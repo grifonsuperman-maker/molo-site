@@ -18,12 +18,23 @@ export class NotificationsService {
       where: { role: In(roles), active: true },
     });
 
-    return staff.filter((person) => Boolean(person.telegramId)).map((person) => person.telegramId as string);
+    return staff
+      .filter((person) => Boolean(person.telegramId))
+      .map((person) => person.telegramId as string);
   }
 
-  async sendToRoles(roles: Array<'owner' | 'admin' | 'waiter'>, text: string, replyMarkup?: unknown) {
+  async sendToRoles(
+    roles: Array<'owner' | 'admin' | 'waiter'>,
+    text: string,
+    replyMarkup?: unknown,
+  ) {
     const chatIds = await this.getActiveStaffTelegramIds(roles);
-    await Promise.allSettled(chatIds.map((chatId) => this.telegramService.sendMessage(chatId, text, replyMarkup)));
+
+    await Promise.allSettled(
+      chatIds.map((chatId) =>
+        this.telegramService.sendMessage(chatId, text, replyMarkup),
+      ),
+    );
   }
 
   async notifyNewBooking(booking: Booking) {
@@ -37,8 +48,7 @@ export class NotificationsService {
       `🕒 Час: <b>${booking.bookingTime}</b>`,
       `👥 Гостей: <b>${booking.guestsCount}</b>`,
       `📝 Побажання: ${booking.wishes || '-'}`,
-    ].join('
-');
+    ].join('\n');
 
     const replyMarkup = {
       inline_keyboard: [
@@ -61,8 +71,7 @@ export class NotificationsService {
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
       `🕒 Час: <b>${booking.bookingTime}</b>`,
-    ].join('
-');
+    ].join('\n');
 
     await this.sendToRoles(['owner', 'admin', 'waiter'], text);
   }
@@ -75,8 +84,7 @@ export class NotificationsService {
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
       `🕒 Час: <b>${booking.bookingTime}</b>`,
-    ].join('
-');
+    ].join('\n');
 
     await this.sendToRoles(['owner', 'admin', 'waiter'], text);
   }
@@ -92,8 +100,7 @@ export class NotificationsService {
       '',
       `Було: <b>${booking.bookingDate} ${booking.bookingTime}</b>`,
       `Нове: <b>${request.requestedDate} ${request.requestedTime}</b>`,
-    ].join('
-');
+    ].join('\n');
 
     const replyMarkup = {
       inline_keyboard: [
@@ -118,8 +125,7 @@ export class NotificationsService {
       `🕒 Час бронювання: <b>${booking.bookingTime}</b>`,
       '',
       'Минуло 15 хвилин після часу бронювання.',
-    ].join('
-');
+    ].join('\n');
 
     const replyMarkup = {
       inline_keyboard: [
@@ -140,8 +146,7 @@ export class NotificationsService {
       '',
       'Закрити онлайн-бронювання?',
       'Після закриття буде доступний тільки дзвінок адміністратору.',
-    ].join('
-');
+    ].join('\n');
 
     const replyMarkup = {
       inline_keyboard: [[{ text: '🔒 Закрити бронювання', callback_data: 'restaurant:close_booking' }]],
@@ -156,8 +161,7 @@ export class NotificationsService {
       '',
       'Закрити ресторан повністю?',
       'Після закриття не працюватимуть бронювання, дзвінки та активна карта.',
-    ].join('
-');
+    ].join('\n');
 
     const replyMarkup = {
       inline_keyboard: [[{ text: '🔴 Закрити ресторан', callback_data: 'restaurant:close_full' }]],
