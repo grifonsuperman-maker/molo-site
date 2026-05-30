@@ -1,0 +1,70 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
+
+import { RestaurantModule } from './restaurant/restaurant.module';
+import { ZonesModule } from './zones/zones.module';
+import { TablesModule } from './tables/tables.module';
+import { ClientsModule } from './clients/clients.module';
+import { StaffModule } from './staff/staff.module';
+import { BookingsModule } from './bookings/bookings.module';
+import { LogsModule } from './logs/logs.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { TelegramModule } from './telegram/telegram.module';
+import { ConstructorModule } from './constructor/constructor.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { BroadcastsModule } from './broadcasts/broadcasts.module';
+import { SchedulesModule } from './schedules/schedules.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
+
+    ScheduleModule.forRoot(),
+
+    TypeOrmModule.forRootAsync({
+      useFactory: () => {
+        if (process.env.DB_URL) {
+          return {
+            type: 'postgres',
+            url: process.env.DB_URL,
+            autoLoadEntities: true,
+            synchronize: false,
+            ssl: {
+              rejectUnauthorized: false,
+            },
+          };
+        }
+
+        return {
+          type: 'postgres',
+          host: process.env.DB_HOST || 'localhost',
+          port: Number(process.env.DB_PORT || 5432),
+          username: process.env.DB_USER || 'postgres',
+          password: process.env.DB_PASSWORD || 'postgres',
+          database: process.env.DB_NAME || 'molo_restaurant',
+          autoLoadEntities: true,
+          synchronize: false,
+        };
+      },
+    }),
+
+    RestaurantModule,
+    ZonesModule,
+    TablesModule,
+    ClientsModule,
+    StaffModule,
+    BookingsModule,
+    LogsModule,
+    NotificationsModule,
+    TelegramModule,
+    ConstructorModule,
+    AnalyticsModule,
+    BroadcastsModule,
+    SchedulesModule,
+  ],
+})
+export class AppModule {}
