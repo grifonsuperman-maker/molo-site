@@ -61,13 +61,15 @@ CREATE TABLE tables (
     rotation NUMERIC NOT NULL DEFAULT 0,
     is_visible BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(zone_id, table_number)
 );
 
 CREATE TABLE clients (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     full_name VARCHAR(255) NOT NULL,
     phone VARCHAR(50) NOT NULL UNIQUE,
+    telegram_id BIGINT UNIQUE,
     visits_count INTEGER NOT NULL DEFAULT 0,
     total_guests INTEGER NOT NULL DEFAULT 0,
     cancellations_count INTEGER NOT NULL DEFAULT 0,

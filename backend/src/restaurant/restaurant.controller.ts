@@ -1,35 +1,38 @@
 import { Body, Controller, Get, Patch, Post } from '@nestjs/common';
-
 import { RestaurantService } from './restaurant.service';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { CloseRestaurantDto } from './dto/close-restaurant.dto';
+import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 
+@Roles('owner', 'admin')
 @Controller('restaurant')
 export class RestaurantController {
-  constructor(private readonly restaurantService: RestaurantService) {}
+  constructor(private readonly service: RestaurantService) {}
 
+  @Public()
   @Get()
   getSettings() {
-    return this.restaurantService.getSettings();
+    return this.service.getSettings();
   }
 
   @Patch()
   update(@Body() dto: UpdateRestaurantDto) {
-    return this.restaurantService.update(dto);
+    return this.service.update(dto);
   }
 
   @Post('open')
-  openRestaurant() {
-    return this.restaurantService.openRestaurant();
+  open() {
+    return this.service.openRestaurant();
   }
 
   @Post('close-booking')
   closeBooking() {
-    return this.restaurantService.closeBooking();
+    return this.service.closeBooking();
   }
 
   @Post('close')
-  closeRestaurant(@Body() dto: CloseRestaurantDto) {
-    return this.restaurantService.closeRestaurant(dto);
+  close(@Body() dto: CloseRestaurantDto) {
+    return this.service.closeRestaurant(dto);
   }
 }

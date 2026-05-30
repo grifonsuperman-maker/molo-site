@@ -1,40 +1,41 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-
 import { StaffService } from './staff.service';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
+import { Roles } from '../common/decorators/roles.decorator';
 
+@Roles('owner', 'admin')
 @Controller('staff')
 export class StaffController {
-  constructor(private readonly staffService: StaffService) {}
+  constructor(private readonly service: StaffService) {}
 
   @Get()
   findAll() {
-    return this.staffService.findAll();
+    return this.service.findAll();
   }
 
   @Post()
   create(@Body() dto: CreateStaffDto) {
-    return this.staffService.create(dto);
+    return this.service.create(dto);
   }
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateStaffDto) {
-    return this.staffService.update(id, dto);
+    return this.service.update(id, dto);
   }
 
   @Patch(':id/block')
   block(@Param('id') id: string) {
-    return this.staffService.setActive(id, false);
+    return this.service.setActive(id, false);
   }
 
   @Patch(':id/unblock')
   unblock(@Param('id') id: string) {
-    return this.staffService.setActive(id, true);
+    return this.service.setActive(id, true);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.staffService.remove(id);
+    return this.service.remove(id);
   }
 }

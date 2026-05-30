@@ -1,7 +1,2 @@
 import { IsOptional, IsString } from 'class-validator';
-
-export class CloseRestaurantDto {
-  @IsOptional()
-  @IsString()
-  message?: string;
-}
+export class CloseRestaurantDto { @IsOptional() @IsString() message?: string; }

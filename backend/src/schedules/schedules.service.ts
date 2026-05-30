@@ -1,0 +1,120 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Booking } from '../bookings/entities/booking.entity';
+import { Restaurant } from '../restaurant/entities/restaurant.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { LogsService } from '../logs/logs.service';
+
+@Injectable()
+export class SchedulesService {
+  private readonly logger = new Logger(SchedulesService.name);
+
+  constructor(
+    @InjectRepository(Booking)
+    private readonly bookingsRepo: Repository<Booking>,
+    @InjectRepository(Restaurant)
+    private readonly restaurantRepo: Repository<Restaurant>,
+    private readonly notificationsService: NotificationsService,
+    private readonly logsService: LogsService,
+  ) {}
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async runEveryMinute() {
+    await this.checkLateGuests();
+    await this.checkBookingCloseReminder();
+    await this.checkRestaurantCloseReminder();
+  }
+
+  private getTodayString() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  private getCurrentTimeString() {
+    return new Date().toTimeString().slice(0, 5);
+  }
+
+  private minutesFromTime(time: string) {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  }
+
+  private currentMinutes() {
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  }
+
+  private async getRestaurant() {
+    return this.restaurantRepo.findOne({ order: { createdAt: 'ASC' } });
+  }
+
+  private async checkLateGuests() {
+    const today = this.getTodayString();
+    const nowMinutes = this.currentMinutes();
+
+    const bookings = await this.bookingsRepo.find({
+      where: { bookingDate: today, status: 'approved' },
+      relations: ['table', 'client'],
+    });
+
+    for (const booking of bookings) {
+      if (booking.lateNotifiedAt) continue;
+
+      const bookingMinutes = this.minutesFromTime(booking.bookingTime);
+      const isLate = nowMinutes >= bookingMinutes + 15;
+      if (!isLate) continue;
+
+      booking.lateNotifiedAt = new Date();
+      await this.bookingsRepo.save(booking);
+      await this.notificationsService.notifyLateGuest(booking);
+
+      await this.logsService.create('Відправлено сповіщення про запізнення гостя', null, {
+        bookingId: booking.id,
+        tableNumber: booking.table?.tableNumber,
+        clientName: booking.client?.fullName,
+        bookingTime: booking.bookingTime,
+      });
+    }
+  }
+
+  private async checkBookingCloseReminder() {
+    const restaurant = await this.getRestaurant();
+    if (!restaurant) return;
+
+    const today = this.getTodayString();
+    const currentTime = this.getCurrentTimeString();
+    const closeBookingTime = restaurant.bookingCloseTime.slice(0, 5);
+
+    if (currentTime !== closeBookingTime) return;
+    if (restaurant.bookingCloseNotifiedAt === today) return;
+
+    restaurant.bookingCloseNotifiedAt = today;
+    await this.restaurantRepo.save(restaurant);
+    await this.notificationsService.notifyBookingCloseReminder();
+
+    await this.logsService.create('Відправлено нагадування закрити онлайн-бронювання', null, {
+      time: closeBookingTime,
+    });
+  }
+
+  private async checkRestaurantCloseReminder() {
+    const restaurant = await this.getRestaurant();
+    if (!restaurant) return;
+
+    const today = this.getTodayString();
+    const currentTime = this.getCurrentTimeString();
+    const closeRestaurantTime = restaurant.closeTime.slice(0, 5);
+
+    if (currentTime !== closeRestaurantTime) return;
+    if (restaurant.restaurantCloseNotifiedAt === today) return;
+
+    restaurant.restaurantCloseNotifiedAt = today;
+    await this.restaurantRepo.save(restaurant);
+    await this.notificationsService.notifyRestaurantCloseReminder();
+
+    await this.logsService.create('Відправлено нагадування закрити ресторан', null, {
+      time: closeRestaurantTime,
+    });
+  }
+}

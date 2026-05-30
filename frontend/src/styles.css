@@ -1,0 +1,4 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+html,body,#root{min-height:100%;margin:0;background:#10100f;}*{box-sizing:border-box;}

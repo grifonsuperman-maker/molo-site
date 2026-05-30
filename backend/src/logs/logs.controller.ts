@@ -1,7 +1,8 @@
 import { Controller, Get } from '@nestjs/common';
-
 import { LogsService } from './logs.service';
+import { Roles } from '../common/decorators/roles.decorator';
 
+@Roles('owner', 'admin')
 @Controller('logs')
 export class LogsController {
   constructor(private readonly logsService: LogsService) {}
