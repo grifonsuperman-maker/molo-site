@@ -94,8 +94,7 @@ export default function GuestApp() {
       {step === 'home' && (
         <section className="space-y-5">
           <div className="overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900 shadow-2xl">
-            <div className="h-48 bg-gradient-to-br from-neutral-700 via-neutral-900 to-black" />
-
+            <div className="overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900 shadow-2xl"><div className="p-5">
             <div className="p-5">
               <img
                 src="/logo.png"
