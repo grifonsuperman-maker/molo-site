@@ -1,22 +1,12 @@
 import { useEffect, useState } from 'react';
-import {
-  ArrowLeft,
-  CalendarDays,
-  CheckCircle2,
-  Clock,
-  Menu,
-  Phone,
-  Users,
-} from 'lucide-react';
-
+import { ArrowLeft, CalendarDays, CheckCircle2, Clock, Menu, Phone, Users } from 'lucide-react';
 import type { FullMapResponse, TableItem, Restaurant } from '../api/types';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { bookingsApi } from '../api/bookings';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 
-const FALLBACK_MENU =
-  'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
+const FALLBACK_MENU = 'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
 
 export default function GuestApp() {
   const [step, setStep] = useState<'home' | 'map' | 'form' | 'success'>('home');
@@ -25,7 +15,6 @@ export default function GuestApp() {
   const [selectedTable, setSelectedTable] = useState<TableItem | null>(null);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState('19:00');
-
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -94,7 +83,6 @@ export default function GuestApp() {
       {step === 'home' && (
         <section className="space-y-5">
           <div className="overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900 shadow-2xl">
-            <div className="overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900 shadow-2xl"><div className="p-5">
             <div className="p-5">
               <img
                 src="/logo.png"
@@ -171,18 +159,7 @@ export default function GuestApp() {
                 onChange={(e) => setTime(e.target.value)}
                 className="mt-2 w-full bg-neutral-900 text-sm outline-none"
               >
-                {[
-                  '12:00',
-                  '13:00',
-                  '14:00',
-                  '15:00',
-                  '16:00',
-                  '17:00',
-                  '18:00',
-                  '19:00',
-                  '20:00',
-                  '21:00',
-                ].map((t) => (
+                {['12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'].map((t) => (
                   <option key={t}>{t}</option>
                 ))}
               </select>
