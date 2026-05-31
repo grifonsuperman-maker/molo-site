@@ -8,7 +8,7 @@ RUN npm install --include=dev
 
 COPY . .
 
-RUN npx -y @nestjs/cli build
+RUN ./node_modules/.bin/tsc -p tsconfig.json
 
 FROM node:20-alpine AS production
 
