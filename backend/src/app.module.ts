@@ -24,16 +24,27 @@ import { SchedulesModule } from './schedules/schedules.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: process.env.DB_HOST || 'localhost',
-      port: Number(process.env.DB_PORT || 5432),
-      username: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASSWORD || 'postgres',
-      database: process.env.DB_NAME || 'molo_restaurant',
-      autoLoadEntities: true,
-      synchronize: false,
-    }),
+    TypeOrmModule.forRoot(
+      process.env.DB_URL
+        ? {
+            type: 'postgres',
+            url: process.env.DB_URL,
+            ssl: { rejectUnauthorized: false },
+            extra: { ssl: { rejectUnauthorized: false } },
+            autoLoadEntities: true,
+            synchronize: false,
+          }
+        : {
+            type: 'postgres',
+            host: process.env.DB_HOST || 'localhost',
+            port: Number(process.env.DB_PORT || 5432),
+            username: process.env.DB_USER || 'postgres',
+            password: process.env.DB_PASSWORD || 'postgres',
+            database: process.env.DB_NAME || 'molo_restaurant',
+            autoLoadEntities: true,
+            synchronize: false,
+          },
+    ),
     AuthModule,
     LogsModule,
     NotificationsModule,
