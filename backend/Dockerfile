@@ -8,7 +8,7 @@ RUN npm install --include=dev
 
 COPY . .
 
-RUN ./node_modules/.bin/nest build
+RUN npx -y @nestjs/cli build
 
 FROM node:20-alpine AS production
 
