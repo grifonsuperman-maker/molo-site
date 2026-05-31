@@ -3,17 +3,20 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+
+RUN npm ci --include=dev
 
 COPY . .
-RUN npm run build
+
+RUN ./node_modules/.bin/nest build
 
 FROM node:20-alpine AS production
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --omit=dev
+
+RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 
