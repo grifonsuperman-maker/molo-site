@@ -31,6 +31,8 @@ type DragState = {
 
 type TableShape = 'square' | 'round' | 'rect';
 
+type TableStatus = 'free' | 'reserved' | 'occupied';
+
 type PaletteItem = {
   label: string;
   objectType: string;
@@ -44,204 +46,36 @@ const DEFAULT_MAP_WIDTH = 2200;
 const DEFAULT_MAP_HEIGHT = 1500;
 
 const FLOOR_ITEMS: PaletteItem[] = [
-  {
-    label: 'Зона',
-    objectType: 'zone_rect',
-    name: 'Зона',
-    width: 520,
-    height: 320,
-    color: '#2b2924',
-  },
-  {
-    label: 'Зона овал',
-    objectType: 'zone_oval',
-    name: 'Зона',
-    width: 420,
-    height: 260,
-    color: '#2b2924',
-  },
-  {
-    label: 'Мрамор',
-    objectType: 'floor_marble',
-    name: 'Мрамор',
-    width: 520,
-    height: 320,
-    color: '#d8d3c7',
-  },
-  {
-    label: 'Плитка',
-    objectType: 'floor_tile',
-    name: 'Плитка',
-    width: 520,
-    height: 320,
-    color: '#57534e',
-  },
-  {
-    label: 'Тротуар',
-    objectType: 'floor_pavement',
-    name: 'Тротуар',
-    width: 520,
-    height: 260,
-    color: '#44403c',
-  },
-  {
-    label: 'Дерево',
-    objectType: 'floor_wood',
-    name: 'Дерево',
-    width: 520,
-    height: 320,
-    color: '#7c4a1e',
-  },
-  {
-    label: 'Газон',
-    objectType: 'floor_grass',
-    name: 'Газон',
-    width: 520,
-    height: 320,
-    color: '#3f6212',
-  },
-  {
-    label: 'Вода',
-    objectType: 'floor_water',
-    name: 'Вода',
-    width: 520,
-    height: 320,
-    color: '#075985',
-  },
+  { label: 'Зона', objectType: 'zone_rect', name: 'Зона', width: 520, height: 320, color: '#2b2924' },
+  { label: 'Зона овал', objectType: 'zone_oval', name: 'Зона', width: 420, height: 260, color: '#2b2924' },
+  { label: 'Мрамор', objectType: 'floor_marble', name: 'Мрамор', width: 520, height: 320, color: '#d8d3c7' },
+  { label: 'Плитка', objectType: 'floor_tile', name: 'Плитка', width: 520, height: 320, color: '#57534e' },
+  { label: 'Тротуар', objectType: 'floor_pavement', name: 'Тротуар', width: 520, height: 260, color: '#44403c' },
+  { label: 'Дерево', objectType: 'floor_wood', name: 'Дерево', width: 520, height: 320, color: '#7c4a1e' },
+  { label: 'Газон', objectType: 'floor_grass', name: 'Газон', width: 520, height: 320, color: '#3f6212' },
+  { label: 'Вода', objectType: 'floor_water', name: 'Вода', width: 520, height: 320, color: '#075985' },
 ];
 
 const BUILD_ITEMS: PaletteItem[] = [
-  {
-    label: 'Стена',
-    objectType: 'wall',
-    name: '',
-    width: 360,
-    height: 28,
-    color: '#57534e',
-  },
-  {
-    label: 'Окно',
-    objectType: 'window',
-    name: 'Окно',
-    width: 180,
-    height: 28,
-    color: '#38bdf8',
-  },
-  {
-    label: 'Дверь',
-    objectType: 'door',
-    name: 'Дверь',
-    width: 110,
-    height: 36,
-    color: '#92400e',
-  },
-  {
-    label: 'Забор кам.',
-    objectType: 'stone_fence',
-    name: '',
-    width: 300,
-    height: 42,
-    color: '#78716c',
-  },
-  {
-    label: 'Забор дер.',
-    objectType: 'wood_fence',
-    name: '',
-    width: 300,
-    height: 42,
-    color: '#854d0e',
-  },
-  {
-    label: 'Мост',
-    objectType: 'bridge',
-    name: 'Мост',
-    width: 300,
-    height: 90,
-    color: '#8b5a2b',
-  },
-  {
-    label: 'Причал',
-    objectType: 'pier',
-    name: 'Причал',
-    width: 320,
-    height: 160,
-    color: '#7c4a1e',
-  },
-  {
-    label: 'Камин',
-    objectType: 'fireplace',
-    name: 'Камин',
-    width: 120,
-    height: 80,
-    color: '#dc2626',
-  },
+  { label: 'Стена', objectType: 'wall', name: '', width: 360, height: 28, color: '#57534e' },
+  { label: 'Окно', objectType: 'window', name: 'Окно', width: 180, height: 28, color: '#38bdf8' },
+  { label: 'Дверь', objectType: 'door', name: 'Дверь', width: 110, height: 36, color: '#92400e' },
+  { label: 'Забор кам.', objectType: 'stone_fence', name: '', width: 300, height: 42, color: '#78716c' },
+  { label: 'Забор дер.', objectType: 'wood_fence', name: '', width: 300, height: 42, color: '#854d0e' },
+  { label: 'Мост', objectType: 'bridge', name: 'Мост', width: 300, height: 90, color: '#8b5a2b' },
+  { label: 'Причал', objectType: 'pier', name: 'Причал', width: 320, height: 160, color: '#7c4a1e' },
+  { label: 'Камин', objectType: 'fireplace', name: 'Камин', width: 120, height: 80, color: '#dc2626' },
 ];
 
 const FURNITURE_ITEMS: PaletteItem[] = [
-  {
-    label: 'Бар',
-    objectType: 'bar',
-    name: 'Бар',
-    width: 320,
-    height: 110,
-    color: '#b7791f',
-  },
-  {
-    label: 'Диван',
-    objectType: 'sofa',
-    name: 'Диван',
-    width: 210,
-    height: 85,
-    color: '#7f1d1d',
-  },
-  {
-    label: 'Стул',
-    objectType: 'chair',
-    name: '',
-    width: 58,
-    height: 58,
-    color: '#92400e',
-  },
-  {
-    label: 'Дерево',
-    objectType: 'tree',
-    name: '',
-    width: 90,
-    height: 90,
-    color: '#166534',
-  },
-  {
-    label: 'Камни',
-    objectType: 'stones',
-    name: '',
-    width: 130,
-    height: 75,
-    color: '#78716c',
-  },
-  {
-    label: 'Фонарь',
-    objectType: 'lamp',
-    name: '',
-    width: 60,
-    height: 60,
-    color: '#facc15',
-  },
-  {
-    label: 'Текст',
-    objectType: 'text',
-    name: 'Текст',
-    width: 230,
-    height: 64,
-    color: '#111827',
-  },
-  {
-    label: 'Цифра',
-    objectType: 'number',
-    name: '1',
-    width: 80,
-    height: 70,
-    color: '#111827',
-  },
+  { label: 'Бар', objectType: 'bar', name: 'Бар', width: 320, height: 110, color: '#b7791f' },
+  { label: 'Диван', objectType: 'sofa', name: 'Диван', width: 210, height: 85, color: '#7f1d1d' },
+  { label: 'Стул', objectType: 'chair', name: '', width: 58, height: 58, color: '#92400e' },
+  { label: 'Дерево', objectType: 'tree', name: '', width: 90, height: 90, color: '#166534' },
+  { label: 'Камни', objectType: 'stones', name: '', width: 130, height: 75, color: '#78716c' },
+  { label: 'Фонарь', objectType: 'lamp', name: '', width: 60, height: 60, color: '#facc15' },
+  { label: 'Текст', objectType: 'text', name: 'Текст', width: 230, height: 64, color: '#111827' },
+  { label: 'Цифра', objectType: 'number', name: '1', width: 80, height: 70, color: '#111827' },
 ];
 
 function numberValue(value: unknown, fallback = 0) {
@@ -267,12 +101,13 @@ function isFloorObject(objectType: string) {
 }
 
 function isOvalObject(objectType: string) {
-  return objectType.includes('oval') || objectType === 'floor_water_oval';
+  return objectType.includes('oval');
 }
 
 function getObjectLayer(objectType: string) {
   if (objectType.startsWith('floor_') || objectType.startsWith('zone_')) return 1;
-  if (objectType === 'floor_water' || objectType === 'bridge' || objectType === 'pier') return 2;
+  if (objectType === 'bridge' || objectType === 'pier') return 2;
+
   if (
     objectType === 'wall' ||
     objectType === 'window' ||
@@ -282,11 +117,11 @@ function getObjectLayer(objectType: string) {
   ) {
     return 3;
   }
-  if (objectType === 'bar' || objectType === 'sofa' || objectType === 'chair' || objectType === 'fireplace') {
-    return 4;
-  }
+
+  if (objectType === 'bar' || objectType === 'sofa' || objectType === 'chair' || objectType === 'fireplace') return 4;
   if (objectType === 'lamp' || objectType === 'tree' || objectType === 'stones') return 5;
   if (objectType === 'text' || objectType === 'number') return 8;
+
   return 4;
 }
 
@@ -389,13 +224,15 @@ function getObjectBackground(object: MapObject) {
   }
 
   if (type === 'stones') {
-    return `radial-gradient(circle at 22% 50%, #a8a29e 0 12px, transparent 13px),
+    return `
+      radial-gradient(circle at 22% 50%, #a8a29e 0 12px, transparent 13px),
       radial-gradient(circle at 52% 45%, ${color} 0 14px, transparent 15px),
-      radial-gradient(circle at 75% 55%, #57534e 0 10px, transparent 11px)`;
+      radial-gradient(circle at 75% 55%, #57534e 0 10px, transparent 11px)
+    `;
   }
 
   if (type === 'text' || type === 'number') {
-    return `${color}`;
+    return color;
   }
 
   return color;
@@ -437,8 +274,14 @@ function getObjectShadow(objectType: string, selected: boolean) {
   return '0 12px 24px rgba(0,0,0,.45)';
 }
 
+function normalizeTableStatus(status: unknown): TableStatus {
+  if (status === 'reserved') return 'reserved';
+  if (status === 'occupied') return 'occupied';
+  return 'free';
+}
+
 function tableColors(table: TableItem, selected: boolean) {
-  const status = String(table.status || 'free');
+  const status = normalizeTableStatus((table as any).status);
 
   if (selected) {
     return {
@@ -456,15 +299,7 @@ function tableColors(table: TableItem, selected: boolean) {
     };
   }
 
-  if (status === 'closed' || status === 'hidden') {
-    return {
-      background: '#525252',
-      border: '#a3a3a3',
-      shadow: '0 0 12px rgba(115,115,115,.5)',
-    };
-  }
-
-  if (status === 'reserved' || status === 'booked') {
+  if (status === 'reserved') {
     return {
       background: '#d97706',
       border: '#fcd34d',
@@ -495,25 +330,8 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
 
   return (
     <div className="relative h-full w-full overflow-visible">
-      <Chair
-        style={{
-          width: 22,
-          height: 12,
-          left: '50%',
-          top: -13,
-          transform: 'translateX(-50%)',
-        }}
-      />
-
-      <Chair
-        style={{
-          width: 22,
-          height: 12,
-          left: '50%',
-          bottom: -13,
-          transform: 'translateX(-50%)',
-        }}
-      />
+      <Chair style={{ width: 22, height: 12, left: '50%', top: -13, transform: 'translateX(-50%)' }} />
+      <Chair style={{ width: 22, height: 12, left: '50%', bottom: -13, transform: 'translateX(-50%)' }} />
 
       {!isRound && (
         <>
@@ -526,49 +344,15 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
 
       {isRound && (
         <>
-          <Chair
-            style={{
-              width: 12,
-              height: 22,
-              left: -13,
-              top: '50%',
-              transform: 'translateY(-50%)',
-            }}
-          />
-
-          <Chair
-            style={{
-              width: 12,
-              height: 22,
-              right: -13,
-              top: '50%',
-              transform: 'translateY(-50%)',
-            }}
-          />
+          <Chair style={{ width: 12, height: 22, left: -13, top: '50%', transform: 'translateY(-50%)' }} />
+          <Chair style={{ width: 12, height: 22, right: -13, top: '50%', transform: 'translateY(-50%)' }} />
         </>
       )}
 
       {isRect && (
         <>
-          <Chair
-            style={{
-              width: 12,
-              height: 22,
-              left: -13,
-              top: '50%',
-              transform: 'translateY(-50%)',
-            }}
-          />
-
-          <Chair
-            style={{
-              width: 12,
-              height: 22,
-              right: -13,
-              top: '50%',
-              transform: 'translateY(-50%)',
-            }}
-          />
+          <Chair style={{ width: 12, height: 22, left: -13, top: '50%', transform: 'translateY(-50%)' }} />
+          <Chair style={{ width: 12, height: 22, right: -13, top: '50%', transform: 'translateY(-50%)' }} />
         </>
       )}
 
@@ -713,6 +497,7 @@ export default function ConstructorApp() {
         tableNumber,
         seats: 4,
         shape,
+        status: 'free',
         x: 160,
         y: 160,
         width,
@@ -779,6 +564,7 @@ export default function ConstructorApp() {
     try {
       if (selected.kind === 'table') {
         const table = item as TableItem;
+        const status = normalizeTableStatus((table as any).status);
 
         await api.patch(`/constructor/tables/${selected.id}/position`, {
           x: numberValue(table.x),
@@ -795,18 +581,19 @@ export default function ConstructorApp() {
           tableNumber: table.tableNumber,
           seats: Number(table.seats) || 1,
           shape: table.shape,
+          status,
         });
 
-        if (table.status === 'free') {
-          await api.patch(`/tables/${selected.id}/free`);
+        if (status === 'free') {
+          try {
+            await api.patch(`/tables/${selected.id}/free`);
+          } catch {}
         }
 
-        if (table.status === 'occupied') {
-          await api.patch(`/tables/${selected.id}/occupied`);
-        }
-
-        if (table.status === 'closed' || table.status === 'hidden') {
-          await api.patch(`/tables/${selected.id}/close`);
+        if (status === 'occupied') {
+          try {
+            await api.patch(`/tables/${selected.id}/occupied`);
+          } catch {}
         }
 
         await loadMap();
@@ -873,6 +660,7 @@ export default function ConstructorApp() {
           tableNumber: String(table.tableNumber || ''),
           seats: Number(table.seats) || 4,
           shape: table.shape || 'square',
+          status: normalizeTableStatus((table as any).status),
           x: numberValue(table.x) + 40,
           y: numberValue(table.y) + 40,
           width: numberValue(table.width, 90),
@@ -1019,7 +807,8 @@ export default function ConstructorApp() {
         <h1 className="mt-2 text-3xl font-semibold">Конструктор</h1>
 
         <p className="mt-2 text-sm text-neutral-300">
-          Добавляй зоны, покрытия, столы, окна, камин, воду, мост, траву, стены, текст и декор. Всё можно двигать, менять размер, цвет и поворот.
+          Добавляй зоны, покрытия, столы, окна, камин, воду, мост, траву, стены, текст и декор.
+          Всё можно двигать, менять размер, цвет и поворот.
         </p>
 
         <label className="mt-4 block text-sm text-neutral-300">
@@ -1041,29 +830,17 @@ export default function ConstructorApp() {
         <h2 className="text-lg font-semibold">Столы</h2>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
-          <button
-            disabled={loading}
-            onClick={() => createTable('square')}
-            className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50"
-          >
+          <button disabled={loading} onClick={() => createTable('square')} className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50">
             <Plus className="mr-1 inline h-4 w-4" />
             Квадрат
           </button>
 
-          <button
-            disabled={loading}
-            onClick={() => createTable('round')}
-            className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50"
-          >
+          <button disabled={loading} onClick={() => createTable('round')} className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50">
             <Plus className="mr-1 inline h-4 w-4" />
             Круглый
           </button>
 
-          <button
-            disabled={loading}
-            onClick={() => createTable('rect')}
-            className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50"
-          >
+          <button disabled={loading} onClick={() => createTable('rect')} className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50">
             <Plus className="mr-1 inline h-4 w-4" />
             Прямой
           </button>
@@ -1073,12 +850,7 @@ export default function ConstructorApp() {
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           {FLOOR_ITEMS.map((item) => (
-            <button
-              key={item.objectType}
-              disabled={loading}
-              onClick={() => createObject(item)}
-              className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
-            >
+            <button key={item.objectType} disabled={loading} onClick={() => createObject(item)} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">
               {item.label}
             </button>
           ))}
@@ -1088,12 +860,7 @@ export default function ConstructorApp() {
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           {BUILD_ITEMS.map((item) => (
-            <button
-              key={item.objectType}
-              disabled={loading}
-              onClick={() => createObject(item)}
-              className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
-            >
+            <button key={item.objectType} disabled={loading} onClick={() => createObject(item)} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">
               {item.label}
             </button>
           ))}
@@ -1103,12 +870,7 @@ export default function ConstructorApp() {
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           {FURNITURE_ITEMS.map((item) => (
-            <button
-              key={item.objectType}
-              disabled={loading}
-              onClick={() => createObject(item)}
-              className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
-            >
+            <button key={item.objectType} disabled={loading} onClick={() => createObject(item)} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">
               {item.label}
             </button>
           ))}
@@ -1117,44 +879,13 @@ export default function ConstructorApp() {
         <h2 className="mt-5 text-lg font-semibold">Расширить карту</h2>
 
         <div className="mt-3 grid grid-cols-4 gap-2">
-          <button
-            disabled={loading}
-            onClick={() => expandMap('left')}
-            className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
-          >
-            ←
-          </button>
-
-          <button
-            disabled={loading}
-            onClick={() => expandMap('right')}
-            className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
-          >
-            →
-          </button>
-
-          <button
-            disabled={loading}
-            onClick={() => expandMap('top')}
-            className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
-          >
-            ↑
-          </button>
-
-          <button
-            disabled={loading}
-            onClick={() => expandMap('bottom')}
-            className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
-          >
-            ↓
-          </button>
+          <button disabled={loading} onClick={() => expandMap('left')} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">←</button>
+          <button disabled={loading} onClick={() => expandMap('right')} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">→</button>
+          <button disabled={loading} onClick={() => expandMap('top')} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">↑</button>
+          <button disabled={loading} onClick={() => expandMap('bottom')} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">↓</button>
         </div>
 
-        <button
-          disabled={loading}
-          onClick={clearMap}
-          className="mt-5 w-full rounded-2xl bg-red-500 px-4 py-4 font-semibold text-white disabled:opacity-50"
-        >
+        <button disabled={loading} onClick={clearMap} className="mt-5 w-full rounded-2xl bg-red-500 px-4 py-4 font-semibold text-white disabled:opacity-50">
           Очистить карту
         </button>
       </section>
@@ -1174,11 +905,7 @@ export default function ConstructorApp() {
                   Номер
                   <input
                     value={String((selectedItem as TableItem).tableNumber || '')}
-                    onChange={(event) =>
-                      updateLocalItem(selected.kind, selected.id, {
-                        tableNumber: event.target.value,
-                      })
-                    }
+                    onChange={(event) => updateLocalItem(selected.kind, selected.id, { tableNumber: event.target.value })}
                     className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                   />
                 </label>
@@ -1188,48 +915,23 @@ export default function ConstructorApp() {
                   <input
                     type="number"
                     value={Number((selectedItem as TableItem).seats || 1)}
-                    onChange={(event) =>
-                      updateLocalItem(selected.kind, selected.id, {
-                        seats: Number(event.target.value),
-                      })
-                    }
+                    onChange={(event) => updateLocalItem(selected.kind, selected.id, { seats: Number(event.target.value) })}
                     className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                   />
                 </label>
               </div>
 
               <div className="mt-3 grid grid-cols-3 gap-2">
-                <button
-                  onClick={() =>
-                    updateLocalItem(selected.kind, selected.id, {
-                      status: 'free',
-                    })
-                  }
-                  className="rounded-xl bg-emerald-600 px-2 py-2 text-xs"
-                >
+                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'free' })} className="rounded-xl bg-emerald-600 px-2 py-2 text-xs">
                   Свободен
                 </button>
 
-                <button
-                  onClick={() =>
-                    updateLocalItem(selected.kind, selected.id, {
-                      status: 'occupied',
-                    })
-                  }
-                  className="rounded-xl bg-red-700 px-2 py-2 text-xs"
-                >
-                  Занят
+                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'reserved' })} className="rounded-xl bg-amber-600 px-2 py-2 text-xs">
+                  Бронь
                 </button>
 
-                <button
-                  onClick={() =>
-                    updateLocalItem(selected.kind, selected.id, {
-                      status: 'closed',
-                    })
-                  }
-                  className="rounded-xl bg-neutral-700 px-2 py-2 text-xs"
-                >
-                  Скрыт
+                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'occupied' })} className="rounded-xl bg-red-700 px-2 py-2 text-xs">
+                  Занят
                 </button>
               </div>
             </>
@@ -1241,11 +943,7 @@ export default function ConstructorApp() {
                 Текст / название
                 <input
                   value={String((selectedItem as MapObject).name || '')}
-                  onChange={(event) =>
-                    updateLocalItem(selected.kind, selected.id, {
-                      name: event.target.value,
-                    })
-                  }
+                  onChange={(event) => updateLocalItem(selected.kind, selected.id, { name: event.target.value })}
                   className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                 />
               </label>
@@ -1255,11 +953,7 @@ export default function ConstructorApp() {
                 <input
                   type="color"
                   value={String((selectedItem as MapObject).color || '#525252')}
-                  onChange={(event) =>
-                    updateLocalItem(selected.kind, selected.id, {
-                      color: event.target.value,
-                    })
-                  }
+                  onChange={(event) => updateLocalItem(selected.kind, selected.id, { color: event.target.value })}
                   className="mt-1 h-10 w-full rounded-xl bg-neutral-800 px-2 py-1 outline-none"
                 />
               </label>
@@ -1269,109 +963,47 @@ export default function ConstructorApp() {
           <div className="mt-3 grid grid-cols-2 gap-2">
             <label className="text-xs text-neutral-400">
               Ширина
-              <input
-                type="number"
-                value={Math.round(numberValue(selectedItem.width, 100))}
-                onChange={(event) =>
-                  updateLocalItem(selected.kind, selected.id, {
-                    width: Number(event.target.value),
-                  })
-                }
-                className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
-              />
+              <input type="number" value={Math.round(numberValue(selectedItem.width, 100))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { width: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
             </label>
 
             <label className="text-xs text-neutral-400">
               Высота
-              <input
-                type="number"
-                value={Math.round(numberValue(selectedItem.height, 100))}
-                onChange={(event) =>
-                  updateLocalItem(selected.kind, selected.id, {
-                    height: Number(event.target.value),
-                  })
-                }
-                className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
-              />
+              <input type="number" value={Math.round(numberValue(selectedItem.height, 100))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { height: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
             </label>
 
             <label className="text-xs text-neutral-400">
               X
-              <input
-                type="number"
-                value={Math.round(numberValue(selectedItem.x))}
-                onChange={(event) =>
-                  updateLocalItem(selected.kind, selected.id, {
-                    x: Number(event.target.value),
-                  })
-                }
-                className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
-              />
+              <input type="number" value={Math.round(numberValue(selectedItem.x))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { x: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
             </label>
 
             <label className="text-xs text-neutral-400">
               Y
-              <input
-                type="number"
-                value={Math.round(numberValue(selectedItem.y))}
-                onChange={(event) =>
-                  updateLocalItem(selected.kind, selected.id, {
-                    y: Number(event.target.value),
-                  })
-                }
-                className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
-              />
+              <input type="number" value={Math.round(numberValue(selectedItem.y))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { y: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
             </label>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <button
-              onClick={() =>
-                updateLocalItem(selected.kind, selected.id, {
-                  rotation: numberValue(selectedItem.rotation) - 15,
-                })
-              }
-              className="rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm"
-            >
+            <button onClick={() => updateLocalItem(selected.kind, selected.id, { rotation: numberValue(selectedItem.rotation) - 15 })} className="rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm">
               <RotateCcw className="mr-1 inline h-4 w-4" />
               Поворот -
             </button>
 
-            <button
-              onClick={() =>
-                updateLocalItem(selected.kind, selected.id, {
-                  rotation: numberValue(selectedItem.rotation) + 15,
-                })
-              }
-              className="rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm"
-            >
+            <button onClick={() => updateLocalItem(selected.kind, selected.id, { rotation: numberValue(selectedItem.rotation) + 15 })} className="rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm">
               <RotateCw className="mr-1 inline h-4 w-4" />
               Поворот +
             </button>
 
-            <button
-              disabled={loading}
-              onClick={saveSelected}
-              className="rounded-2xl bg-emerald-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50"
-            >
+            <button disabled={loading} onClick={saveSelected} className="rounded-2xl bg-emerald-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
               <Save className="mr-1 inline h-4 w-4" />
               Сохранить
             </button>
 
-            <button
-              disabled={loading}
-              onClick={duplicateSelected}
-              className="rounded-2xl bg-blue-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50"
-            >
+            <button disabled={loading} onClick={duplicateSelected} className="rounded-2xl bg-blue-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
               <Copy className="mr-1 inline h-4 w-4" />
               Копия
             </button>
 
-            <button
-              disabled={loading}
-              onClick={deleteSelected}
-              className="col-span-2 rounded-2xl bg-red-500 px-3 py-3 text-sm font-semibold text-white disabled:opacity-50"
-            >
+            <button disabled={loading} onClick={deleteSelected} className="col-span-2 rounded-2xl bg-red-500 px-3 py-3 text-sm font-semibold text-white disabled:opacity-50">
               <Trash2 className="mr-1 inline h-4 w-4" />
               Удалить
             </button>
@@ -1387,14 +1019,9 @@ export default function ConstructorApp() {
 
       <section className="mt-4 rounded-3xl border border-neutral-800 bg-neutral-950 p-3">
         <div className="mb-3 flex items-center justify-between text-xs text-neutral-400">
-          <span>
-            Карта: {mapWidth} x {mapHeight}
-          </span>
+          <span>Карта: {mapWidth} x {mapHeight}</span>
 
-          <button
-            onClick={() => loadMap()}
-            className="flex items-center gap-1 rounded-xl bg-neutral-800 px-2 py-1 text-xs"
-          >
+          <button onClick={() => loadMap()} className="flex items-center gap-1 rounded-xl bg-neutral-800 px-2 py-1 text-xs">
             <RefreshCcw className="h-3 w-3" />
             обновить
           </button>
@@ -1412,13 +1039,7 @@ export default function ConstructorApp() {
           onPointerCancel={stopDrag}
           className="relative h-[700px] overflow-auto rounded-3xl border border-neutral-800 bg-[#0b0a08]"
         >
-          <div
-            className="relative"
-            style={{
-              width: mapWidth * zoom,
-              height: mapHeight * zoom,
-            }}
-          >
+          <div className="relative" style={{ width: mapWidth * zoom, height: mapHeight * zoom }}>
             <div
               className="relative origin-top-left overflow-hidden rounded-[34px]"
               style={{
@@ -1428,7 +1049,6 @@ export default function ConstructorApp() {
                 transformOrigin: 'top left',
                 background:
                   'radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 30%), linear-gradient(135deg, #0b0a08, #17120d)',
-                backgroundSize: '100% 100%',
               }}
             >
               <div
@@ -1462,16 +1082,11 @@ export default function ConstructorApp() {
                       borderRadius: getObjectBorderRadius(type),
                       borderColor: isSelected ? '#fcd34d' : 'rgba(255,255,255,.18)',
                       boxShadow: getObjectShadow(type, isSelected),
-                      color: type === 'text' || type === 'number' ? '#ffffff' : '#ffffff',
                       fontSize: type === 'number' ? 28 : floor ? 18 : 13,
                       zIndex: getObjectLayer(type),
                     }}
                   >
-                    {text ? (
-                      <span className="rounded-full bg-black/30 px-3 py-1 drop-shadow">
-                        {text}
-                      </span>
-                    ) : null}
+                    {text ? <span className="rounded-full bg-black/30 px-3 py-1 drop-shadow">{text}</span> : null}
                   </div>
                 );
               })}
@@ -1506,7 +1121,6 @@ export default function ConstructorApp() {
           <span>🟢 свободен</span>
           <span>🟠 бронь</span>
           <span>🔴 занят</span>
-          <span>⚫ скрыт</span>
           <span>▦ мрамор</span>
           <span>🌊 вода</span>
           <span>🔥 камин</span>
