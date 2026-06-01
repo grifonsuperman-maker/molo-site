@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import {
   Copy,
   Move,
@@ -8,7 +8,6 @@ import {
   RotateCcw,
   RotateCw,
   Save,
-  Sparkles,
   Trash2,
 } from 'lucide-react';
 
@@ -32,115 +31,217 @@ type DragState = {
 
 type TableShape = 'square' | 'round' | 'rect';
 
-type TemplateTable = {
-  tableNumber: string;
-  seats: number;
-  shape: TableShape;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation?: number;
-};
-
-type TemplateObject = {
+type PaletteItem = {
+  label: string;
   objectType: string;
   name: string;
-  x: number;
-  y: number;
   width: number;
   height: number;
-  rotation?: number;
   color: string;
 };
 
-const MAP_WIDTH = 1800;
-const MAP_HEIGHT = 1120;
+const DEFAULT_MAP_WIDTH = 2200;
+const DEFAULT_MAP_HEIGHT = 1500;
 
-const TABLES: TemplateTable[] = [
-  { tableNumber: '28', seats: 4, shape: 'rect', x: 180, y: 95, width: 86, height: 64 },
-  { tableNumber: '29', seats: 4, shape: 'rect', x: 325, y: 95, width: 86, height: 64 },
-  { tableNumber: '30', seats: 4, shape: 'rect', x: 470, y: 95, width: 86, height: 64 },
-  { tableNumber: '31', seats: 4, shape: 'rect', x: 615, y: 95, width: 86, height: 64 },
-  { tableNumber: '32', seats: 4, shape: 'rect', x: 760, y: 95, width: 86, height: 64 },
-  { tableNumber: '33', seats: 4, shape: 'rect', x: 905, y: 95, width: 86, height: 64 },
-
-  { tableNumber: '21', seats: 4, shape: 'square', x: 175, y: 235, width: 74, height: 74 },
-  { tableNumber: '22', seats: 4, shape: 'square', x: 330, y: 235, width: 74, height: 74 },
-  { tableNumber: '23', seats: 4, shape: 'square', x: 485, y: 235, width: 74, height: 74 },
-  { tableNumber: '24', seats: 4, shape: 'square', x: 640, y: 235, width: 74, height: 74 },
-  { tableNumber: '25', seats: 4, shape: 'square', x: 795, y: 235, width: 74, height: 74 },
-  { tableNumber: '26', seats: 4, shape: 'square', x: 950, y: 235, width: 74, height: 74 },
-
-  { tableNumber: '2', seats: 4, shape: 'square', x: 160, y: 430, width: 74, height: 74 },
-  { tableNumber: '4', seats: 4, shape: 'square', x: 310, y: 430, width: 74, height: 74 },
-  { tableNumber: '1', seats: 4, shape: 'square', x: 510, y: 430, width: 74, height: 74 },
-  { tableNumber: '1', seats: 4, shape: 'square', x: 660, y: 430, width: 74, height: 74 },
-
-  { tableNumber: '5', seats: 6, shape: 'round', x: 170, y: 585, width: 100, height: 100 },
-  { tableNumber: '6', seats: 6, shape: 'round', x: 390, y: 585, width: 100, height: 100 },
-  { tableNumber: '7', seats: 6, shape: 'round', x: 610, y: 585, width: 100, height: 100 },
-  { tableNumber: '8', seats: 6, shape: 'round', x: 170, y: 755, width: 100, height: 100 },
-  { tableNumber: '9', seats: 6, shape: 'round', x: 390, y: 755, width: 100, height: 100 },
-  { tableNumber: '10', seats: 6, shape: 'round', x: 610, y: 755, width: 100, height: 100 },
-
-  { tableNumber: '11', seats: 4, shape: 'square', x: 360, y: 925, width: 74, height: 74 },
-  { tableNumber: '12', seats: 4, shape: 'square', x: 500, y: 925, width: 74, height: 74 },
-  { tableNumber: '13', seats: 4, shape: 'square', x: 640, y: 925, width: 74, height: 74 },
-  { tableNumber: '14', seats: 4, shape: 'square', x: 780, y: 925, width: 74, height: 74 },
-
-  { tableNumber: '15', seats: 4, shape: 'square', x: 900, y: 440, width: 74, height: 74 },
-  { tableNumber: '18', seats: 4, shape: 'square', x: 1040, y: 440, width: 74, height: 74 },
-  { tableNumber: '16', seats: 4, shape: 'square', x: 900, y: 590, width: 74, height: 74 },
-  { tableNumber: '19', seats: 4, shape: 'square', x: 1040, y: 590, width: 74, height: 74 },
-  { tableNumber: '17', seats: 4, shape: 'square', x: 900, y: 740, width: 74, height: 74 },
-  { tableNumber: '20', seats: 4, shape: 'square', x: 1040, y: 740, width: 74, height: 74 },
-
-  { tableNumber: '37', seats: 6, shape: 'round', x: 1205, y: 410, width: 100, height: 100 },
-  { tableNumber: '38', seats: 6, shape: 'round', x: 1205, y: 590, width: 100, height: 100 },
-  { tableNumber: '39', seats: 6, shape: 'round', x: 1205, y: 780, width: 100, height: 100 },
-
-  { tableNumber: '201', seats: 4, shape: 'square', x: 1450, y: 80, width: 78, height: 78 },
-  { tableNumber: '29', seats: 4, shape: 'square', x: 1500, y: 200, width: 74, height: 74 },
-  { tableNumber: '30', seats: 4, shape: 'square', x: 1500, y: 310, width: 74, height: 74 },
-  { tableNumber: '31', seats: 4, shape: 'square', x: 1500, y: 420, width: 74, height: 74 },
-  { tableNumber: '32', seats: 4, shape: 'square', x: 1500, y: 530, width: 74, height: 74 },
-  { tableNumber: '33', seats: 4, shape: 'square', x: 1500, y: 640, width: 74, height: 74 },
-  { tableNumber: '202', seats: 4, shape: 'square', x: 1500, y: 760, width: 78, height: 78 },
-  { tableNumber: '41', seats: 4, shape: 'square', x: 1500, y: 885, width: 74, height: 74 },
-  { tableNumber: '42', seats: 4, shape: 'square', x: 1500, y: 995, width: 74, height: 74 },
+const FLOOR_ITEMS: PaletteItem[] = [
+  {
+    label: 'Зона',
+    objectType: 'zone_rect',
+    name: 'Зона',
+    width: 520,
+    height: 320,
+    color: '#2b2924',
+  },
+  {
+    label: 'Зона овал',
+    objectType: 'zone_oval',
+    name: 'Зона',
+    width: 420,
+    height: 260,
+    color: '#2b2924',
+  },
+  {
+    label: 'Мрамор',
+    objectType: 'floor_marble',
+    name: 'Мрамор',
+    width: 520,
+    height: 320,
+    color: '#d8d3c7',
+  },
+  {
+    label: 'Плитка',
+    objectType: 'floor_tile',
+    name: 'Плитка',
+    width: 520,
+    height: 320,
+    color: '#57534e',
+  },
+  {
+    label: 'Тротуар',
+    objectType: 'floor_pavement',
+    name: 'Тротуар',
+    width: 520,
+    height: 260,
+    color: '#44403c',
+  },
+  {
+    label: 'Дерево',
+    objectType: 'floor_wood',
+    name: 'Дерево',
+    width: 520,
+    height: 320,
+    color: '#7c4a1e',
+  },
+  {
+    label: 'Газон',
+    objectType: 'floor_grass',
+    name: 'Газон',
+    width: 520,
+    height: 320,
+    color: '#3f6212',
+  },
+  {
+    label: 'Вода',
+    objectType: 'floor_water',
+    name: 'Вода',
+    width: 520,
+    height: 320,
+    color: '#075985',
+  },
 ];
 
-const OBJECTS: TemplateObject[] = [
-  { objectType: 'fireplace', name: 'Камин', x: 560, y: 510, width: 90, height: 60, color: '#dc2626' },
-  { objectType: 'bar', name: 'Бар', x: 95, y: 900, width: 250, height: 95, color: '#b7791f' },
-  { objectType: 'tree', name: '', x: 1120, y: 350, width: 80, height: 80, color: '#166534' },
-  { objectType: 'tree', name: '', x: 1285, y: 720, width: 80, height: 80, color: '#166534' },
-  { objectType: 'tree', name: '', x: 40, y: 760, width: 70, height: 70, color: '#166534' },
-  { objectType: 'lamp', name: '', x: 100, y: 340, width: 42, height: 42, color: '#facc15' },
-  { objectType: 'lamp', name: '', x: 850, y: 330, width: 42, height: 42, color: '#facc15' },
-  { objectType: 'lamp', name: '', x: 1330, y: 540, width: 42, height: 42, color: '#facc15' },
-  { objectType: 'lamp', name: '', x: 1660, y: 540, width: 42, height: 42, color: '#facc15' },
-  { objectType: 'window', name: 'Окно', x: 120, y: 38, width: 170, height: 24, color: '#38bdf8' },
-  { objectType: 'window', name: 'Окно', x: 390, y: 38, width: 170, height: 24, color: '#38bdf8' },
-  { objectType: 'window', name: 'Окно', x: 660, y: 38, width: 170, height: 24, color: '#38bdf8' },
-  { objectType: 'window', name: 'Окно', x: 40, y: 420, width: 24, height: 170, color: '#38bdf8' },
-  { objectType: 'window', name: 'Окно', x: 40, y: 620, width: 24, height: 170, color: '#38bdf8' },
+const BUILD_ITEMS: PaletteItem[] = [
+  {
+    label: 'Стена',
+    objectType: 'wall',
+    name: '',
+    width: 360,
+    height: 28,
+    color: '#57534e',
+  },
+  {
+    label: 'Окно',
+    objectType: 'window',
+    name: 'Окно',
+    width: 180,
+    height: 28,
+    color: '#38bdf8',
+  },
+  {
+    label: 'Дверь',
+    objectType: 'door',
+    name: 'Дверь',
+    width: 110,
+    height: 36,
+    color: '#92400e',
+  },
+  {
+    label: 'Забор кам.',
+    objectType: 'stone_fence',
+    name: '',
+    width: 300,
+    height: 42,
+    color: '#78716c',
+  },
+  {
+    label: 'Забор дер.',
+    objectType: 'wood_fence',
+    name: '',
+    width: 300,
+    height: 42,
+    color: '#854d0e',
+  },
+  {
+    label: 'Мост',
+    objectType: 'bridge',
+    name: 'Мост',
+    width: 300,
+    height: 90,
+    color: '#8b5a2b',
+  },
+  {
+    label: 'Причал',
+    objectType: 'pier',
+    name: 'Причал',
+    width: 320,
+    height: 160,
+    color: '#7c4a1e',
+  },
+  {
+    label: 'Камин',
+    objectType: 'fireplace',
+    name: 'Камин',
+    width: 120,
+    height: 80,
+    color: '#dc2626',
+  },
 ];
 
-const ADD_ITEMS = [
-  { label: 'Мрамор', objectType: 'marble_tile', name: 'Мрамор', width: 250, height: 160, color: '#d8d3c7' },
-  { label: 'Плитка', objectType: 'tile', name: 'Плитка', width: 250, height: 160, color: '#57534e' },
-  { label: 'Тротуар', objectType: 'pavement', name: 'Тротуар', width: 250, height: 130, color: '#44403c' },
-  { label: 'Вода', objectType: 'water', name: 'Вода', width: 300, height: 160, color: '#075985' },
-  { label: 'Газон', objectType: 'grass', name: 'Газон', width: 250, height: 160, color: '#3f6212' },
-  { label: 'Дерево', objectType: 'tree', name: '', width: 80, height: 80, color: '#166534' },
-  { label: 'Камни', objectType: 'stones', name: '', width: 110, height: 60, color: '#78716c' },
-  { label: 'Фонарь', objectType: 'lamp', name: '', width: 44, height: 44, color: '#facc15' },
-  { label: 'Мост', objectType: 'bridge', name: 'Мост', width: 280, height: 80, color: '#8b5a2b' },
-  { label: 'Камин', objectType: 'fireplace', name: 'Камин', width: 90, height: 60, color: '#dc2626' },
-  { label: 'Окно', objectType: 'window', name: 'Окно', width: 160, height: 28, color: '#38bdf8' },
-  { label: 'Диван', objectType: 'sofa', name: 'Диван', width: 170, height: 70, color: '#7f1d1d' },
+const FURNITURE_ITEMS: PaletteItem[] = [
+  {
+    label: 'Бар',
+    objectType: 'bar',
+    name: 'Бар',
+    width: 320,
+    height: 110,
+    color: '#b7791f',
+  },
+  {
+    label: 'Диван',
+    objectType: 'sofa',
+    name: 'Диван',
+    width: 210,
+    height: 85,
+    color: '#7f1d1d',
+  },
+  {
+    label: 'Стул',
+    objectType: 'chair',
+    name: '',
+    width: 58,
+    height: 58,
+    color: '#92400e',
+  },
+  {
+    label: 'Дерево',
+    objectType: 'tree',
+    name: '',
+    width: 90,
+    height: 90,
+    color: '#166534',
+  },
+  {
+    label: 'Камни',
+    objectType: 'stones',
+    name: '',
+    width: 130,
+    height: 75,
+    color: '#78716c',
+  },
+  {
+    label: 'Фонарь',
+    objectType: 'lamp',
+    name: '',
+    width: 60,
+    height: 60,
+    color: '#facc15',
+  },
+  {
+    label: 'Текст',
+    objectType: 'text',
+    name: 'Текст',
+    width: 230,
+    height: 64,
+    color: '#111827',
+  },
+  {
+    label: 'Цифра',
+    objectType: 'number',
+    name: '1',
+    width: 80,
+    height: 70,
+    color: '#111827',
+  },
 ];
 
 function numberValue(value: unknown, fallback = 0) {
@@ -153,82 +254,232 @@ function getCreatedId(value: unknown) {
   return String(data?.id || data?.data?.id || data?.data?.data?.id || '');
 }
 
-function objectLabel(object: MapObject) {
-  if (object.objectType === 'tree') return '🌳';
-  if (object.objectType === 'lamp') return '💡';
-  if (object.objectType === 'fireplace') return '🔥';
-  if (object.objectType === 'bar') return '🍸';
-  if (object.objectType === 'window') return '';
-  if (object.objectType === 'water') return '🌊';
-  if (object.objectType === 'grass') return '🌿';
-  if (object.objectType === 'stones') return '⚫';
-  if (object.objectType === 'bridge') return '🌉';
-  if (object.objectType === 'sofa') return '▰';
-  return object.name || '';
+function getMapWidth(map: FullMapResponse | null) {
+  return numberValue((map as any)?.restaurant?.mapWidth, DEFAULT_MAP_WIDTH);
 }
 
-function objectBackground(object: MapObject) {
-  const color = object.color || '#525252';
+function getMapHeight(map: FullMapResponse | null) {
+  return numberValue((map as any)?.restaurant?.mapHeight, DEFAULT_MAP_HEIGHT);
+}
 
-  if (object.objectType === 'water') {
-    return `radial-gradient(circle at 30% 20%, rgba(125,211,252,.45), transparent 25%), linear-gradient(135deg, #082f49, ${color}, #020617)`;
+function isFloorObject(objectType: string) {
+  return objectType.startsWith('floor_') || objectType.startsWith('zone_');
+}
+
+function isOvalObject(objectType: string) {
+  return objectType.includes('oval') || objectType === 'floor_water_oval';
+}
+
+function getObjectLayer(objectType: string) {
+  if (objectType.startsWith('floor_') || objectType.startsWith('zone_')) return 1;
+  if (objectType === 'floor_water' || objectType === 'bridge' || objectType === 'pier') return 2;
+  if (
+    objectType === 'wall' ||
+    objectType === 'window' ||
+    objectType === 'door' ||
+    objectType === 'stone_fence' ||
+    objectType === 'wood_fence'
+  ) {
+    return 3;
+  }
+  if (objectType === 'bar' || objectType === 'sofa' || objectType === 'chair' || objectType === 'fireplace') {
+    return 4;
+  }
+  if (objectType === 'lamp' || objectType === 'tree' || objectType === 'stones') return 5;
+  if (objectType === 'text' || objectType === 'number') return 8;
+  return 4;
+}
+
+function getObjectBackground(object: MapObject) {
+  const type = String(object.objectType || '');
+  const color = String(object.color || '#525252');
+
+  if (type === 'floor_marble') {
+    return `
+      linear-gradient(135deg, rgba(255,255,255,.85), rgba(255,255,255,.12)),
+      repeating-linear-gradient(45deg, ${color}, ${color} 22px, #f5f5f4 22px, #f5f5f4 26px, #a8a29e 26px, #a8a29e 44px)
+    `;
   }
 
-  if (object.objectType === 'grass') {
-    return `repeating-linear-gradient(45deg, ${color}, ${color} 12px, #65a30d 12px, #65a30d 20px)`;
+  if (type === 'floor_tile') {
+    return `
+      radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 28%),
+      repeating-linear-gradient(45deg, ${color}, ${color} 18px, #292524 18px, #292524 34px)
+    `;
   }
 
-  if (object.objectType === 'marble_tile') {
-    return `linear-gradient(135deg, #fafaf9, ${color}, #a8a29e)`;
+  if (type === 'floor_pavement') {
+    return `
+      repeating-linear-gradient(90deg, ${color}, ${color} 22px, #292524 22px, #292524 28px),
+      repeating-linear-gradient(0deg, transparent, transparent 22px, rgba(0,0,0,.3) 22px, rgba(0,0,0,.3) 28px)
+    `;
   }
 
-  if (object.objectType === 'tile') {
-    return `repeating-linear-gradient(45deg, ${color}, ${color} 18px, #292524 18px, #292524 24px)`;
+  if (type === 'floor_wood' || type === 'bridge' || type === 'pier') {
+    return `
+      repeating-linear-gradient(90deg, ${color}, ${color} 24px, #3f2a14 24px, #3f2a14 31px),
+      linear-gradient(180deg, rgba(255,255,255,.12), rgba(0,0,0,.18))
+    `;
   }
 
-  if (object.objectType === 'pavement') {
-    return `repeating-linear-gradient(90deg, ${color}, ${color} 18px, #292524 18px, #292524 25px)`;
+  if (type === 'floor_grass') {
+    return `
+      radial-gradient(circle at 18% 25%, rgba(190,242,100,.18), transparent 26%),
+      repeating-linear-gradient(45deg, ${color}, ${color} 12px, #65a30d 12px, #65a30d 20px)
+    `;
   }
 
-  if (object.objectType === 'tree') {
-    return `radial-gradient(circle, #22c55e 0%, ${color} 58%, #14532d 100%)`;
+  if (type === 'floor_water') {
+    return `
+      radial-gradient(circle at 25% 20%, rgba(125,211,252,.42), transparent 23%),
+      radial-gradient(circle at 70% 70%, rgba(14,165,233,.22), transparent 25%),
+      linear-gradient(135deg, #082f49, ${color}, #020617)
+    `;
   }
 
-  if (object.objectType === 'lamp') {
-    return `radial-gradient(circle, #fef08a 0%, ${color} 35%, rgba(250,204,21,.2) 60%, transparent 100%)`;
+  if (type === 'zone_rect' || type === 'zone_oval') {
+    return `
+      radial-gradient(circle at 20% 20%, rgba(245,158,11,.10), transparent 30%),
+      linear-gradient(135deg, ${color}, #15110d)
+    `;
   }
 
-  if (object.objectType === 'fireplace') {
-    return `radial-gradient(circle, #fde68a 0%, #f97316 38%, ${color} 70%, #450a0a 100%)`;
+  if (type === 'tree') {
+    return `radial-gradient(circle, #22c55e 0%, ${color} 56%, #14532d 100%)`;
   }
 
-  if (object.objectType === 'bar') {
+  if (type === 'lamp') {
+    return `radial-gradient(circle, #fef08a 0%, ${color} 35%, rgba(250,204,21,.25) 58%, transparent 100%)`;
+  }
+
+  if (type === 'fireplace') {
+    return `radial-gradient(circle, #fde68a 0%, #f97316 35%, ${color} 68%, #450a0a 100%)`;
+  }
+
+  if (type === 'bar') {
     return `linear-gradient(135deg, #f59e0b, ${color}, #451a03)`;
   }
 
-  if (object.objectType === 'window') {
+  if (type === 'sofa') {
+    return `linear-gradient(180deg, ${color}, #450a0a)`;
+  }
+
+  if (type === 'chair') {
+    return `linear-gradient(180deg, #a16207, ${color})`;
+  }
+
+  if (type === 'window') {
     return `linear-gradient(180deg, #7dd3fc, ${color}, #0f172a)`;
   }
 
-  if (object.objectType === 'bridge') {
-    return `repeating-linear-gradient(90deg, ${color}, ${color} 20px, #f59e0b 20px, #f59e0b 24px)`;
+  if (type === 'door') {
+    return `linear-gradient(180deg, #b45309, ${color}, #451a03)`;
+  }
+
+  if (type === 'wall') {
+    return `linear-gradient(180deg, #78716c, ${color}, #1c1917)`;
+  }
+
+  if (type === 'stone_fence') {
+    return `repeating-linear-gradient(90deg, ${color}, ${color} 28px, #292524 28px, #292524 34px)`;
+  }
+
+  if (type === 'wood_fence') {
+    return `repeating-linear-gradient(90deg, ${color}, ${color} 26px, #3f2a14 26px, #3f2a14 32px)`;
+  }
+
+  if (type === 'stones') {
+    return `radial-gradient(circle at 22% 50%, #a8a29e 0 12px, transparent 13px),
+      radial-gradient(circle at 52% 45%, ${color} 0 14px, transparent 15px),
+      radial-gradient(circle at 75% 55%, #57534e 0 10px, transparent 11px)`;
+  }
+
+  if (type === 'text' || type === 'number') {
+    return `${color}`;
   }
 
   return color;
 }
 
+function getObjectText(object: MapObject) {
+  const type = String(object.objectType || '');
+
+  if (type === 'tree') return '🌳';
+  if (type === 'lamp') return '💡';
+  if (type === 'fireplace') return '🔥';
+  if (type === 'bar') return object.name || 'Бар';
+  if (type === 'sofa') return object.name || 'Диван';
+  if (type === 'chair') return object.name || '';
+  if (type === 'window') return object.name || '';
+  if (type === 'door') return object.name || 'Дверь';
+  if (type === 'bridge') return object.name || 'Мост';
+  if (type === 'pier') return object.name || 'Причал';
+  if (type === 'stones') return '';
+  if (type === 'wall' || type === 'stone_fence' || type === 'wood_fence') return object.name || '';
+  if (type === 'text' || type === 'number') return object.name || '';
+
+  return object.name || '';
+}
+
+function getObjectBorderRadius(objectType: string) {
+  if (objectType === 'tree' || objectType === 'lamp' || objectType === 'number') return '999px';
+  if (isOvalObject(objectType)) return '999px';
+  if (objectType === 'window' || objectType === 'wall' || objectType.includes('fence')) return '12px';
+  if (isFloorObject(objectType)) return '28px';
+  return '18px';
+}
+
+function getObjectShadow(objectType: string, selected: boolean) {
+  if (selected) return '0 0 0 3px rgba(251,191,36,.9), 0 18px 30px rgba(0,0,0,.45)';
+  if (objectType === 'lamp') return '0 0 34px rgba(250,204,21,.9)';
+  if (objectType === 'fireplace') return '0 0 30px rgba(249,115,22,.75)';
+  if (isFloorObject(objectType)) return 'inset 0 0 38px rgba(0,0,0,.62), 0 14px 28px rgba(0,0,0,.28)';
+  return '0 12px 24px rgba(0,0,0,.45)';
+}
+
 function tableColors(table: TableItem, selected: boolean) {
   const status = String(table.status || 'free');
 
-  if (selected) return 'border-amber-200 bg-amber-500 shadow-[0_0_30px_rgba(251,191,36,.9)]';
-  if (status === 'occupied') return 'border-red-300 bg-red-700 shadow-[0_0_18px_rgba(239,68,68,.6)]';
-  if (status === 'closed' || status === 'hidden') return 'border-neutral-400 bg-neutral-700 shadow-[0_0_12px_rgba(115,115,115,.5)]';
-  if (status === 'reserved' || status === 'booked') return 'border-amber-300 bg-amber-600 shadow-[0_0_18px_rgba(245,158,11,.6)]';
+  if (selected) {
+    return {
+      background: '#f59e0b',
+      border: '#fde68a',
+      shadow: '0 0 0 3px rgba(251,191,36,.9), 0 0 24px rgba(251,191,36,.85)',
+    };
+  }
 
-  return 'border-emerald-300 bg-green-800 shadow-[0_0_18px_rgba(34,197,94,.65)]';
+  if (status === 'occupied') {
+    return {
+      background: '#b91c1c',
+      border: '#fca5a5',
+      shadow: '0 0 18px rgba(239,68,68,.65)',
+    };
+  }
+
+  if (status === 'closed' || status === 'hidden') {
+    return {
+      background: '#525252',
+      border: '#a3a3a3',
+      shadow: '0 0 12px rgba(115,115,115,.5)',
+    };
+  }
+
+  if (status === 'reserved' || status === 'booked') {
+    return {
+      background: '#d97706',
+      border: '#fcd34d',
+      shadow: '0 0 18px rgba(245,158,11,.65)',
+    };
+  }
+
+  return {
+    background: '#166534',
+    border: '#6ee7b7',
+    shadow: '0 0 18px rgba(34,197,94,.65)',
+  };
 }
 
-function Chair({ style }: { style: React.CSSProperties }) {
+function Chair({ style }: { style: CSSProperties }) {
   return (
     <span
       style={style}
@@ -238,13 +489,31 @@ function Chair({ style }: { style: React.CSSProperties }) {
 }
 
 function TableVisual({ table, selected }: { table: TableItem; selected: boolean }) {
+  const colors = tableColors(table, selected);
   const isRound = table.shape === 'round';
   const isRect = table.shape === 'rect';
 
   return (
     <div className="relative h-full w-full overflow-visible">
-      <Chair style={{ width: 22, height: 12, left: '50%', top: -13, transform: 'translateX(-50%)' }} />
-      <Chair style={{ width: 22, height: 12, left: '50%', bottom: -13, transform: 'translateX(-50%)' }} />
+      <Chair
+        style={{
+          width: 22,
+          height: 12,
+          left: '50%',
+          top: -13,
+          transform: 'translateX(-50%)',
+        }}
+      />
+
+      <Chair
+        style={{
+          width: 22,
+          height: 12,
+          left: '50%',
+          bottom: -13,
+          transform: 'translateX(-50%)',
+        }}
+      />
 
       {!isRound && (
         <>
@@ -257,23 +526,60 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
 
       {isRound && (
         <>
-          <Chair style={{ width: 12, height: 22, left: -13, top: '50%', transform: 'translateY(-50%)' }} />
-          <Chair style={{ width: 12, height: 22, right: -13, top: '50%', transform: 'translateY(-50%)' }} />
+          <Chair
+            style={{
+              width: 12,
+              height: 22,
+              left: -13,
+              top: '50%',
+              transform: 'translateY(-50%)',
+            }}
+          />
+
+          <Chair
+            style={{
+              width: 12,
+              height: 22,
+              right: -13,
+              top: '50%',
+              transform: 'translateY(-50%)',
+            }}
+          />
         </>
       )}
 
       {isRect && (
         <>
-          <Chair style={{ width: 12, height: 22, left: -13, top: '50%', transform: 'translateY(-50%)' }} />
-          <Chair style={{ width: 12, height: 22, right: -13, top: '50%', transform: 'translateY(-50%)' }} />
+          <Chair
+            style={{
+              width: 12,
+              height: 22,
+              left: -13,
+              top: '50%',
+              transform: 'translateY(-50%)',
+            }}
+          />
+
+          <Chair
+            style={{
+              width: 12,
+              height: 22,
+              right: -13,
+              top: '50%',
+              transform: 'translateY(-50%)',
+            }}
+          />
         </>
       )}
 
       <div
-        className={`relative z-10 flex h-full w-full items-center justify-center border-2 text-sm font-bold text-white ${tableColors(
-          table,
-          selected,
-        )} ${isRound ? 'rounded-full' : 'rounded-xl'}`}
+        className="relative z-10 flex h-full w-full items-center justify-center border-2 text-sm font-bold text-white"
+        style={{
+          background: colors.background,
+          borderColor: colors.border,
+          boxShadow: colors.shadow,
+          borderRadius: isRound ? '999px' : '14px',
+        }}
       >
         {table.tableNumber}
       </div>
@@ -281,41 +587,9 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
   );
 }
 
-function StaticMapBackground() {
-  const stone =
-    'radial-gradient(circle at 15% 20%, rgba(245,158,11,.08), transparent 28%), repeating-linear-gradient(45deg, #302b25, #302b25 18px, #24201b 18px, #24201b 34px)';
-  const darkStone =
-    'radial-gradient(circle at 20% 20%, rgba(250,204,21,.08), transparent 30%), repeating-linear-gradient(45deg, #25221d, #25221d 16px, #171511 16px, #171511 32px)';
-  const wood =
-    'repeating-linear-gradient(90deg, #7c4a1e, #7c4a1e 24px, #4a2d14 24px, #4a2d14 30px)';
-  const water =
-    'radial-gradient(circle at 25% 18%, rgba(125,211,252,.35), transparent 20%), linear-gradient(135deg, #082f49, #075985, #020617)';
-
-  return (
-    <>
-      <div className="absolute left-[55px] top-[55px] h-[290px] w-[1010px] rounded-[22px] border border-stone-500/45 shadow-[inset_0_0_45px_rgba(0,0,0,.8)]" style={{ background: darkStone }} />
-      <div className="absolute left-[55px] top-[365px] h-[550px] w-[780px] rounded-[28px] border border-stone-500/45 shadow-[inset_0_0_45px_rgba(0,0,0,.8)]" style={{ background: stone }} />
-      <div className="absolute left-[75px] top-[850px] h-[210px] w-[350px] rounded-[28px] border border-amber-800/40 bg-[#1d1710] shadow-[inset_0_0_35px_rgba(0,0,0,.9)]" />
-      <div className="absolute left-[860px] top-[360px] h-[600px] w-[455px] rounded-[24px] border border-amber-700/40 shadow-[inset_0_0_35px_rgba(0,0,0,.7)]" style={{ background: wood }} />
-      <div className="absolute left-[1320px] top-[30px] h-[1050px] w-[420px] rounded-[30px] border border-sky-500/20 shadow-[inset_0_0_70px_rgba(0,0,0,.85)]" style={{ background: water }} />
-      <div className="absolute left-[1370px] top-[120px] h-[400px] w-[250px] rounded-[24px] border border-amber-600/40 shadow-[inset_0_0_30px_rgba(0,0,0,.7)]" style={{ background: wood }} />
-      <div className="absolute left-[1360px] top-[600px] h-[145px] w-[285px] rounded-[20px] border border-amber-600/40 shadow-[inset_0_0_30px_rgba(0,0,0,.7)]" style={{ background: wood }} />
-
-      <div className="absolute left-[405px] top-[185px] rounded-full bg-black/55 px-10 py-3 text-lg font-semibold text-stone-200">Банкетний зал</div>
-      <div className="absolute left-[370px] top-[515px] rounded-full bg-black/55 px-10 py-3 text-lg font-semibold text-stone-200">Основний зал</div>
-      <div className="absolute left-[1405px] top-[260px] rounded-full bg-black/55 px-10 py-3 text-lg font-semibold text-stone-200">Причал</div>
-      <div className="absolute left-[1415px] top-[640px] rounded-full bg-black/55 px-10 py-3 text-lg font-semibold text-stone-200">Мост</div>
-      <div className="absolute left-[115px] top-[930px] rounded-full bg-black/55 px-8 py-3 text-lg font-semibold text-stone-200">Бар</div>
-
-      <div className="absolute left-[40px] top-[150px] rotate-[-90deg] text-3xl font-light tracking-widest text-stone-300/80">ВХОД</div>
-      <div className="absolute left-[40px] top-[535px] rotate-[-90deg] text-3xl font-light tracking-widest text-stone-300/80">ВХОД</div>
-    </>
-  );
-}
-
 export default function ConstructorApp() {
   const [map, setMap] = useState<FullMapResponse | null>(null);
-  const [zoom, setZoom] = useState(0.46);
+  const [zoom, setZoom] = useState(0.48);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
   const [dragging, setDragging] = useState<DragState | null>(null);
   const [message, setMessage] = useState('');
@@ -329,15 +603,19 @@ export default function ConstructorApp() {
   }
 
   useEffect(() => {
-    loadMap().catch(() => setMessage('Не удалось загрузить карту'));
+    loadMap().catch(() => {
+      setMessage('Не удалось загрузить карту');
+    });
   }, []);
 
   function findSelectedItem(): any {
     if (!map || !selected) return null;
+
     if (selected.kind === 'table') {
-      return (map.tables || []).find((item) => item.id === selected.id) || null;
+      return (map.tables || []).find((item) => String(item.id) === selected.id) || null;
     }
-    return (map.objects || []).find((item) => item.id === selected.id) || null;
+
+    return (map.objects || []).find((item) => String(item.id) === selected.id) || null;
   }
 
   function updateLocalItem(kind: ItemKind, id: string, patch: Record<string, unknown>) {
@@ -348,7 +626,7 @@ export default function ConstructorApp() {
         return {
           ...current,
           tables: (current.tables || []).map((item) =>
-            item.id === id ? ({ ...item, ...patch } as TableItem) : item,
+            String(item.id) === id ? ({ ...item, ...patch } as TableItem) : item,
           ),
         };
       }
@@ -356,7 +634,7 @@ export default function ConstructorApp() {
       return {
         ...current,
         objects: (current.objects || []).map((item) =>
-          item.id === id ? ({ ...item, ...patch } as MapObject) : item,
+          String(item.id) === id ? ({ ...item, ...patch } as MapObject) : item,
         ),
       };
     });
@@ -364,7 +642,10 @@ export default function ConstructorApp() {
 
   function getPointerPosition(event: ReactPointerEvent<HTMLElement>) {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
+
+    if (!canvas) {
+      return { x: 0, y: 0 };
+    }
 
     const rect = canvas.getBoundingClientRect();
 
@@ -382,8 +663,8 @@ export default function ConstructorApp() {
 
     const item =
       kind === 'table'
-        ? (map.tables || []).find((table) => table.id === id)
-        : (map.objects || []).find((object) => object.id === id);
+        ? (map.tables || []).find((table) => String(table.id) === id)
+        : (map.objects || []).find((object) => String(object.id) === id);
 
     if (!item) return;
 
@@ -419,91 +700,33 @@ export default function ConstructorApp() {
     setMessage('Передвинуто. Нажми «Сохранить».');
   }
 
-  async function deleteEverything(data: FullMapResponse) {
-    const objects = data.objects || [];
-    const tables = data.tables || [];
-    const zones = data.zones || [];
-
-    for (const object of objects) {
-      try {
-        await api.delete(`/constructor/objects/${object.id}`);
-      } catch {}
-    }
-
-    for (const table of tables) {
-      try {
-        await api.delete(`/tables/${table.id}`);
-      } catch {}
-    }
-
-    for (const zone of zones) {
-      try {
-        await api.delete(`/zones/${zone.id}`);
-      } catch {}
-    }
-  }
-
-  async function createFreshMap() {
-    const ok = window.confirm('Очистить старую карту и создать новую?');
-    if (!ok) return;
-
-    setLoading(true);
-    setMessage('Очищаю старую карту...');
-
-    try {
-      const current = (await mapApi.get()) as FullMapResponse;
-      await deleteEverything(current);
-
-      setMessage('Создаю новую карту...');
-
-      for (const object of OBJECTS) {
-        await api.post('/constructor/objects', {
-          ...object,
-          rotation: object.rotation || 0,
-        });
-      }
-
-      for (const table of TABLES) {
-        await api.post('/tables', {
-          ...table,
-          rotation: table.rotation || 0,
-        });
-      }
-
-      await loadMap();
-      setSelected(null);
-      setMessage('Новая карта создана. Теперь двигай столы/объекты и нажимай «Сохранить».');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка создания карты');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function createTable(shape: TableShape) {
     setLoading(true);
     setMessage('');
 
     try {
       const tableNumber = String(((map?.tables || []).length || 0) + 1);
-      const width = shape === 'round' ? 96 : shape === 'square' ? 84 : 135;
-      const height = shape === 'round' ? 96 : shape === 'square' ? 84 : 78;
+      const width = shape === 'round' ? 96 : shape === 'square' ? 88 : 145;
+      const height = shape === 'round' ? 96 : shape === 'square' ? 88 : 82;
 
       const created = await api.post('/tables', {
         tableNumber,
         seats: 4,
         shape,
-        x: 120,
-        y: 120,
+        x: 160,
+        y: 160,
         width,
         height,
         rotation: 0,
       });
 
       const id = getCreatedId(created);
+
       await loadMap();
 
-      if (id) setSelected({ kind: 'table', id });
+      if (id) {
+        setSelected({ kind: 'table', id });
+      }
 
       setMessage(`Добавлен стол ${tableNumber}`);
     } catch (error) {
@@ -513,7 +736,7 @@ export default function ConstructorApp() {
     }
   }
 
-  async function createObject(item: (typeof ADD_ITEMS)[number]) {
+  async function createObject(item: PaletteItem) {
     setLoading(true);
     setMessage('');
 
@@ -521,8 +744,8 @@ export default function ConstructorApp() {
       const created = await api.post('/constructor/objects', {
         objectType: item.objectType,
         name: item.name,
-        x: 150,
-        y: 150,
+        x: 180,
+        y: 180,
         width: item.width,
         height: item.height,
         rotation: 0,
@@ -530,9 +753,12 @@ export default function ConstructorApp() {
       });
 
       const id = getCreatedId(created);
+
       await loadMap();
 
-      if (id) setSelected({ kind: 'object', id });
+      if (id) {
+        setSelected({ kind: 'object', id });
+      }
 
       setMessage(`${item.label} добавлен`);
     } catch (error) {
@@ -544,6 +770,7 @@ export default function ConstructorApp() {
 
   async function saveSelected() {
     const item = findSelectedItem();
+
     if (!selected || !item) return;
 
     setLoading(true);
@@ -570,9 +797,17 @@ export default function ConstructorApp() {
           shape: table.shape,
         });
 
-        if (table.status === 'free') await api.patch(`/tables/${selected.id}/free`);
-        if (table.status === 'occupied') await api.patch(`/tables/${selected.id}/occupied`);
-        if (table.status === 'closed') await api.patch(`/tables/${selected.id}/close`);
+        if (table.status === 'free') {
+          await api.patch(`/tables/${selected.id}/free`);
+        }
+
+        if (table.status === 'occupied') {
+          await api.patch(`/tables/${selected.id}/occupied`);
+        }
+
+        if (table.status === 'closed' || table.status === 'hidden') {
+          await api.patch(`/tables/${selected.id}/close`);
+        }
 
         await loadMap();
         setSelected({ kind: 'table', id: selected.id });
@@ -581,9 +816,7 @@ export default function ConstructorApp() {
       if (selected.kind === 'object') {
         const object = item as MapObject;
 
-        await api.delete(`/constructor/objects/${selected.id}`);
-
-        const created = await api.post('/constructor/objects', {
+        const body = {
           objectType: object.objectType,
           name: object.name || '',
           x: numberValue(object.x),
@@ -592,14 +825,28 @@ export default function ConstructorApp() {
           height: numberValue(object.height, 100),
           rotation: numberValue(object.rotation),
           color: object.color || '#525252',
-        });
+        };
 
-        const newId = getCreatedId(created);
+        try {
+          await api.patch(`/constructor/objects/${selected.id}`, body);
+          await loadMap();
+          setSelected({ kind: 'object', id: selected.id });
+        } catch {
+          const created = await api.post('/constructor/objects', body);
+          const newId = getCreatedId(created);
 
-        await loadMap();
+          try {
+            await api.delete(`/constructor/objects/${selected.id}`);
+          } catch {}
 
-        if (newId) setSelected({ kind: 'object', id: newId });
-        else setSelected(null);
+          await loadMap();
+
+          if (newId) {
+            setSelected({ kind: 'object', id: newId });
+          } else {
+            setSelected(null);
+          }
+        }
       }
 
       setMessage('Сохранено');
@@ -612,6 +859,7 @@ export default function ConstructorApp() {
 
   async function duplicateSelected() {
     const item = findSelectedItem();
+
     if (!selected || !item) return;
 
     setLoading(true);
@@ -622,19 +870,23 @@ export default function ConstructorApp() {
         const table = item as TableItem;
 
         const created = await api.post('/tables', {
-          tableNumber: `${table.tableNumber}`,
-          seats: table.seats || 4,
+          tableNumber: String(table.tableNumber || ''),
+          seats: Number(table.seats) || 4,
           shape: table.shape || 'square',
-          x: numberValue(table.x) + 35,
-          y: numberValue(table.y) + 35,
+          x: numberValue(table.x) + 40,
+          y: numberValue(table.y) + 40,
           width: numberValue(table.width, 90),
           height: numberValue(table.height, 90),
           rotation: numberValue(table.rotation),
         });
 
         const id = getCreatedId(created);
+
         await loadMap();
-        if (id) setSelected({ kind: 'table', id });
+
+        if (id) {
+          setSelected({ kind: 'table', id });
+        }
       }
 
       if (selected.kind === 'object') {
@@ -643,8 +895,8 @@ export default function ConstructorApp() {
         const created = await api.post('/constructor/objects', {
           objectType: object.objectType,
           name: object.name || '',
-          x: numberValue(object.x) + 35,
-          y: numberValue(object.y) + 35,
+          x: numberValue(object.x) + 40,
+          y: numberValue(object.y) + 40,
           width: numberValue(object.width, 100),
           height: numberValue(object.height, 100),
           rotation: numberValue(object.rotation),
@@ -652,8 +904,12 @@ export default function ConstructorApp() {
         });
 
         const id = getCreatedId(created);
+
         await loadMap();
-        if (id) setSelected({ kind: 'object', id });
+
+        if (id) {
+          setSelected({ kind: 'object', id });
+        }
       }
 
       setMessage('Скопировано');
@@ -689,27 +945,82 @@ export default function ConstructorApp() {
     }
   }
 
+  async function clearMap() {
+    const ok = window.confirm('Удалить все столы, зоны и объекты с карты?');
+
+    if (!ok) return;
+
+    setLoading(true);
+    setMessage('Очищаю карту...');
+
+    try {
+      const current = (await mapApi.get()) as FullMapResponse;
+
+      for (const object of current.objects || []) {
+        try {
+          await api.delete(`/constructor/objects/${object.id}`);
+        } catch {}
+      }
+
+      for (const table of current.tables || []) {
+        try {
+          await api.delete(`/tables/${table.id}`);
+        } catch {}
+      }
+
+      for (const zone of (current as any).zones || []) {
+        try {
+          await api.delete(`/zones/${zone.id}`);
+        } catch {}
+      }
+
+      setSelected(null);
+      await loadMap();
+      setMessage('Карта очищена. Теперь добавляй элементы вручную.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Ошибка очистки карты');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function expandMap(direction: 'left' | 'right' | 'top' | 'bottom') {
+    setLoading(true);
+    setMessage('');
+
+    try {
+      await api.post('/constructor/map/expand', {
+        direction,
+        amount: 300,
+      });
+
+      await loadMap();
+      setMessage('Карта расширена');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Ошибка расширения карты');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const selectedItem = findSelectedItem();
+  const mapWidth = getMapWidth(map);
+  const mapHeight = getMapHeight(map);
+
+  const sortedObjects = [...(map?.objects || [])].sort((a, b) => {
+    return getObjectLayer(String(a.objectType || '')) - getObjectLayer(String(b.objectType || ''));
+  });
 
   return (
     <div className="mx-auto max-w-md px-4 py-5 pb-28">
       <section className="rounded-3xl border border-neutral-800 bg-gradient-to-br from-neutral-900 to-black p-5 shadow-2xl">
         <p className="text-sm uppercase tracking-[0.3em] text-amber-300/80">MOLO</p>
 
-        <h1 className="mt-2 text-3xl font-semibold">Конструктор залу</h1>
+        <h1 className="mt-2 text-3xl font-semibold">Конструктор</h1>
 
         <p className="mt-2 text-sm text-neutral-300">
-          Чистая версия карты: фон рисуется красиво, а столы и декор можно двигать, менять и сохранять.
+          Добавляй зоны, покрытия, столы, окна, камин, воду, мост, траву, стены, текст и декор. Всё можно двигать, менять размер, цвет и поворот.
         </p>
-
-        <button
-          disabled={loading}
-          onClick={createFreshMap}
-          className="mt-4 w-full rounded-2xl bg-amber-300 px-4 py-4 font-semibold text-neutral-950 disabled:opacity-50"
-        >
-          <Sparkles className="mr-2 inline h-5 w-5" />
-          Очистить и создать новую карту
-        </button>
 
         <label className="mt-4 block text-sm text-neutral-300">
           Масштаб: {Math.round(zoom * 100)}%
@@ -717,7 +1028,7 @@ export default function ConstructorApp() {
 
         <input
           type="range"
-          min="0.3"
+          min="0.25"
           max="1.1"
           step="0.05"
           value={zoom}
@@ -727,29 +1038,41 @@ export default function ConstructorApp() {
       </section>
 
       <section className="mt-4 rounded-3xl border border-neutral-800 bg-neutral-950 p-4">
-        <h2 className="text-lg font-semibold">Добавить стол</h2>
+        <h2 className="text-lg font-semibold">Столы</h2>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
-          <button disabled={loading} onClick={() => createTable('square')} className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50">
+          <button
+            disabled={loading}
+            onClick={() => createTable('square')}
+            className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50"
+          >
             <Plus className="mr-1 inline h-4 w-4" />
             Квадрат
           </button>
 
-          <button disabled={loading} onClick={() => createTable('round')} className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50">
+          <button
+            disabled={loading}
+            onClick={() => createTable('round')}
+            className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50"
+          >
             <Plus className="mr-1 inline h-4 w-4" />
             Круглый
           </button>
 
-          <button disabled={loading} onClick={() => createTable('rect')} className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50">
+          <button
+            disabled={loading}
+            onClick={() => createTable('rect')}
+            className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50"
+          >
             <Plus className="mr-1 inline h-4 w-4" />
             Прямой
           </button>
         </div>
 
-        <h2 className="mt-5 text-lg font-semibold">Добавить декор</h2>
+        <h2 className="mt-5 text-lg font-semibold">Зоны / покрытия</h2>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
-          {ADD_ITEMS.map((item) => (
+          {FLOOR_ITEMS.map((item) => (
             <button
               key={item.objectType}
               disabled={loading}
@@ -760,6 +1083,80 @@ export default function ConstructorApp() {
             </button>
           ))}
         </div>
+
+        <h2 className="mt-5 text-lg font-semibold">Стены / стройка</h2>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {BUILD_ITEMS.map((item) => (
+            <button
+              key={item.objectType}
+              disabled={loading}
+              onClick={() => createObject(item)}
+              className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <h2 className="mt-5 text-lg font-semibold">Мебель / декор / текст</h2>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {FURNITURE_ITEMS.map((item) => (
+            <button
+              key={item.objectType}
+              disabled={loading}
+              onClick={() => createObject(item)}
+              className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <h2 className="mt-5 text-lg font-semibold">Расширить карту</h2>
+
+        <div className="mt-3 grid grid-cols-4 gap-2">
+          <button
+            disabled={loading}
+            onClick={() => expandMap('left')}
+            className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
+          >
+            ←
+          </button>
+
+          <button
+            disabled={loading}
+            onClick={() => expandMap('right')}
+            className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
+          >
+            →
+          </button>
+
+          <button
+            disabled={loading}
+            onClick={() => expandMap('top')}
+            className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
+          >
+            ↑
+          </button>
+
+          <button
+            disabled={loading}
+            onClick={() => expandMap('bottom')}
+            className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
+          >
+            ↓
+          </button>
+        </div>
+
+        <button
+          disabled={loading}
+          onClick={clearMap}
+          className="mt-5 w-full rounded-2xl bg-red-500 px-4 py-4 font-semibold text-white disabled:opacity-50"
+        >
+          Очистить карту
+        </button>
       </section>
 
       {selectedItem && selected && (
@@ -767,7 +1164,7 @@ export default function ConstructorApp() {
           <h2 className="text-lg font-semibold">Выбрано</h2>
 
           <p className="mt-1 text-sm text-neutral-300">
-            {selected.kind === 'table' ? 'Стол' : 'Декор'}
+            {selected.kind === 'table' ? 'Стол' : 'Элемент'}
           </p>
 
           {selected.kind === 'table' && (
@@ -778,7 +1175,9 @@ export default function ConstructorApp() {
                   <input
                     value={String((selectedItem as TableItem).tableNumber || '')}
                     onChange={(event) =>
-                      updateLocalItem(selected.kind, selected.id, { tableNumber: event.target.value })
+                      updateLocalItem(selected.kind, selected.id, {
+                        tableNumber: event.target.value,
+                      })
                     }
                     className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                   />
@@ -790,7 +1189,9 @@ export default function ConstructorApp() {
                     type="number"
                     value={Number((selectedItem as TableItem).seats || 1)}
                     onChange={(event) =>
-                      updateLocalItem(selected.kind, selected.id, { seats: Number(event.target.value) })
+                      updateLocalItem(selected.kind, selected.id, {
+                        seats: Number(event.target.value),
+                      })
                     }
                     className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                   />
@@ -798,15 +1199,36 @@ export default function ConstructorApp() {
               </div>
 
               <div className="mt-3 grid grid-cols-3 gap-2">
-                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'free' })} className="rounded-xl bg-emerald-600 px-2 py-2 text-xs">
+                <button
+                  onClick={() =>
+                    updateLocalItem(selected.kind, selected.id, {
+                      status: 'free',
+                    })
+                  }
+                  className="rounded-xl bg-emerald-600 px-2 py-2 text-xs"
+                >
                   Свободен
                 </button>
 
-                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'occupied' })} className="rounded-xl bg-red-700 px-2 py-2 text-xs">
+                <button
+                  onClick={() =>
+                    updateLocalItem(selected.kind, selected.id, {
+                      status: 'occupied',
+                    })
+                  }
+                  className="rounded-xl bg-red-700 px-2 py-2 text-xs"
+                >
                   Занят
                 </button>
 
-                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'closed' })} className="rounded-xl bg-neutral-700 px-2 py-2 text-xs">
+                <button
+                  onClick={() =>
+                    updateLocalItem(selected.kind, selected.id, {
+                      status: 'closed',
+                    })
+                  }
+                  className="rounded-xl bg-neutral-700 px-2 py-2 text-xs"
+                >
                   Скрыт
                 </button>
               </div>
@@ -816,11 +1238,13 @@ export default function ConstructorApp() {
           {selected.kind === 'object' && (
             <div className="mt-3 grid grid-cols-2 gap-2">
               <label className="text-xs text-neutral-400">
-                Название
+                Текст / название
                 <input
                   value={String((selectedItem as MapObject).name || '')}
                   onChange={(event) =>
-                    updateLocalItem(selected.kind, selected.id, { name: event.target.value })
+                    updateLocalItem(selected.kind, selected.id, {
+                      name: event.target.value,
+                    })
                   }
                   className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                 />
@@ -832,7 +1256,9 @@ export default function ConstructorApp() {
                   type="color"
                   value={String((selectedItem as MapObject).color || '#525252')}
                   onChange={(event) =>
-                    updateLocalItem(selected.kind, selected.id, { color: event.target.value })
+                    updateLocalItem(selected.kind, selected.id, {
+                      color: event.target.value,
+                    })
                   }
                   className="mt-1 h-10 w-full rounded-xl bg-neutral-800 px-2 py-1 outline-none"
                 />
@@ -846,7 +1272,11 @@ export default function ConstructorApp() {
               <input
                 type="number"
                 value={Math.round(numberValue(selectedItem.width, 100))}
-                onChange={(event) => updateLocalItem(selected.kind, selected.id, { width: Number(event.target.value) })}
+                onChange={(event) =>
+                  updateLocalItem(selected.kind, selected.id, {
+                    width: Number(event.target.value),
+                  })
+                }
                 className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
               />
             </label>
@@ -856,7 +1286,11 @@ export default function ConstructorApp() {
               <input
                 type="number"
                 value={Math.round(numberValue(selectedItem.height, 100))}
-                onChange={(event) => updateLocalItem(selected.kind, selected.id, { height: Number(event.target.value) })}
+                onChange={(event) =>
+                  updateLocalItem(selected.kind, selected.id, {
+                    height: Number(event.target.value),
+                  })
+                }
                 className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
               />
             </label>
@@ -866,7 +1300,11 @@ export default function ConstructorApp() {
               <input
                 type="number"
                 value={Math.round(numberValue(selectedItem.x))}
-                onChange={(event) => updateLocalItem(selected.kind, selected.id, { x: Number(event.target.value) })}
+                onChange={(event) =>
+                  updateLocalItem(selected.kind, selected.id, {
+                    x: Number(event.target.value),
+                  })
+                }
                 className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
               />
             </label>
@@ -876,7 +1314,11 @@ export default function ConstructorApp() {
               <input
                 type="number"
                 value={Math.round(numberValue(selectedItem.y))}
-                onChange={(event) => updateLocalItem(selected.kind, selected.id, { y: Number(event.target.value) })}
+                onChange={(event) =>
+                  updateLocalItem(selected.kind, selected.id, {
+                    y: Number(event.target.value),
+                  })
+                }
                 className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
               />
             </label>
@@ -907,17 +1349,29 @@ export default function ConstructorApp() {
               Поворот +
             </button>
 
-            <button disabled={loading} onClick={saveSelected} className="rounded-2xl bg-emerald-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
+            <button
+              disabled={loading}
+              onClick={saveSelected}
+              className="rounded-2xl bg-emerald-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50"
+            >
               <Save className="mr-1 inline h-4 w-4" />
               Сохранить
             </button>
 
-            <button disabled={loading} onClick={duplicateSelected} className="rounded-2xl bg-blue-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
+            <button
+              disabled={loading}
+              onClick={duplicateSelected}
+              className="rounded-2xl bg-blue-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50"
+            >
               <Copy className="mr-1 inline h-4 w-4" />
               Копия
             </button>
 
-            <button disabled={loading} onClick={deleteSelected} className="col-span-2 rounded-2xl bg-red-500 px-3 py-3 text-sm font-semibold text-white disabled:opacity-50">
+            <button
+              disabled={loading}
+              onClick={deleteSelected}
+              className="col-span-2 rounded-2xl bg-red-500 px-3 py-3 text-sm font-semibold text-white disabled:opacity-50"
+            >
               <Trash2 className="mr-1 inline h-4 w-4" />
               Удалить
             </button>
@@ -933,9 +1387,14 @@ export default function ConstructorApp() {
 
       <section className="mt-4 rounded-3xl border border-neutral-800 bg-neutral-950 p-3">
         <div className="mb-3 flex items-center justify-between text-xs text-neutral-400">
-          <span>Карта: {MAP_WIDTH} x {MAP_HEIGHT}</span>
+          <span>
+            Карта: {mapWidth} x {mapHeight}
+          </span>
 
-          <button onClick={() => loadMap()} className="flex items-center gap-1 rounded-xl bg-neutral-800 px-2 py-1 text-xs">
+          <button
+            onClick={() => loadMap()}
+            className="flex items-center gap-1 rounded-xl bg-neutral-800 px-2 py-1 text-xs"
+          >
             <RefreshCcw className="h-3 w-3" />
             обновить
           </button>
@@ -951,71 +1410,88 @@ export default function ConstructorApp() {
           onPointerMove={moveDrag}
           onPointerUp={stopDrag}
           onPointerCancel={stopDrag}
-          className="relative h-[660px] overflow-auto rounded-3xl border border-neutral-800 bg-[#0b0a08]"
+          className="relative h-[700px] overflow-auto rounded-3xl border border-neutral-800 bg-[#0b0a08]"
         >
-          <div className="relative" style={{ width: MAP_WIDTH * zoom, height: MAP_HEIGHT * zoom }}>
+          <div
+            className="relative"
+            style={{
+              width: mapWidth * zoom,
+              height: mapHeight * zoom,
+            }}
+          >
             <div
               className="relative origin-top-left overflow-hidden rounded-[34px]"
               style={{
-                width: MAP_WIDTH,
-                height: MAP_HEIGHT,
+                width: mapWidth,
+                height: mapHeight,
                 transform: `scale(${zoom})`,
                 transformOrigin: 'top left',
-                background: 'linear-gradient(135deg, #0b0a08, #17120d)',
+                background:
+                  'radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 30%), linear-gradient(135deg, #0b0a08, #17120d)',
+                backgroundSize: '100% 100%',
               }}
             >
-              <StaticMapBackground />
+              <div
+                className="absolute inset-0 opacity-20"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px)',
+                  backgroundSize: '50px 50px',
+                }}
+              />
 
-              {(map?.objects || []).map((object) => {
-                const isSelected = selected?.kind === 'object' && selected.id === object.id;
-                const isWindow = object.objectType === 'window';
-                const isLamp = object.objectType === 'lamp';
-                const isTree = object.objectType === 'tree';
+              {sortedObjects.map((object) => {
+                const id = String(object.id);
+                const type = String(object.objectType || '');
+                const isSelected = selected?.kind === 'object' && selected.id === id;
+                const text = getObjectText(object);
+                const floor = isFloorObject(type);
 
                 return (
                   <div
-                    key={object.id}
-                    onPointerDown={(event) => startDrag(event, 'object', object.id)}
-                    className={`absolute flex touch-none items-center justify-center border text-center text-xs font-semibold text-white ${
-                      isSelected ? 'border-amber-300' : 'border-white/20'
-                    } ${isLamp || isTree ? 'rounded-full' : isWindow ? 'rounded-full' : 'rounded-2xl'}`}
+                    key={id}
+                    onPointerDown={(event) => startDrag(event, 'object', id)}
+                    className="absolute flex touch-none select-none items-center justify-center border text-center text-xs font-semibold text-white"
                     style={{
                       left: numberValue(object.x),
                       top: numberValue(object.y),
-                      width: numberValue(object.width, 80),
-                      height: numberValue(object.height, 80),
+                      width: numberValue(object.width, 100),
+                      height: numberValue(object.height, 100),
                       transform: `rotate(${numberValue(object.rotation)}deg)`,
-                      background: objectBackground(object),
-                      boxShadow:
-                        object.objectType === 'lamp'
-                          ? '0 0 30px rgba(250,204,21,.9)'
-                          : object.objectType === 'fireplace'
-                            ? '0 0 28px rgba(249,115,22,.7)'
-                            : '0 10px 22px rgba(0,0,0,.45)',
+                      background: getObjectBackground(object),
+                      borderRadius: getObjectBorderRadius(type),
+                      borderColor: isSelected ? '#fcd34d' : 'rgba(255,255,255,.18)',
+                      boxShadow: getObjectShadow(type, isSelected),
+                      color: type === 'text' || type === 'number' ? '#ffffff' : '#ffffff',
+                      fontSize: type === 'number' ? 28 : floor ? 18 : 13,
+                      zIndex: getObjectLayer(type),
                     }}
                   >
-                    <span className="px-1 drop-shadow">
-                      {objectLabel(object)}
-                      {object.name ? <><br />{object.name}</> : null}
-                    </span>
+                    {text ? (
+                      <span className="rounded-full bg-black/30 px-3 py-1 drop-shadow">
+                        {text}
+                      </span>
+                    ) : null}
                   </div>
                 );
               })}
 
               {(map?.tables || []).map((table) => {
-                const isSelected = selected?.kind === 'table' && selected.id === table.id;
+                const id = String(table.id);
+                const isSelected = selected?.kind === 'table' && selected.id === id;
 
                 return (
                   <div
-                    key={table.id}
-                    onPointerDown={(event) => startDrag(event, 'table', table.id)}
-                    className="absolute touch-none"
+                    key={id}
+                    onPointerDown={(event) => startDrag(event, 'table', id)}
+                    className="absolute touch-none select-none"
                     style={{
                       left: numberValue(table.x),
                       top: numberValue(table.y),
                       width: numberValue(table.width, 80),
                       height: numberValue(table.height, 70),
                       transform: `rotate(${numberValue(table.rotation)}deg)`,
+                      zIndex: 10,
                     }}
                   >
                     <TableVisual table={table} selected={isSelected} />
@@ -1031,10 +1507,13 @@ export default function ConstructorApp() {
           <span>🟠 бронь</span>
           <span>🔴 занят</span>
           <span>⚫ скрыт</span>
+          <span>▦ мрамор</span>
+          <span>🌊 вода</span>
           <span>🔥 камин</span>
           <span>▭ окно</span>
           <span>🌳 дерево</span>
-          <span>🌊 вода</span>
+          <span>🌉 мост</span>
+          <span>🍸 бар</span>
           <span>💡 фонарь</span>
         </div>
       </section>
