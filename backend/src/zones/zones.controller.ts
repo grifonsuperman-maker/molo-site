@@ -3,9 +3,7 @@ import { ZonesService } from './zones.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
 import { Public } from '../common/decorators/public.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 
-@Roles('owner', 'admin')
 @Controller('zones')
 export class ZonesController {
   constructor(private readonly service: ZonesService) {}
@@ -16,26 +14,31 @@ export class ZonesController {
     return this.service.findAll();
   }
 
+  @Public()
   @Post()
   create(@Body() dto: CreateZoneDto) {
     return this.service.create(dto);
   }
 
+  @Public()
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateZoneDto) {
     return this.service.update(id, dto);
   }
 
+  @Public()
   @Patch(':id/close')
   close(@Param('id') id: string) {
     return this.service.close(id);
   }
 
+  @Public()
   @Patch(':id/open')
   open(@Param('id') id: string) {
     return this.service.open(id);
   }
 
+  @Public()
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.service.remove(id);
