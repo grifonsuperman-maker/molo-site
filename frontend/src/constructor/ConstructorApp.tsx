@@ -7,6 +7,7 @@ import {
   RotateCw,
   Save,
   Trash2,
+  RefreshCcw,
 } from 'lucide-react';
 
 import { api } from '../api/client';
@@ -31,125 +32,155 @@ type CreatedResponse = {
   id?: unknown;
 };
 
-const DEFAULT_MAP_WIDTH = 1400;
-const DEFAULT_MAP_HEIGHT = 1000;
+const DEFAULT_MAP_WIDTH = 1800;
+const DEFAULT_MAP_HEIGHT = 1200;
 
 const ZONE_PRESETS = [
   {
-    label: 'Зона',
-    name: 'Зона',
-    color: '#262626',
-    width: 420,
-    height: 260,
+    label: 'Зал',
+    name: 'Основний зал',
+    color: '#27211a',
+    width: 520,
+    height: 320,
+    pattern: 'plain',
   },
   {
     label: 'Мрамор',
-    name: 'Мрамор',
+    name: 'Мраморна плитка',
     color: '#d8d3c7',
-    width: 420,
-    height: 260,
+    width: 520,
+    height: 320,
+    pattern: 'marble',
   },
   {
     label: 'Плитка',
     name: 'Плитка',
     color: '#78716c',
-    width: 420,
-    height: 260,
+    width: 520,
+    height: 320,
+    pattern: 'tile',
   },
   {
     label: 'Тротуар',
-    name: 'Тротуарная плитка',
+    name: 'Тротуарна плитка',
     color: '#57534e',
-    width: 420,
-    height: 180,
+    width: 520,
+    height: 220,
+    pattern: 'pavement',
   },
   {
     label: 'Газон',
     name: 'Газон',
     color: '#3f6212',
-    width: 420,
-    height: 260,
+    width: 520,
+    height: 320,
+    pattern: 'grass',
   },
   {
     label: 'Вода',
     name: 'Вода',
     color: '#0369a1',
-    width: 420,
-    height: 180,
+    width: 520,
+    height: 220,
+    pattern: 'water',
+  },
+  {
+    label: 'Тераса',
+    name: 'Деревʼяна тераса',
+    color: '#7c4a1e',
+    width: 520,
+    height: 260,
+    pattern: 'wood',
   },
 ];
 
 const DECOR_ITEMS = [
   {
-    label: 'Трава',
-    objectType: 'grass',
-    name: 'Трава',
-    width: 180,
-    height: 120,
-    color: '#3f7d20',
-  },
-  {
-    label: 'Дерево',
-    objectType: 'tree',
-    name: 'Дерево',
-    width: 90,
-    height: 90,
-    color: '#166534',
-  },
-  {
-    label: 'Мрамор',
-    objectType: 'marble',
-    name: 'Мрамор',
-    width: 240,
-    height: 160,
-    color: '#d8d3c7',
+    label: 'Мрамор плитка',
+    objectType: 'marble_tile',
+    name: 'Мраморна плитка',
+    width: 260,
+    height: 180,
+    color: '#ded8c8',
   },
   {
     label: 'Плитка',
     objectType: 'tile',
     name: 'Плитка',
-    width: 240,
-    height: 160,
+    width: 260,
+    height: 180,
     color: '#78716c',
   },
   {
     label: 'Тротуар',
     objectType: 'pavement',
     name: 'Тротуар',
-    width: 260,
-    height: 120,
+    width: 280,
+    height: 130,
     color: '#57534e',
+  },
+  {
+    label: 'Газон',
+    objectType: 'grass',
+    name: 'Газон',
+    width: 240,
+    height: 160,
+    color: '#3f7d20',
   },
   {
     label: 'Вода',
     objectType: 'water',
     name: 'Вода',
-    width: 280,
-    height: 130,
+    width: 320,
+    height: 150,
     color: '#0ea5e9',
+  },
+  {
+    label: 'Дерево',
+    objectType: 'tree',
+    name: 'Дерево',
+    width: 95,
+    height: 95,
+    color: '#166534',
+  },
+  {
+    label: 'Камешки',
+    objectType: 'stones',
+    name: 'Камешки',
+    width: 140,
+    height: 80,
+    color: '#71717a',
+  },
+  {
+    label: 'Фонарь',
+    objectType: 'lamp',
+    name: 'Фонарь',
+    width: 60,
+    height: 100,
+    color: '#facc15',
   },
   {
     label: 'Мост',
     objectType: 'bridge',
     name: 'Мост',
-    width: 240,
-    height: 70,
+    width: 260,
+    height: 80,
     color: '#8b5a2b',
   },
   {
     label: 'Бар',
     objectType: 'bar',
     name: 'Барная стойка',
-    width: 280,
-    height: 80,
+    width: 320,
+    height: 90,
     color: '#713f12',
   },
   {
     label: 'Диван',
     objectType: 'sofa',
     name: 'Диван',
-    width: 180,
-    height: 70,
+    width: 190,
+    height: 75,
     color: '#7f1d1d',
   },
   {
@@ -161,52 +192,52 @@ const DECOR_ITEMS = [
     color: '#92400e',
   },
   {
-    label: 'Камни',
-    objectType: 'stones',
-    name: 'Камни',
-    width: 120,
-    height: 70,
-    color: '#71717a',
+    label: 'Камин',
+    objectType: 'fireplace',
+    name: 'Камин',
+    width: 130,
+    height: 80,
+    color: '#dc2626',
   },
   {
-    label: 'Фонарь',
-    objectType: 'lamp',
-    name: 'Фонарь',
-    width: 55,
-    height: 90,
-    color: '#facc15',
+    label: 'Окно',
+    objectType: 'window',
+    name: 'Окно',
+    width: 140,
+    height: 32,
+    color: '#38bdf8',
+  },
+  {
+    label: 'Дверь',
+    objectType: 'door',
+    name: 'Дверь',
+    width: 95,
+    height: 34,
+    color: '#92400e',
+  },
+  {
+    label: 'Стена',
+    objectType: 'wall',
+    name: 'Стена',
+    width: 300,
+    height: 28,
+    color: '#525252',
   },
   {
     label: 'Забор кам.',
     objectType: 'stone_fence',
     name: 'Каменный забор',
-    width: 260,
-    height: 34,
+    width: 280,
+    height: 38,
     color: '#78716c',
   },
   {
     label: 'Забор дер.',
     objectType: 'wood_fence',
     name: 'Деревянный забор',
-    width: 260,
-    height: 34,
-    color: '#854d0e',
-  },
-  {
-    label: 'Стена',
-    objectType: 'wall',
-    name: 'Стена',
     width: 280,
-    height: 26,
-    color: '#525252',
-  },
-  {
-    label: 'Дверь',
-    objectType: 'door',
-    name: 'Дверь',
-    width: 90,
-    height: 32,
-    color: '#92400e',
+    height: 38,
+    color: '#854d0e',
   },
 ];
 
@@ -235,7 +266,7 @@ function getObjectLabel(object: MapObject) {
   if (object.objectType === 'tree') return '🌳';
   if (object.objectType === 'water') return '🌊';
   if (object.objectType === 'bridge') return '🌉';
-  if (object.objectType === 'marble') return '▦';
+  if (object.objectType === 'marble_tile') return '▦';
   if (object.objectType === 'tile') return '▦';
   if (object.objectType === 'pavement') return '▥';
   if (object.objectType === 'bar') return '🍸';
@@ -243,9 +274,11 @@ function getObjectLabel(object: MapObject) {
   if (object.objectType === 'chair') return '▣';
   if (object.objectType === 'stones') return '⚫';
   if (object.objectType === 'lamp') return '💡';
+  if (object.objectType === 'fireplace') return '🔥';
+  if (object.objectType === 'window') return '▭';
   if (object.objectType === 'stone_fence') return '▤';
   if (object.objectType === 'wood_fence') return '▥';
-  if (object.objectType === 'wall') return '▭';
+  if (object.objectType === 'wall') return '━';
   if (object.objectType === 'door') return '🚪';
 
   return object.name || object.objectType;
@@ -255,35 +288,82 @@ function getObjectBackground(object: MapObject) {
   const color = object.color || '#404040';
 
   if (object.objectType === 'water') {
-    return `linear-gradient(135deg, ${color}, #38bdf8)`;
+    return `linear-gradient(135deg, ${color}, #38bdf8, #075985)`;
   }
 
   if (object.objectType === 'grass') {
-    return `linear-gradient(135deg, ${color}, #84cc16)`;
+    return `repeating-linear-gradient(45deg, ${color}, ${color} 10px, #65a30d 10px, #65a30d 18px)`;
   }
 
   if (object.objectType === 'tree') {
-    return `radial-gradient(circle, #22c55e 0%, ${color} 65%, #3f6212 100%)`;
+    return `radial-gradient(circle, #22c55e 0%, ${color} 58%, #3f6212 100%)`;
   }
 
-  if (object.objectType === 'marble') {
+  if (object.objectType === 'marble_tile') {
     return `linear-gradient(135deg, #fafafa, ${color}, #a3a3a3)`;
   }
 
   if (object.objectType === 'tile') {
-    return `repeating-linear-gradient(45deg, ${color}, ${color} 12px, #44403c 12px, #44403c 24px)`;
+    return `repeating-linear-gradient(45deg, ${color}, ${color} 14px, #44403c 14px, #44403c 28px)`;
   }
 
   if (object.objectType === 'pavement') {
-    return `repeating-linear-gradient(90deg, ${color}, ${color} 18px, #292524 18px, #292524 22px)`;
+    return `repeating-linear-gradient(90deg, ${color}, ${color} 18px, #292524 18px, #292524 24px)`;
   }
 
   if (object.objectType === 'bridge') {
-    return `linear-gradient(135deg, ${color}, #f59e0b)`;
+    return `repeating-linear-gradient(90deg, ${color}, ${color} 20px, #f59e0b 20px, #f59e0b 24px)`;
   }
 
   if (object.objectType === 'lamp') {
     return `radial-gradient(circle, #fef08a 0%, ${color} 45%, #1f2937 100%)`;
+  }
+
+  if (object.objectType === 'fireplace') {
+    return `radial-gradient(circle, #facc15 0%, #ef4444 45%, ${color} 100%)`;
+  }
+
+  if (object.objectType === 'window') {
+    return `linear-gradient(180deg, #7dd3fc, ${color}, #0f172a)`;
+  }
+
+  if (object.objectType === 'sofa') {
+    return `linear-gradient(180deg, ${color}, #450a0a)`;
+  }
+
+  if (object.objectType === 'bar') {
+    return `linear-gradient(135deg, ${color}, #d97706)`;
+  }
+
+  return color;
+}
+
+function getZoneBackground(zone: Zone) {
+  const name = `${zone.name || ''}`.toLowerCase();
+  const color = zone.color || '#262626';
+
+  if (name.includes('мрамор')) {
+    return `linear-gradient(135deg, #fafafa, ${color}, #a3a3a3)`;
+  }
+
+  if (name.includes('тротуар')) {
+    return `repeating-linear-gradient(90deg, ${color}, ${color} 20px, #292524 20px, #292524 25px)`;
+  }
+
+  if (name.includes('плит')) {
+    return `repeating-linear-gradient(45deg, ${color}, ${color} 18px, #44403c 18px, #44403c 34px)`;
+  }
+
+  if (name.includes('газон') || name.includes('трава')) {
+    return `repeating-linear-gradient(45deg, ${color}, ${color} 12px, #65a30d 12px, #65a30d 20px)`;
+  }
+
+  if (name.includes('вода')) {
+    return `linear-gradient(135deg, ${color}, #38bdf8, #075985)`;
+  }
+
+  if (name.includes('терас') || name.includes('дерев')) {
+    return `repeating-linear-gradient(90deg, ${color}, ${color} 22px, #3f2a14 22px, #3f2a14 26px)`;
   }
 
   return color;
@@ -291,29 +371,31 @@ function getObjectBackground(object: MapObject) {
 
 function getTableClass(table: TableItem, selected: boolean) {
   const base =
-    'absolute flex touch-none items-center justify-center border text-xs font-bold text-white shadow-lg';
+    'absolute flex touch-none items-center justify-center border-2 text-xs font-bold text-white shadow-[0_12px_24px_rgba(0,0,0,0.35)]';
 
   const shape =
     table.shape === 'round'
       ? 'rounded-full'
       : table.shape === 'square'
         ? 'rounded-xl'
-        : 'rounded-xl';
+        : 'rounded-2xl';
 
   const color = selected
     ? 'border-amber-300 bg-amber-500'
     : table.status === 'free'
-      ? 'border-emerald-300 bg-emerald-500'
+      ? 'border-emerald-300 bg-emerald-600'
       : table.status === 'occupied'
-        ? 'border-neutral-400 bg-neutral-700'
-        : 'border-amber-300 bg-amber-600';
+        ? 'border-red-300 bg-red-700'
+        : table.status === 'closed'
+          ? 'border-neutral-400 bg-neutral-700'
+          : 'border-amber-300 bg-amber-600';
 
   return `${base} ${shape} ${color}`;
 }
 
 export default function ConstructorApp() {
   const [map, setMap] = useState<FullMapResponse | null>(null);
-  const [zoom, setZoom] = useState(0.6);
+  const [zoom, setZoom] = useState(0.55);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
   const [dragging, setDragging] = useState<DragState | null>(null);
   const [message, setMessage] = useState('');
@@ -470,6 +552,18 @@ export default function ConstructorApp() {
           shape: table.shape,
         });
 
+        if (table.status === 'free') {
+          await api.patch(`/tables/${selected.id}/free`);
+        }
+
+        if (table.status === 'occupied') {
+          await api.patch(`/tables/${selected.id}/occupied`);
+        }
+
+        if (table.status === 'closed') {
+          await api.patch(`/tables/${selected.id}/close`);
+        }
+
         await loadMap();
         setSelected({ kind: 'table', id: selected.id });
       }
@@ -532,15 +626,15 @@ export default function ConstructorApp() {
     try {
       const tableNumber = String(((map?.tables || []).length || 0) + 1);
 
-      const width = shape === 'round' ? 82 : shape === 'square' ? 82 : 130;
-      const height = shape === 'round' ? 82 : shape === 'square' ? 82 : 78;
+      const width = shape === 'round' ? 88 : shape === 'square' ? 88 : 140;
+      const height = shape === 'round' ? 88 : shape === 'square' ? 88 : 82;
 
       const created = await api.post('/tables', {
         tableNumber,
         seats: 4,
         shape,
-        x: 80,
-        y: 80,
+        x: 90,
+        y: 90,
         width,
         height,
         rotation: 0,
@@ -570,8 +664,8 @@ export default function ConstructorApp() {
       const created = await api.post('/zones', {
         name: preset.name,
         color: preset.color,
-        x: 40,
-        y: 40,
+        x: 60,
+        y: 60,
         width: preset.width,
         height: preset.height,
         rotation: 0,
@@ -602,8 +696,8 @@ export default function ConstructorApp() {
       const created = await api.post('/constructor/objects', {
         objectType: item.objectType,
         name: item.name,
-        x: 120,
-        y: 120,
+        x: 140,
+        y: 140,
         width: item.width,
         height: item.height,
         rotation: 0,
@@ -662,7 +756,7 @@ export default function ConstructorApp() {
     try {
       await api.post('/constructor/map/expand', {
         direction,
-        amount: 250,
+        amount: 300,
       });
 
       await loadMap();
@@ -679,7 +773,7 @@ export default function ConstructorApp() {
 
   return (
     <div className="mx-auto max-w-md px-4 py-5 pb-28">
-      <section className="rounded-3xl border border-neutral-800 bg-neutral-900 p-5">
+      <section className="rounded-3xl border border-neutral-800 bg-gradient-to-br from-neutral-900 to-black p-5 shadow-2xl">
         <p className="text-sm uppercase tracking-[0.3em] text-amber-300/80">
           MOLO
         </p>
@@ -687,8 +781,9 @@ export default function ConstructorApp() {
         <h1 className="mt-2 text-3xl font-semibold">Конструктор залу</h1>
 
         <p className="mt-2 text-sm text-neutral-300">
-          Добавляй столы, зоны и декор. Всё можно двигать пальцем, увеличивать,
-          уменьшать, поворачивать, писать названия и сохранять.
+          Строй карту ресторана: столы, зоны, вода, мост, окна, камин, мрамор,
+          трава, деревья и декор. Всё можно двигать, менять размер, цвет и
+          поворачивать.
         </p>
 
         <label className="mt-4 block text-sm text-neutral-300">
@@ -738,7 +833,7 @@ export default function ConstructorApp() {
           </button>
         </div>
 
-        <h2 className="mt-5 text-lg font-semibold">Зоны / покрытие</h2>
+        <h2 className="mt-5 text-lg font-semibold">Зоны / покрытия</h2>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           {ZONE_PRESETS.map((preset) => (
@@ -816,34 +911,69 @@ export default function ConstructorApp() {
           </p>
 
           {selected.kind === 'table' && (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <label className="text-xs text-neutral-400">
-                Номер
-                <input
-                  value={(selectedItem as TableItem).tableNumber}
-                  onChange={(event) =>
-                    updateLocalItem(selected.kind, selected.id, {
-                      tableNumber: event.target.value,
-                    })
-                  }
-                  className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
-                />
-              </label>
+            <>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <label className="text-xs text-neutral-400">
+                  Номер
+                  <input
+                    value={(selectedItem as TableItem).tableNumber}
+                    onChange={(event) =>
+                      updateLocalItem(selected.kind, selected.id, {
+                        tableNumber: event.target.value,
+                      })
+                    }
+                    className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
+                  />
+                </label>
 
-              <label className="text-xs text-neutral-400">
-                Мест
-                <input
-                  type="number"
-                  value={(selectedItem as TableItem).seats}
-                  onChange={(event) =>
+                <label className="text-xs text-neutral-400">
+                  Мест
+                  <input
+                    type="number"
+                    value={(selectedItem as TableItem).seats}
+                    onChange={(event) =>
+                      updateLocalItem(selected.kind, selected.id, {
+                        seats: Number(event.target.value),
+                      })
+                    }
+                    className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <button
+                  onClick={() =>
+                    updateLocalItem(selected.kind, selected.id, { status: 'free' })
+                  }
+                  className="rounded-xl bg-emerald-600 px-2 py-2 text-xs"
+                >
+                  Свободен
+                </button>
+
+                <button
+                  onClick={() =>
                     updateLocalItem(selected.kind, selected.id, {
-                      seats: Number(event.target.value),
+                      status: 'occupied',
                     })
                   }
-                  className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
-                />
-              </label>
-            </div>
+                  className="rounded-xl bg-red-700 px-2 py-2 text-xs"
+                >
+                  Занят
+                </button>
+
+                <button
+                  onClick={() =>
+                    updateLocalItem(selected.kind, selected.id, {
+                      status: 'closed',
+                    })
+                  }
+                  className="rounded-xl bg-neutral-700 px-2 py-2 text-xs"
+                >
+                  Скрыт
+                </button>
+              </div>
+            </>
           )}
 
           {(selected.kind === 'zone' || selected.kind === 'object') && (
@@ -1001,9 +1131,17 @@ export default function ConstructorApp() {
             Карта: {size.width} x {size.height}
           </span>
 
+          <button
+            onClick={() => loadMap()}
+            className="flex items-center gap-1 rounded-xl bg-neutral-800 px-2 py-1 text-xs"
+          >
+            <RefreshCcw className="h-3 w-3" />
+            обновить
+          </button>
+
           <span className="flex items-center gap-1">
             <Move className="h-3 w-3" />
-            двигай пальцем
+            двигай
           </span>
         </div>
 
@@ -1012,7 +1150,7 @@ export default function ConstructorApp() {
           onPointerMove={moveDrag}
           onPointerUp={stopDrag}
           onPointerCancel={stopDrag}
-          className="relative h-[620px] overflow-auto rounded-3xl border border-neutral-800 bg-[#17140f]"
+          className="relative h-[640px] overflow-auto rounded-3xl border border-neutral-800 bg-[#17140f]"
         >
           <div
             className="relative"
@@ -1028,6 +1166,8 @@ export default function ConstructorApp() {
                 height: size.height,
                 transform: `scale(${zoom})`,
                 transformOrigin: 'top left',
+                background:
+                  'radial-gradient(circle at 20% 20%, rgba(245,158,11,0.08), transparent 30%), linear-gradient(135deg, #14100b, #241a10)',
               }}
             >
               {(map?.zones || []).map((zone) => {
@@ -1037,10 +1177,8 @@ export default function ConstructorApp() {
                   <div
                     key={zone.id}
                     onPointerDown={(event) => startDrag(event, 'zone', zone.id)}
-                    className={`absolute touch-none rounded-3xl border p-3 text-xs text-neutral-100 ${
-                      isSelected
-                        ? 'border-amber-300'
-                        : 'border-neutral-700'
+                    className={`absolute touch-none rounded-[28px] border p-3 text-xs text-neutral-100 shadow-[0_14px_30px_rgba(0,0,0,0.35)] ${
+                      isSelected ? 'border-amber-300' : 'border-white/20'
                     }`}
                     style={{
                       left: numberValue(zone.x),
@@ -1048,7 +1186,7 @@ export default function ConstructorApp() {
                       width: numberValue(zone.width, 200),
                       height: numberValue(zone.height, 150),
                       transform: `rotate(${numberValue(zone.rotation)}deg)`,
-                      background: zone.color || '#262626',
+                      background: getZoneBackground(zone),
                     }}
                   >
                     {zone.isClosed ? '🔒 ' : ''}
@@ -1065,7 +1203,7 @@ export default function ConstructorApp() {
                   <div
                     key={object.id}
                     onPointerDown={(event) => startDrag(event, 'object', object.id)}
-                    className={`absolute flex touch-none items-center justify-center rounded-2xl border text-center text-xs font-semibold text-white shadow-lg ${
+                    className={`absolute flex touch-none items-center justify-center rounded-2xl border text-center text-xs font-semibold text-white shadow-[0_12px_24px_rgba(0,0,0,0.45)] ${
                       isSelected ? 'border-amber-300' : 'border-white/20'
                     }`}
                     style={{
@@ -1077,7 +1215,7 @@ export default function ConstructorApp() {
                       background: getObjectBackground(object),
                     }}
                   >
-                    <span className="px-1">
+                    <span className="px-1 drop-shadow">
                       {getObjectLabel(object)}
                       <br />
                       {object.name}
@@ -1112,12 +1250,15 @@ export default function ConstructorApp() {
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-neutral-300">
-          <span>🟢 Стол</span>
-          <span>▦ Мрамор</span>
-          <span>🌊 Вода</span>
-          <span>🌿 Трава</span>
-          <span>🌳 Дерево</span>
-          <span>🌉 Мост</span>
+          <span>🟢 свободен</span>
+          <span>🔴 занят</span>
+          <span>⚫ скрыт</span>
+          <span>▦ мрамор</span>
+          <span>🌊 вода</span>
+          <span>🔥 камин</span>
+          <span>▭ окно</span>
+          <span>🌳 дерево</span>
+          <span>🌉 мост</span>
         </div>
       </section>
     </div>
