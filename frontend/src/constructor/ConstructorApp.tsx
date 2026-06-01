@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import {
   Copy,
+  Lock,
   Move,
   Plus,
   RefreshCcw,
@@ -9,13 +10,14 @@ import {
   RotateCw,
   Save,
   Trash2,
+  Unlock,
 } from 'lucide-react';
 
 import { api } from '../api/client';
 import { mapApi } from '../api/map';
-import type { FullMapResponse, MapObject, TableItem } from '../api/types';
+import type { FullMapResponse, MapObject, TableItem, Zone } from '../api/types';
 
-type ItemKind = 'table' | 'object';
+type ItemKind = 'table' | 'zone' | 'object';
 
 type SelectedItem = {
   kind: ItemKind;
@@ -31,7 +33,7 @@ type DragState = {
 
 type TableShape = 'square' | 'round' | 'rect';
 
-type TableStatus = 'free' | 'reserved' | 'occupied';
+type ZoneStatus = 'open' | 'closed' | 'hidden' | 'call_only';
 
 type PaletteItem = {
   label: string;
@@ -40,40 +42,46 @@ type PaletteItem = {
   width: number;
   height: number;
   color: string;
+  allowColor?: boolean;
 };
 
 const DEFAULT_MAP_WIDTH = 2200;
 const DEFAULT_MAP_HEIGHT = 1500;
+const ZONE_STATUS_MARKER = '[zone_status:call_only]';
 
 const FLOOR_ITEMS: PaletteItem[] = [
-  { label: 'Зона', objectType: 'zone_rect', name: 'Зона', width: 520, height: 320, color: '#2b2924' },
-  { label: 'Зона овал', objectType: 'zone_oval', name: 'Зона', width: 420, height: 260, color: '#2b2924' },
-  { label: 'Мрамор', objectType: 'floor_marble', name: 'Мрамор', width: 520, height: 320, color: '#d8d3c7' },
-  { label: 'Плитка', objectType: 'floor_tile', name: 'Плитка', width: 520, height: 320, color: '#57534e' },
-  { label: 'Тротуар', objectType: 'floor_pavement', name: 'Тротуар', width: 520, height: 260, color: '#44403c' },
-  { label: 'Дерево', objectType: 'floor_wood', name: 'Дерево', width: 520, height: 320, color: '#7c4a1e' },
-  { label: 'Газон', objectType: 'floor_grass', name: 'Газон', width: 520, height: 320, color: '#3f6212' },
-  { label: 'Вода', objectType: 'floor_water', name: 'Вода', width: 520, height: 320, color: '#075985' },
+  { label: 'Мармур', objectType: 'floor_marble', name: '', width: 520, height: 320, color: '#d8d3c7' },
+  { label: 'Плитка', objectType: 'floor_tile', name: '', width: 520, height: 320, color: '#57534e' },
+  { label: 'Тротуар', objectType: 'floor_pavement', name: '', width: 520, height: 260, color: '#44403c' },
+  { label: 'Дерево', objectType: 'floor_wood', name: '', width: 520, height: 320, color: '#7c4a1e' },
+  { label: 'Газон', objectType: 'floor_grass', name: '', width: 520, height: 320, color: '#3f6212', allowColor: false },
+  { label: 'Вода', objectType: 'floor_water', name: '', width: 520, height: 320, color: '#075985', allowColor: false },
 ];
 
 const BUILD_ITEMS: PaletteItem[] = [
-  { label: 'Стена', objectType: 'wall', name: '', width: 360, height: 28, color: '#57534e' },
-  { label: 'Окно', objectType: 'window', name: 'Окно', width: 180, height: 28, color: '#38bdf8' },
-  { label: 'Дверь', objectType: 'door', name: 'Дверь', width: 110, height: 36, color: '#92400e' },
-  { label: 'Забор кам.', objectType: 'stone_fence', name: '', width: 300, height: 42, color: '#78716c' },
-  { label: 'Забор дер.', objectType: 'wood_fence', name: '', width: 300, height: 42, color: '#854d0e' },
-  { label: 'Мост', objectType: 'bridge', name: 'Мост', width: 300, height: 90, color: '#8b5a2b' },
-  { label: 'Причал', objectType: 'pier', name: 'Причал', width: 320, height: 160, color: '#7c4a1e' },
-  { label: 'Камин', objectType: 'fireplace', name: 'Камин', width: 120, height: 80, color: '#dc2626' },
+  { label: 'Стіна', objectType: 'wall', name: '', width: 360, height: 28, color: '#57534e' },
+  { label: 'Вікно', objectType: 'window', name: '', width: 180, height: 28, color: '#38bdf8' },
+  { label: 'Двері', objectType: 'door', name: '', width: 110, height: 36, color: '#92400e' },
+  { label: 'Кам. паркан', objectType: 'stone_fence', name: '', width: 300, height: 42, color: '#78716c' },
+  { label: 'Дер. паркан', objectType: 'wood_fence', name: '', width: 300, height: 42, color: '#854d0e' },
+  { label: 'Мет. паркан', objectType: 'metal_fence', name: '', width: 300, height: 42, color: '#71717a' },
+  { label: 'Міст', objectType: 'bridge', name: '', width: 300, height: 90, color: '#8b5a2b' },
+  { label: 'Причал', objectType: 'pier', name: '', width: 320, height: 160, color: '#7c4a1e' },
 ];
 
-const FURNITURE_ITEMS: PaletteItem[] = [
-  { label: 'Бар', objectType: 'bar', name: 'Бар', width: 320, height: 110, color: '#b7791f' },
-  { label: 'Диван', objectType: 'sofa', name: 'Диван', width: 210, height: 85, color: '#7f1d1d' },
-  { label: 'Стул', objectType: 'chair', name: '', width: 58, height: 58, color: '#92400e' },
+const DECOR_ITEMS: PaletteItem[] = [
+  { label: 'Бар', objectType: 'bar', name: '', width: 320, height: 110, color: '#b7791f' },
+  { label: 'Диван', objectType: 'sofa', name: '', width: 210, height: 85, color: '#7f1d1d' },
+  { label: 'Стілець 1', objectType: 'chair_classic', name: '', width: 58, height: 58, color: '#92400e' },
+  { label: 'Стілець 2', objectType: 'chair_soft', name: '', width: 66, height: 66, color: '#a16207' },
+  { label: 'Бар. стілець', objectType: 'chair_bar', name: '', width: 54, height: 74, color: '#78350f' },
   { label: 'Дерево', objectType: 'tree', name: '', width: 90, height: 90, color: '#166534' },
-  { label: 'Камни', objectType: 'stones', name: '', width: 130, height: 75, color: '#78716c' },
-  { label: 'Фонарь', objectType: 'lamp', name: '', width: 60, height: 60, color: '#facc15' },
+  { label: 'Кущ', objectType: 'bush', name: '', width: 100, height: 75, color: '#3f6212', allowColor: false },
+  { label: 'Камінь', objectType: 'stones', name: '', width: 130, height: 75, color: '#78716c' },
+  { label: 'Ліхтар', objectType: 'lamp_post', name: '', width: 62, height: 110, color: '#facc15' },
+  { label: 'Світло', objectType: 'spot_light', name: '', width: 80, height: 80, color: '#facc15' },
+  { label: 'Камін', objectType: 'fireplace', name: '', width: 120, height: 80, color: '#dc2626' },
+  { label: 'Батут', objectType: 'trampoline', name: '', width: 160, height: 160, color: '#111827' },
   { label: 'Текст', objectType: 'text', name: 'Текст', width: 230, height: 64, color: '#111827' },
   { label: 'Цифра', objectType: 'number', name: '1', width: 80, height: 70, color: '#111827' },
 ];
@@ -96,16 +104,53 @@ function getMapHeight(map: FullMapResponse | null) {
   return numberValue((map as any)?.restaurant?.mapHeight, DEFAULT_MAP_HEIGHT);
 }
 
-function isFloorObject(objectType: string) {
-  return objectType.startsWith('floor_') || objectType.startsWith('zone_');
+function removeZoneStatusMarker(description: string | null | undefined) {
+  return String(description || '').replace(ZONE_STATUS_MARKER, '').trim();
 }
 
-function isOvalObject(objectType: string) {
-  return objectType.includes('oval');
+function addCallOnlyMarker(description: string | null | undefined) {
+  const clean = removeZoneStatusMarker(description);
+  return `${clean} ${ZONE_STATUS_MARKER}`.trim();
+}
+
+function getZoneStatus(zone: Zone): ZoneStatus {
+  const description = String(zone.description || '');
+
+  if (!zone.isVisible) return 'hidden';
+  if (description.includes(ZONE_STATUS_MARKER)) return 'call_only';
+  if (zone.isClosed) return 'closed';
+
+  return 'open';
+}
+
+function getZoneStatusLabel(status: ZoneStatus) {
+  if (status === 'closed') return 'Закрита';
+  if (status === 'hidden') return 'Прихована';
+  if (status === 'call_only') return 'Тільки дзвінок';
+  return 'Відкрита';
+}
+
+function getZoneStatusIcon(status: ZoneStatus) {
+  if (status === 'closed') return '🔒';
+  if (status === 'hidden') return '🙈';
+  if (status === 'call_only') return '📞';
+  return '✅';
+}
+
+function isWaterOrGrass(objectType: string) {
+  return objectType === 'floor_water' || objectType === 'floor_grass' || objectType === 'bush';
+}
+
+function isFloorObject(objectType: string) {
+  return objectType.startsWith('floor_');
+}
+
+function isRoundLike(objectType: string) {
+  return ['tree', 'bush', 'spot_light', 'number', 'trampoline'].includes(objectType);
 }
 
 function getObjectLayer(objectType: string) {
-  if (objectType.startsWith('floor_') || objectType.startsWith('zone_')) return 1;
+  if (objectType.startsWith('floor_')) return 1;
   if (objectType === 'bridge' || objectType === 'pier') return 2;
 
   if (
@@ -113,25 +158,80 @@ function getObjectLayer(objectType: string) {
     objectType === 'window' ||
     objectType === 'door' ||
     objectType === 'stone_fence' ||
-    objectType === 'wood_fence'
+    objectType === 'wood_fence' ||
+    objectType === 'metal_fence'
   ) {
     return 3;
   }
 
-  if (objectType === 'bar' || objectType === 'sofa' || objectType === 'chair' || objectType === 'fireplace') return 4;
-  if (objectType === 'lamp' || objectType === 'tree' || objectType === 'stones') return 5;
+  if (
+    objectType === 'bar' ||
+    objectType === 'sofa' ||
+    objectType.startsWith('chair_') ||
+    objectType === 'fireplace' ||
+    objectType === 'trampoline'
+  ) {
+    return 4;
+  }
+
+  if (
+    objectType === 'lamp_post' ||
+    objectType === 'spot_light' ||
+    objectType === 'tree' ||
+    objectType === 'bush' ||
+    objectType === 'stones'
+  ) {
+    return 5;
+  }
+
   if (objectType === 'text' || objectType === 'number') return 8;
 
   return 4;
 }
 
-function getObjectBackground(object: MapObject) {
+function getImageForType(objectType: string) {
+  const images: Record<string, string> = {
+    floor_marble: '/elements/marble.png',
+    floor_tile: '/elements/tile.png',
+    floor_pavement: '/elements/pavement.png',
+    floor_wood: '/elements/wood-floor.png',
+    floor_grass: '/elements/grass.png',
+    floor_water: '/elements/water.png',
+
+    wall: '/elements/wall.png',
+    window: '/elements/window.png',
+    door: '/elements/door.png',
+    stone_fence: '/elements/stone-fence.png',
+    wood_fence: '/elements/wood-fence.png',
+    metal_fence: '/elements/metal-fence.png',
+    bridge: '/elements/bridge.png',
+    pier: '/elements/pier.png',
+
+    bar: '/elements/bar.png',
+    sofa: '/elements/sofa.png',
+    chair_classic: '/elements/chair-classic.png',
+    chair_soft: '/elements/chair-soft.png',
+    chair_bar: '/elements/chair-bar.png',
+
+    tree: '/elements/tree.png',
+    bush: '/elements/bush.png',
+    stones: '/elements/stones.png',
+    lamp_post: '/elements/lamp-post.png',
+    spot_light: '/elements/spot-light.png',
+    fireplace: '/elements/fireplace.png',
+    trampoline: '/elements/trampoline.png',
+  };
+
+  return images[objectType] || '';
+}
+
+function getFallbackBackground(object: MapObject) {
   const type = String(object.objectType || '');
   const color = String(object.color || '#525252');
 
   if (type === 'floor_marble') {
     return `
-      linear-gradient(135deg, rgba(255,255,255,.85), rgba(255,255,255,.12)),
+      linear-gradient(135deg, rgba(255,255,255,.9), rgba(255,255,255,.25)),
       repeating-linear-gradient(45deg, ${color}, ${color} 22px, #f5f5f4 22px, #f5f5f4 26px, #a8a29e 26px, #a8a29e 44px)
     `;
   }
@@ -160,7 +260,7 @@ function getObjectBackground(object: MapObject) {
   if (type === 'floor_grass') {
     return `
       radial-gradient(circle at 18% 25%, rgba(190,242,100,.18), transparent 26%),
-      repeating-linear-gradient(45deg, ${color}, ${color} 12px, #65a30d 12px, #65a30d 20px)
+      repeating-linear-gradient(45deg, #365314, #365314 12px, #65a30d 12px, #65a30d 20px)
     `;
   }
 
@@ -168,60 +268,24 @@ function getObjectBackground(object: MapObject) {
     return `
       radial-gradient(circle at 25% 20%, rgba(125,211,252,.42), transparent 23%),
       radial-gradient(circle at 70% 70%, rgba(14,165,233,.22), transparent 25%),
-      linear-gradient(135deg, #082f49, ${color}, #020617)
+      linear-gradient(135deg, #082f49, #075985, #020617)
     `;
   }
 
-  if (type === 'zone_rect' || type === 'zone_oval') {
-    return `
-      radial-gradient(circle at 20% 20%, rgba(245,158,11,.10), transparent 30%),
-      linear-gradient(135deg, ${color}, #15110d)
-    `;
-  }
-
-  if (type === 'tree') {
-    return `radial-gradient(circle, #22c55e 0%, ${color} 56%, #14532d 100%)`;
-  }
-
-  if (type === 'lamp') {
-    return `radial-gradient(circle, #fef08a 0%, ${color} 35%, rgba(250,204,21,.25) 58%, transparent 100%)`;
-  }
-
-  if (type === 'fireplace') {
-    return `radial-gradient(circle, #fde68a 0%, #f97316 35%, ${color} 68%, #450a0a 100%)`;
-  }
-
-  if (type === 'bar') {
-    return `linear-gradient(135deg, #f59e0b, ${color}, #451a03)`;
-  }
-
-  if (type === 'sofa') {
-    return `linear-gradient(180deg, ${color}, #450a0a)`;
-  }
-
-  if (type === 'chair') {
-    return `linear-gradient(180deg, #a16207, ${color})`;
-  }
-
-  if (type === 'window') {
-    return `linear-gradient(180deg, #7dd3fc, ${color}, #0f172a)`;
-  }
-
-  if (type === 'door') {
-    return `linear-gradient(180deg, #b45309, ${color}, #451a03)`;
-  }
-
-  if (type === 'wall') {
-    return `linear-gradient(180deg, #78716c, ${color}, #1c1917)`;
-  }
-
-  if (type === 'stone_fence') {
-    return `repeating-linear-gradient(90deg, ${color}, ${color} 28px, #292524 28px, #292524 34px)`;
-  }
-
-  if (type === 'wood_fence') {
-    return `repeating-linear-gradient(90deg, ${color}, ${color} 26px, #3f2a14 26px, #3f2a14 32px)`;
-  }
+  if (type === 'tree') return `radial-gradient(circle, #22c55e 0%, ${color} 56%, #14532d 100%)`;
+  if (type === 'bush') return `radial-gradient(circle, #84cc16 0%, #3f6212 60%, #1a2e05 100%)`;
+  if (type === 'lamp_post' || type === 'spot_light') return `radial-gradient(circle, #fef08a 0%, #facc15 35%, rgba(250,204,21,.25) 58%, transparent 100%)`;
+  if (type === 'fireplace') return `radial-gradient(circle, #fde68a 0%, #f97316 35%, ${color} 68%, #450a0a 100%)`;
+  if (type === 'bar') return `linear-gradient(135deg, #f59e0b, ${color}, #451a03)`;
+  if (type === 'sofa') return `linear-gradient(180deg, ${color}, #450a0a)`;
+  if (type.startsWith('chair_')) return `linear-gradient(180deg, #a16207, ${color})`;
+  if (type === 'window') return `linear-gradient(180deg, #7dd3fc, #38bdf8, #0f172a)`;
+  if (type === 'door') return `linear-gradient(180deg, #b45309, ${color}, #451a03)`;
+  if (type === 'wall') return `linear-gradient(180deg, #78716c, ${color}, #1c1917)`;
+  if (type === 'stone_fence') return `repeating-linear-gradient(90deg, ${color}, ${color} 28px, #292524 28px, #292524 34px)`;
+  if (type === 'wood_fence') return `repeating-linear-gradient(90deg, ${color}, ${color} 26px, #3f2a14 26px, #3f2a14 32px)`;
+  if (type === 'metal_fence') return `repeating-linear-gradient(90deg, ${color}, ${color} 12px, transparent 12px, transparent 24px)`;
+  if (type === 'trampoline') return `radial-gradient(circle, #111827 0%, #111827 58%, #38bdf8 60%, #38bdf8 70%, transparent 72%)`;
 
   if (type === 'stones') {
     return `
@@ -231,57 +295,46 @@ function getObjectBackground(object: MapObject) {
     `;
   }
 
-  if (type === 'text' || type === 'number') {
-    return color;
-  }
+  if (type === 'text' || type === 'number') return color;
 
   return color;
 }
 
-function getObjectText(object: MapObject) {
+function getObjectBackground(object: MapObject) {
   const type = String(object.objectType || '');
+  const image = getImageForType(type);
+  const fallback = getFallbackBackground(object);
 
-  if (type === 'tree') return '🌳';
-  if (type === 'lamp') return '💡';
-  if (type === 'fireplace') return '🔥';
-  if (type === 'bar') return object.name || 'Бар';
-  if (type === 'sofa') return object.name || 'Диван';
-  if (type === 'chair') return object.name || '';
-  if (type === 'window') return object.name || '';
-  if (type === 'door') return object.name || 'Дверь';
-  if (type === 'bridge') return object.name || 'Мост';
-  if (type === 'pier') return object.name || 'Причал';
-  if (type === 'stones') return '';
-  if (type === 'wall' || type === 'stone_fence' || type === 'wood_fence') return object.name || '';
-  if (type === 'text' || type === 'number') return object.name || '';
+  if (!image) return fallback;
 
-  return object.name || '';
+  return `url("${image}") center / cover no-repeat, ${fallback}`;
 }
 
-function getObjectBorderRadius(objectType: string) {
-  if (objectType === 'tree' || objectType === 'lamp' || objectType === 'number') return '999px';
-  if (isOvalObject(objectType)) return '999px';
+function getObjectRadius(objectType: string) {
+  if (isRoundLike(objectType)) return '999px';
   if (objectType === 'window' || objectType === 'wall' || objectType.includes('fence')) return '12px';
   if (isFloorObject(objectType)) return '28px';
   return '18px';
 }
 
+function getObjectText(object: MapObject) {
+  const type = String(object.objectType || '');
+  const name = String(object.name || '');
+
+  if (type === 'text' || type === 'number') return name;
+  return '';
+}
+
 function getObjectShadow(objectType: string, selected: boolean) {
   if (selected) return '0 0 0 3px rgba(251,191,36,.9), 0 18px 30px rgba(0,0,0,.45)';
-  if (objectType === 'lamp') return '0 0 34px rgba(250,204,21,.9)';
+  if (objectType === 'lamp_post' || objectType === 'spot_light') return '0 0 34px rgba(250,204,21,.9)';
   if (objectType === 'fireplace') return '0 0 30px rgba(249,115,22,.75)';
   if (isFloorObject(objectType)) return 'inset 0 0 38px rgba(0,0,0,.62), 0 14px 28px rgba(0,0,0,.28)';
   return '0 12px 24px rgba(0,0,0,.45)';
 }
 
-function normalizeTableStatus(status: unknown): TableStatus {
-  if (status === 'reserved') return 'reserved';
-  if (status === 'occupied') return 'occupied';
-  return 'free';
-}
-
 function tableColors(table: TableItem, selected: boolean) {
-  const status = normalizeTableStatus((table as any).status);
+  const status = String(table.status || 'free');
 
   if (selected) {
     return {
@@ -296,6 +349,14 @@ function tableColors(table: TableItem, selected: boolean) {
       background: '#b91c1c',
       border: '#fca5a5',
       shadow: '0 0 18px rgba(239,68,68,.65)',
+    };
+  }
+
+  if (status === 'closed') {
+    return {
+      background: '#525252',
+      border: '#a3a3a3',
+      shadow: '0 0 12px rgba(115,115,115,.5)',
     };
   }
 
@@ -315,12 +376,7 @@ function tableColors(table: TableItem, selected: boolean) {
 }
 
 function Chair({ style }: { style: CSSProperties }) {
-  return (
-    <span
-      style={style}
-      className="absolute rounded-md border border-black/50 bg-stone-700 shadow-md"
-    />
-  );
+  return <span style={style} className="absolute rounded-md border border-black/50 bg-stone-700 shadow-md" />;
 }
 
 function TableVisual({ table, selected }: { table: TableItem; selected: boolean }) {
@@ -342,14 +398,7 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
         </>
       )}
 
-      {isRound && (
-        <>
-          <Chair style={{ width: 12, height: 22, left: -13, top: '50%', transform: 'translateY(-50%)' }} />
-          <Chair style={{ width: 12, height: 22, right: -13, top: '50%', transform: 'translateY(-50%)' }} />
-        </>
-      )}
-
-      {isRect && (
+      {(isRound || isRect) && (
         <>
           <Chair style={{ width: 12, height: 22, left: -13, top: '50%', transform: 'translateY(-50%)' }} />
           <Chair style={{ width: 12, height: 22, right: -13, top: '50%', transform: 'translateY(-50%)' }} />
@@ -374,12 +423,23 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
 export default function ConstructorApp() {
   const [map, setMap] = useState<FullMapResponse | null>(null);
   const [zoom, setZoom] = useState(0.48);
+  const [mapRotation, setMapRotation] = useState(0);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
   const [dragging, setDragging] = useState<DragState | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const savedRotation = Number(window.localStorage.getItem('molo_map_rotation') || 0);
+    if (Number.isFinite(savedRotation)) setMapRotation(savedRotation);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem('molo_map_rotation', String(mapRotation));
+  }, [mapRotation]);
 
   async function loadMap() {
     const data = (await mapApi.get()) as FullMapResponse;
@@ -388,15 +448,19 @@ export default function ConstructorApp() {
 
   useEffect(() => {
     loadMap().catch(() => {
-      setMessage('Не удалось загрузить карту');
+      setMessage('Не вдалося завантажити карту');
     });
   }, []);
 
-  function findSelectedItem(): any {
+  function findSelectedItem(): TableItem | Zone | MapObject | null {
     if (!map || !selected) return null;
 
     if (selected.kind === 'table') {
       return (map.tables || []).find((item) => String(item.id) === selected.id) || null;
+    }
+
+    if (selected.kind === 'zone') {
+      return (map.zones || []).find((item) => String(item.id) === selected.id) || null;
     }
 
     return (map.objects || []).find((item) => String(item.id) === selected.id) || null;
@@ -415,6 +479,15 @@ export default function ConstructorApp() {
         };
       }
 
+      if (kind === 'zone') {
+        return {
+          ...current,
+          zones: (current.zones || []).map((item) =>
+            String(item.id) === id ? ({ ...item, ...patch } as Zone) : item,
+          ),
+        };
+      }
+
       return {
         ...current,
         objects: (current.objects || []).map((item) =>
@@ -424,12 +497,47 @@ export default function ConstructorApp() {
     });
   }
 
+  function setZoneStatusLocal(id: string, status: ZoneStatus) {
+    const zone = (map?.zones || []).find((item) => String(item.id) === id);
+    const description = zone?.description || '';
+
+    if (status === 'open') {
+      updateLocalItem('zone', id, {
+        isVisible: true,
+        isClosed: false,
+        description: removeZoneStatusMarker(description),
+      });
+    }
+
+    if (status === 'closed') {
+      updateLocalItem('zone', id, {
+        isVisible: true,
+        isClosed: true,
+        description: removeZoneStatusMarker(description),
+      });
+    }
+
+    if (status === 'hidden') {
+      updateLocalItem('zone', id, {
+        isVisible: false,
+        isClosed: false,
+        description: removeZoneStatusMarker(description),
+      });
+    }
+
+    if (status === 'call_only') {
+      updateLocalItem('zone', id, {
+        isVisible: true,
+        isClosed: false,
+        description: addCallOnlyMarker(description),
+      });
+    }
+  }
+
   function getPointerPosition(event: ReactPointerEvent<HTMLElement>) {
     const canvas = canvasRef.current;
 
-    if (!canvas) {
-      return { x: 0, y: 0 };
-    }
+    if (!canvas) return { x: 0, y: 0 };
 
     const rect = canvas.getBoundingClientRect();
 
@@ -439,22 +547,30 @@ export default function ConstructorApp() {
     };
   }
 
-  function startDrag(event: ReactPointerEvent<HTMLElement>, kind: ItemKind, id: string) {
+  function startPointer(event: ReactPointerEvent<HTMLElement>, kind: ItemKind, id: string) {
     event.preventDefault();
     event.stopPropagation();
 
-    if (!map) return;
+    const currentMap = map;
+    if (!currentMap) return;
 
     const item =
       kind === 'table'
-        ? (map.tables || []).find((table) => String(table.id) === id)
-        : (map.objects || []).find((object) => String(object.id) === id);
+        ? (currentMap.tables || []).find((table) => String(table.id) === id)
+        : kind === 'zone'
+          ? (currentMap.zones || []).find((zone) => String(zone.id) === id)
+          : (currentMap.objects || []).find((object) => String(object.id) === id);
 
     if (!item) return;
 
+    setSelected({ kind, id });
+
+    if (!isEditMode) {
+      return;
+    }
+
     const point = getPointerPosition(event);
 
-    setSelected({ kind, id });
     setDragging({
       kind,
       id,
@@ -466,7 +582,7 @@ export default function ConstructorApp() {
   }
 
   function moveDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!dragging) return;
+    if (!dragging || !isEditMode) return;
 
     const point = getPointerPosition(event);
 
@@ -481,7 +597,7 @@ export default function ConstructorApp() {
 
     setDragging(null);
     canvasRef.current?.releasePointerCapture(event.pointerId);
-    setMessage('Передвинуто. Нажми «Сохранить».');
+    setMessage('Переміщено. Натисни «Зберегти».');
   }
 
   async function createTable(shape: TableShape) {
@@ -497,7 +613,6 @@ export default function ConstructorApp() {
         tableNumber,
         seats: 4,
         shape,
-        status: 'free',
         x: 160,
         y: 160,
         width,
@@ -509,13 +624,42 @@ export default function ConstructorApp() {
 
       await loadMap();
 
-      if (id) {
-        setSelected({ kind: 'table', id });
-      }
+      if (id) setSelected({ kind: 'table', id });
 
-      setMessage(`Добавлен стол ${tableNumber}`);
+      setMessage(`Стіл ${tableNumber} додано`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка создания стола');
+      setMessage(error instanceof Error ? error.message : 'Помилка створення столу');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createZone(name: string) {
+    setLoading(true);
+    setMessage('');
+
+    try {
+      const created = await api.post('/zones', {
+        name,
+        color: '#2b2924',
+        description: '',
+        x: 180,
+        y: 180,
+        width: 520,
+        height: 320,
+        rotation: 0,
+        isVisible: true,
+      });
+
+      const id = getCreatedId(created);
+
+      await loadMap();
+
+      if (id) setSelected({ kind: 'zone', id });
+
+      setMessage('Зону додано');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Помилка створення зони');
     } finally {
       setLoading(false);
     }
@@ -541,13 +685,11 @@ export default function ConstructorApp() {
 
       await loadMap();
 
-      if (id) {
-        setSelected({ kind: 'object', id });
-      }
+      if (id) setSelected({ kind: 'object', id });
 
-      setMessage(`${item.label} добавлен`);
+      setMessage(`${item.label} додано`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка создания элемента');
+      setMessage(error instanceof Error ? error.message : 'Помилка створення елемента');
     } finally {
       setLoading(false);
     }
@@ -564,7 +706,6 @@ export default function ConstructorApp() {
     try {
       if (selected.kind === 'table') {
         const table = item as TableItem;
-        const status = normalizeTableStatus((table as any).status);
 
         await api.patch(`/constructor/tables/${selected.id}/position`, {
           x: numberValue(table.x),
@@ -581,23 +722,85 @@ export default function ConstructorApp() {
           tableNumber: table.tableNumber,
           seats: Number(table.seats) || 1,
           shape: table.shape,
-          status,
         });
 
-        if (status === 'free') {
+        if (table.status === 'free') {
           try {
             await api.patch(`/tables/${selected.id}/free`);
           } catch {}
         }
 
-        if (status === 'occupied') {
+        if (table.status === 'occupied') {
           try {
             await api.patch(`/tables/${selected.id}/occupied`);
           } catch {}
         }
 
+        if (table.status === 'closed') {
+          try {
+            await api.patch(`/tables/${selected.id}/close`);
+          } catch {}
+        }
+
+        if (table.isVisible === false) {
+          try {
+            await api.patch(`/constructor/tables/${selected.id}/hide`);
+          } catch {}
+        } else {
+          try {
+            await api.patch(`/constructor/tables/${selected.id}/show`);
+          } catch {}
+        }
+
         await loadMap();
         setSelected({ kind: 'table', id: selected.id });
+      }
+
+      if (selected.kind === 'zone') {
+        const zone = item as Zone;
+        const status = getZoneStatus(zone);
+        const cleanDescription = removeZoneStatusMarker(zone.description);
+
+        await api.patch(`/constructor/zones/${selected.id}/position`, {
+          x: numberValue(zone.x),
+          y: numberValue(zone.y),
+          rotation: numberValue(zone.rotation),
+        });
+
+        await api.patch(`/constructor/zones/${selected.id}/size`, {
+          width: numberValue(zone.width, 300),
+          height: numberValue(zone.height, 200),
+        });
+
+        await api.patch(`/zones/${selected.id}`, {
+          name: zone.name,
+          color: zone.color || '#2b2924',
+          description: status === 'call_only' ? addCallOnlyMarker(cleanDescription) : cleanDescription,
+          isVisible: status !== 'hidden',
+        });
+
+        if (status === 'hidden') {
+          try {
+            await api.patch(`/constructor/zones/${selected.id}/hide`);
+          } catch {}
+        } else {
+          try {
+            await api.patch(`/constructor/zones/${selected.id}/show`);
+          } catch {}
+        }
+
+        if (status === 'closed') {
+          try {
+            await api.patch(`/zones/${selected.id}/close`);
+          } catch {}
+        } else {
+          try {
+            await api.patch(`/zones/${selected.id}/open`);
+          } catch {}
+        }
+
+        await loadMap();
+        setSelected({ kind: 'zone', id: selected.id });
       }
 
       if (selected.kind === 'object') {
@@ -614,31 +817,26 @@ export default function ConstructorApp() {
           color: object.color || '#525252',
         };
 
+        const created = await api.post('/constructor/objects', body);
+        const newId = getCreatedId(created);
+
         try {
-          await api.patch(`/constructor/objects/${selected.id}`, body);
-          await loadMap();
-          setSelected({ kind: 'object', id: selected.id });
-        } catch {
-          const created = await api.post('/constructor/objects', body);
-          const newId = getCreatedId(created);
+          await api.delete(`/constructor/objects/${selected.id}`);
+        } catch {}
 
-          try {
-            await api.delete(`/constructor/objects/${selected.id}`);
-          } catch {}
+        await loadMap();
 
-          await loadMap();
-
-          if (newId) {
-            setSelected({ kind: 'object', id: newId });
-          } else {
-            setSelected(null);
-          }
+        if (newId) {
+          setSelected({ kind: 'object', id: newId });
+        } else {
+          setSelected(null);
         }
       }
 
-      setMessage('Сохранено');
+      setIsEditMode(false);
+      setMessage('Збережено. Переміщення заблоковано.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка сохранения');
+      setMessage(error instanceof Error ? error.message : 'Помилка збереження');
     } finally {
       setLoading(false);
     }
@@ -660,7 +858,6 @@ export default function ConstructorApp() {
           tableNumber: String(table.tableNumber || ''),
           seats: Number(table.seats) || 4,
           shape: table.shape || 'square',
-          status: normalizeTableStatus((table as any).status),
           x: numberValue(table.x) + 40,
           y: numberValue(table.y) + 40,
           width: numberValue(table.width, 90),
@@ -669,12 +866,28 @@ export default function ConstructorApp() {
         });
 
         const id = getCreatedId(created);
-
         await loadMap();
+        if (id) setSelected({ kind: 'table', id });
+      }
 
-        if (id) {
-          setSelected({ kind: 'table', id });
-        }
+      if (selected.kind === 'zone') {
+        const zone = item as Zone;
+
+        const created = await api.post('/zones', {
+          name: `${zone.name} копія`,
+          color: zone.color || '#2b2924',
+          description: zone.description || '',
+          x: numberValue(zone.x) + 40,
+          y: numberValue(zone.y) + 40,
+          width: numberValue(zone.width, 300),
+          height: numberValue(zone.height, 200),
+          rotation: numberValue(zone.rotation),
+          isVisible: zone.isVisible,
+        });
+
+        const id = getCreatedId(created);
+        await loadMap();
+        if (id) setSelected({ kind: 'zone', id });
       }
 
       if (selected.kind === 'object') {
@@ -692,17 +905,13 @@ export default function ConstructorApp() {
         });
 
         const id = getCreatedId(created);
-
         await loadMap();
-
-        if (id) {
-          setSelected({ kind: 'object', id });
-        }
+        if (id) setSelected({ kind: 'object', id });
       }
 
-      setMessage('Скопировано');
+      setMessage('Скопійовано');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка копирования');
+      setMessage(error instanceof Error ? error.message : 'Помилка копіювання');
     } finally {
       setLoading(false);
     }
@@ -719,23 +928,26 @@ export default function ConstructorApp() {
         await api.delete(`/tables/${selected.id}`);
       }
 
+      if (selected.kind === 'zone') {
+        await api.delete(`/zones/${selected.id}`);
+      }
+
       if (selected.kind === 'object') {
         await api.delete(`/constructor/objects/${selected.id}`);
       }
 
       setSelected(null);
       await loadMap();
-      setMessage('Удалено');
+      setMessage('Видалено');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка удаления');
+      setMessage(error instanceof Error ? error.message : 'Помилка видалення');
     } finally {
       setLoading(false);
     }
   }
 
   async function clearMap() {
-    const ok = window.confirm('Удалить все столы, зоны и объекты с карты?');
-
+    const ok = window.confirm('Видалити всі столи, зони та елементи?');
     if (!ok) return;
 
     setLoading(true);
@@ -756,7 +968,7 @@ export default function ConstructorApp() {
         } catch {}
       }
 
-      for (const zone of (current as any).zones || []) {
+      for (const zone of current.zones || []) {
         try {
           await api.delete(`/zones/${zone.id}`);
         } catch {}
@@ -764,9 +976,9 @@ export default function ConstructorApp() {
 
       setSelected(null);
       await loadMap();
-      setMessage('Карта очищена. Теперь добавляй элементы вручную.');
+      setMessage('Карту очищено');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка очистки карты');
+      setMessage(error instanceof Error ? error.message : 'Помилка очищення карти');
     } finally {
       setLoading(false);
     }
@@ -783,9 +995,9 @@ export default function ConstructorApp() {
       });
 
       await loadMap();
-      setMessage('Карта расширена');
+      setMessage('Карту розширено');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка расширения карты');
+      setMessage(error instanceof Error ? error.message : 'Помилка розширення карти');
     } finally {
       setLoading(false);
     }
@@ -807,9 +1019,18 @@ export default function ConstructorApp() {
         <h1 className="mt-2 text-3xl font-semibold">Конструктор</h1>
 
         <p className="mt-2 text-sm text-neutral-300">
-          Добавляй зоны, покрытия, столы, окна, камин, воду, мост, траву, стены, текст и декор.
-          Всё можно двигать, менять размер, цвет и поворот.
+          Натисни елемент, щоб відкрити налаштування. Переміщення працює тільки у режимі редагування.
         </p>
+
+        <button
+          onClick={() => setIsEditMode(!isEditMode)}
+          className={`mt-4 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-4 font-semibold ${
+            isEditMode ? 'bg-emerald-400 text-neutral-950' : 'bg-neutral-800 text-white'
+          }`}
+        >
+          {isEditMode ? <Unlock className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
+          {isEditMode ? 'Редагування увімкнено' : 'Переміщення заблоковано'}
+        </button>
 
         <label className="mt-4 block text-sm text-neutral-300">
           Масштаб: {Math.round(zoom * 100)}%
@@ -824,10 +1045,24 @@ export default function ConstructorApp() {
           onChange={(event) => setZoom(Number(event.target.value))}
           className="mt-2 w-full"
         />
+
+        <label className="mt-4 block text-sm text-neutral-300">
+          Поворот карти: {mapRotation}°
+        </label>
+
+        <input
+          type="range"
+          min="-20"
+          max="20"
+          step="1"
+          value={mapRotation}
+          onChange={(event) => setMapRotation(Number(event.target.value))}
+          className="mt-2 w-full"
+        />
       </section>
 
       <section className="mt-4 rounded-3xl border border-neutral-800 bg-neutral-950 p-4">
-        <h2 className="text-lg font-semibold">Столы</h2>
+        <h2 className="text-lg font-semibold">Столи</h2>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           <button disabled={loading} onClick={() => createTable('square')} className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50">
@@ -837,16 +1072,28 @@ export default function ConstructorApp() {
 
           <button disabled={loading} onClick={() => createTable('round')} className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50">
             <Plus className="mr-1 inline h-4 w-4" />
-            Круглый
+            Круглий
           </button>
 
           <button disabled={loading} onClick={() => createTable('rect')} className="rounded-2xl bg-amber-300 px-2 py-3 text-xs font-semibold text-neutral-950 disabled:opacity-50">
             <Plus className="mr-1 inline h-4 w-4" />
-            Прямой
+            Прямокут.
           </button>
         </div>
 
-        <h2 className="mt-5 text-lg font-semibold">Зоны / покрытия</h2>
+        <h2 className="mt-5 text-lg font-semibold">Зони</h2>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button disabled={loading} onClick={() => createZone('Основний зал')} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">
+            + Основний зал
+          </button>
+
+          <button disabled={loading} onClick={() => createZone('Тераса')} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">
+            + Тераса
+          </button>
+        </div>
+
+        <h2 className="mt-5 text-lg font-semibold">Покриття</h2>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           {FLOOR_ITEMS.map((item) => (
@@ -856,7 +1103,7 @@ export default function ConstructorApp() {
           ))}
         </div>
 
-        <h2 className="mt-5 text-lg font-semibold">Стены / стройка</h2>
+        <h2 className="mt-5 text-lg font-semibold">Стіни / будова</h2>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           {BUILD_ITEMS.map((item) => (
@@ -866,17 +1113,17 @@ export default function ConstructorApp() {
           ))}
         </div>
 
-        <h2 className="mt-5 text-lg font-semibold">Мебель / декор / текст</h2>
+        <h2 className="mt-5 text-lg font-semibold">Меблі / декор / текст</h2>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
-          {FURNITURE_ITEMS.map((item) => (
+          {DECOR_ITEMS.map((item) => (
             <button key={item.objectType} disabled={loading} onClick={() => createObject(item)} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">
               {item.label}
             </button>
           ))}
         </div>
 
-        <h2 className="mt-5 text-lg font-semibold">Расширить карту</h2>
+        <h2 className="mt-5 text-lg font-semibold">Розширити карту</h2>
 
         <div className="mt-3 grid grid-cols-4 gap-2">
           <button disabled={loading} onClick={() => expandMap('left')} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">←</button>
@@ -886,16 +1133,18 @@ export default function ConstructorApp() {
         </div>
 
         <button disabled={loading} onClick={clearMap} className="mt-5 w-full rounded-2xl bg-red-500 px-4 py-4 font-semibold text-white disabled:opacity-50">
-          Очистить карту
+          Очистити карту
         </button>
       </section>
 
       {selectedItem && selected && (
         <section className="mt-4 rounded-3xl border border-amber-300/40 bg-neutral-900 p-4">
-          <h2 className="text-lg font-semibold">Выбрано</h2>
+          <h2 className="text-lg font-semibold">Налаштування</h2>
 
           <p className="mt-1 text-sm text-neutral-300">
-            {selected.kind === 'table' ? 'Стол' : 'Элемент'}
+            {selected.kind === 'table' && 'Стіл'}
+            {selected.kind === 'zone' && 'Зона'}
+            {selected.kind === 'object' && 'Елемент'}
           </p>
 
           {selected.kind === 'table' && (
@@ -911,7 +1160,7 @@ export default function ConstructorApp() {
                 </label>
 
                 <label className="text-xs text-neutral-400">
-                  Мест
+                  Місць
                   <input
                     type="number"
                     value={Number((selectedItem as TableItem).seats || 1)}
@@ -923,24 +1172,68 @@ export default function ConstructorApp() {
 
               <div className="mt-3 grid grid-cols-3 gap-2">
                 <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'free' })} className="rounded-xl bg-emerald-600 px-2 py-2 text-xs">
-                  Свободен
-                </button>
-
-                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'reserved' })} className="rounded-xl bg-amber-600 px-2 py-2 text-xs">
-                  Бронь
+                  Вільний
                 </button>
 
                 <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'occupied' })} className="rounded-xl bg-red-700 px-2 py-2 text-xs">
-                  Занят
+                  Зайнятий
+                </button>
+
+                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'closed' })} className="rounded-xl bg-neutral-700 px-2 py-2 text-xs">
+                  Закритий
                 </button>
               </div>
+
+              <button
+                onClick={() => updateLocalItem(selected.kind, selected.id, { isVisible: !(selectedItem as TableItem).isVisible })}
+                className="mt-3 w-full rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm"
+              >
+                {(selectedItem as TableItem).isVisible === false ? 'Показати гостям' : 'Приховати від гостей'}
+              </button>
             </>
+          )}
+
+          {selected.kind === 'zone' && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <label className="text-xs text-neutral-400">
+                Назва зони
+                <input
+                  value={String((selectedItem as Zone).name || '')}
+                  onChange={(event) => updateLocalItem(selected.kind, selected.id, { name: event.target.value })}
+                  className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
+                />
+              </label>
+
+              <label className="text-xs text-neutral-400">
+                Колір
+                <input
+                  type="color"
+                  value={String((selectedItem as Zone).color || '#2b2924')}
+                  onChange={(event) => updateLocalItem(selected.kind, selected.id, { color: event.target.value })}
+                  className="mt-1 h-10 w-full rounded-xl bg-neutral-800 px-2 py-1 outline-none"
+                />
+              </label>
+
+              <label className="col-span-2 text-xs text-neutral-400">
+                Статус зони
+                <select
+                  value={getZoneStatus(selectedItem as Zone)}
+                  onChange={(event) => setZoneStatusLocal(selected.id, event.target.value as ZoneStatus)}
+                  className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-3 text-sm text-white outline-none"
+                >
+                  <option value="open">Відкрита</option>
+                  <option value="closed">Закрита</option>
+                  <option value="hidden">Прихована</option>
+                  <option value="call_only">Тільки дзвінок</option>
+                </select>
+              </label>
+            </div>
           )}
 
           {selected.kind === 'object' && (
             <div className="mt-3 grid grid-cols-2 gap-2">
               <label className="text-xs text-neutral-400">
-                Текст / название
+                Текст / назва
                 <input
                   value={String((selectedItem as MapObject).name || '')}
                   onChange={(event) => updateLocalItem(selected.kind, selected.id, { name: event.target.value })}
@@ -948,64 +1241,66 @@ export default function ConstructorApp() {
                 />
               </label>
 
-              <label className="text-xs text-neutral-400">
-                Цвет
-                <input
-                  type="color"
-                  value={String((selectedItem as MapObject).color || '#525252')}
-                  onChange={(event) => updateLocalItem(selected.kind, selected.id, { color: event.target.value })}
-                  className="mt-1 h-10 w-full rounded-xl bg-neutral-800 px-2 py-1 outline-none"
-                />
-              </label>
+              {!isWaterOrGrass(String((selectedItem as MapObject).objectType || '')) && (
+                <label className="text-xs text-neutral-400">
+                  Колір
+                  <input
+                    type="color"
+                    value={String((selectedItem as MapObject).color || '#525252')}
+                    onChange={(event) => updateLocalItem(selected.kind, selected.id, { color: event.target.value })}
+                    className="mt-1 h-10 w-full rounded-xl bg-neutral-800 px-2 py-1 outline-none"
+                  />
+                </label>
+              )}
             </div>
           )}
 
           <div className="mt-3 grid grid-cols-2 gap-2">
             <label className="text-xs text-neutral-400">
               Ширина
-              <input type="number" value={Math.round(numberValue(selectedItem.width, 100))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { width: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
+              <input type="number" value={Math.round(numberValue((selectedItem as any).width, 100))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { width: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
             </label>
 
             <label className="text-xs text-neutral-400">
-              Высота
-              <input type="number" value={Math.round(numberValue(selectedItem.height, 100))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { height: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
+              Висота
+              <input type="number" value={Math.round(numberValue((selectedItem as any).height, 100))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { height: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
             </label>
 
             <label className="text-xs text-neutral-400">
               X
-              <input type="number" value={Math.round(numberValue(selectedItem.x))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { x: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
+              <input type="number" value={Math.round(numberValue((selectedItem as any).x))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { x: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
             </label>
 
             <label className="text-xs text-neutral-400">
               Y
-              <input type="number" value={Math.round(numberValue(selectedItem.y))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { y: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
+              <input type="number" value={Math.round(numberValue((selectedItem as any).y))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { y: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
             </label>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <button onClick={() => updateLocalItem(selected.kind, selected.id, { rotation: numberValue(selectedItem.rotation) - 15 })} className="rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm">
+            <button onClick={() => updateLocalItem(selected.kind, selected.id, { rotation: numberValue((selectedItem as any).rotation) - 15 })} className="rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm">
               <RotateCcw className="mr-1 inline h-4 w-4" />
               Поворот -
             </button>
 
-            <button onClick={() => updateLocalItem(selected.kind, selected.id, { rotation: numberValue(selectedItem.rotation) + 15 })} className="rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm">
+            <button onClick={() => updateLocalItem(selected.kind, selected.id, { rotation: numberValue((selectedItem as any).rotation) + 15 })} className="rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm">
               <RotateCw className="mr-1 inline h-4 w-4" />
               Поворот +
             </button>
 
             <button disabled={loading} onClick={saveSelected} className="rounded-2xl bg-emerald-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
               <Save className="mr-1 inline h-4 w-4" />
-              Сохранить
+              Зберегти
             </button>
 
             <button disabled={loading} onClick={duplicateSelected} className="rounded-2xl bg-blue-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
               <Copy className="mr-1 inline h-4 w-4" />
-              Копия
+              Копія
             </button>
 
             <button disabled={loading} onClick={deleteSelected} className="col-span-2 rounded-2xl bg-red-500 px-3 py-3 text-sm font-semibold text-white disabled:opacity-50">
               <Trash2 className="mr-1 inline h-4 w-4" />
-              Удалить
+              Видалити
             </button>
           </div>
         </section>
@@ -1023,12 +1318,12 @@ export default function ConstructorApp() {
 
           <button onClick={() => loadMap()} className="flex items-center gap-1 rounded-xl bg-neutral-800 px-2 py-1 text-xs">
             <RefreshCcw className="h-3 w-3" />
-            обновить
+            оновити
           </button>
 
           <span className="flex items-center gap-1">
             <Move className="h-3 w-3" />
-            двигай
+            {isEditMode ? 'рухати' : 'заблок.'}
           </span>
         </div>
 
@@ -1045,8 +1340,8 @@ export default function ConstructorApp() {
               style={{
                 width: mapWidth,
                 height: mapHeight,
-                transform: `scale(${zoom})`,
-                transformOrigin: 'top left',
+                transform: `scale(${zoom}) rotate(${mapRotation}deg)`,
+                transformOrigin: 'center center',
                 background:
                   'radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 30%), linear-gradient(135deg, #0b0a08, #17120d)',
               }}
@@ -1060,17 +1355,47 @@ export default function ConstructorApp() {
                 }}
               />
 
+              {(map?.zones || []).map((zone) => {
+                const id = String(zone.id);
+                const isSelected = selected?.kind === 'zone' && selected.id === id;
+                const status = getZoneStatus(zone);
+
+                return (
+                  <div
+                    key={id}
+                    onPointerDown={(event) => startPointer(event, 'zone', id)}
+                    className="absolute flex touch-none select-none items-center justify-center border text-center text-sm font-semibold text-white"
+                    style={{
+                      left: numberValue(zone.x),
+                      top: numberValue(zone.y),
+                      width: numberValue(zone.width, 300),
+                      height: numberValue(zone.height, 200),
+                      transform: `rotate(${numberValue(zone.rotation)}deg)`,
+                      background: `radial-gradient(circle at 20% 20%, rgba(245,158,11,.10), transparent 30%), linear-gradient(135deg, ${zone.color || '#2b2924'}, #15110d)`,
+                      borderRadius: '28px',
+                      borderColor: isSelected ? '#fcd34d' : 'rgba(255,255,255,.18)',
+                      boxShadow: isSelected ? '0 0 0 3px rgba(251,191,36,.9)' : 'inset 0 0 38px rgba(0,0,0,.62)',
+                      opacity: status === 'hidden' ? 0.35 : 1,
+                      zIndex: 1,
+                    }}
+                  >
+                    <span className="rounded-full bg-black/45 px-4 py-2 drop-shadow">
+                      {getZoneStatusIcon(status)} {zone.name}
+                    </span>
+                  </div>
+                );
+              })}
+
               {sortedObjects.map((object) => {
                 const id = String(object.id);
                 const type = String(object.objectType || '');
                 const isSelected = selected?.kind === 'object' && selected.id === id;
                 const text = getObjectText(object);
-                const floor = isFloorObject(type);
 
                 return (
                   <div
                     key={id}
-                    onPointerDown={(event) => startDrag(event, 'object', id)}
+                    onPointerDown={(event) => startPointer(event, 'object', id)}
                     className="absolute flex touch-none select-none items-center justify-center border text-center text-xs font-semibold text-white"
                     style={{
                       left: numberValue(object.x),
@@ -1079,14 +1404,14 @@ export default function ConstructorApp() {
                       height: numberValue(object.height, 100),
                       transform: `rotate(${numberValue(object.rotation)}deg)`,
                       background: getObjectBackground(object),
-                      borderRadius: getObjectBorderRadius(type),
+                      borderRadius: getObjectRadius(type),
                       borderColor: isSelected ? '#fcd34d' : 'rgba(255,255,255,.18)',
                       boxShadow: getObjectShadow(type, isSelected),
-                      fontSize: type === 'number' ? 28 : floor ? 18 : 13,
+                      fontSize: type === 'number' ? 28 : 13,
                       zIndex: getObjectLayer(type),
                     }}
                   >
-                    {text ? <span className="rounded-full bg-black/30 px-3 py-1 drop-shadow">{text}</span> : null}
+                    {text ? <span className="rounded-full bg-black/35 px-3 py-1 drop-shadow">{text}</span> : null}
                   </div>
                 );
               })}
@@ -1098,7 +1423,7 @@ export default function ConstructorApp() {
                 return (
                   <div
                     key={id}
-                    onPointerDown={(event) => startDrag(event, 'table', id)}
+                    onPointerDown={(event) => startPointer(event, 'table', id)}
                     className="absolute touch-none select-none"
                     style={{
                       left: numberValue(table.x),
@@ -1106,6 +1431,7 @@ export default function ConstructorApp() {
                       width: numberValue(table.width, 80),
                       height: numberValue(table.height, 70),
                       transform: `rotate(${numberValue(table.rotation)}deg)`,
+                      opacity: table.isVisible === false ? 0.35 : 1,
                       zIndex: 10,
                     }}
                   >
@@ -1118,17 +1444,15 @@ export default function ConstructorApp() {
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-neutral-300">
-          <span>🟢 свободен</span>
-          <span>🟠 бронь</span>
-          <span>🔴 занят</span>
-          <span>▦ мрамор</span>
+          <span>✅ відкрита</span>
+          <span>🔒 закрита</span>
+          <span>📞 дзвінок</span>
+          <span>🟢 стіл</span>
+          <span>▦ мармур</span>
           <span>🌊 вода</span>
-          <span>🔥 камин</span>
-          <span>▭ окно</span>
+          <span>🔥 камін</span>
+          <span>▭ вікно</span>
           <span>🌳 дерево</span>
-          <span>🌉 мост</span>
-          <span>🍸 бар</span>
-          <span>💡 фонарь</span>
         </div>
       </section>
     </div>
