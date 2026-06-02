@@ -11,6 +11,7 @@ import { UpdatePositionDto } from './dto/update-position.dto';
 import { UpdateSizeDto } from './dto/update-size.dto';
 import { ExpandMapDto } from './dto/expand-map.dto';
 import { CreateMapObjectDto } from './dto/create-map-object.dto';
+import { SaveLayoutDto } from './dto/save-layout.dto';
 
 @Injectable()
 export class ConstructorService {
@@ -59,7 +60,7 @@ export class ConstructorService {
       mapHeight: 1500,
       bookingCloseNotifiedAt: null,
       restaurantCloseNotifiedAt: null,
-    });
+    } as any);
 
     return this.restaurants.save(restaurant);
   }
@@ -102,8 +103,8 @@ export class ConstructorService {
       })
     ).filter(
       (table) =>
-        table.isVisible &&
-        (!table.zone || visibleZoneIds.has(table.zone.id)),
+        (table as any).isVisible &&
+        (!(table as any).zone || visibleZoneIds.has((table as any).zone.id)),
     );
 
     const objects = (
@@ -113,8 +114,8 @@ export class ConstructorService {
       })
     ).filter(
       (object) =>
-        object.isVisible &&
-        (!object.zone || visibleZoneIds.has(object.zone.id)),
+        (object as any).isVisible &&
+        (!(object as any).zone || visibleZoneIds.has((object as any).zone.id)),
     );
 
     return {
@@ -137,6 +138,91 @@ export class ConstructorService {
     };
   }
 
+  async saveLayout(dto: SaveLayoutDto) {
+    const result = {
+      tables: 0,
+      zones: 0,
+      objects: 0,
+    };
+
+    for (const item of dto.tables || []) {
+      if (!item.id) continue;
+
+      const table = await this.tables.findOne({
+        where: { id: item.id },
+      });
+
+      if (!table) continue;
+
+      if (item.x !== undefined) (table as any).x = item.x;
+      if (item.y !== undefined) (table as any).y = item.y;
+      if (item.width !== undefined) (table as any).width = item.width;
+      if (item.height !== undefined) (table as any).height = item.height;
+      if (item.rotation !== undefined) (table as any).rotation = item.rotation;
+      if (item.tableNumber !== undefined) (table as any).tableNumber = item.tableNumber;
+      if (item.seats !== undefined) (table as any).seats = item.seats;
+      if (item.shape !== undefined) (table as any).shape = item.shape;
+      if (item.isVisible !== undefined) (table as any).isVisible = item.isVisible;
+
+      await this.tables.save(table);
+      result.tables += 1;
+    }
+
+    for (const item of dto.zones || []) {
+      if (!item.id) continue;
+
+      const zone = await this.zones.findOne({
+        where: { id: item.id },
+      });
+
+      if (!zone) continue;
+
+      if (item.x !== undefined) (zone as any).x = item.x;
+      if (item.y !== undefined) (zone as any).y = item.y;
+      if (item.width !== undefined) (zone as any).width = item.width;
+      if (item.height !== undefined) (zone as any).height = item.height;
+      if (item.rotation !== undefined) (zone as any).rotation = item.rotation;
+      if (item.name !== undefined) (zone as any).name = item.name;
+      if (item.color !== undefined) (zone as any).color = item.color;
+      if (item.description !== undefined) (zone as any).description = item.description;
+      if (item.isVisible !== undefined) (zone as any).isVisible = item.isVisible;
+      if (item.isClosed !== undefined) (zone as any).isClosed = item.isClosed;
+
+      await this.zones.save(zone);
+      result.zones += 1;
+    }
+
+    for (const item of dto.objects || []) {
+      if (!item.id) continue;
+
+      const object = await this.objects.findOne({
+        where: { id: item.id },
+      });
+
+      if (!object) continue;
+
+      if (item.objectType !== undefined) (object as any).objectType = item.objectType;
+      if (item.name !== undefined) (object as any).name = item.name || null;
+      if (item.x !== undefined) (object as any).x = item.x;
+      if (item.y !== undefined) (object as any).y = item.y;
+      if (item.width !== undefined) (object as any).width = item.width;
+      if (item.height !== undefined) (object as any).height = item.height;
+      if (item.rotation !== undefined) (object as any).rotation = item.rotation;
+      if (item.color !== undefined) (object as any).color = item.color || null;
+      if (item.isVisible !== undefined) (object as any).isVisible = item.isVisible;
+
+      await this.objects.save(object);
+      result.objects += 1;
+    }
+
+    await this.logs.create('Збережено карту конструктора', null, result);
+
+    return {
+      message: 'Карту збережено',
+      ...result,
+    };
+  }
+
   async updateTablePosition(id: string, dto: UpdatePositionDto) {
     const table = await this.tables.findOne({
       where: { id },
@@ -146,11 +232,11 @@ export class ConstructorService {
       throw new NotFoundException('Стіл не знайдено');
     }
 
-    table.x = dto.x;
-    table.y = dto.y;
+    (table as any).x = dto.x;
+    (table as any).y = dto.y;
 
     if (dto.rotation !== undefined) {
-      table.rotation = dto.rotation;
+      (table as any).rotation = dto.rotation;
     }
 
     await this.logs.create('Оновлено позицію столу', null, {
@@ -184,7 +270,7 @@ export class ConstructorService {
       throw new NotFoundException('Стіл не знайдено');
     }
 
-    table.isVisible = isVisible;
+    (table as any).isVisible = isVisible;
 
     return this.tables.save(table);
   }
@@ -198,11 +284,11 @@ export class ConstructorService {
       throw new NotFoundException('Зону не знайдено');
     }
 
-    zone.x = dto.x;
-    zone.y = dto.y;
+    (zone as any).x = dto.x;
+    (zone as any).y = dto.y;
 
     if (dto.rotation !== undefined) {
-      zone.rotation = dto.rotation;
+      (zone as any).rotation = dto.rotation;
     }
 
     return this.zones.save(zone);
@@ -231,7 +317,7 @@ export class ConstructorService {
       throw new NotFoundException('Зону не знайдено');
     }
 
-    zone.isVisible = isVisible;
+    (zone as any).isVisible = isVisible;
 
     return this.zones.save(zone);
   }
@@ -241,9 +327,9 @@ export class ConstructorService {
 
     let zone: Zone | null = null;
 
-    if (dto.zoneId) {
+    if ((dto as any).zoneId) {
       zone = await this.zones.findOne({
-        where: { id: dto.zoneId },
+        where: { id: (dto as any).zoneId },
       });
 
       if (!zone) {
@@ -263,7 +349,7 @@ export class ConstructorService {
       rotation: dto.rotation ?? 0,
       color: dto.color || null,
       isVisible: true,
-    });
+    } as any);
 
     return this.objects.save(object);
   }
@@ -278,49 +364,26 @@ export class ConstructorService {
       throw new NotFoundException('Обʼєкт не знайдено');
     }
 
-    if (dto.zoneId) {
+    if ((dto as any).zoneId) {
       const zone = await this.zones.findOne({
-        where: { id: dto.zoneId },
+        where: { id: (dto as any).zoneId },
       });
 
       if (!zone) {
         throw new NotFoundException('Зону не знайдено');
       }
 
-      object.zone = zone;
+      (object as any).zone = zone;
     }
 
-    if (dto.objectType !== undefined) {
-      object.objectType = dto.objectType;
-    }
-
-    if (dto.name !== undefined) {
-      object.name = dto.name || null;
-    }
-
-    if (dto.x !== undefined) {
-      object.x = dto.x;
-    }
-
-    if (dto.y !== undefined) {
-      object.y = dto.y;
-    }
-
-    if (dto.width !== undefined) {
-      object.width = dto.width;
-    }
-
-    if (dto.height !== undefined) {
-      object.height = dto.height;
-    }
-
-    if (dto.rotation !== undefined) {
-      object.rotation = dto.rotation;
-    }
-
-    if (dto.color !== undefined) {
-      object.color = dto.color || null;
-    }
+    if (dto.objectType !== undefined) (object as any).objectType = dto.objectType;
+    if (dto.name !== undefined) (object as any).name = dto.name || null;
+    if (dto.x !== undefined) (object as any).x = dto.x;
+    if (dto.y !== undefined) (object as any).y = dto.y;
+    if (dto.width !== undefined) (object as any).width = dto.width;
+    if (dto.height !== undefined) (object as any).height = dto.height;
+    if (dto.rotation !== undefined) (object as any).rotation = dto.rotation;
+    if (dto.color !== undefined) (object as any).color = dto.color || null;
 
     return this.objects.save(object);
   }
@@ -334,11 +397,11 @@ export class ConstructorService {
       throw new NotFoundException('Обʼєкт не знайдено');
     }
 
-    object.x = dto.x;
-    object.y = dto.y;
+    (object as any).x = dto.x;
+    (object as any).y = dto.y;
 
     if (dto.rotation !== undefined) {
-      object.rotation = dto.rotation;
+      (object as any).rotation = dto.rotation;
     }
 
     return this.objects.save(object);
@@ -367,7 +430,7 @@ export class ConstructorService {
       throw new NotFoundException('Обʼєкт не знайдено');
     }
 
-    object.isVisible = isVisible;
+    (object as any).isVisible = isVisible;
 
     return this.objects.save(object);
   }
