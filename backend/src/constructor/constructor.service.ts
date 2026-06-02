@@ -55,8 +55,8 @@ export class ConstructorService {
       closeMessage: 'Ресторан зараз зачинений.\nМи працюємо з 10:00 до 23:00.',
       bookingClosedMessage:
         'Онлайн-бронювання завершено.\nДля бронювання зателефонуйте адміністратору.',
-      mapWidth: 1600,
-      mapHeight: 1000,
+      mapWidth: 2200,
+      mapHeight: 1500,
       bookingCloseNotifiedAt: null,
       restaurantCloseNotifiedAt: null,
     });
@@ -264,6 +264,63 @@ export class ConstructorService {
       color: dto.color || null,
       isVisible: true,
     });
+
+    return this.objects.save(object);
+  }
+
+  async updateObject(id: string, dto: CreateMapObjectDto) {
+    const object = await this.objects.findOne({
+      where: { id },
+      relations: ['zone'],
+    });
+
+    if (!object) {
+      throw new NotFoundException('Обʼєкт не знайдено');
+    }
+
+    if (dto.zoneId) {
+      const zone = await this.zones.findOne({
+        where: { id: dto.zoneId },
+      });
+
+      if (!zone) {
+        throw new NotFoundException('Зону не знайдено');
+      }
+
+      object.zone = zone;
+    }
+
+    if (dto.objectType !== undefined) {
+      object.objectType = dto.objectType;
+    }
+
+    if (dto.name !== undefined) {
+      object.name = dto.name || null;
+    }
+
+    if (dto.x !== undefined) {
+      object.x = dto.x;
+    }
+
+    if (dto.y !== undefined) {
+      object.y = dto.y;
+    }
+
+    if (dto.width !== undefined) {
+      object.width = dto.width;
+    }
+
+    if (dto.height !== undefined) {
+      object.height = dto.height;
+    }
+
+    if (dto.rotation !== undefined) {
+      object.rotation = dto.rotation;
+    }
+
+    if (dto.color !== undefined) {
+      object.color = dto.color || null;
+    }
 
     return this.objects.save(object);
   }
