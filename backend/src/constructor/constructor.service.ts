@@ -41,7 +41,7 @@ export class ConstructorService {
       return restaurants[0];
     }
 
-    const restaurant = this.restaurants.create({} as any) as Restaurant;
+    const restaurant = this.restaurants.create() as unknown as Restaurant;
 
     Object.assign(restaurant as any, {
       name: 'MOLO',
@@ -347,21 +347,23 @@ export class ConstructorService {
       }
     }
 
-    const object = this.objects.create({
-      restaurant,
-      zone,
-      objectType: dto.objectType,
-      name: dto.name || null,
-      x: Number(dto.x ?? 0),
-      y: Number(dto.y ?? 0),
-      width: Number(dto.width ?? 100),
-      height: Number(dto.height ?? 100),
-      rotation: Number(dto.rotation ?? 0),
-      color: dto.color || null,
-      isVisible: true,
-    } as any) as MapObject;
+const object = this.objects.create() as unknown as MapObject;
 
-    return this.objects.save(object as any);
+Object.assign(object as any, {
+  restaurant,
+  zone,
+  objectType: dto.objectType,
+  name: dto.name || null,
+  x: Number(dto.x ?? 0),
+  y: Number(dto.y ?? 0),
+  width: Number(dto.width ?? 100),
+  height: Number(dto.height ?? 100),
+  rotation: Number(dto.rotation ?? 0),
+  color: dto.color || null,
+  isVisible: true,
+});
+
+return this.objects.save(object as any);
   }
 
   async updateObject(id: string, dto: CreateMapObjectDto) {
