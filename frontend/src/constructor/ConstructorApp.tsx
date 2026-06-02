@@ -1576,7 +1576,7 @@ export default function ConstructorApp() {
               Поворот +
             </button>
 
-            <button disabled={loading} onClick={saveSelected} className="rounded-2xl bg-emerald-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
+            <button disabled={loading} onClick={saveAll} className="rounded-2xl bg-emerald-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
               <Save className="mr-1 inline h-4 w-4" />
               Зберегти
             </button>
