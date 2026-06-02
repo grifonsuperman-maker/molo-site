@@ -189,7 +189,6 @@ function getImageForType(objectType: string) {
     floor_wood: '/elements/wood-floor.png',
     floor_grass: '/elements/grass.png',
     floor_water: '/elements/water.png',
-
     wall: '/elements/wall.png',
     window: '/elements/window.png',
     door: '/elements/door.png',
@@ -198,13 +197,11 @@ function getImageForType(objectType: string) {
     metal_fence: '/elements/metal-fence.png',
     bridge: '/elements/bridge.png',
     pier: '/elements/pier.png',
-
     bar: '/elements/bar.png',
     sofa: '/elements/sofa.png',
     chair_classic: '/elements/chair-classic.png',
     chair_soft: '/elements/chair-soft.png',
     chair_bar: '/elements/chair-bar.png',
-
     tree: '/elements/tree.png',
     bush: '/elements/bush.png',
     stones: '/elements/stones.png',
@@ -415,7 +412,6 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
 export default function ConstructorApp() {
   const [map, setMap] = useState<FullMapResponse | null>(null);
   const [zoom, setZoom] = useState(0.48);
-  const [mapRotation, setMapRotation] = useState(0);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
   const [dragging, setDragging] = useState<DragState | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -423,15 +419,6 @@ export default function ConstructorApp() {
   const [loading, setLoading] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const savedRotation = Number(window.localStorage.getItem('molo_map_rotation') || 0);
-    if (Number.isFinite(savedRotation)) setMapRotation(savedRotation);
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem('molo_map_rotation', String(mapRotation));
-  }, [mapRotation]);
 
   async function loadMap() {
     const data = (await mapApi.get()) as FullMapResponse;
@@ -1023,20 +1010,6 @@ export default function ConstructorApp() {
           onChange={(event) => setZoom(Number(event.target.value))}
           className="mt-2 w-full"
         />
-
-        <label className="mt-4 block text-sm text-neutral-300">
-          Поворот карти: {mapRotation}°
-        </label>
-
-        <input
-          type="range"
-          min="-20"
-          max="20"
-          step="1"
-          value={mapRotation}
-          onChange={(event) => setMapRotation(Number(event.target.value))}
-          className="mt-2 w-full"
-        />
       </section>
 
       <section className="mt-4 rounded-3xl border border-neutral-800 bg-neutral-950 p-4">
@@ -1146,20 +1119,6 @@ export default function ConstructorApp() {
                     className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                   />
                 </label>
-              </div>
-
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'free' })} className="rounded-xl bg-emerald-600 px-2 py-2 text-xs">
-                  Вільний
-                </button>
-
-                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'occupied' })} className="rounded-xl bg-red-700 px-2 py-2 text-xs">
-                  Зайнятий
-                </button>
-
-                <button onClick={() => updateLocalItem(selected.kind, selected.id, { status: 'closed' })} className="rounded-xl bg-neutral-700 px-2 py-2 text-xs">
-                  Закритий
-                </button>
               </div>
 
               <button
@@ -1318,8 +1277,8 @@ export default function ConstructorApp() {
               style={{
                 width: mapWidth,
                 height: mapHeight,
-                transform: `scale(${zoom}) rotate(${isEditMode ? 0 : mapRotation}deg)`,
-                transformOrigin: 'center center',
+                transform: `scale(${zoom})`,
+                transformOrigin: 'top left',
                 background:
                   'radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 30%), linear-gradient(135deg, #0b0a08, #17120d)',
               }}
