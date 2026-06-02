@@ -4,6 +4,7 @@ import { UpdatePositionDto } from './dto/update-position.dto';
 import { UpdateSizeDto } from './dto/update-size.dto';
 import { ExpandMapDto } from './dto/expand-map.dto';
 import { CreateMapObjectDto } from './dto/create-map-object.dto';
+import { SaveLayoutDto } from './dto/save-layout.dto';
 import { Public } from '../common/decorators/public.decorator';
 
 @Controller('constructor')
@@ -20,6 +21,12 @@ export class ConstructorController {
   @Get('public-map')
   getPublicMap() {
     return this.service.getPublicMap();
+  }
+
+  @Public()
+  @Post('save-layout')
+  saveLayout(@Body() dto: SaveLayoutDto) {
+    return this.service.saveLayout(dto);
   }
 
   @Public()
