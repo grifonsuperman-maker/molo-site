@@ -24,12 +24,22 @@ type SelectedItem = {
   id: string;
 };
 
-type DragState = {
-  kind: ItemKind;
-  id: string;
-  offsetX: number;
-  offsetY: number;
-};
+type DragState =
+  | {
+      mode: 'item';
+      kind: ItemKind;
+      id: string;
+      offsetX: number;
+      offsetY: number;
+      moved: boolean;
+    }
+  | {
+      mode: 'pan';
+      startClientX: number;
+      startClientY: number;
+      startViewX: number;
+      startViewY: number;
+    };
 
 type TableShape = 'square' | 'round' | 'rect';
 type ZoneStatus = 'open' | 'closed' | 'hidden' | 'call_only';
@@ -402,16 +412,39 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
 
 export default function ConstructorApp() {
   const [map, setMap] = useState<FullMapResponse | null>(null);
+  const mapRef = useRef<FullMapResponse | null>(null);
+
   const [zoom, setZoom] = useState(0.48);
   const [mapRotation, setMapRotation] = useState(0);
+  const [rotationPreview, setRotationPreview] = useState(false);
+
+  const [viewX, setViewX] = useState(0);
+  const [viewY, setViewY] = useState(0);
+
   const [selected, setSelected] = useState<SelectedItem | null>(null);
+  const selectedRef = useRef<SelectedItem | null>(null);
+
   const [dragging, setDragging] = useState<DragState | null>(null);
+  const draggingRef = useRef<DragState | null>(null);
+
   const [isEditMode, setIsEditMode] = useState(false);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [moveStep, setMoveStep] = useState(20);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    mapRef.current = map;
+  }, [map]);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  useEffect(() => {
+    draggingRef.current = dragging;
+  }, [dragging]);
 
   useEffect(() => {
     const savedRotation = Number(window.localStorage.getItem('molo_map_rotation') || 0);
@@ -444,6 +477,7 @@ export default function ConstructorApp() {
 
   async function loadMap() {
     const data = (await mapApi.get()) as FullMapResponse;
+    mapRef.current = data;
     setMap(data);
   }
 
@@ -453,24 +487,36 @@ export default function ConstructorApp() {
     });
   }, []);
 
+  function setMapSafe(updater: (current: FullMapResponse) => FullMapResponse) {
+    setMap((current) => {
+      if (!current) return current;
+      const next = updater(current);
+      mapRef.current = next;
+      return next;
+    });
+  }
+
+  function getItem(kind: ItemKind, id: string, source: FullMapResponse | null = mapRef.current) {
+    if (!source) return null;
+
+    if (kind === 'table') {
+      return (source.tables || []).find((item) => String(item.id) === id) || null;
+    }
+
+    if (kind === 'zone') {
+      return (source.zones || []).find((item) => String(item.id) === id) || null;
+    }
+
+    return (source.objects || []).find((item) => String(item.id) === id) || null;
+  }
+
   function findSelectedItem(): TableItem | Zone | MapObject | null {
-    if (!map || !selected) return null;
-
-    if (selected.kind === 'table') {
-      return (map.tables || []).find((item) => String(item.id) === selected.id) || null;
-    }
-
-    if (selected.kind === 'zone') {
-      return (map.zones || []).find((item) => String(item.id) === selected.id) || null;
-    }
-
-    return (map.objects || []).find((item) => String(item.id) === selected.id) || null;
+    if (!selected) return null;
+    return getItem(selected.kind, selected.id) as TableItem | Zone | MapObject | null;
   }
 
   function updateLocalItem(kind: ItemKind, id: string, patch: Record<string, unknown>) {
-    setMap((current) => {
-      if (!current) return current;
-
+    setMapSafe((current) => {
       if (kind === 'table') {
         return {
           ...current,
@@ -499,7 +545,9 @@ export default function ConstructorApp() {
   }
 
   function selectItem(kind: ItemKind, id: string) {
-    setSelected({ kind, id });
+    const next = { kind, id };
+    selectedRef.current = next;
+    setSelected(next);
   }
 
   function getPointerPosition(event: ReactPointerEvent<HTMLDivElement>) {
@@ -512,8 +560,8 @@ export default function ConstructorApp() {
     const rect = canvas.getBoundingClientRect();
 
     return {
-      x: (event.clientX - rect.left + canvas.scrollLeft) / zoom,
-      y: (event.clientY - rect.top + canvas.scrollTop) / zoom,
+      x: (event.clientX - rect.left - viewX) / zoom,
+      y: (event.clientY - rect.top - viewY) / zoom,
     };
   }
 
@@ -527,60 +575,99 @@ export default function ConstructorApp() {
       return;
     }
 
-    const currentMap = map;
-    if (!currentMap) return;
-
-    const item =
-      kind === 'table'
-        ? (currentMap.tables || []).find((table) => String(table.id) === id)
-        : kind === 'zone'
-          ? (currentMap.zones || []).find((zone) => String(zone.id) === id)
-          : (currentMap.objects || []).find((object) => String(object.id) === id);
-
+    const item = getItem(kind, id);
     if (!item) return;
 
     const point = getPointerPosition(event);
 
-    setDragging({
+    const nextDragging: DragState = {
+      mode: 'item',
       kind,
       id,
       offsetX: point.x - numberValue((item as any).x),
       offsetY: point.y - numberValue((item as any).y),
-    });
+      moved: false,
+    };
+
+    draggingRef.current = nextDragging;
+    setDragging(nextDragging);
 
     try {
-      event.currentTarget.setPointerCapture(event.pointerId);
+      canvasRef.current?.setPointerCapture(event.pointerId);
     } catch {}
 
-    setMessage('Рухай пальцем. Прокрутка карти вимкнена до відпускання.');
+    setMessage('Рухай пальцем. Прокрутка вимкнена до відпускання.');
+  }
+
+  function startPan(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const nextDragging: DragState = {
+      mode: 'pan',
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startViewX: viewX,
+      startViewY: viewY,
+    };
+
+    draggingRef.current = nextDragging;
+    setDragging(nextDragging);
+
+    try {
+      canvasRef.current?.setPointerCapture(event.pointerId);
+    } catch {}
+
+    if (isEditMode) {
+      setMessage('Рухаєш карту. Щоб рухати елемент — тягни саме елемент.');
+    }
   }
 
   function moveDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!dragging || !isEditMode) return;
+    const drag = draggingRef.current;
+    if (!drag) return;
 
     event.preventDefault();
     event.stopPropagation();
 
-    const point = getPointerPosition(event);
+    if (drag.mode === 'pan') {
+      setViewX(drag.startViewX + event.clientX - drag.startClientX);
+      setViewY(drag.startViewY + event.clientY - drag.startClientY);
+      return;
+    }
 
-    updateLocalItem(dragging.kind, dragging.id, {
-      x: Math.round(point.x - dragging.offsetX),
-      y: Math.round(point.y - dragging.offsetY),
+    if (!isEditMode) return;
+
+    const point = getPointerPosition(event);
+    const newX = Math.round(point.x - drag.offsetX);
+    const newY = Math.round(point.y - drag.offsetY);
+
+    draggingRef.current = { ...drag, moved: true };
+    setDragging({ ...drag, moved: true });
+
+    updateLocalItem(drag.kind, drag.id, {
+      x: newX,
+      y: newY,
     });
   }
 
   function stopDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!dragging) return;
+    const drag = draggingRef.current;
+    if (!drag) return;
 
     event.preventDefault();
     event.stopPropagation();
 
     try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      canvasRef.current?.releasePointerCapture(event.pointerId);
     } catch {}
 
+    draggingRef.current = null;
     setDragging(null);
-    setMessage('Переміщено пальцем. Натисни «Зберегти».');
+
+    if (drag.mode === 'item' && drag.moved) {
+      setMessage('Переміщено пальцем. Натисни «Зберегти все».');
+    }
   }
 
   function moveSelected(dx: number, dy: number) {
@@ -593,11 +680,11 @@ export default function ConstructorApp() {
       y: Math.round(numberValue((item as any).y) + dy),
     });
 
-    setMessage('Переміщено кнопками. Натисни «Зберегти».');
+    setMessage('Переміщено кнопками. Натисни «Зберегти все».');
   }
 
   function setZoneStatusLocal(id: string, status: ZoneStatus) {
-    const zone = (map?.zones || []).find((item) => String(item.id) === id);
+    const zone = (mapRef.current?.zones || []).find((item) => String(item.id) === id);
     const description = (zone as any)?.description || '';
 
     if (status === 'open') {
@@ -638,7 +725,7 @@ export default function ConstructorApp() {
     setMessage('');
 
     try {
-      const tableNumber = String(((map?.tables || []).length || 0) + 1);
+      const tableNumber = String(((mapRef.current?.tables || []).length || 0) + 1);
       const width = shape === 'round' ? 96 : shape === 'square' ? 88 : 145;
       const height = shape === 'round' ? 96 : shape === 'square' ? 88 : 82;
 
@@ -657,7 +744,7 @@ export default function ConstructorApp() {
 
       await loadMap();
 
-      if (id) setSelected({ kind: 'table', id });
+      if (id) selectItem('table', id);
 
       setMessage(`Стіл ${tableNumber} додано`);
     } catch (error) {
@@ -688,7 +775,7 @@ export default function ConstructorApp() {
 
       await loadMap();
 
-      if (id) setSelected({ kind: 'zone', id });
+      if (id) selectItem('zone', id);
 
       setMessage('Зону додано');
     } catch (error) {
@@ -718,7 +805,7 @@ export default function ConstructorApp() {
 
       await loadMap();
 
-      if (id) setSelected({ kind: 'object', id });
+      if (id) selectItem('object', id);
 
       setMessage(`${item.label} додано`);
     } catch (error) {
@@ -728,100 +815,105 @@ export default function ConstructorApp() {
     }
   }
 
-  async function saveSelected() {
-    const item = findSelectedItem();
-
-    if (!selected || !item) return;
-
-    setLoading(true);
-    setMessage('');
-
+  async function safe(action: () => Promise<unknown>) {
     try {
-      if (selected.kind === 'table') {
-        const table = item as TableItem;
+      await action();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
-        await api.patch(`/constructor/tables/${selected.id}/position`, {
-          x: numberValue((table as any).x),
-          y: numberValue((table as any).y),
-          rotation: numberValue((table as any).rotation),
-        });
+  async function saveItem(kind: ItemKind, id: string) {
+    const item = getItem(kind, id);
+    if (!item) return true;
 
-        await api.patch(`/constructor/tables/${selected.id}/size`, {
-          width: numberValue((table as any).width, 90),
-          height: numberValue((table as any).height, 90),
-        });
+    let ok = true;
 
-        await api.patch(`/tables/${selected.id}`, {
+    if (kind === 'table') {
+      const table = item as TableItem;
+
+      ok =
+        (await safe(() =>
+          api.patch(`/constructor/tables/${id}/position`, {
+            x: numberValue((table as any).x),
+            y: numberValue((table as any).y),
+            rotation: numberValue((table as any).rotation),
+          }),
+        )) && ok;
+
+      ok =
+        (await safe(() =>
+          api.patch(`/constructor/tables/${id}/size`, {
+            width: numberValue((table as any).width, 90),
+            height: numberValue((table as any).height, 90),
+          }),
+        )) && ok;
+
+      await safe(() =>
+        api.patch(`/tables/${id}`, {
           tableNumber: (table as any).tableNumber,
           seats: Number((table as any).seats) || 1,
           shape: (table as any).shape,
-        });
+        }),
+      );
 
-        if ((table as any).isVisible === false) {
-          try {
-            await api.patch(`/constructor/tables/${selected.id}/hide`);
-          } catch {}
-        } else {
-          try {
-            await api.patch(`/constructor/tables/${selected.id}/show`);
-          } catch {}
-        }
-
-        await loadMap();
-        setSelected({ kind: 'table', id: selected.id });
+      if ((table as any).isVisible === false) {
+        await safe(() => api.patch(`/constructor/tables/${id}/hide`));
+      } else {
+        await safe(() => api.patch(`/constructor/tables/${id}/show`));
       }
+    }
 
-      if (selected.kind === 'zone') {
-        const zone = item as Zone;
-        const status = getZoneStatus(zone);
-        const cleanDescription = removeZoneStatusMarker((zone as any).description);
+    if (kind === 'zone') {
+      const zone = item as Zone;
+      const status = getZoneStatus(zone);
+      const cleanDescription = removeZoneStatusMarker((zone as any).description);
 
-        await api.patch(`/constructor/zones/${selected.id}/position`, {
-          x: numberValue((zone as any).x),
-          y: numberValue((zone as any).y),
-          rotation: numberValue((zone as any).rotation),
-        });
+      ok =
+        (await safe(() =>
+          api.patch(`/constructor/zones/${id}/position`, {
+            x: numberValue((zone as any).x),
+            y: numberValue((zone as any).y),
+            rotation: numberValue((zone as any).rotation),
+          }),
+        )) && ok;
 
-        await api.patch(`/constructor/zones/${selected.id}/size`, {
-          width: numberValue((zone as any).width, 300),
-          height: numberValue((zone as any).height, 200),
-        });
+      ok =
+        (await safe(() =>
+          api.patch(`/constructor/zones/${id}/size`, {
+            width: numberValue((zone as any).width, 300),
+            height: numberValue((zone as any).height, 200),
+          }),
+        )) && ok;
 
-        await api.patch(`/zones/${selected.id}`, {
+      await safe(() =>
+        api.patch(`/zones/${id}`, {
           name: (zone as any).name,
           color: (zone as any).color || '#2b2924',
           description: status === 'call_only' ? addCallOnlyMarker(cleanDescription) : cleanDescription,
           isVisible: status !== 'hidden',
-        });
+        }),
+      );
 
-        if (status === 'hidden') {
-          try {
-            await api.patch(`/constructor/zones/${selected.id}/hide`);
-          } catch {}
-        } else {
-          try {
-            await api.patch(`/constructor/zones/${selected.id}/show`);
-          } catch {}
-        }
-
-        if (status === 'closed') {
-          try {
-            await api.patch(`/zones/${selected.id}/close`);
-          } catch {}
-        } else {
-          try {
-            await api.patch(`/zones/${selected.id}/open`);
-          } catch {}
-        }
-
-        await loadMap();
-        setSelected({ kind: 'zone', id: selected.id });
+      if (status === 'hidden') {
+        await safe(() => api.patch(`/constructor/zones/${id}/hide`));
+      } else {
+        await safe(() => api.patch(`/constructor/zones/${id}/show`));
       }
 
-      if (selected.kind === 'object') {
-        const object = item as MapObject;
+      if (status === 'closed') {
+        await safe(() => api.patch(`/zones/${id}/close`));
+      } else {
+        await safe(() => api.patch(`/zones/${id}/open`));
+      }
+    }
 
-        await api.patch(`/constructor/objects/${selected.id}`, {
+    if (kind === 'object') {
+      const object = item as MapObject;
+
+      const fullSaved = await safe(() =>
+        api.patch(`/constructor/objects/${id}`, {
           objectType: (object as any).objectType,
           name: (object as any).name || '',
           x: numberValue((object as any).x),
@@ -830,16 +922,81 @@ export default function ConstructorApp() {
           height: numberValue((object as any).height, 100),
           rotation: numberValue((object as any).rotation),
           color: (object as any).color || '#525252',
-        });
+        }),
+      );
 
-        await loadMap();
-        setSelected({ kind: 'object', id: selected.id });
+      if (!fullSaved) {
+        ok =
+          (await safe(() =>
+            api.patch(`/constructor/objects/${id}/position`, {
+              x: numberValue((object as any).x),
+              y: numberValue((object as any).y),
+              rotation: numberValue((object as any).rotation),
+            }),
+          )) && ok;
+
+        ok =
+          (await safe(() =>
+            api.patch(`/constructor/objects/${id}/size`, {
+              width: numberValue((object as any).width, 100),
+              height: numberValue((object as any).height, 100),
+            }),
+          )) && ok;
       }
+    }
 
+    return ok;
+  }
+
+  async function saveSelected() {
+    const current = selectedRef.current;
+    if (!current) return;
+
+    setLoading(true);
+    setMessage('');
+
+    try {
+      const ok = await saveItem(current.kind, current.id);
+
+      await loadMap();
       setIsEditMode(false);
-      setMessage('Збережено. Переміщення заблоковано. Тепер можна крутити карту.');
+      setRotationPreview(false);
+      setMessage(ok ? 'Збережено. Переміщення заблоковано.' : 'Позицію збережено частково. Якщо знову зʼїде — потрібен backend PATCH objects.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Помилка збереження');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveAll() {
+    const current = mapRef.current;
+    if (!current) return;
+
+    setLoading(true);
+    setMessage('Зберігаю всю карту...');
+
+    try {
+      let ok = true;
+
+      for (const zone of current.zones || []) {
+        ok = (await saveItem('zone', String(zone.id))) && ok;
+      }
+
+      for (const object of current.objects || []) {
+        ok = (await saveItem('object', String(object.id))) && ok;
+      }
+
+      for (const table of current.tables || []) {
+        ok = (await saveItem('table', String(table.id))) && ok;
+      }
+
+      await loadMap();
+      setIsEditMode(false);
+      setRotationPreview(false);
+      setMessage(ok ? 'Вся карта збережена. Переміщення заблоковано.' : 'Карта збережена частково. Перевір backend для objects PATCH.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Помилка збереження карти');
     } finally {
       setLoading(false);
     }
@@ -870,7 +1027,7 @@ export default function ConstructorApp() {
 
         const id = getCreatedId(created);
         await loadMap();
-        if (id) setSelected({ kind: 'table', id });
+        if (id) selectItem('table', id);
       }
 
       if (selected.kind === 'zone') {
@@ -890,7 +1047,7 @@ export default function ConstructorApp() {
 
         const id = getCreatedId(created);
         await loadMap();
-        if (id) setSelected({ kind: 'zone', id });
+        if (id) selectItem('zone', id);
       }
 
       if (selected.kind === 'object') {
@@ -909,7 +1066,7 @@ export default function ConstructorApp() {
 
         const id = getCreatedId(created);
         await loadMap();
-        if (id) setSelected({ kind: 'object', id });
+        if (id) selectItem('object', id);
       }
 
       setMessage('Скопійовано');
@@ -939,6 +1096,7 @@ export default function ConstructorApp() {
         await api.delete(`/constructor/objects/${selected.id}`);
       }
 
+      selectedRef.current = null;
       setSelected(null);
       await loadMap();
       setMessage('Видалено');
@@ -960,23 +1118,18 @@ export default function ConstructorApp() {
       const current = (await mapApi.get()) as FullMapResponse;
 
       for (const object of current.objects || []) {
-        try {
-          await api.delete(`/constructor/objects/${object.id}`);
-        } catch {}
+        await safe(() => api.delete(`/constructor/objects/${object.id}`));
       }
 
       for (const table of current.tables || []) {
-        try {
-          await api.delete(`/tables/${table.id}`);
-        } catch {}
+        await safe(() => api.delete(`/tables/${table.id}`));
       }
 
       for (const zone of current.zones || []) {
-        try {
-          await api.delete(`/zones/${zone.id}`);
-        } catch {}
+        await safe(() => api.delete(`/zones/${zone.id}`));
       }
 
+      selectedRef.current = null;
       setSelected(null);
       await loadMap();
       setMessage('Карту очищено');
@@ -1006,6 +1159,13 @@ export default function ConstructorApp() {
     }
   }
 
+  function resetView() {
+    setViewX(0);
+    setViewY(0);
+    setZoom(0.48);
+    setRotationPreview(false);
+  }
+
   const selectedItem = findSelectedItem();
   const mapWidth = getMapWidth(map);
   const mapHeight = getMapHeight(map);
@@ -1014,8 +1174,8 @@ export default function ConstructorApp() {
     return getObjectLayer(String((a as any).objectType || '')) - getObjectLayer(String((b as any).objectType || ''));
   });
 
-  const mapTransform = isEditMode ? `scale(${zoom}) rotate(0deg)` : `scale(${zoom}) rotate(${mapRotation}deg)`;
-  const mapTransformOrigin = isEditMode ? 'top left' : 'center center';
+  const activeRotation = !isEditMode && rotationPreview ? mapRotation : 0;
+  const mapTransform = `translate(${viewX}px, ${viewY}px) scale(${zoom}) rotate(${activeRotation}deg)`;
 
   return (
     <div className="mx-auto max-w-md px-4 py-5 pb-28">
@@ -1025,11 +1185,14 @@ export default function ConstructorApp() {
         <h1 className="mt-2 text-3xl font-semibold">Конструктор</h1>
 
         <p className="mt-2 text-sm text-neutral-300">
-          У режимі редагування елементи рухаються пальцем, а прокрутка карти вимкнена. Крутити карту можна тільки коли конструктор заблокований.
+          Максимально удобный режим: в редактировании можно двигать и элементы, и саму карту. Тянешь элемент — двигается элемент. Тянешь пустое место карты — двигается карта. После «Зберегти все» всё остаётся на местах.
         </p>
 
         <button
-          onClick={() => setIsEditMode(!isEditMode)}
+          onClick={() => {
+            setIsEditMode(!isEditMode);
+            setRotationPreview(false);
+          }}
           className={`mt-4 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-4 font-semibold ${
             isEditMode ? 'bg-emerald-400 text-neutral-950' : 'bg-neutral-800 text-white'
           }`}
@@ -1054,27 +1217,49 @@ export default function ConstructorApp() {
 
         {!isEditMode && (
           <>
-            <label className="mt-4 block text-sm text-neutral-300">
-              Поворот карти: {mapRotation}°
-            </label>
+            <button
+              onClick={() => setRotationPreview(!rotationPreview)}
+              className="mt-4 w-full rounded-2xl border border-neutral-700 bg-neutral-900 px-4 py-3 text-sm"
+            >
+              {rotationPreview ? 'Вимкнути нахил карти' : 'Увімкнути нахил карти'}
+            </button>
 
-            <input
-              type="range"
-              min="-20"
-              max="20"
-              step="1"
-              value={mapRotation}
-              onChange={(event) => setMapRotation(Number(event.target.value))}
-              className="mt-2 w-full"
-            />
+            {rotationPreview && (
+              <>
+                <label className="mt-4 block text-sm text-neutral-300">
+                  Поворот карти: {mapRotation}°
+                </label>
+
+                <input
+                  type="range"
+                  min="-20"
+                  max="20"
+                  step="1"
+                  value={mapRotation}
+                  onChange={(event) => setMapRotation(Number(event.target.value))}
+                  className="mt-2 w-full"
+                />
+              </>
+            )}
           </>
         )}
 
         {isEditMode && (
           <div className="mt-4 rounded-2xl bg-amber-500/10 p-3 text-sm text-amber-100">
-            Під час редагування карта не крутиться і не прокручується, щоб елемент точно рухався пальцем.
+            Двигай элемент пальцем. Чтобы передвинуть саму карту — тяни пустое место карты.
           </div>
         )}
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button disabled={loading} onClick={saveAll} className="rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
+            <Save className="mr-1 inline h-4 w-4" />
+            Зберегти все
+          </button>
+
+          <button onClick={resetView} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-4 py-3 text-sm">
+            Вид по центру
+          </button>
+        </div>
       </section>
 
       <section className="mt-4 rounded-3xl border border-neutral-800 bg-neutral-950 p-4">
@@ -1281,7 +1466,7 @@ export default function ConstructorApp() {
 
           <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
             <div className="mb-2 flex items-center justify-between gap-2 text-xs text-neutral-300">
-              <span>Рух кнопками</span>
+              <span>Точный рух кнопками</span>
               <select
                 value={moveStep}
                 onChange={(event) => setMoveStep(Number(event.target.value))}
@@ -1351,7 +1536,7 @@ export default function ConstructorApp() {
 
           <span className="flex items-center gap-1">
             <Move className="h-3 w-3" />
-            {isEditMode ? 'рух пальцем' : 'можна крутити'}
+            {isEditMode ? 'елемент/карта' : 'двигай карту'}
           </span>
         </div>
 
@@ -1360,22 +1545,30 @@ export default function ConstructorApp() {
           onPointerMove={moveDrag}
           onPointerUp={stopDrag}
           onPointerCancel={stopDrag}
-          className="relative h-[700px] rounded-3xl border border-neutral-800 bg-[#0b0a08]"
+          className="relative h-[700px] overflow-hidden rounded-3xl border border-neutral-800 bg-[#0b0a08]"
           style={{
-            overflow: isEditMode ? 'hidden' : 'auto',
-            touchAction: isEditMode ? 'none' : 'pan-x pan-y',
+            touchAction: 'none',
+            cursor: isEditMode ? 'default' : 'grab',
           }}
         >
-          <div className="relative" style={{ width: mapWidth * zoom, height: mapHeight * zoom }}>
+          <div
+            className="relative origin-top-left"
+            style={{
+              width: mapWidth,
+              height: mapHeight,
+              transform: mapTransform,
+              transformOrigin: 'top left',
+            }}
+          >
             <div
-              className="relative origin-top-left overflow-hidden rounded-[34px]"
+              onPointerDown={startPan}
+              className="relative overflow-hidden rounded-[34px]"
               style={{
                 width: mapWidth,
                 height: mapHeight,
-                transform: mapTransform,
-                transformOrigin: mapTransformOrigin,
                 background:
                   'radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 30%), linear-gradient(135deg, #0b0a08, #17120d)',
+                touchAction: 'none',
               }}
             >
               <div
@@ -1384,6 +1577,7 @@ export default function ConstructorApp() {
                   backgroundImage:
                     'linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px)',
                   backgroundSize: '50px 50px',
+                  pointerEvents: 'none',
                 }}
               />
 
@@ -1409,7 +1603,7 @@ export default function ConstructorApp() {
                       boxShadow: isSelected ? '0 0 0 3px rgba(251,191,36,.9)' : 'inset 0 0 38px rgba(0,0,0,.62)',
                       opacity: status === 'hidden' ? 0.35 : 1,
                       zIndex: 1,
-                      touchAction: isEditMode ? 'none' : 'auto',
+                      touchAction: 'none',
                     }}
                   >
                     <span className="rounded-full bg-black/45 px-4 py-2 drop-shadow">
@@ -1442,7 +1636,7 @@ export default function ConstructorApp() {
                       boxShadow: getObjectShadow(type, isSelected),
                       fontSize: type === 'number' ? 28 : 13,
                       zIndex: getObjectLayer(type),
-                      touchAction: isEditMode ? 'none' : 'auto',
+                      touchAction: 'none',
                     }}
                   >
                     {text ? <span className="rounded-full bg-black/35 px-3 py-1 drop-shadow">{text}</span> : null}
@@ -1467,7 +1661,7 @@ export default function ConstructorApp() {
                       transform: `rotate(${numberValue((table as any).rotation)}deg)`,
                       opacity: (table as any).isVisible === false ? 0.35 : 1,
                       zIndex: 10,
-                      touchAction: isEditMode ? 'none' : 'auto',
+                      touchAction: 'none',
                     }}
                   >
                     <TableVisual table={table} selected={isSelected} />
