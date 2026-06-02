@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import {
   Copy,
   Lock,
@@ -24,15 +24,7 @@ type SelectedItem = {
   id: string;
 };
 
-type DragState = {
-  kind: ItemKind;
-  id: string;
-  offsetX: number;
-  offsetY: number;
-};
-
 type TableShape = 'square' | 'round' | 'rect';
-
 type ZoneStatus = 'open' | 'closed' | 'hidden' | 'call_only';
 
 type PaletteItem = {
@@ -113,11 +105,11 @@ function addCallOnlyMarker(description: string | null | undefined) {
 }
 
 function getZoneStatus(zone: Zone): ZoneStatus {
-  const description = String(zone.description || '');
+  const description = String((zone as any).description || '');
 
-  if (!zone.isVisible) return 'hidden';
+  if (!(zone as any).isVisible) return 'hidden';
   if (description.includes(ZONE_STATUS_MARKER)) return 'call_only';
-  if (zone.isClosed) return 'closed';
+  if ((zone as any).isClosed) return 'closed';
 
   return 'open';
 }
@@ -215,8 +207,8 @@ function getImageForType(objectType: string) {
 }
 
 function getFallbackBackground(object: MapObject) {
-  const type = String(object.objectType || '');
-  const color = String(object.color || '#525252');
+  const type = String((object as any).objectType || '');
+  const color = String((object as any).color || '#525252');
 
   if (type === 'floor_marble') {
     return `
@@ -290,7 +282,7 @@ function getFallbackBackground(object: MapObject) {
 }
 
 function getObjectBackground(object: MapObject) {
-  const type = String(object.objectType || '');
+  const type = String((object as any).objectType || '');
   const image = getImageForType(type);
   const fallback = getFallbackBackground(object);
 
@@ -307,8 +299,8 @@ function getObjectRadius(objectType: string) {
 }
 
 function getObjectText(object: MapObject) {
-  const type = String(object.objectType || '');
-  const name = String(object.name || '');
+  const type = String((object as any).objectType || '');
+  const name = String((object as any).name || '');
 
   if (type === 'text' || type === 'number') return name;
   return '';
@@ -323,7 +315,7 @@ function getObjectShadow(objectType: string, selected: boolean) {
 }
 
 function tableColors(table: TableItem, selected: boolean) {
-  const status = String(table.status || 'free');
+  const status = String((table as any).status || 'free');
 
   if (selected) {
     return {
@@ -341,15 +333,7 @@ function tableColors(table: TableItem, selected: boolean) {
     };
   }
 
-  if (status === 'closed') {
-    return {
-      background: '#525252',
-      border: '#a3a3a3',
-      shadow: '0 0 12px rgba(115,115,115,.5)',
-    };
-  }
-
-  if (status === 'reserved') {
+  if (status === 'reserved' || status === 'booked') {
     return {
       background: '#d97706',
       border: '#fcd34d',
@@ -413,12 +397,10 @@ export default function ConstructorApp() {
   const [map, setMap] = useState<FullMapResponse | null>(null);
   const [zoom, setZoom] = useState(0.48);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
-  const [dragging, setDragging] = useState<DragState | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
-
-  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [moveStep, setMoveStep] = useState(20);
 
   async function loadMap() {
     const data = (await mapApi.get()) as FullMapResponse;
@@ -476,9 +458,26 @@ export default function ConstructorApp() {
     });
   }
 
+  function selectItem(kind: ItemKind, id: string) {
+    setSelected({ kind, id });
+  }
+
+  function moveSelected(dx: number, dy: number) {
+    const item = findSelectedItem();
+
+    if (!selected || !item) return;
+
+    updateLocalItem(selected.kind, selected.id, {
+      x: Math.round(numberValue((item as any).x) + dx),
+      y: Math.round(numberValue((item as any).y) + dy),
+    });
+
+    setMessage('Переміщено кнопками. Натисни «Зберегти».');
+  }
+
   function setZoneStatusLocal(id: string, status: ZoneStatus) {
     const zone = (map?.zones || []).find((item) => String(item.id) === id);
-    const description = zone?.description || '';
+    const description = (zone as any)?.description || '';
 
     if (status === 'open') {
       updateLocalItem('zone', id, {
@@ -511,70 +510,6 @@ export default function ConstructorApp() {
         description: addCallOnlyMarker(description),
       });
     }
-  }
-
-  function getPointerPosition(event: ReactPointerEvent<HTMLElement>) {
-    const canvas = canvasRef.current;
-
-    if (!canvas) return { x: 0, y: 0 };
-
-    const rect = canvas.getBoundingClientRect();
-
-    return {
-      x: (event.clientX - rect.left + canvas.scrollLeft) / zoom,
-      y: (event.clientY - rect.top + canvas.scrollTop) / zoom,
-    };
-  }
-
-  function startPointer(event: ReactPointerEvent<HTMLElement>, kind: ItemKind, id: string) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const currentMap = map;
-    if (!currentMap) return;
-
-    const item =
-      kind === 'table'
-        ? (currentMap.tables || []).find((table) => String(table.id) === id)
-        : kind === 'zone'
-          ? (currentMap.zones || []).find((zone) => String(zone.id) === id)
-          : (currentMap.objects || []).find((object) => String(object.id) === id);
-
-    if (!item) return;
-
-    setSelected({ kind, id });
-
-    if (!isEditMode) return;
-
-    const point = getPointerPosition(event);
-
-    setDragging({
-      kind,
-      id,
-      offsetX: point.x - numberValue((item as any).x),
-      offsetY: point.y - numberValue((item as any).y),
-    });
-
-    canvasRef.current?.setPointerCapture(event.pointerId);
-  }
-
-  function moveDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!dragging || !isEditMode) return;
-
-    const point = getPointerPosition(event);
-
-    updateLocalItem(dragging.kind, dragging.id, {
-      x: Math.round(point.x - dragging.offsetX),
-      y: Math.round(point.y - dragging.offsetY),
-    });
-  }
-
-  function stopDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!dragging) return;
-
-    setDragging(null);
-    canvasRef.current?.releasePointerCapture(event.pointerId);
-    setMessage('Переміщено. Натисни «Зберегти».');
   }
 
   async function createTable(shape: TableShape) {
@@ -685,41 +620,23 @@ export default function ConstructorApp() {
         const table = item as TableItem;
 
         await api.patch(`/constructor/tables/${selected.id}/position`, {
-          x: numberValue(table.x),
-          y: numberValue(table.y),
-          rotation: numberValue(table.rotation),
+          x: numberValue((table as any).x),
+          y: numberValue((table as any).y),
+          rotation: numberValue((table as any).rotation),
         });
 
         await api.patch(`/constructor/tables/${selected.id}/size`, {
-          width: numberValue(table.width, 90),
-          height: numberValue(table.height, 90),
+          width: numberValue((table as any).width, 90),
+          height: numberValue((table as any).height, 90),
         });
 
         await api.patch(`/tables/${selected.id}`, {
-          tableNumber: table.tableNumber,
-          seats: Number(table.seats) || 1,
-          shape: table.shape,
+          tableNumber: (table as any).tableNumber,
+          seats: Number((table as any).seats) || 1,
+          shape: (table as any).shape,
         });
 
-        if (table.status === 'free') {
-          try {
-            await api.patch(`/tables/${selected.id}/free`);
-          } catch {}
-        }
-
-        if (table.status === 'occupied') {
-          try {
-            await api.patch(`/tables/${selected.id}/occupied`);
-          } catch {}
-        }
-
-        if (table.status === 'closed') {
-          try {
-            await api.patch(`/tables/${selected.id}/close`);
-          } catch {}
-        }
-
-        if (table.isVisible === false) {
+        if ((table as any).isVisible === false) {
           try {
             await api.patch(`/constructor/tables/${selected.id}/hide`);
           } catch {}
@@ -736,22 +653,22 @@ export default function ConstructorApp() {
       if (selected.kind === 'zone') {
         const zone = item as Zone;
         const status = getZoneStatus(zone);
-        const cleanDescription = removeZoneStatusMarker(zone.description);
+        const cleanDescription = removeZoneStatusMarker((zone as any).description);
 
         await api.patch(`/constructor/zones/${selected.id}/position`, {
-          x: numberValue(zone.x),
-          y: numberValue(zone.y),
-          rotation: numberValue(zone.rotation),
+          x: numberValue((zone as any).x),
+          y: numberValue((zone as any).y),
+          rotation: numberValue((zone as any).rotation),
         });
 
         await api.patch(`/constructor/zones/${selected.id}/size`, {
-          width: numberValue(zone.width, 300),
-          height: numberValue(zone.height, 200),
+          width: numberValue((zone as any).width, 300),
+          height: numberValue((zone as any).height, 200),
         });
 
         await api.patch(`/zones/${selected.id}`, {
-          name: zone.name,
-          color: zone.color || '#2b2924',
+          name: (zone as any).name,
+          color: (zone as any).color || '#2b2924',
           description: status === 'call_only' ? addCallOnlyMarker(cleanDescription) : cleanDescription,
           isVisible: status !== 'hidden',
         });
@@ -784,14 +701,14 @@ export default function ConstructorApp() {
         const object = item as MapObject;
 
         await api.patch(`/constructor/objects/${selected.id}`, {
-          objectType: object.objectType,
-          name: object.name || '',
-          x: numberValue(object.x),
-          y: numberValue(object.y),
-          width: numberValue(object.width, 100),
-          height: numberValue(object.height, 100),
-          rotation: numberValue(object.rotation),
-          color: object.color || '#525252',
+          objectType: (object as any).objectType,
+          name: (object as any).name || '',
+          x: numberValue((object as any).x),
+          y: numberValue((object as any).y),
+          width: numberValue((object as any).width, 100),
+          height: numberValue((object as any).height, 100),
+          rotation: numberValue((object as any).rotation),
+          color: (object as any).color || '#525252',
         });
 
         await loadMap();
@@ -820,14 +737,14 @@ export default function ConstructorApp() {
         const table = item as TableItem;
 
         const created = await api.post('/tables', {
-          tableNumber: String(table.tableNumber || ''),
-          seats: Number(table.seats) || 4,
-          shape: table.shape || 'square',
-          x: numberValue(table.x) + 40,
-          y: numberValue(table.y) + 40,
-          width: numberValue(table.width, 90),
-          height: numberValue(table.height, 90),
-          rotation: numberValue(table.rotation),
+          tableNumber: String((table as any).tableNumber || ''),
+          seats: Number((table as any).seats) || 4,
+          shape: (table as any).shape || 'square',
+          x: numberValue((table as any).x) + 40,
+          y: numberValue((table as any).y) + 40,
+          width: numberValue((table as any).width, 90),
+          height: numberValue((table as any).height, 90),
+          rotation: numberValue((table as any).rotation),
         });
 
         const id = getCreatedId(created);
@@ -839,15 +756,15 @@ export default function ConstructorApp() {
         const zone = item as Zone;
 
         const created = await api.post('/zones', {
-          name: `${zone.name} копія`,
-          color: zone.color || '#2b2924',
-          description: zone.description || '',
-          x: numberValue(zone.x) + 40,
-          y: numberValue(zone.y) + 40,
-          width: numberValue(zone.width, 300),
-          height: numberValue(zone.height, 200),
-          rotation: numberValue(zone.rotation),
-          isVisible: zone.isVisible,
+          name: `${(zone as any).name} копія`,
+          color: (zone as any).color || '#2b2924',
+          description: (zone as any).description || '',
+          x: numberValue((zone as any).x) + 40,
+          y: numberValue((zone as any).y) + 40,
+          width: numberValue((zone as any).width, 300),
+          height: numberValue((zone as any).height, 200),
+          rotation: numberValue((zone as any).rotation),
+          isVisible: (zone as any).isVisible,
         });
 
         const id = getCreatedId(created);
@@ -859,14 +776,14 @@ export default function ConstructorApp() {
         const object = item as MapObject;
 
         const created = await api.post('/constructor/objects', {
-          objectType: object.objectType,
-          name: object.name || '',
-          x: numberValue(object.x) + 40,
-          y: numberValue(object.y) + 40,
-          width: numberValue(object.width, 100),
-          height: numberValue(object.height, 100),
-          rotation: numberValue(object.rotation),
-          color: object.color || '#525252',
+          objectType: (object as any).objectType,
+          name: (object as any).name || '',
+          x: numberValue((object as any).x) + 40,
+          y: numberValue((object as any).y) + 40,
+          width: numberValue((object as any).width, 100),
+          height: numberValue((object as any).height, 100),
+          rotation: numberValue((object as any).rotation),
+          color: (object as any).color || '#525252',
         });
 
         const id = getCreatedId(created);
@@ -973,7 +890,7 @@ export default function ConstructorApp() {
   const mapHeight = getMapHeight(map);
 
   const sortedObjects = [...(map?.objects || [])].sort((a, b) => {
-    return getObjectLayer(String(a.objectType || '')) - getObjectLayer(String(b.objectType || ''));
+    return getObjectLayer(String((a as any).objectType || '')) - getObjectLayer(String((b as any).objectType || ''));
   });
 
   return (
@@ -984,7 +901,7 @@ export default function ConstructorApp() {
         <h1 className="mt-2 text-3xl font-semibold">Конструктор</h1>
 
         <p className="mt-2 text-sm text-neutral-300">
-          Натисни елемент, щоб відкрити налаштування. Переміщення працює тільки у режимі редагування.
+          Стабільний режим для телефону: елементи не рухаються пальцем. Обери елемент і рухай кнопками або через X/Y.
         </p>
 
         <button
@@ -1104,7 +1021,7 @@ export default function ConstructorApp() {
                 <label className="text-xs text-neutral-400">
                   Номер
                   <input
-                    value={String((selectedItem as TableItem).tableNumber || '')}
+                    value={String((selectedItem as any).tableNumber || '')}
                     onChange={(event) => updateLocalItem(selected.kind, selected.id, { tableNumber: event.target.value })}
                     className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                   />
@@ -1114,7 +1031,7 @@ export default function ConstructorApp() {
                   Місць
                   <input
                     type="number"
-                    value={Number((selectedItem as TableItem).seats || 1)}
+                    value={Number((selectedItem as any).seats || 1)}
                     onChange={(event) => updateLocalItem(selected.kind, selected.id, { seats: Number(event.target.value) })}
                     className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                   />
@@ -1122,10 +1039,10 @@ export default function ConstructorApp() {
               </div>
 
               <button
-                onClick={() => updateLocalItem(selected.kind, selected.id, { isVisible: !(selectedItem as TableItem).isVisible })}
+                onClick={() => updateLocalItem(selected.kind, selected.id, { isVisible: !(selectedItem as any).isVisible })}
                 className="mt-3 w-full rounded-2xl border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm"
               >
-                {(selectedItem as TableItem).isVisible === false ? 'Показати гостям' : 'Приховати від гостей'}
+                {(selectedItem as any).isVisible === false ? 'Показати гостям' : 'Приховати від гостей'}
               </button>
             </>
           )}
@@ -1135,7 +1052,7 @@ export default function ConstructorApp() {
               <label className="text-xs text-neutral-400">
                 Назва зони
                 <input
-                  value={String((selectedItem as Zone).name || '')}
+                  value={String((selectedItem as any).name || '')}
                   onChange={(event) => updateLocalItem(selected.kind, selected.id, { name: event.target.value })}
                   className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                 />
@@ -1145,7 +1062,7 @@ export default function ConstructorApp() {
                 Колір
                 <input
                   type="color"
-                  value={String((selectedItem as Zone).color || '#2b2924')}
+                  value={String((selectedItem as any).color || '#2b2924')}
                   onChange={(event) => updateLocalItem(selected.kind, selected.id, { color: event.target.value })}
                   className="mt-1 h-10 w-full rounded-xl bg-neutral-800 px-2 py-1 outline-none"
                 />
@@ -1172,18 +1089,18 @@ export default function ConstructorApp() {
               <label className="text-xs text-neutral-400">
                 Текст / назва
                 <input
-                  value={String((selectedItem as MapObject).name || '')}
+                  value={String((selectedItem as any).name || '')}
                   onChange={(event) => updateLocalItem(selected.kind, selected.id, { name: event.target.value })}
                   className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none"
                 />
               </label>
 
-              {!isWaterOrGrass(String((selectedItem as MapObject).objectType || '')) && (
+              {!isWaterOrGrass(String((selectedItem as any).objectType || '')) && (
                 <label className="text-xs text-neutral-400">
                   Колір
                   <input
                     type="color"
-                    value={String((selectedItem as MapObject).color || '#525252')}
+                    value={String((selectedItem as any).color || '#525252')}
                     onChange={(event) => updateLocalItem(selected.kind, selected.id, { color: event.target.value })}
                     className="mt-1 h-10 w-full rounded-xl bg-neutral-800 px-2 py-1 outline-none"
                   />
@@ -1212,6 +1129,32 @@ export default function ConstructorApp() {
               Y
               <input type="number" value={Math.round(numberValue((selectedItem as any).y))} onChange={(event) => updateLocalItem(selected.kind, selected.id, { y: Number(event.target.value) })} className="mt-1 w-full rounded-xl bg-neutral-800 px-3 py-2 text-sm text-white outline-none" />
             </label>
+          </div>
+
+          <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2 text-xs text-neutral-300">
+              <span>Рух кнопками</span>
+              <select
+                value={moveStep}
+                onChange={(event) => setMoveStep(Number(event.target.value))}
+                className="rounded-xl bg-neutral-800 px-2 py-1"
+              >
+                <option value={5}>5 px</option>
+                <option value={10}>10 px</option>
+                <option value={20}>20 px</option>
+                <option value={50}>50 px</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <span />
+              <button disabled={!isEditMode} onClick={() => moveSelected(0, -moveStep)} className="rounded-xl bg-neutral-800 px-3 py-3 disabled:opacity-40">↑</button>
+              <span />
+
+              <button disabled={!isEditMode} onClick={() => moveSelected(-moveStep, 0)} className="rounded-xl bg-neutral-800 px-3 py-3 disabled:opacity-40">←</button>
+              <button disabled={!isEditMode} onClick={() => moveSelected(0, moveStep)} className="rounded-xl bg-neutral-800 px-3 py-3 disabled:opacity-40">↓</button>
+              <button disabled={!isEditMode} onClick={() => moveSelected(moveStep, 0)} className="rounded-xl bg-neutral-800 px-3 py-3 disabled:opacity-40">→</button>
+            </div>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -1260,17 +1203,11 @@ export default function ConstructorApp() {
 
           <span className="flex items-center gap-1">
             <Move className="h-3 w-3" />
-            {isEditMode ? 'рухати' : 'заблок.'}
+            {isEditMode ? 'кнопками' : 'заблок.'}
           </span>
         </div>
 
-        <div
-          ref={canvasRef}
-          onPointerMove={moveDrag}
-          onPointerUp={stopDrag}
-          onPointerCancel={stopDrag}
-          className="relative h-[700px] overflow-auto rounded-3xl border border-neutral-800 bg-[#0b0a08]"
-        >
+        <div className="relative h-[700px] overflow-auto rounded-3xl border border-neutral-800 bg-[#0b0a08]">
           <div className="relative" style={{ width: mapWidth * zoom, height: mapHeight * zoom }}>
             <div
               className="relative origin-top-left overflow-hidden rounded-[34px]"
@@ -1300,15 +1237,15 @@ export default function ConstructorApp() {
                 return (
                   <div
                     key={id}
-                    onPointerDown={(event) => startPointer(event, 'zone', id)}
-                    className="absolute flex touch-none select-none items-center justify-center border text-center text-sm font-semibold text-white"
+                    onClick={() => selectItem('zone', id)}
+                    className="absolute flex select-none items-center justify-center border text-center text-sm font-semibold text-white"
                     style={{
-                      left: numberValue(zone.x),
-                      top: numberValue(zone.y),
-                      width: numberValue(zone.width, 300),
-                      height: numberValue(zone.height, 200),
-                      transform: `rotate(${numberValue(zone.rotation)}deg)`,
-                      background: `radial-gradient(circle at 20% 20%, rgba(245,158,11,.10), transparent 30%), linear-gradient(135deg, ${zone.color || '#2b2924'}, #15110d)`,
+                      left: numberValue((zone as any).x),
+                      top: numberValue((zone as any).y),
+                      width: numberValue((zone as any).width, 300),
+                      height: numberValue((zone as any).height, 200),
+                      transform: `rotate(${numberValue((zone as any).rotation)}deg)`,
+                      background: `radial-gradient(circle at 20% 20%, rgba(245,158,11,.10), transparent 30%), linear-gradient(135deg, ${(zone as any).color || '#2b2924'}, #15110d)`,
                       borderRadius: '28px',
                       borderColor: isSelected ? '#fcd34d' : 'rgba(255,255,255,.18)',
                       boxShadow: isSelected ? '0 0 0 3px rgba(251,191,36,.9)' : 'inset 0 0 38px rgba(0,0,0,.62)',
@@ -1317,29 +1254,29 @@ export default function ConstructorApp() {
                     }}
                   >
                     <span className="rounded-full bg-black/45 px-4 py-2 drop-shadow">
-                      {getZoneStatusIcon(status)} {zone.name}
+                      {getZoneStatusIcon(status)} {(zone as any).name}
                     </span>
                   </div>
                 );
               })}
 
               {sortedObjects.map((object) => {
-                const id = String(object.id);
-                const type = String(object.objectType || '');
+                const id = String((object as any).id);
+                const type = String((object as any).objectType || '');
                 const isSelected = selected?.kind === 'object' && selected.id === id;
                 const text = getObjectText(object);
 
                 return (
                   <div
                     key={id}
-                    onPointerDown={(event) => startPointer(event, 'object', id)}
-                    className="absolute flex touch-none select-none items-center justify-center border text-center text-xs font-semibold text-white"
+                    onClick={() => selectItem('object', id)}
+                    className="absolute flex select-none items-center justify-center border text-center text-xs font-semibold text-white"
                     style={{
-                      left: numberValue(object.x),
-                      top: numberValue(object.y),
-                      width: numberValue(object.width, 100),
-                      height: numberValue(object.height, 100),
-                      transform: `rotate(${numberValue(object.rotation)}deg)`,
+                      left: numberValue((object as any).x),
+                      top: numberValue((object as any).y),
+                      width: numberValue((object as any).width, 100),
+                      height: numberValue((object as any).height, 100),
+                      transform: `rotate(${numberValue((object as any).rotation)}deg)`,
                       background: getObjectBackground(object),
                       borderRadius: getObjectRadius(type),
                       borderColor: isSelected ? '#fcd34d' : 'rgba(255,255,255,.18)',
@@ -1360,15 +1297,15 @@ export default function ConstructorApp() {
                 return (
                   <div
                     key={id}
-                    onPointerDown={(event) => startPointer(event, 'table', id)}
-                    className="absolute touch-none select-none"
+                    onClick={() => selectItem('table', id)}
+                    className="absolute select-none"
                     style={{
-                      left: numberValue(table.x),
-                      top: numberValue(table.y),
-                      width: numberValue(table.width, 80),
-                      height: numberValue(table.height, 70),
-                      transform: `rotate(${numberValue(table.rotation)}deg)`,
-                      opacity: table.isVisible === false ? 0.35 : 1,
+                      left: numberValue((table as any).x),
+                      top: numberValue((table as any).y),
+                      width: numberValue((table as any).width, 80),
+                      height: numberValue((table as any).height, 70),
+                      transform: `rotate(${numberValue((table as any).rotation)}deg)`,
+                      opacity: (table as any).isVisible === false ? 0.35 : 1,
                       zIndex: 10,
                     }}
                   >
