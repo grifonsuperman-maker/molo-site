@@ -42,7 +42,6 @@ type PaletteItem = {
   width: number;
   height: number;
   color: string;
-  allowColor?: boolean;
 };
 
 const DEFAULT_MAP_WIDTH = 2200;
@@ -54,8 +53,8 @@ const FLOOR_ITEMS: PaletteItem[] = [
   { label: 'Плитка', objectType: 'floor_tile', name: '', width: 520, height: 320, color: '#57534e' },
   { label: 'Тротуар', objectType: 'floor_pavement', name: '', width: 520, height: 260, color: '#44403c' },
   { label: 'Дерево', objectType: 'floor_wood', name: '', width: 520, height: 320, color: '#7c4a1e' },
-  { label: 'Газон', objectType: 'floor_grass', name: '', width: 520, height: 320, color: '#3f6212', allowColor: false },
-  { label: 'Вода', objectType: 'floor_water', name: '', width: 520, height: 320, color: '#075985', allowColor: false },
+  { label: 'Газон', objectType: 'floor_grass', name: '', width: 520, height: 320, color: '#3f6212' },
+  { label: 'Вода', objectType: 'floor_water', name: '', width: 520, height: 320, color: '#075985' },
 ];
 
 const BUILD_ITEMS: PaletteItem[] = [
@@ -76,7 +75,7 @@ const DECOR_ITEMS: PaletteItem[] = [
   { label: 'Стілець 2', objectType: 'chair_soft', name: '', width: 66, height: 66, color: '#a16207' },
   { label: 'Бар. стілець', objectType: 'chair_bar', name: '', width: 54, height: 74, color: '#78350f' },
   { label: 'Дерево', objectType: 'tree', name: '', width: 90, height: 90, color: '#166534' },
-  { label: 'Кущ', objectType: 'bush', name: '', width: 100, height: 75, color: '#3f6212', allowColor: false },
+  { label: 'Кущ', objectType: 'bush', name: '', width: 100, height: 75, color: '#3f6212' },
   { label: 'Камінь', objectType: 'stones', name: '', width: 130, height: 75, color: '#78716c' },
   { label: 'Ліхтар', objectType: 'lamp_post', name: '', width: 62, height: 110, color: '#facc15' },
   { label: 'Світло', objectType: 'spot_light', name: '', width: 80, height: 80, color: '#facc15' },
@@ -121,13 +120,6 @@ function getZoneStatus(zone: Zone): ZoneStatus {
   if (zone.isClosed) return 'closed';
 
   return 'open';
-}
-
-function getZoneStatusLabel(status: ZoneStatus) {
-  if (status === 'closed') return 'Закрита';
-  if (status === 'hidden') return 'Прихована';
-  if (status === 'call_only') return 'Тільки дзвінок';
-  return 'Відкрита';
 }
 
 function getZoneStatusIcon(status: ZoneStatus) {
@@ -565,9 +557,7 @@ export default function ConstructorApp() {
 
     setSelected({ kind, id });
 
-    if (!isEditMode) {
-      return;
-    }
+    if (!isEditMode) return;
 
     const point = getPointerPosition(event);
 
@@ -806,7 +796,7 @@ export default function ConstructorApp() {
       if (selected.kind === 'object') {
         const object = item as MapObject;
 
-        const body = {
+        await api.patch(`/constructor/objects/${selected.id}`, {
           objectType: object.objectType,
           name: object.name || '',
           x: numberValue(object.x),
@@ -815,22 +805,10 @@ export default function ConstructorApp() {
           height: numberValue(object.height, 100),
           rotation: numberValue(object.rotation),
           color: object.color || '#525252',
-        };
-
-        const created = await api.post('/constructor/objects', body);
-        const newId = getCreatedId(created);
-
-        try {
-          await api.delete(`/constructor/objects/${selected.id}`);
-        } catch {}
+        });
 
         await loadMap();
-
-        if (newId) {
-          setSelected({ kind: 'object', id: newId });
-        } else {
-          setSelected(null);
-        }
+        setSelected({ kind: 'object', id: selected.id });
       }
 
       setIsEditMode(false);
@@ -1340,7 +1318,7 @@ export default function ConstructorApp() {
               style={{
                 width: mapWidth,
                 height: mapHeight,
-                transform: `scale(${zoom}) rotate(${mapRotation}deg)`,
+                transform: `scale(${zoom}) rotate(${isEditMode ? 0 : mapRotation}deg)`,
                 transformOrigin: 'center center',
                 background:
                   'radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 30%), linear-gradient(135deg, #0b0a08, #17120d)',
