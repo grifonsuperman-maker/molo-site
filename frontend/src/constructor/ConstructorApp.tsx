@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import {
   Copy,
   Lock,
@@ -22,6 +22,13 @@ type ItemKind = 'table' | 'zone' | 'object';
 type SelectedItem = {
   kind: ItemKind;
   id: string;
+};
+
+type DragState = {
+  kind: ItemKind;
+  id: string;
+  offsetX: number;
+  offsetY: number;
 };
 
 type TableShape = 'square' | 'round' | 'rect';
@@ -396,11 +403,44 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
 export default function ConstructorApp() {
   const [map, setMap] = useState<FullMapResponse | null>(null);
   const [zoom, setZoom] = useState(0.48);
+  const [mapRotation, setMapRotation] = useState(0);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
+  const [dragging, setDragging] = useState<DragState | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [moveStep, setMoveStep] = useState(20);
+
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const savedRotation = Number(window.localStorage.getItem('molo_map_rotation') || 0);
+    if (Number.isFinite(savedRotation)) {
+      setMapRotation(savedRotation);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem('molo_map_rotation', String(mapRotation));
+  }, [mapRotation]);
+
+  useEffect(() => {
+    if (!dragging) return;
+
+    const previousUserSelect = document.body.style.userSelect;
+    const previousTouchAction = document.body.style.touchAction;
+    const previousOverscroll = document.body.style.overscrollBehavior;
+
+    document.body.style.userSelect = 'none';
+    document.body.style.touchAction = 'none';
+    document.body.style.overscrollBehavior = 'none';
+
+    return () => {
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.touchAction = previousTouchAction;
+      document.body.style.overscrollBehavior = previousOverscroll;
+    };
+  }, [dragging]);
 
   async function loadMap() {
     const data = (await mapApi.get()) as FullMapResponse;
@@ -460,6 +500,87 @@ export default function ConstructorApp() {
 
   function selectItem(kind: ItemKind, id: string) {
     setSelected({ kind, id });
+  }
+
+  function getPointerPosition(event: ReactPointerEvent<HTMLDivElement>) {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return { x: 0, y: 0 };
+    }
+
+    const rect = canvas.getBoundingClientRect();
+
+    return {
+      x: (event.clientX - rect.left + canvas.scrollLeft) / zoom,
+      y: (event.clientY - rect.top + canvas.scrollTop) / zoom,
+    };
+  }
+
+  function startPointer(event: ReactPointerEvent<HTMLDivElement>, kind: ItemKind, id: string) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    selectItem(kind, id);
+
+    if (!isEditMode) {
+      return;
+    }
+
+    const currentMap = map;
+    if (!currentMap) return;
+
+    const item =
+      kind === 'table'
+        ? (currentMap.tables || []).find((table) => String(table.id) === id)
+        : kind === 'zone'
+          ? (currentMap.zones || []).find((zone) => String(zone.id) === id)
+          : (currentMap.objects || []).find((object) => String(object.id) === id);
+
+    if (!item) return;
+
+    const point = getPointerPosition(event);
+
+    setDragging({
+      kind,
+      id,
+      offsetX: point.x - numberValue((item as any).x),
+      offsetY: point.y - numberValue((item as any).y),
+    });
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {}
+
+    setMessage('Рухай пальцем. Прокрутка карти вимкнена до відпускання.');
+  }
+
+  function moveDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragging || !isEditMode) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const point = getPointerPosition(event);
+
+    updateLocalItem(dragging.kind, dragging.id, {
+      x: Math.round(point.x - dragging.offsetX),
+      y: Math.round(point.y - dragging.offsetY),
+    });
+  }
+
+  function stopDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragging) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {}
+
+    setDragging(null);
+    setMessage('Переміщено пальцем. Натисни «Зберегти».');
   }
 
   function moveSelected(dx: number, dy: number) {
@@ -716,7 +837,7 @@ export default function ConstructorApp() {
       }
 
       setIsEditMode(false);
-      setMessage('Збережено. Переміщення заблоковано.');
+      setMessage('Збережено. Переміщення заблоковано. Тепер можна крутити карту.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Помилка збереження');
     } finally {
@@ -893,6 +1014,9 @@ export default function ConstructorApp() {
     return getObjectLayer(String((a as any).objectType || '')) - getObjectLayer(String((b as any).objectType || ''));
   });
 
+  const mapTransform = isEditMode ? `scale(${zoom}) rotate(0deg)` : `scale(${zoom}) rotate(${mapRotation}deg)`;
+  const mapTransformOrigin = isEditMode ? 'top left' : 'center center';
+
   return (
     <div className="mx-auto max-w-md px-4 py-5 pb-28">
       <section className="rounded-3xl border border-neutral-800 bg-gradient-to-br from-neutral-900 to-black p-5 shadow-2xl">
@@ -901,7 +1025,7 @@ export default function ConstructorApp() {
         <h1 className="mt-2 text-3xl font-semibold">Конструктор</h1>
 
         <p className="mt-2 text-sm text-neutral-300">
-          Стабільний режим для телефону: елементи не рухаються пальцем. Обери елемент і рухай кнопками або через X/Y.
+          У режимі редагування елементи рухаються пальцем, а прокрутка карти вимкнена. Крутити карту можна тільки коли конструктор заблокований.
         </p>
 
         <button
@@ -927,6 +1051,30 @@ export default function ConstructorApp() {
           onChange={(event) => setZoom(Number(event.target.value))}
           className="mt-2 w-full"
         />
+
+        {!isEditMode && (
+          <>
+            <label className="mt-4 block text-sm text-neutral-300">
+              Поворот карти: {mapRotation}°
+            </label>
+
+            <input
+              type="range"
+              min="-20"
+              max="20"
+              step="1"
+              value={mapRotation}
+              onChange={(event) => setMapRotation(Number(event.target.value))}
+              className="mt-2 w-full"
+            />
+          </>
+        )}
+
+        {isEditMode && (
+          <div className="mt-4 rounded-2xl bg-amber-500/10 p-3 text-sm text-amber-100">
+            Під час редагування карта не крутиться і не прокручується, щоб елемент точно рухався пальцем.
+          </div>
+        )}
       </section>
 
       <section className="mt-4 rounded-3xl border border-neutral-800 bg-neutral-950 p-4">
@@ -1203,19 +1351,29 @@ export default function ConstructorApp() {
 
           <span className="flex items-center gap-1">
             <Move className="h-3 w-3" />
-            {isEditMode ? 'кнопками' : 'заблок.'}
+            {isEditMode ? 'рух пальцем' : 'можна крутити'}
           </span>
         </div>
 
-        <div className="relative h-[700px] overflow-auto rounded-3xl border border-neutral-800 bg-[#0b0a08]">
+        <div
+          ref={canvasRef}
+          onPointerMove={moveDrag}
+          onPointerUp={stopDrag}
+          onPointerCancel={stopDrag}
+          className="relative h-[700px] rounded-3xl border border-neutral-800 bg-[#0b0a08]"
+          style={{
+            overflow: isEditMode ? 'hidden' : 'auto',
+            touchAction: isEditMode ? 'none' : 'pan-x pan-y',
+          }}
+        >
           <div className="relative" style={{ width: mapWidth * zoom, height: mapHeight * zoom }}>
             <div
               className="relative origin-top-left overflow-hidden rounded-[34px]"
               style={{
                 width: mapWidth,
                 height: mapHeight,
-                transform: `scale(${zoom})`,
-                transformOrigin: 'top left',
+                transform: mapTransform,
+                transformOrigin: mapTransformOrigin,
                 background:
                   'radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 30%), linear-gradient(135deg, #0b0a08, #17120d)',
               }}
@@ -1237,7 +1395,7 @@ export default function ConstructorApp() {
                 return (
                   <div
                     key={id}
-                    onClick={() => selectItem('zone', id)}
+                    onPointerDown={(event) => startPointer(event, 'zone', id)}
                     className="absolute flex select-none items-center justify-center border text-center text-sm font-semibold text-white"
                     style={{
                       left: numberValue((zone as any).x),
@@ -1251,6 +1409,7 @@ export default function ConstructorApp() {
                       boxShadow: isSelected ? '0 0 0 3px rgba(251,191,36,.9)' : 'inset 0 0 38px rgba(0,0,0,.62)',
                       opacity: status === 'hidden' ? 0.35 : 1,
                       zIndex: 1,
+                      touchAction: isEditMode ? 'none' : 'auto',
                     }}
                   >
                     <span className="rounded-full bg-black/45 px-4 py-2 drop-shadow">
@@ -1269,7 +1428,7 @@ export default function ConstructorApp() {
                 return (
                   <div
                     key={id}
-                    onClick={() => selectItem('object', id)}
+                    onPointerDown={(event) => startPointer(event, 'object', id)}
                     className="absolute flex select-none items-center justify-center border text-center text-xs font-semibold text-white"
                     style={{
                       left: numberValue((object as any).x),
@@ -1283,6 +1442,7 @@ export default function ConstructorApp() {
                       boxShadow: getObjectShadow(type, isSelected),
                       fontSize: type === 'number' ? 28 : 13,
                       zIndex: getObjectLayer(type),
+                      touchAction: isEditMode ? 'none' : 'auto',
                     }}
                   >
                     {text ? <span className="rounded-full bg-black/35 px-3 py-1 drop-shadow">{text}</span> : null}
@@ -1297,7 +1457,7 @@ export default function ConstructorApp() {
                 return (
                   <div
                     key={id}
-                    onClick={() => selectItem('table', id)}
+                    onPointerDown={(event) => startPointer(event, 'table', id)}
                     className="absolute select-none"
                     style={{
                       left: numberValue((table as any).x),
@@ -1307,6 +1467,7 @@ export default function ConstructorApp() {
                       transform: `rotate(${numberValue((table as any).rotation)}deg)`,
                       opacity: (table as any).isVisible === false ? 0.35 : 1,
                       zIndex: 10,
+                      touchAction: isEditMode ? 'none' : 'auto',
                     }}
                   >
                     <TableVisual table={table} selected={isSelected} />
