@@ -77,6 +77,12 @@ export class ConstructorController {
   }
 
   @Public()
+  @Patch('objects/:id')
+  updateObject(@Param('id') id: string, @Body() dto: CreateMapObjectDto) {
+    return this.service.updateObject(id, dto);
+  }
+
+  @Public()
   @Patch('objects/:id/position')
   updateObjectPosition(@Param('id') id: string, @Body() dto: UpdatePositionDto) {
     return this.service.updateObjectPosition(id, dto);
