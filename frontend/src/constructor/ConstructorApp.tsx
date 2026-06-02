@@ -824,6 +824,76 @@ export default function ConstructorApp() {
     }
   }
 
+
+  function buildLayoutPayload(source: FullMapResponse | null = mapRef.current) {
+    if (!source) {
+      return {
+        restaurant: null,
+        tables: [],
+        zones: [],
+        objects: [],
+      };
+    }
+
+    return {
+      restaurant: {
+        id: (source as any).restaurant?.id,
+        mapWidth: getMapWidth(source),
+        mapHeight: getMapHeight(source),
+      },
+      tables: (source.tables || []).map((table) => ({
+        id: String((table as any).id),
+        tableNumber: String((table as any).tableNumber || ''),
+        seats: Number((table as any).seats) || 1,
+        shape: String((table as any).shape || 'square'),
+        status: String((table as any).status || 'free'),
+        isVisible: (table as any).isVisible !== false,
+        x: numberValue((table as any).x),
+        y: numberValue((table as any).y),
+        width: numberValue((table as any).width, 90),
+        height: numberValue((table as any).height, 90),
+        rotation: numberValue((table as any).rotation),
+      })),
+      zones: (source.zones || []).map((zone) => {
+        const status = getZoneStatus(zone);
+        const cleanDescription = removeZoneStatusMarker((zone as any).description);
+
+        return {
+          id: String((zone as any).id),
+          name: String((zone as any).name || ''),
+          color: String((zone as any).color || '#2b2924'),
+          description: status === 'call_only' ? addCallOnlyMarker(cleanDescription) : cleanDescription,
+          status,
+          isVisible: status !== 'hidden',
+          isClosed: status === 'closed',
+          x: numberValue((zone as any).x),
+          y: numberValue((zone as any).y),
+          width: numberValue((zone as any).width, 300),
+          height: numberValue((zone as any).height, 200),
+          rotation: numberValue((zone as any).rotation),
+        };
+      }),
+      objects: (source.objects || []).map((object) => ({
+        id: String((object as any).id),
+        objectType: String((object as any).objectType || ''),
+        name: String((object as any).name || ''),
+        color: String((object as any).color || '#525252'),
+        isVisible: (object as any).isVisible !== false,
+        x: numberValue((object as any).x),
+        y: numberValue((object as any).y),
+        width: numberValue((object as any).width, 100),
+        height: numberValue((object as any).height, 100),
+        rotation: numberValue((object as any).rotation),
+      })),
+    };
+  }
+
+  async function saveLayoutToBackend() {
+    const payload = buildLayoutPayload();
+
+    return safe(() => api.post('/constructor/save-layout', payload));
+  }
+
   async function saveItem(kind: ItemKind, id: string) {
     const item = getItem(kind, id);
     if (!item) return true;
@@ -956,12 +1026,13 @@ export default function ConstructorApp() {
     setMessage('');
 
     try {
-      const ok = await saveItem(current.kind, current.id);
+      const layoutSaved = await saveLayoutToBackend();
+      const ok = layoutSaved || (await saveItem(current.kind, current.id));
 
       await loadMap();
       setIsEditMode(false);
       setRotationPreview(false);
-      setMessage(ok ? 'Збережено. Переміщення заблоковано.' : 'Позицію збережено частково. Якщо знову зʼїде — потрібен backend PATCH objects.');
+      setMessage(ok ? 'Збережено. Переміщення заблоковано.' : 'Не вдалося зберегти позицію. Перевір backend save-layout.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Помилка збереження');
     } finally {
@@ -977,24 +1048,28 @@ export default function ConstructorApp() {
     setMessage('Зберігаю всю карту...');
 
     try {
-      let ok = true;
+      let ok = await saveLayoutToBackend();
 
-      for (const zone of current.zones || []) {
-        ok = (await saveItem('zone', String(zone.id))) && ok;
-      }
+      if (!ok) {
+        ok = true;
 
-      for (const object of current.objects || []) {
-        ok = (await saveItem('object', String(object.id))) && ok;
-      }
+        for (const zone of current.zones || []) {
+          ok = (await saveItem('zone', String(zone.id))) && ok;
+        }
 
-      for (const table of current.tables || []) {
-        ok = (await saveItem('table', String(table.id))) && ok;
+        for (const object of current.objects || []) {
+          ok = (await saveItem('object', String(object.id))) && ok;
+        }
+
+        for (const table of current.tables || []) {
+          ok = (await saveItem('table', String(table.id))) && ok;
+        }
       }
 
       await loadMap();
       setIsEditMode(false);
       setRotationPreview(false);
-      setMessage(ok ? 'Вся карта збережена. Переміщення заблоковано.' : 'Карта збережена частково. Перевір backend для objects PATCH.');
+      setMessage(ok ? 'Вся карта збережена. Переміщення заблоковано.' : 'Карту не вдалося зберегти. Перевір backend save-layout.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Помилка збереження карти');
     } finally {
