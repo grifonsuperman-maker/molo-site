@@ -224,7 +224,7 @@ export default function GuestApp() {
       )}
 
       {step === 'home' && (
-        <section className="relative flex min-h-[calc(100vh-8rem)] items-center justify-center overflow-hidden rounded-[34px] border border-white/10 bg-black shadow-2xl">
+        <section className="relative -mx-4 -my-5 flex min-h-[calc(100vh-5rem)] items-center justify-center overflow-hidden bg-black px-6 py-10 sm:-mx-6">
           <div
             className="absolute inset-0 bg-cover bg-center"
             style={{
@@ -232,58 +232,57 @@ export default function GuestApp() {
             }}
           />
 
-          <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/45 to-black/85" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(250,204,21,.22),transparent_35%)]" />
+          <div className="absolute inset-0 bg-black/55" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/25 to-black/80" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(250,204,21,.20),transparent_32%)]" />
 
-          <div className="relative z-10 w-full max-w-5xl px-5 py-10 text-center sm:px-10">
-            <div className="mx-auto flex max-w-3xl flex-col items-center rounded-[34px] border border-white/15 bg-black/35 px-5 py-8 shadow-2xl backdrop-blur-xl sm:px-12 sm:py-12">
-              <img
-                src="/logo.png"
-                alt="MOLO"
-                className="h-40 w-auto max-w-[85%] object-contain drop-shadow-[0_20px_45px_rgba(0,0,0,.85)] sm:h-56"
-              />
+          <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-col items-center text-center">
+            <img
+              src="/logo.png"
+              alt="MOLO"
+              className="h-36 w-auto max-w-[82%] object-contain drop-shadow-[0_20px_45px_rgba(0,0,0,.85)] sm:h-48"
+            />
 
-              <p className="mt-5 text-xs uppercase tracking-[0.55em] text-amber-200 sm:text-sm">
-                Restaurant
-              </p>
+            <p className="mt-8 text-xs uppercase tracking-[0.7em] text-amber-200/90 sm:text-sm">
+              Restaurant
+            </p>
 
-              <h1 className="mt-3 text-5xl font-semibold tracking-[0.12em] text-white sm:text-7xl">
-                MOLO
-              </h1>
+            <h1 className="mt-4 text-6xl font-semibold tracking-[0.16em] text-white drop-shadow-[0_8px_30px_rgba(0,0,0,.85)] sm:text-8xl">
+              MOLO
+            </h1>
 
-              <p className="mt-5 max-w-xl text-base leading-relaxed text-neutral-200 sm:text-xl">
-                Бронювання столиків, меню та звʼязок з адміністратором.
-              </p>
+            <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/90 drop-shadow-[0_4px_20px_rgba(0,0,0,.95)] sm:text-2xl">
+              Бронювання столиків, меню та звʼязок з адміністратором.
+            </p>
 
-              <div className="mt-8 grid w-full max-w-xl gap-3">
-                <button
-                  onClick={() => setStep('map')}
-                  className="rounded-2xl border border-amber-200/80 bg-amber-300/10 px-5 py-4 text-base font-semibold text-amber-100 shadow-[0_0_30px_rgba(251,191,36,.14)] backdrop-blur-md transition hover:bg-amber-300/20"
-                >
-                  Забронювати столик
-                </button>
+            <div className="mt-10 grid w-full max-w-xl gap-4">
+              <button
+                onClick={() => setStep('map')}
+                className="rounded-2xl border border-amber-200/90 bg-transparent px-5 py-4 text-base font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.16)] backdrop-blur-[2px] transition active:scale-[0.99] sm:text-lg"
+              >
+                Забронювати столик
+              </button>
 
-                <button
-                  onClick={openMenu}
-                  className="flex items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/5 px-5 py-4 text-base font-semibold text-white backdrop-blur-md transition hover:bg-white/10"
-                >
-                  <Menu className="h-5 w-5 text-amber-200" />
-                  Меню
-                </button>
+              <button
+                onClick={openMenu}
+                className="flex items-center justify-center gap-3 rounded-2xl border border-white/35 bg-transparent px-5 py-4 text-base font-semibold text-white backdrop-blur-[2px] transition active:scale-[0.99] sm:text-lg"
+              >
+                <Menu className="h-5 w-5 text-amber-200" />
+                Меню
+              </button>
 
-                <button
-                  onClick={callAdmin}
-                  className="flex items-center justify-center gap-3 rounded-2xl border border-emerald-300/35 bg-emerald-300/5 px-5 py-4 text-base font-semibold text-white backdrop-blur-md transition hover:bg-emerald-300/10"
-                >
-                  <Phone className="h-5 w-5 text-emerald-300" />
-                  Зателефонувати адміністратору
-                </button>
-              </div>
-
-              <p className="mt-6 text-sm text-neutral-300">
-                Ми працюємо з 10:00 до 23:00
-              </p>
+              <button
+                onClick={callAdmin}
+                className="flex items-center justify-center gap-3 rounded-2xl border border-emerald-300/55 bg-transparent px-5 py-4 text-base font-semibold text-white backdrop-blur-[2px] transition active:scale-[0.99] sm:text-lg"
+              >
+                <Phone className="h-5 w-5 text-emerald-300" />
+                Зателефонувати адміністратору
+              </button>
             </div>
+
+            <p className="mt-8 text-base text-white/80 drop-shadow-[0_4px_18px_rgba(0,0,0,.95)]">
+              Ми працюємо з 10:00 до 23:00
+            </p>
           </div>
         </section>
       )}
