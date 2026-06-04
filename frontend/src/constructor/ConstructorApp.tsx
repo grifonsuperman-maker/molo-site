@@ -67,29 +67,38 @@ const FLOOR_ITEMS: PaletteItem[] = [
 ];
 
 const BUILD_ITEMS: PaletteItem[] = [
-  { label: 'Стіна', objectType: 'wall', name: '', width: 360, height: 28, color: '#57534e' },
-  { label: 'Вікно', objectType: 'window', name: '', width: 180, height: 28, color: '#38bdf8' },
-  { label: 'Двері', objectType: 'door', name: '', width: 110, height: 36, color: '#92400e' },
-  { label: 'Кам. паркан', objectType: 'stone_fence', name: '', width: 300, height: 42, color: '#78716c' },
-  { label: 'Дер. паркан', objectType: 'wood_fence', name: '', width: 300, height: 42, color: '#854d0e' },
-  { label: 'Мет. паркан', objectType: 'metal_fence', name: '', width: 300, height: 42, color: '#71717a' },
-  { label: 'Міст', objectType: 'bridge', name: '', width: 300, height: 90, color: '#8b5a2b' },
-  { label: 'Причал', objectType: 'pier', name: '', width: 320, height: 160, color: '#7c4a1e' },
+  { label: 'Кам. стіна', objectType: 'wall', name: '', width: 420, height: 160, color: '#78716c' },
+  { label: 'Вікно', objectType: 'window', name: '', width: 120, height: 280, color: '#38bdf8' },
+  { label: 'Двері', objectType: 'door', name: '', width: 190, height: 260, color: '#92400e' },
+  { label: 'Паркан 1', objectType: 'stone_fence', name: '', width: 420, height: 170, color: '#78716c' },
+  { label: 'Паркан 2', objectType: 'metal_fence', name: '', width: 420, height: 130, color: '#71717a' },
+  { label: 'Міст', objectType: 'bridge', name: '', width: 300, height: 190, color: '#8b5a2b' },
+  { label: 'Причал', objectType: 'pier', name: '', width: 320, height: 190, color: '#7c4a1e' },
 ];
 
 const DECOR_ITEMS: PaletteItem[] = [
-  { label: 'Бар', objectType: 'bar', name: '', width: 320, height: 110, color: '#b7791f' },
-  { label: 'Диван', objectType: 'sofa', name: '', width: 210, height: 85, color: '#7f1d1d' },
-  { label: 'Стілець 1', objectType: 'chair_classic', name: '', width: 58, height: 58, color: '#92400e' },
-  { label: 'Стілець 2', objectType: 'chair_soft', name: '', width: 66, height: 66, color: '#a16207' },
-  { label: 'Бар. стілець', objectType: 'chair_bar', name: '', width: 54, height: 74, color: '#78350f' },
-  { label: 'Дерево', objectType: 'tree', name: '', width: 90, height: 90, color: '#166534' },
-  { label: 'Кущ', objectType: 'bush', name: '', width: 100, height: 75, color: '#3f6212' },
+  { label: 'Стіл прям.', objectType: 'table_rect_photo', name: '', width: 150, height: 95, color: '#525252' },
+  { label: 'Стіл круг. 1', objectType: 'table_round_1_photo', name: '', width: 120, height: 120, color: '#525252' },
+  { label: 'Стіл круг. 2', objectType: 'table_round_2_photo', name: '', width: 120, height: 120, color: '#525252' },
+
+  { label: 'Бар', objectType: 'bar', name: '', width: 420, height: 150, color: '#b7791f' },
+  { label: 'Диван', objectType: 'sofa', name: '', width: 420, height: 150, color: '#7f1d1d' },
+
+  { label: 'Стілець 1', objectType: 'chair_classic', name: '', width: 75, height: 75, color: '#166534' },
+  { label: 'Стілець 2', objectType: 'chair_soft', name: '', width: 75, height: 75, color: '#a16207' },
+  { label: 'Стілець 3', objectType: 'chair_bar', name: '', width: 75, height: 90, color: '#111827' },
+  { label: 'Стілець 4', objectType: 'chair_4', name: '', width: 75, height: 85, color: '#525252' },
+  { label: 'Стілець 5', objectType: 'chair_5', name: '', width: 90, height: 90, color: '#f5f5f4' },
+
+  { label: 'Дерево', objectType: 'tree', name: '', width: 120, height: 180, color: '#166534' },
+  { label: 'Кущ', objectType: 'bush', name: '', width: 130, height: 100, color: '#3f6212' },
   { label: 'Камінь', objectType: 'stones', name: '', width: 130, height: 75, color: '#78716c' },
+
   { label: 'Ліхтар', objectType: 'lamp_post', name: '', width: 62, height: 110, color: '#facc15' },
   { label: 'Світло', objectType: 'spot_light', name: '', width: 80, height: 80, color: '#facc15' },
-  { label: 'Камін', objectType: 'fireplace', name: '', width: 120, height: 80, color: '#dc2626' },
+  { label: 'Камін', objectType: 'fireplace', name: '', width: 240, height: 95, color: '#dc2626' },
   { label: 'Батут', objectType: 'trampoline', name: '', width: 160, height: 160, color: '#111827' },
+
   { label: 'Текст', objectType: 'text', name: 'Текст', width: 230, height: 64, color: '#111827' },
   { label: 'Цифра', objectType: 'number', name: '1', width: 80, height: 70, color: '#111827' },
 ];
@@ -147,7 +156,7 @@ function isFloorObject(objectType: string) {
 }
 
 function isRoundLike(objectType: string) {
-  return ['tree', 'bush', 'spot_light', 'number', 'trampoline'].includes(objectType);
+  return ['tree', 'bush', 'spot_light', 'number', 'trampoline', 'table_round_1_photo', 'table_round_2_photo'].includes(objectType);
 }
 
 function getObjectLayer(objectType: string) {
@@ -169,6 +178,7 @@ function getObjectLayer(objectType: string) {
     objectType === 'bar' ||
     objectType === 'sofa' ||
     objectType.startsWith('chair_') ||
+    objectType.includes('table_') ||
     objectType === 'fireplace' ||
     objectType === 'trampoline'
   ) {
@@ -193,27 +203,36 @@ function getObjectLayer(objectType: string) {
 function getImageForType(objectType: string) {
   const images: Record<string, string> = {
     floor_marble: '/elements/marble.png',
-    floor_tile: '/elements/tile.png',
+    floor_tile: '/elements/pavement.png',
     floor_pavement: '/elements/pavement.png',
     floor_wood: '/elements/wood-floor.png',
     floor_grass: '/elements/grass.png',
     floor_water: '/elements/water.png',
-    wall: '/elements/wall.png',
+
+    table_rect_photo: '/elements/table-rect.png',
+    table_round_1_photo: '/elements/table-round-1.png',
+    table_round_2_photo: '/elements/table-round-2.png',
+
+    wall: '/elements/wall-stone.png',
     window: '/elements/window.png',
     door: '/elements/door.png',
-    stone_fence: '/elements/stone-fence.png',
-    wood_fence: '/elements/wood-fence.png',
-    metal_fence: '/elements/metal-fence.png',
+    stone_fence: '/elements/fence-1.png',
+    wood_fence: '/elements/fence-1.png',
+    metal_fence: '/elements/fence-2.png',
     bridge: '/elements/bridge.png',
-    pier: '/elements/pier.png',
+    pier: '/elements/bridge.png',
+
     bar: '/elements/bar.png',
-    sofa: '/elements/sofa.png',
-    chair_classic: '/elements/chair-classic.png',
-    chair_soft: '/elements/chair-soft.png',
-    chair_bar: '/elements/chair-bar.png',
+    sofa: '/elements/sofa-long.png',
+    chair_classic: '/elements/chair-1.png',
+    chair_soft: '/elements/chair-2.png',
+    chair_bar: '/elements/chair-3.png',
+    chair_4: '/elements/chair-4.png',
+    chair_5: '/elements/chair-5.png',
+
     tree: '/elements/tree.png',
     bush: '/elements/bush.png',
-    stones: '/elements/stones.png',
+    stones: '/elements/wall-stone.png',
     lamp_post: '/elements/lamp-post.png',
     spot_light: '/elements/spot-light.png',
     fireplace: '/elements/fireplace.png',
@@ -305,7 +324,9 @@ function getObjectBackground(object: MapObject) {
 
   if (!image) return fallback;
 
-  return `url("${image}") center / cover no-repeat, ${fallback}`;
+  const size = isFloorObject(type) || type === 'wall' || type.includes('fence') ? 'cover' : 'contain';
+
+  return `url("${image}") center / ${size} no-repeat, ${fallback}`;
 }
 
 function getObjectRadius(objectType: string) {
@@ -407,6 +428,36 @@ function TableVisual({ table, selected }: { table: TableItem; selected: boolean 
         {table.tableNumber}
       </div>
     </div>
+  );
+}
+
+function PaletteButton({
+  item,
+  loading,
+  onClick,
+}: {
+  item: PaletteItem;
+  loading: boolean;
+  onClick: () => void;
+}) {
+  const image = getImageForType(item.objectType);
+
+  return (
+    <button
+      disabled={loading}
+      onClick={onClick}
+      className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50"
+    >
+      {image && (
+        <img
+          src={image}
+          alt={item.label}
+          className="mx-auto mb-2 h-12 w-12 object-contain"
+          draggable={false}
+        />
+      )}
+      {item.label}
+    </button>
   );
 }
 
@@ -1373,9 +1424,7 @@ export default function ConstructorApp() {
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           {FLOOR_ITEMS.map((item) => (
-            <button key={item.objectType} disabled={loading} onClick={() => createObject(item)} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">
-              {item.label}
-            </button>
+            <PaletteButton key={item.objectType} item={item} loading={loading} onClick={() => createObject(item)} />
           ))}
         </div>
 
@@ -1383,9 +1432,7 @@ export default function ConstructorApp() {
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           {BUILD_ITEMS.map((item) => (
-            <button key={item.objectType} disabled={loading} onClick={() => createObject(item)} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">
-              {item.label}
-            </button>
+            <PaletteButton key={item.objectType} item={item} loading={loading} onClick={() => createObject(item)} />
           ))}
         </div>
 
@@ -1393,9 +1440,7 @@ export default function ConstructorApp() {
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           {DECOR_ITEMS.map((item) => (
-            <button key={item.objectType} disabled={loading} onClick={() => createObject(item)} className="rounded-2xl border border-neutral-700 bg-neutral-900 px-2 py-3 text-xs disabled:opacity-50">
-              {item.label}
-            </button>
+            <PaletteButton key={item.objectType} item={item} loading={loading} onClick={() => createObject(item)} />
           ))}
         </div>
 
@@ -1576,7 +1621,7 @@ export default function ConstructorApp() {
               Поворот +
             </button>
 
-            <button disabled={loading} onClick={saveAll} className="rounded-2xl bg-emerald-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
+            <button disabled={loading} onClick={saveSelected} className="rounded-2xl bg-emerald-400 px-3 py-3 text-sm font-semibold text-neutral-950 disabled:opacity-50">
               <Save className="mr-1 inline h-4 w-4" />
               Зберегти
             </button>
