@@ -53,6 +53,24 @@ type PaletteItem = {
   color: string;
 };
 
+type MapViewMode = 'scheme' | 'background';
+type MapAreaKey = 'territory' | 'hall' | 'canopy' | 'terrace' | 'gazebo' | 'pier';
+
+type MapArea = {
+  key: MapAreaKey;
+  label: string;
+  image: string;
+};
+
+const MAP_AREAS: MapArea[] = [
+  { key: 'territory', label: 'Територія', image: '/maps/territory-bg.png' },
+  { key: 'hall', label: 'Зал', image: '/maps/hall-bg.png' },
+  { key: 'canopy', label: 'Навіс', image: '/maps/canopy-bg.png' },
+  { key: 'terrace', label: 'Тераса', image: '/maps/terrace-bg.png' },
+  { key: 'gazebo', label: 'Бесідка', image: '/maps/gazebo-bg.png' },
+  { key: 'pier', label: 'Причал', image: '/maps/pier-bg.png' },
+];
+
 const DEFAULT_MAP_WIDTH = 2200;
 const DEFAULT_MAP_HEIGHT = 1500;
 const ZONE_STATUS_MARKER = '[zone_status:call_only]';
@@ -466,6 +484,8 @@ export default function ConstructorApp() {
   const mapRef = useRef<FullMapResponse | null>(null);
 
   const [zoom, setZoom] = useState(0.48);
+  const [mapViewMode, setMapViewMode] = useState<MapViewMode>('background');
+  const [activeMapArea, setActiveMapArea] = useState<MapAreaKey>('canopy');
   const [mapRotation, setMapRotation] = useState(0);
   const [rotationPreview, setRotationPreview] = useState(false);
 
@@ -507,6 +527,25 @@ export default function ConstructorApp() {
   useEffect(() => {
     window.localStorage.setItem('molo_map_rotation', String(mapRotation));
   }, [mapRotation]);
+
+
+  useEffect(() => {
+    const savedMode = window.localStorage.getItem('molo_map_view_mode') as MapViewMode | null;
+    const savedArea = window.localStorage.getItem('molo_active_map_area') as MapAreaKey | null;
+
+    if (savedMode === 'scheme' || savedMode === 'background') {
+      setMapViewMode(savedMode);
+    }
+
+    if (savedArea && MAP_AREAS.some((area) => area.key === savedArea)) {
+      setActiveMapArea(savedArea);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem('molo_map_view_mode', mapViewMode);
+    window.localStorage.setItem('molo_active_map_area', activeMapArea);
+  }, [mapViewMode, activeMapArea]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -1300,6 +1339,20 @@ export default function ConstructorApp() {
     return getObjectLayer(String((a as any).objectType || '')) - getObjectLayer(String((b as any).objectType || ''));
   });
 
+
+  const activeArea = MAP_AREAS.find((area) => area.key === activeMapArea) || { key: 'canopy', label: 'Навіс', image: '/maps/canopy-bg.png' };
+  const hasMapBackground = mapViewMode === 'background' && Boolean(activeArea.image);
+
+  const visibleObjects = sortedObjects.filter((object) => {
+    const type = String((object as any).objectType || '');
+
+    if (mapViewMode === 'background' && isFloorObject(type)) {
+      return false;
+    }
+
+    return true;
+  });
+
   const activeRotation = !isEditMode && rotationPreview ? mapRotation : 0;
   const mapTransform = `translate(${viewX}px, ${viewY}px) scale(${zoom}) rotate(${activeRotation}deg)`;
 
@@ -1313,6 +1366,55 @@ export default function ConstructorApp() {
         <p className="mt-2 text-sm text-neutral-300">
           Максимально удобный режим: в редактировании можно двигать и элементы, и саму карту. Тянешь элемент — двигается элемент. Тянешь пустое место карты — двигается карта. После «Зберегти все» всё остаётся на местах.
         </p>
+
+
+        <div className="mt-4 rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+          <div className="text-sm font-semibold text-neutral-200">Режим карти</div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setMapViewMode('scheme')}
+              className={`rounded-2xl px-3 py-3 text-sm font-semibold ${
+                mapViewMode === 'scheme' ? 'bg-amber-300 text-neutral-950' : 'bg-neutral-800 text-white'
+              }`}
+            >
+              2D схема
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMapViewMode('background')}
+              className={`rounded-2xl px-3 py-3 text-sm font-semibold ${
+                mapViewMode === 'background' ? 'bg-amber-300 text-neutral-950' : 'bg-neutral-800 text-white'
+              }`}
+            >
+              3D фон
+            </button>
+          </div>
+
+          <div className="mt-4 text-sm font-semibold text-neutral-200">Зона / фон</div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {MAP_AREAS.map((area) => (
+              <button
+                key={area.key}
+                type="button"
+                onClick={() => setActiveMapArea(area.key)}
+                className={`rounded-2xl border px-3 py-3 text-xs font-semibold ${
+                  activeMapArea === area.key
+                    ? 'border-amber-300 bg-amber-300 text-neutral-950'
+                    : 'border-neutral-700 bg-neutral-900 text-white'
+                }`}
+              >
+                {area.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-3 rounded-xl bg-black/30 p-3 text-xs text-neutral-300">
+            У режимі «3D фон» фон заблокований. Рухаються тільки столи, номери, клікабельні зони та предмети поверх фону.
+          </div>
+        </div>
 
         <button
           onClick={() => {
@@ -1647,7 +1749,7 @@ export default function ConstructorApp() {
 
       <section className="mt-4 rounded-3xl border border-neutral-800 bg-neutral-950 p-3">
         <div className="mb-3 flex items-center justify-between text-xs text-neutral-400">
-          <span>Карта: {mapWidth} x {mapHeight}</span>
+          <span>{mapViewMode === 'background' ? `3D фон: ${activeArea.label}` : `2D карта: ${mapWidth} x ${mapHeight}`}</span>
 
           <button onClick={() => loadMap()} className="flex items-center gap-1 rounded-xl bg-neutral-800 px-2 py-1 text-xs">
             <RefreshCcw className="h-3 w-3" />
@@ -1686,18 +1788,20 @@ export default function ConstructorApp() {
               style={{
                 width: mapWidth,
                 height: mapHeight,
-                background:
-                  'radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 30%), linear-gradient(135deg, #0b0a08, #17120d)',
+                background: hasMapBackground
+                  ? `linear-gradient(rgba(0,0,0,.04), rgba(0,0,0,.16)), url("${activeArea.image}") center / cover no-repeat, #0b0a08`
+                  : 'radial-gradient(circle at 20% 20%, rgba(245,158,11,.08), transparent 30%), linear-gradient(135deg, #0b0a08, #17120d)',
                 touchAction: 'none',
               }}
             >
               <div
-                className="absolute inset-0 opacity-20"
+                className="absolute inset-0"
                 style={{
                   backgroundImage:
                     'linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px)',
                   backgroundSize: '50px 50px',
                   pointerEvents: 'none',
+                  opacity: mapViewMode === 'background' ? 0.06 : 0.2,
                 }}
               />
 
@@ -1717,7 +1821,7 @@ export default function ConstructorApp() {
                       width: numberValue((zone as any).width, 300),
                       height: numberValue((zone as any).height, 200),
                       transform: `rotate(${numberValue((zone as any).rotation)}deg)`,
-                      background: `radial-gradient(circle at 20% 20%, rgba(245,158,11,.10), transparent 30%), linear-gradient(135deg, ${(zone as any).color || '#2b2924'}, #15110d)`,
+                      background: mapViewMode === 'background' ? 'rgba(0,0,0,.10)' : `radial-gradient(circle at 20% 20%, rgba(245,158,11,.10), transparent 30%), linear-gradient(135deg, ${(zone as any).color || '#2b2924'}, #15110d)`,
                       borderRadius: '28px',
                       borderColor: isSelected ? '#fcd34d' : 'rgba(255,255,255,.18)',
                       boxShadow: isSelected ? '0 0 0 3px rgba(251,191,36,.9)' : 'inset 0 0 38px rgba(0,0,0,.62)',
@@ -1733,7 +1837,7 @@ export default function ConstructorApp() {
                 );
               })}
 
-              {sortedObjects.map((object) => {
+              {visibleObjects.map((object) => {
                 const id = String((object as any).id);
                 const type = String((object as any).objectType || '');
                 const isSelected = selected?.kind === 'object' && selected.id === id;
