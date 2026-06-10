@@ -1,8 +1,7 @@
+import { useState } from "react";
 import "./styles.css";
 
 type Screen = "territory" | "restaurant" | "embankment";
-
-import { useState } from "react";
 
 function App() {
   const [screen, setScreen] = useState<Screen>("territory");
@@ -12,7 +11,7 @@ function App() {
       {screen === "territory" && (
         <section className="map-screen">
           <img
-            src="/territory-bg.png"
+            src="/maps/territory-bg.png"
             alt="Територія ресторану"
             className="map-image"
           />
