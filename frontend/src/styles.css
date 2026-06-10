@@ -1,4 +1,142 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-html,body,#root{min-height:100%;margin:0;background:#10100f;}*{box-sizing:border-box;}
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  background: #0f1115;
+  color: #ffffff;
+}
+
+button {
+  font-family: inherit;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.map-screen {
+  position: relative;
+  width: 100%;
+  max-width: 1200px;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+.map-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.map-button {
+  position: absolute;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 22px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.map-button:active {
+  transform: scale(0.96);
+}
+
+.restaurant-button {
+  left: 40%;
+  top: 58%;
+}
+
+.embankment-button {
+  right: 10%;
+  top: 45%;
+}
+
+.place-screen {
+  width: 100%;
+  max-width: 700px;
+  min-height: 70vh;
+  border-radius: 20px;
+  padding: 24px;
+  background: #171a21;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+.place-screen h1 {
+  margin: 24px 0 10px;
+  font-size: 32px;
+}
+
+.place-screen p {
+  margin: 0;
+  color: #c9c9c9;
+  font-size: 18px;
+}
+
+.back-button {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 18px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .app {
+    align-items: flex-start;
+    padding: 8px;
+  }
+
+  .map-screen {
+    border-radius: 12px;
+  }
+
+  .map-button {
+    padding: 9px 14px;
+    font-size: 13px;
+  }
+
+  .restaurant-button {
+    left: 34%;
+    top: 58%;
+  }
+
+  .embankment-button {
+    right: 6%;
+    top: 44%;
+  }
+
+  .place-screen {
+    min-height: 80vh;
+    padding: 18px;
+  }
+
+  .place-screen h1 {
+    font-size: 26px;
+  }
+
+  .place-screen p {
+    font-size: 16px;
+  }
+}
