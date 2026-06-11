@@ -282,10 +282,10 @@ export default function GuestApp() {
             <img
               src="/logo.png"
               alt="MOLO"
-              className="mx-auto h-40 w-40 object-contain mix-blend-screen sm:h-52 sm:w-52"
+              className="mx-auto h-56 w-56 object-contain mix-blend-screen sm:h-72 sm:w-72"
             />
 
-            <p className="mt-8 text-sm uppercase tracking-[0.55em] text-amber-100/75">
+            <p className="mt-6 text-sm uppercase tracking-[0.55em] text-amber-100/75">
               Restaurant
             </p>
 
