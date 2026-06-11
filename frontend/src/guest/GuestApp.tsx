@@ -118,14 +118,17 @@ function tableButtonClass(table: TableItem) {
 function GoldButton({
   children,
   onClick,
+  disabled = false,
 }: {
   children: ReactNode;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className="rounded-[22px] border border-amber-200/90 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.16)] backdrop-blur-sm transition active:scale-[0.99] sm:text-2xl"
+      disabled={disabled}
+      className="rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.16)] backdrop-blur-sm transition active:scale-[0.99] disabled:opacity-50 sm:text-2xl"
     >
       {children}
     </button>
@@ -245,7 +248,7 @@ export default function GuestApp() {
 
   if (restaurant?.status === 'closed') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-black px-4 text-white">
+      <div className="flex min-h-[100dvh] items-center justify-center bg-black px-4 text-white">
         <section className="rounded-[34px] border border-white/10 bg-white/5 p-6 text-center shadow-2xl backdrop-blur-xl">
           <h1 className="text-2xl font-semibold">Ресторан зачинений</h1>
           <p className="mt-3 text-neutral-300">{restaurant.closeMessage}</p>
@@ -255,12 +258,12 @@ export default function GuestApp() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-[100dvh] bg-black text-white">
       {step !== 'home' && (
-        <div className="fixed left-4 top-4 z-50">
+        <div className="fixed left-4 top-4 z-[80]">
           <button
             onClick={goBack}
-            className="inline-flex items-center gap-2 rounded-full border border-amber-200/60 bg-black/25 px-4 py-2 text-sm text-amber-100 shadow-xl backdrop-blur-md active:scale-95"
+            className="inline-flex items-center gap-2 rounded-full border border-amber-200/70 bg-black/30 px-4 py-2 text-sm text-amber-100 shadow-xl backdrop-blur-md active:scale-95"
           >
             <ArrowLeft className="h-4 w-4" />
             Назад
@@ -269,42 +272,44 @@ export default function GuestApp() {
       )}
 
       {step === 'home' && (
-        <section className="relative min-h-screen overflow-hidden bg-black">
+        <section className="fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden bg-black">
           <img
             src="/hero-bg.jpg"
             alt="MOLO"
             className="absolute inset-0 h-full w-full object-cover opacity-85"
+            draggable={false}
           />
 
-          <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/25 to-black/80" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/25 via-black/25 to-black/80" />
 
-          <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10 text-center">
+          <div className="relative flex h-[100dvh] w-full flex-col items-center justify-center px-4 pb-[112px] pt-8 text-center">
             <img
               src="/logo.png"
               alt="MOLO"
-              className="mx-auto h-56 w-56 object-contain mix-blend-screen sm:h-72 sm:w-72"
+              className="mx-auto h-52 w-52 object-contain mix-blend-screen sm:h-72 sm:w-72"
+              draggable={false}
             />
 
-            <p className="mt-6 text-sm uppercase tracking-[0.55em] text-amber-100/75">
+            <p className="mt-3 text-sm uppercase tracking-[0.55em] text-amber-100/75">
               Restaurant
             </p>
 
-            <h1 className="mt-5 text-7xl font-light tracking-[0.28em] text-white sm:text-8xl">
+            <h1 className="mt-4 text-7xl font-light tracking-[0.28em] text-white sm:text-8xl">
               MOLO
             </h1>
 
-            <p className="mt-8 max-w-2xl text-xl leading-snug text-white/90 sm:text-3xl">
+            <p className="mt-7 max-w-2xl text-xl leading-snug text-white/90 sm:text-3xl">
               Бронювання столиків, меню та звʼязок з адміністратором.
             </p>
 
-            <div className="mt-10 grid w-full max-w-2xl gap-5">
+            <div className="mt-8 grid w-full max-w-2xl gap-4">
               <GoldButton onClick={() => setStep('location_choice')}>
                 Забронювати столик
               </GoldButton>
 
               <button
                 onClick={openMenu}
-                className="inline-flex items-center justify-center gap-4 rounded-[22px] border border-amber-200/90 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm transition active:scale-[0.99] sm:text-2xl"
+                className="inline-flex items-center justify-center gap-4 rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm transition active:scale-[0.99] sm:text-2xl"
               >
                 <Menu className="h-7 w-7 text-amber-200" />
                 Меню
@@ -312,14 +317,14 @@ export default function GuestApp() {
 
               <button
                 onClick={callAdmin}
-                className="inline-flex items-center justify-center gap-4 rounded-[22px] border border-amber-200/90 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm transition active:scale-[0.99] sm:text-2xl"
+                className="inline-flex items-center justify-center gap-4 rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm transition active:scale-[0.99] sm:text-2xl"
               >
                 <Phone className="h-7 w-7 text-amber-200" />
                 Зателефонувати адміністратору
               </button>
             </div>
 
-            <p className="mt-9 text-lg text-white/75 sm:text-xl">
+            <p className="mt-6 text-base text-white/75 sm:text-xl">
               Ми працюємо з 10:00 до 23:00
             </p>
           </div>
@@ -327,49 +332,56 @@ export default function GuestApp() {
       )}
 
       {step === 'location_choice' && (
-        <section className="relative min-h-screen overflow-hidden bg-black">
+        <section className="fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden bg-black text-white">
           <img
             src="/maps/territory-bg.png"
             alt="Вхід до ресторану MOLO"
-            className="absolute inset-0 h-full w-full object-cover opacity-90"
+            className="absolute inset-0 h-full w-full object-cover opacity-95"
+            draggable={false}
           />
 
-          <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/20 to-black/82" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/20 to-black/85" />
 
           <button
             aria-label="Зал ресторану"
             onClick={() => setStep('hall_map')}
-            className="absolute left-[38%] top-[23%] h-[42%] w-[34%] rounded-[32px] border border-amber-200/0 bg-amber-300/0 transition hover:border-amber-200/70 hover:bg-amber-300/10 active:scale-[0.99]"
+            className="absolute left-[38%] top-[23%] h-[42%] w-[34%] rounded-[32px] border border-amber-200/0 bg-amber-300/0 transition active:scale-[0.99]"
           />
 
           <button
             aria-label="Набережна ресторану"
             onClick={() => setStep('waterfront_choice')}
-            className="absolute left-[0%] top-[25%] h-[44%] w-[36%] rounded-[32px] border border-amber-200/0 bg-amber-300/0 transition hover:border-amber-200/70 hover:bg-amber-300/10 active:scale-[0.99]"
+            className="absolute left-[0%] top-[25%] h-[44%] w-[36%] rounded-[32px] border border-amber-200/0 bg-amber-300/0 transition active:scale-[0.99]"
           />
 
-          <div className="relative flex min-h-screen items-end px-4 pb-24 pt-20 text-center sm:px-8">
-            <div className="mx-auto w-full max-w-4xl">
-              <p className="text-sm uppercase tracking-[0.35em] text-amber-100/75">
+          <div className="relative flex h-[100dvh] w-full items-end px-5 pb-[120px] pt-20 text-center">
+            <div className="w-full">
+              <p className="text-sm uppercase tracking-[0.45em] text-amber-100/80">
                 MOLO
               </p>
 
-              <h1 className="mt-3 text-3xl font-black tracking-tight text-white sm:text-5xl">
+              <h1 className="mx-auto mt-4 max-w-[680px] text-4xl font-black leading-tight text-white">
                 Раді вітати вас у ресторані MOLO
               </h1>
 
-              <p className="mx-auto mt-4 max-w-2xl text-base text-white/90 sm:text-xl">
+              <p className="mx-auto mt-5 max-w-[620px] text-xl leading-snug text-white/90">
                 Оберіть локацію, у якій бажаєте забронювати стіл
               </p>
 
-              <div className="mt-7 grid gap-4 sm:grid-cols-2">
-                <GoldButton onClick={() => setStep('hall_map')}>
+              <div className="mx-auto mt-8 grid w-full max-w-[680px] gap-5">
+                <button
+                  onClick={() => setStep('hall_map')}
+                  className="rounded-[28px] border border-amber-200/95 bg-black/10 px-6 py-6 text-2xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.14)] backdrop-blur-sm active:scale-[0.99]"
+                >
                   Зал ресторану
-                </GoldButton>
+                </button>
 
-                <GoldButton onClick={() => setStep('waterfront_choice')}>
+                <button
+                  onClick={() => setStep('waterfront_choice')}
+                  className="rounded-[28px] border border-amber-200/95 bg-black/10 px-6 py-6 text-2xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.14)] backdrop-blur-sm active:scale-[0.99]"
+                >
                   Набережна ресторану
-                </GoldButton>
+                </button>
               </div>
             </div>
           </div>
@@ -377,7 +389,7 @@ export default function GuestApp() {
       )}
 
       {step === 'waterfront_choice' && (
-        <section className="min-h-screen bg-black px-4 py-20 text-white">
+        <section className="min-h-[100dvh] bg-black px-4 py-20 pb-[120px] text-white">
           <div className="mx-auto max-w-5xl text-center">
             <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
               Набережна ресторану
@@ -421,7 +433,7 @@ export default function GuestApp() {
       )}
 
       {step === 'location_placeholder' && selectedWaterfrontLocation && (
-        <section className="flex min-h-screen items-center justify-center bg-black px-4 py-20 text-center text-white">
+        <section className="flex min-h-[100dvh] items-center justify-center bg-black px-4 py-20 pb-[120px] text-center text-white">
           <div className="w-full max-w-2xl rounded-[34px] border border-amber-200/40 bg-black/30 p-7 shadow-2xl backdrop-blur-md">
             <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
               Локація
@@ -443,7 +455,7 @@ export default function GuestApp() {
       )}
 
       {step === 'hall_map' && (
-        <section className="min-h-screen bg-black px-4 py-20 text-white">
+        <section className="min-h-[100dvh] bg-black px-4 py-20 pb-[120px] text-white">
           <div className="mx-auto max-w-6xl">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -510,6 +522,7 @@ export default function GuestApp() {
                 src="/maps/hall-bg.png"
                 alt="Зал ресторану"
                 className="max-h-[68vh] w-full rounded-[24px] object-contain"
+                draggable={false}
               />
             </div>
 
@@ -585,7 +598,7 @@ export default function GuestApp() {
       )}
 
       {step === 'form' && selectedTable && (
-        <section className="flex min-h-screen items-center justify-center bg-black px-4 py-20 text-white">
+        <section className="flex min-h-[100dvh] items-center justify-center bg-black px-4 py-20 pb-[120px] text-white">
           <div className="w-full max-w-2xl rounded-[32px] border border-amber-200/35 bg-black/35 p-6 shadow-2xl backdrop-blur-md">
             <h1 className="text-2xl font-semibold">
               Стіл №{selectedTable.tableNumber}
@@ -639,7 +652,7 @@ export default function GuestApp() {
 
               {error && <p className="text-sm text-red-300">{error}</p>}
 
-              <GoldButton onClick={submit}>
+              <GoldButton onClick={submit} disabled={loading}>
                 {loading ? 'Надсилаємо...' : 'Надіслати заявку'}
               </GoldButton>
             </div>
@@ -648,7 +661,7 @@ export default function GuestApp() {
       )}
 
       {step === 'success' && (
-        <section className="flex min-h-screen items-center justify-center bg-black px-4 py-20 text-center text-white">
+        <section className="flex min-h-[100dvh] items-center justify-center bg-black px-4 py-20 pb-[120px] text-center text-white">
           <div className="w-full max-w-2xl rounded-[32px] border border-emerald-400/25 bg-emerald-950/40 p-6 shadow-2xl backdrop-blur-xl">
             <CheckCircle2 className="mx-auto mb-4 h-12 w-12 text-emerald-400" />
 
