@@ -46,8 +46,8 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
   },
   {
     key: 'gazebo',
-    label: 'Велика бесідка',
-    description: 'Окрема зона великої бесідки',
+    label: 'Велика альтанка',
+    description: 'Окрема зона великої альтанки',
   },
   {
     key: 'rotang',
@@ -61,13 +61,13 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
   },
   {
     key: 'pier',
-    label: 'Причал',
-    description: 'Місця біля причалу',
+    label: 'Скляна альтанка',
+    description: 'Зона скляної альтанки',
   },
   {
     key: 'water_pier',
-    label: 'Причал на воді',
-    description: 'Місця на воді',
+    label: 'Альтанка на воді',
+    description: 'Зона альтанки на воді',
   },
 ];
 
