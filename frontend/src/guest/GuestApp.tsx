@@ -42,32 +42,32 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
   {
     key: 'canopy',
     label: 'Навіс',
-    description: 'Зона навісу. Фон локації додамо окремо.',
+    description: 'Зона навісу',
   },
   {
     key: 'gazebo',
     label: 'Велика бесідка',
-    description: 'Окрема зона великої бесідки.',
+    description: 'Окрема зона великої бесідки',
   },
   {
     key: 'rotang',
     label: 'Ротанг',
-    description: 'Зона з ротанговими місцями.',
+    description: 'Зона з ротанговими місцями',
   },
   {
     key: 'embankment',
     label: 'Набережна',
-    description: 'Загальна зона набережної.',
+    description: 'Загальна зона набережної',
   },
   {
     key: 'pier',
     label: 'Причал',
-    description: 'Місця біля причалу.',
+    description: 'Місця біля причалу',
   },
   {
     key: 'water_pier',
     label: 'Причал на воді',
-    description: 'Місця на воді.',
+    description: 'Місця на воді',
   },
 ];
 
@@ -481,44 +481,37 @@ export default function GuestApp() {
       )}
 
       {step === 'waterfront_choice' && (
-        <section className="molo-screen min-h-[100dvh] bg-black px-4 py-20 pb-[120px] text-white">
-          <div className="molo-panel mx-auto max-w-5xl text-center">
-            <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
-              Набережна ресторану
-            </p>
+        <section className="molo-screen fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden bg-black text-white">
+          <img
+            src="/maps/waterfront-bg.png"
+            alt="Набережна ресторану MOLO"
+            className="molo-bg absolute inset-0 h-full w-full object-cover opacity-95"
+            draggable={false}
+          />
 
-            <h1 className="mt-3 text-4xl font-black tracking-tight">
-              Оберіть локацію
-            </h1>
+          <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/15 to-black/88" />
 
-            <p className="mx-auto mt-3 max-w-2xl text-white/75">
-              Тут будуть зовнішні зони ресторану. Поки відкриваємо заглушки, а фони додамо окремо.
-            </p>
+          <div className="relative flex h-[100dvh] w-full items-end px-4 pb-[92px] pt-20 text-center">
+            <div className="molo-panel w-full">
+              <p className="text-xs uppercase tracking-[0.4em] text-amber-100/80">
+                Набережна ресторану
+              </p>
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {WATERFRONT_LOCATIONS.map((location) => (
-                <button
-                  key={location.key}
-                  onClick={() => openWaterfrontLocation(location)}
-                  className="molo-button rounded-[26px] border border-amber-200/70 bg-black/20 p-5 text-left text-amber-100 shadow-[0_0_24px_rgba(251,191,36,.1)] backdrop-blur-sm"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-amber-200/40 bg-amber-300/10">
-                      <MapPin className="h-5 w-5" />
-                    </span>
+              <h1 className="mx-auto mt-3 max-w-[520px] text-2xl font-black leading-tight text-white sm:text-3xl">
+                Оберіть локацію на набережній
+              </h1>
 
-                    <span>
-                      <span className="block text-lg font-semibold">
-                        {location.label}
-                      </span>
-
-                      <span className="mt-1 block text-sm text-white/60">
-                        {location.description}
-                      </span>
-                    </span>
-                  </div>
-                </button>
-              ))}
+              <div className="mx-auto mt-5 grid w-full max-w-[680px] grid-cols-2 gap-3">
+                {WATERFRONT_LOCATIONS.map((location) => (
+                  <button
+                    key={location.key}
+                    onClick={() => openWaterfrontLocation(location)}
+                    className="molo-button rounded-[22px] border border-amber-200/90 bg-black/10 px-4 py-4 text-base font-semibold text-amber-100 shadow-[0_0_28px_rgba(251,191,36,.12)] backdrop-blur-sm sm:text-lg"
+                  >
+                    {location.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </section>
