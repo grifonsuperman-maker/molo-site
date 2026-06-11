@@ -432,7 +432,7 @@ export default function GuestApp() {
             draggable={false}
           />
 
-          <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/20 to-black/85" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/10 to-black/80" />
 
           <button
             aria-label="Зал ресторану"
@@ -446,31 +446,31 @@ export default function GuestApp() {
             className="absolute left-[0%] top-[25%] h-[44%] w-[36%] rounded-[32px] border border-amber-200/0 bg-amber-300/0 transition active:scale-[0.99]"
           />
 
-          <div className="relative flex h-[100dvh] w-full items-end px-5 pb-[120px] pt-20 text-center">
+          <div className="relative flex h-[100dvh] w-full items-end px-4 pb-[92px] pt-20 text-center">
             <div className="molo-panel w-full">
-              <p className="text-sm uppercase tracking-[0.45em] text-amber-100/80">
+              <p className="text-xs uppercase tracking-[0.4em] text-amber-100/80">
                 MOLO
               </p>
 
-              <h1 className="mx-auto mt-4 max-w-[680px] text-4xl font-black leading-tight text-white">
+              <h1 className="mx-auto mt-3 max-w-[520px] text-2xl font-black leading-tight text-white sm:text-3xl">
                 Раді вітати вас у ресторані MOLO
               </h1>
 
-              <p className="mx-auto mt-5 max-w-[620px] text-xl leading-snug text-white/90">
+              <p className="mx-auto mt-3 max-w-[520px] text-sm leading-snug text-white/85 sm:text-base">
                 Оберіть локацію, у якій бажаєте забронювати стіл
               </p>
 
-              <div className="mx-auto mt-8 grid w-full max-w-[680px] gap-5">
+              <div className="mx-auto mt-5 grid w-full max-w-[560px] gap-3">
                 <button
                   onClick={() => setStep('hall_map')}
-                  className="molo-button rounded-[28px] border border-amber-200/95 bg-black/10 px-6 py-6 text-2xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.14)] backdrop-blur-sm"
+                  className="molo-button rounded-[24px] border border-amber-200/95 bg-black/10 px-5 py-4 text-lg font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.14)] backdrop-blur-sm sm:text-xl"
                 >
                   Зал ресторану
                 </button>
 
                 <button
                   onClick={() => setStep('waterfront_choice')}
-                  className="molo-button rounded-[28px] border border-amber-200/95 bg-black/10 px-6 py-6 text-2xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.14)] backdrop-blur-sm"
+                  className="molo-button rounded-[24px] border border-amber-200/95 bg-black/10 px-5 py-4 text-lg font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.14)] backdrop-blur-sm sm:text-xl"
                 >
                   Набережна ресторану
                 </button>
