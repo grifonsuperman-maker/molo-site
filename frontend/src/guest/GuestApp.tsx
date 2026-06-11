@@ -10,7 +10,7 @@ import {
   Users,
 } from 'lucide-react';
 
-import type { FullMapResponse, MapObject, Restaurant, TableItem, Zone } from '../api/types';
+import type { FullMapResponse, Restaurant, TableItem } from '../api/types';
 import { bookingsApi } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
@@ -71,15 +71,10 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 
 const STATUS_TEXT: Record<TableStatus, string> = {
   free: 'Вільний',
-  reserved: 'Бронь',
+  reserved: 'Заброньований',
   occupied: 'Зайнятий',
   closed: 'Закритий',
 };
-
-function numberValue(value: unknown, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 function normalizeTableStatus(status: unknown): TableStatus {
   if (status === 'reserved' || status === 'booked') return 'reserved';
@@ -100,93 +95,22 @@ function getMapFromResponse(value: unknown): FullMapResponse | null {
   return data.data ?? data;
 }
 
-function mapWidth(map: FullMapResponse | null) {
-  return numberValue(map?.restaurant?.mapWidth, 1200);
-}
-
-function mapHeight(map: FullMapResponse | null) {
-  return numberValue(map?.restaurant?.mapHeight, 800);
-}
-
-function tableColor(table: TableItem) {
+function tableButtonClass(table: TableItem) {
   const status = normalizeTableStatus(table.status);
 
-  if (status === 'reserved') return 'bg-amber-500 border-amber-200 shadow-amber-500/40';
-  if (status === 'occupied') return 'bg-red-600 border-red-200 shadow-red-500/40';
-  if (status === 'closed') return 'bg-neutral-600 border-neutral-300 shadow-neutral-500/20';
-
-  return 'bg-emerald-600 border-emerald-200 shadow-emerald-500/40';
-}
-
-function getImageForType(objectType: string) {
-  const images: Record<string, string> = {
-    floor_marble: '/elements/marble.png',
-    floor_tile: '/elements/pavement.png',
-    floor_pavement: '/elements/pavement.png',
-    floor_wood: '/elements/wood-floor.png',
-    floor_grass: '/elements/grass.png',
-    floor_water: '/elements/water.png',
-
-    table_rect_photo: '/elements/table-rect.png',
-    table_round_1_photo: '/elements/table-round-1.png',
-    table_round_2_photo: '/elements/table-round-2.png',
-
-    wall: '/elements/wall-stone.png',
-    window: '/elements/window.png',
-    door: '/elements/door.png',
-    stone_fence: '/elements/fence-1.png',
-    wood_fence: '/elements/fence-1.png',
-    metal_fence: '/elements/fence-2.png',
-    bridge: '/elements/bridge.png',
-    pier: '/elements/bridge.png',
-
-    bar: '/elements/bar.png',
-    sofa: '/elements/sofa-long.png',
-    chair_classic: '/elements/chair-1.png',
-    chair_soft: '/elements/chair-2.png',
-    chair_bar: '/elements/chair-3.png',
-    chair_4: '/elements/chair-4.png',
-    chair_5: '/elements/chair-5.png',
-
-    tree: '/elements/tree.png',
-    bush: '/elements/bush.png',
-    stones: '/elements/wall-stone.png',
-    lamp_post: '/elements/lamp-post.png',
-    spot_light: '/elements/spot-light.png',
-    fireplace: '/elements/fireplace.png',
-    trampoline: '/elements/trampoline.png',
-  };
-
-  return images[objectType] || '';
-}
-
-function objectBackground(object: MapObject) {
-  const image = getImageForType(object.objectType);
-  const fallback = object.color || '#525252';
-
-  if (image) {
-    return `url("${image}") center / contain no-repeat, ${fallback}`;
+  if (status === 'reserved') {
+    return 'border-red-300 bg-red-500/20 text-red-100 shadow-[0_0_24px_rgba(239,68,68,.18)]';
   }
 
-  if (object.objectType === 'fireplace') {
-    return 'radial-gradient(circle, #fde68a 0%, #f97316 35%, #dc2626 68%, #450a0a 100%)';
+  if (status === 'occupied') {
+    return 'border-amber-300 bg-amber-500/20 text-amber-100 shadow-[0_0_24px_rgba(245,158,11,.18)]';
   }
 
-  if (object.objectType === 'lamp_post' || object.objectType === 'spot_light') {
-    return 'radial-gradient(circle, #fef08a 0%, #facc15 35%, transparent 72%)';
+  if (status === 'closed') {
+    return 'border-neutral-400 bg-neutral-500/20 text-neutral-200 shadow-[0_0_18px_rgba(115,115,115,.18)]';
   }
 
-  return fallback;
-}
-
-function objectRadius(object: MapObject) {
-  if (object.objectType.includes('round') || object.objectType === 'bush' || object.objectType === 'tree') {
-    return '999px';
-  }
-
-  if (object.objectType.startsWith('floor_')) return '26px';
-
-  return '14px';
+  return 'border-emerald-300 bg-emerald-500/20 text-emerald-100 shadow-[0_0_24px_rgba(16,185,129,.18)]';
 }
 
 export default function GuestApp() {
@@ -214,23 +138,19 @@ export default function GuestApp() {
       .then((response) => setRestaurant(getRestaurantFromResponse(response)))
       .catch(() => {});
 
-    mapApi
-      .get()
-      .then((response) => setMap(getMapFromResponse(response)))
-      .catch(() => {});
+    refreshMap();
   }, []);
 
   const visibleTables = useMemo(() => {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
   }, [map]);
 
-  const visibleZones = useMemo(() => {
-    return (map?.zones || []).filter((zone) => zone.isVisible !== false);
-  }, [map]);
-
-  const visibleObjects = useMemo(() => {
-    return (map?.objects || []).filter((object) => object.isVisible !== false);
-  }, [map]);
+  function refreshMap() {
+    mapApi
+      .get()
+      .then((response) => setMap(getMapFromResponse(response)))
+      .catch(() => {});
+  }
 
   function callAdmin() {
     if (restaurant?.phone) {
@@ -243,13 +163,6 @@ export default function GuestApp() {
 
   function openMenu() {
     window.open(restaurant?.menuUrl || FALLBACK_MENU, '_blank');
-  }
-
-  function refreshMap() {
-    mapApi
-      .get()
-      .then((response) => setMap(getMapFromResponse(response)))
-      .catch(() => {});
   }
 
   function goBack() {
@@ -323,7 +236,7 @@ export default function GuestApp() {
   }
 
   return (
-    <div className="min-h-screen bg-black px-4 py-5 text-white">
+    <div className="min-h-screen bg-black px-3 py-4 text-white">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
         {step !== 'home' && (
           <button
@@ -336,37 +249,34 @@ export default function GuestApp() {
         )}
 
         {step === 'home' && (
-          <section className="overflow-hidden rounded-[38px] border border-white/10 bg-neutral-950 shadow-2xl">
-            <div className="relative min-h-[720px]">
+          <section className="overflow-hidden rounded-[32px] border border-white/10 bg-neutral-950 shadow-2xl">
+            <div className="relative min-h-[560px]">
               <img
                 src="/hero-bg.jpg"
                 alt="MOLO"
-                className="absolute inset-0 h-full w-full object-cover opacity-70"
+                className="absolute inset-0 h-full w-full object-cover opacity-85"
               />
 
-              <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/55 to-black" />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/15 via-black/35 to-black/80" />
 
-              <div className="relative flex min-h-[720px] flex-col justify-end p-5 sm:p-8">
-                <div className="mb-auto flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.35em] text-amber-100/80">
-                      Restaurant
-                    </p>
-                    <h1 className="mt-2 text-5xl font-black tracking-tight sm:text-7xl">
-                      MOLO
-                    </h1>
-                  </div>
+              <div className="relative flex min-h-[560px] flex-col justify-between p-5 sm:p-8">
+                <div>
+                  <img
+                    src="/logo.png"
+                    alt="MOLO"
+                    className="h-20 w-auto object-contain sm:h-24"
+                  />
                 </div>
 
-                <div className="rounded-[32px] border border-white/10 bg-black/35 p-5 shadow-2xl backdrop-blur-xl">
-                  <p className="text-neutral-200">
+                <div className="rounded-[28px] border border-white/10 bg-black/45 p-5 shadow-2xl backdrop-blur-xl">
+                  <p className="text-sm text-neutral-200">
                     Бронювання столиків, меню та звʼязок з адміністратором.
                   </p>
 
                   <div className="mt-5 grid gap-3">
                     <button
                       onClick={() => setStep('location_choice')}
-                      className="rounded-2xl border border-amber-200/90 bg-amber-300/10 px-5 py-4 text-base font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.16)] transition active:scale-[0.99] sm:text-lg"
+                      className="rounded-2xl border border-amber-200/90 bg-amber-300/10 px-5 py-4 text-base font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.16)] transition active:scale-[0.99]"
                     >
                       Забронювати столик
                     </button>
@@ -398,30 +308,30 @@ export default function GuestApp() {
         )}
 
         {step === 'location_choice' && (
-          <section className="overflow-hidden rounded-[38px] border border-white/10 bg-neutral-950 shadow-2xl">
-            <div className="relative min-h-[680px]">
+          <section className="overflow-hidden rounded-[32px] border border-white/10 bg-neutral-950 shadow-2xl">
+            <div className="relative min-h-[560px]">
               <img
-                src="/maps/territory-bg.png"
+                src="/maps/entrance-bg.png"
                 alt="Вхід до ресторану MOLO"
-                className="absolute inset-0 h-full w-full object-cover opacity-80"
+                className="absolute inset-0 h-full w-full object-contain opacity-90"
               />
 
-              <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-black/40 to-black/80" />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/15 via-black/25 to-black/85" />
 
               <button
                 aria-label="Зал ресторану"
                 onClick={() => setStep('hall_map')}
-                className="absolute left-[43%] top-[34%] h-[28%] w-[30%] rounded-[32px] border border-amber-200/0 bg-amber-300/0 transition hover:border-amber-200/70 hover:bg-amber-300/10 active:scale-[0.99]"
+                className="absolute left-[39%] top-[28%] h-[34%] w-[30%] rounded-[28px] border border-amber-200/0 bg-amber-300/0 transition hover:border-amber-200/70 hover:bg-amber-300/10 active:scale-[0.99]"
               />
 
               <button
                 aria-label="Набережна ресторану"
                 onClick={() => setStep('waterfront_choice')}
-                className="absolute left-[4%] top-[29%] h-[36%] w-[28%] rounded-[32px] border border-sky-200/0 bg-sky-300/0 transition hover:border-sky-200/70 hover:bg-sky-300/10 active:scale-[0.99]"
+                className="absolute left-[1%] top-[30%] h-[38%] w-[32%] rounded-[28px] border border-sky-200/0 bg-sky-300/0 transition hover:border-sky-200/70 hover:bg-sky-300/10 active:scale-[0.99]"
               />
 
-              <div className="relative flex min-h-[680px] items-end p-4 sm:p-8">
-                <div className="w-full rounded-[34px] border border-white/10 bg-black/55 p-5 text-center shadow-2xl backdrop-blur-xl sm:p-7">
+              <div className="relative flex min-h-[560px] items-end p-4 sm:p-8">
+                <div className="w-full rounded-[30px] border border-white/10 bg-black/60 p-5 text-center shadow-2xl backdrop-blur-xl sm:p-7">
                   <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
                     MOLO
                   </p>
@@ -456,7 +366,7 @@ export default function GuestApp() {
         )}
 
         {step === 'waterfront_choice' && (
-          <section className="rounded-[38px] border border-white/10 bg-neutral-950 p-5 shadow-2xl sm:p-7">
+          <section className="rounded-[32px] border border-white/10 bg-neutral-950 p-5 shadow-2xl sm:p-7">
             <div className="text-center">
               <p className="text-sm uppercase tracking-[0.28em] text-sky-100/75">
                 Набережна ресторану
@@ -500,7 +410,7 @@ export default function GuestApp() {
         )}
 
         {step === 'location_placeholder' && selectedWaterfrontLocation && (
-          <section className="rounded-[38px] border border-white/10 bg-neutral-950 p-6 text-center shadow-2xl">
+          <section className="rounded-[32px] border border-white/10 bg-neutral-950 p-6 text-center shadow-2xl">
             <p className="text-sm uppercase tracking-[0.28em] text-sky-100/75">
               Локація
             </p>
@@ -520,7 +430,7 @@ export default function GuestApp() {
         )}
 
         {step === 'hall_map' && (
-          <section className="rounded-[38px] border border-white/10 bg-neutral-950 p-4 shadow-2xl sm:p-6">
+          <section className="rounded-[32px] border border-white/10 bg-neutral-950 p-4 shadow-2xl sm:p-6">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
@@ -581,118 +491,85 @@ export default function GuestApp() {
               </div>
             )}
 
-            <div className="overflow-auto rounded-[34px] border border-white/10 bg-black/70 p-2">
-              <div
-                className="relative overflow-hidden rounded-[28px]"
-                style={{
-                  width: mapWidth(map),
-                  height: mapHeight(map),
-                  backgroundImage:
-                    'linear-gradient(rgba(0,0,0,.18), rgba(0,0,0,.32)), url("/maps/hall-bg.png")',
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                }}
-              >
-                {visibleZones.map((zone: Zone) => (
-                  <div
-                    key={zone.id}
-                    className="absolute flex items-center justify-center border border-white/15 bg-white/5 text-xs font-semibold text-white/70 backdrop-blur-[1px]"
-                    style={{
-                      left: numberValue(zone.x),
-                      top: numberValue(zone.y),
-                      width: numberValue(zone.width, 160),
-                      height: numberValue(zone.height, 90),
-                      transform: `rotate(${numberValue(zone.rotation)}deg)`,
-                      borderRadius: 24,
-                    }}
-                  >
-                    {zone.isClosed ? '🔒 ' : ''}
-                    {zone.name}
-                  </div>
-                ))}
-
-                {visibleObjects.map((object: MapObject) => (
-                  <div
-                    key={object.id}
-                    className="absolute flex items-center justify-center border border-white/10 text-[10px] font-semibold text-white/80 shadow-lg"
-                    style={{
-                      left: numberValue(object.x),
-                      top: numberValue(object.y),
-                      width: numberValue(object.width, 80),
-                      height: numberValue(object.height, 80),
-                      transform: `rotate(${numberValue(object.rotation)}deg)`,
-                      borderRadius: objectRadius(object),
-                      background: objectBackground(object),
-                    }}
-                  >
-                    {object.name || ''}
-                  </div>
-                ))}
-
-                {visibleTables.map((table: TableItem) => {
-                  const status = normalizeTableStatus(table.status);
-
-                  const isBlocked =
-                    restaurant?.status === 'booking_closed' ||
-                    status !== 'free' ||
-                    table.zone?.isClosed;
-
-                  return (
-                    <button
-                      key={table.id}
-                      onClick={() => selectTable(table)}
-                      className={`absolute flex items-center justify-center border text-xs font-black text-white shadow-xl ring-2 ring-white/20 transition active:scale-95 ${
-                        table.shape === 'round' ? 'rounded-full' : 'rounded-xl'
-                      } ${tableColor(table)}`}
-                      style={{
-                        left: numberValue(table.x),
-                        top: numberValue(table.y),
-                        width: numberValue(table.width, 86),
-                        height: numberValue(table.height, 86),
-                        transform: `rotate(${numberValue(table.rotation)}deg)`,
-                        opacity: isBlocked ? 0.9 : 1,
-                      }}
-                      title={STATUS_TEXT[status]}
-                    >
-                      {isBlocked && status === 'closed' ? (
-                        <span className="absolute text-lg">✕</span>
-                      ) : null}
-
-                      <span className="rounded-full bg-black/35 px-2 py-1">
-                        {table.tableNumber}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="overflow-hidden rounded-[30px] border border-white/10 bg-black/70 p-2">
+              <img
+                src="/maps/hall-bg.png"
+                alt="Зал ресторану"
+                className="max-h-[68vh] w-full rounded-[24px] object-contain"
+              />
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-neutral-300 sm:flex">
-              <span className="inline-flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-emerald-500" />
-                Вільний
-              </span>
+            <div className="mt-5 rounded-[28px] border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">Столи</h2>
 
-              <span className="inline-flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-amber-500" />
-                Бронь
-              </span>
+                <div className="flex flex-wrap gap-2 text-[11px] text-neutral-300">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                    Вільний
+                  </span>
 
-              <span className="inline-flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-red-600" />
-                Зайнятий
-              </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
+                    Заброньований
+                  </span>
 
-              <span className="inline-flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-neutral-600" />
-                Закритий
-              </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-full bg-neutral-500" />
+                    Закритий
+                  </span>
+                </div>
+              </div>
+
+              {visibleTables.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-white/10 bg-black/30 p-4 text-sm text-neutral-400">
+                  Столи ще не додано. Додай столи в конструкторі, і вони зʼявляться тут.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {visibleTables.map((table: TableItem) => {
+                    const status = normalizeTableStatus(table.status);
+                    const isBlocked =
+                      restaurant?.status === 'booking_closed' ||
+                      status !== 'free' ||
+                      table.zone?.isClosed;
+
+                    return (
+                      <button
+                        key={table.id}
+                        onClick={() => selectTable(table)}
+                        className={`rounded-2xl border px-4 py-4 text-left transition active:scale-[0.98] ${tableButtonClass(
+                          table,
+                        )}`}
+                      >
+                        <span className="block text-lg font-black">
+                          Стіл {table.tableNumber}
+                        </span>
+
+                        <span className="mt-1 block text-sm opacity-80">
+                          до {table.seats} гостей
+                        </span>
+
+                        <span className="mt-2 block text-xs font-semibold uppercase tracking-[0.15em] opacity-80">
+                          {STATUS_TEXT[status]}
+                        </span>
+
+                        {isBlocked ? (
+                          <span className="mt-2 block text-xs opacity-70">
+                            Натисніть, щоб зателефонувати
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </section>
         )}
 
         {step === 'form' && selectedTable && (
-          <section className="rounded-[34px] border border-white/10 bg-neutral-950 p-6 shadow-2xl">
+          <section className="rounded-[32px] border border-white/10 bg-neutral-950 p-6 shadow-2xl">
             <h1 className="text-2xl font-semibold">
               Стіл №{selectedTable.tableNumber}
             </h1>
@@ -757,7 +634,7 @@ export default function GuestApp() {
         )}
 
         {step === 'success' && (
-          <section className="rounded-[34px] border border-emerald-400/25 bg-emerald-950/40 p-6 text-center shadow-2xl backdrop-blur-xl">
+          <section className="rounded-[32px] border border-emerald-400/25 bg-emerald-950/40 p-6 text-center shadow-2xl backdrop-blur-xl">
             <CheckCircle2 className="mx-auto mb-4 h-12 w-12 text-emerald-400" />
 
             <h1 className="text-2xl font-semibold">Заявку надіслано</h1>
