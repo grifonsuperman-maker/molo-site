@@ -236,79 +236,83 @@ export default function GuestApp() {
   }
 
   return (
-    <div className="min-h-screen bg-black px-3 py-4 text-white">
+    <div className="min-h-screen bg-black text-white">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
         {step !== 'home' && (
-          <button
-            onClick={goBack}
-            className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-neutral-200 backdrop-blur-xl active:scale-95"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Назад
-          </button>
+          <div className="px-3 pt-4">
+            <button
+              onClick={goBack}
+              className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-neutral-200 backdrop-blur-xl active:scale-95"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Назад
+            </button>
+          </div>
         )}
 
         {step === 'home' && (
-          <section className="overflow-hidden rounded-[32px] border border-white/10 bg-neutral-950 shadow-2xl">
-            <div className="relative min-h-[560px]">
+          <section className="relative min-h-screen overflow-hidden bg-black pb-32">
+            <img
+              src="/hero-bg.jpg"
+              alt="MOLO"
+              className="absolute inset-0 h-full w-full object-cover opacity-80"
+            />
+
+            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/35 to-black/85" />
+
+            <div className="relative flex min-h-screen flex-col items-center px-4 pt-10 text-center">
               <img
-                src="/hero-bg.jpg"
+                src="/logo.png"
                 alt="MOLO"
-                className="absolute inset-0 h-full w-full object-cover opacity-85"
+                className="mx-auto h-32 w-32 object-contain mix-blend-screen sm:h-40 sm:w-40"
               />
 
-              <div className="absolute inset-0 bg-gradient-to-b from-black/15 via-black/35 to-black/80" />
+              <p className="mt-8 text-sm uppercase tracking-[0.55em] text-amber-100/70">
+                Restaurant
+              </p>
 
-              <div className="relative flex min-h-[560px] flex-col justify-between p-5 sm:p-8">
-                <div>
-                  <img
-                    src="/logo.png"
-                    alt="MOLO"
-                    className="h-20 w-auto object-contain sm:h-24"
-                  />
-                </div>
+              <h1 className="mt-5 text-7xl font-light tracking-[0.28em] text-white sm:text-8xl">
+                MOLO
+              </h1>
 
-                <div className="rounded-[28px] border border-white/10 bg-black/45 p-5 shadow-2xl backdrop-blur-xl">
-                  <p className="text-sm text-neutral-200">
-                    Бронювання столиків, меню та звʼязок з адміністратором.
-                  </p>
+              <p className="mt-9 max-w-2xl text-2xl leading-snug text-white/90 sm:text-3xl">
+                Бронювання столиків, меню та звʼязок з адміністратором.
+              </p>
 
-                  <div className="mt-5 grid gap-3">
-                    <button
-                      onClick={() => setStep('location_choice')}
-                      className="rounded-2xl border border-amber-200/90 bg-amber-300/10 px-5 py-4 text-base font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.16)] transition active:scale-[0.99]"
-                    >
-                      Забронювати столик
-                    </button>
+              <div className="mt-10 grid w-full max-w-2xl gap-5">
+                <button
+                  onClick={() => setStep('location_choice')}
+                  className="rounded-[22px] border border-amber-200/90 bg-black/25 px-6 py-5 text-2xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.18)] backdrop-blur-md transition active:scale-[0.99]"
+                >
+                  Забронювати столик
+                </button>
 
-                    <button
-                      onClick={openMenu}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-4 font-semibold text-neutral-100 transition active:scale-[0.99]"
-                    >
-                      <Menu className="h-5 w-5" />
-                      Меню
-                    </button>
+                <button
+                  onClick={openMenu}
+                  className="inline-flex items-center justify-center gap-4 rounded-[22px] border border-white/25 bg-black/25 px-6 py-5 text-2xl font-semibold text-white backdrop-blur-md transition active:scale-[0.99]"
+                >
+                  <Menu className="h-8 w-8 text-amber-200" />
+                  Меню
+                </button>
 
-                    <button
-                      onClick={callAdmin}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-4 font-semibold text-neutral-100 transition active:scale-[0.99]"
-                    >
-                      <Phone className="h-5 w-5" />
-                      Зателефонувати адміністратору
-                    </button>
-                  </div>
-
-                  <p className="mt-5 text-center text-sm text-neutral-400">
-                    Ми працюємо з 10:00 до 23:00
-                  </p>
-                </div>
+                <button
+                  onClick={callAdmin}
+                  className="inline-flex items-center justify-center gap-4 rounded-[22px] border border-emerald-300/55 bg-black/25 px-6 py-5 text-2xl font-semibold text-white backdrop-blur-md transition active:scale-[0.99]"
+                >
+                  <Phone className="h-8 w-8 text-emerald-300" />
+                  Зателефонувати адміністратору
+                </button>
               </div>
+
+              <p className="mt-10 text-xl text-white/75">
+                Ми працюємо з 10:00 до 23:00
+              </p>
             </div>
           </section>
         )}
 
         {step === 'location_choice' && (
-          <section className="overflow-hidden rounded-[32px] border border-white/10 bg-neutral-950 shadow-2xl">
+          <section className="mx-3 overflow-hidden rounded-[32px] border border-white/10 bg-neutral-950 shadow-2xl">
             <div className="relative min-h-[560px]">
               <img
                 src="/maps/entrance-bg.png"
@@ -366,7 +370,7 @@ export default function GuestApp() {
         )}
 
         {step === 'waterfront_choice' && (
-          <section className="rounded-[32px] border border-white/10 bg-neutral-950 p-5 shadow-2xl sm:p-7">
+          <section className="mx-3 rounded-[32px] border border-white/10 bg-neutral-950 p-5 shadow-2xl sm:p-7">
             <div className="text-center">
               <p className="text-sm uppercase tracking-[0.28em] text-sky-100/75">
                 Набережна ресторану
@@ -410,7 +414,7 @@ export default function GuestApp() {
         )}
 
         {step === 'location_placeholder' && selectedWaterfrontLocation && (
-          <section className="rounded-[32px] border border-white/10 bg-neutral-950 p-6 text-center shadow-2xl">
+          <section className="mx-3 rounded-[32px] border border-white/10 bg-neutral-950 p-6 text-center shadow-2xl">
             <p className="text-sm uppercase tracking-[0.28em] text-sky-100/75">
               Локація
             </p>
@@ -430,7 +434,7 @@ export default function GuestApp() {
         )}
 
         {step === 'hall_map' && (
-          <section className="rounded-[32px] border border-white/10 bg-neutral-950 p-4 shadow-2xl sm:p-6">
+          <section className="mx-3 rounded-[32px] border border-white/10 bg-neutral-950 p-4 shadow-2xl sm:p-6">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
@@ -569,7 +573,7 @@ export default function GuestApp() {
         )}
 
         {step === 'form' && selectedTable && (
-          <section className="rounded-[32px] border border-white/10 bg-neutral-950 p-6 shadow-2xl">
+          <section className="mx-3 rounded-[32px] border border-white/10 bg-neutral-950 p-6 shadow-2xl">
             <h1 className="text-2xl font-semibold">
               Стіл №{selectedTable.tableNumber}
             </h1>
@@ -634,7 +638,7 @@ export default function GuestApp() {
         )}
 
         {step === 'success' && (
-          <section className="rounded-[32px] border border-emerald-400/25 bg-emerald-950/40 p-6 text-center shadow-2xl backdrop-blur-xl">
+          <section className="mx-3 rounded-[32px] border border-emerald-400/25 bg-emerald-950/40 p-6 text-center shadow-2xl backdrop-blur-xl">
             <CheckCircle2 className="mx-auto mb-4 h-12 w-12 text-emerald-400" />
 
             <h1 className="text-2xl font-semibold">Заявку надіслано</h1>
