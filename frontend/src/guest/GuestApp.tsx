@@ -282,23 +282,23 @@ export default function GuestApp() {
 
           <div className="absolute inset-0 bg-gradient-to-b from-black/25 via-black/25 to-black/80" />
 
-          <div className="relative flex h-[100dvh] w-full flex-col items-center justify-center px-4 pb-[112px] pt-8 text-center">
+          <div className="relative flex h-[100dvh] w-full flex-col items-center justify-center px-4 pb-[112px] pt-6 text-center">
             <img
               src="/logo.png"
               alt="MOLO"
-              className="mx-auto h-52 w-52 object-contain mix-blend-screen sm:h-72 sm:w-72"
+              className="mx-auto h-64 w-64 object-contain mix-blend-screen sm:h-80 sm:w-80"
               draggable={false}
             />
 
-            <p className="mt-3 text-sm uppercase tracking-[0.55em] text-amber-100/75">
+            <p className="mt-2 text-sm uppercase tracking-[0.55em] text-amber-100/75">
               Restaurant
             </p>
 
-            <h1 className="mt-4 text-7xl font-light tracking-[0.28em] text-white sm:text-8xl">
+            <h1 className="mt-3 text-6xl font-light tracking-[0.24em] text-white sm:text-7xl">
               MOLO
             </h1>
 
-            <p className="mt-7 max-w-2xl text-xl leading-snug text-white/90 sm:text-3xl">
+            <p className="mt-6 max-w-2xl text-xl leading-snug text-white/90 sm:text-3xl">
               Бронювання столиків, меню та звʼязок з адміністратором.
             </p>
 
