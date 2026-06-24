@@ -296,7 +296,7 @@ export default function GuestApp() {
           @keyframes moloBgZoom {
             from {
               opacity: 0.72;
-              transform: scale(1.035);
+              transform: scale(1.015);
             }
             to {
               opacity: 1;
@@ -525,14 +525,16 @@ export default function GuestApp() {
 
       {step === 'location_placeholder' && selectedWaterfrontLocation && (
         <section className="molo-screen fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden bg-black text-white">
-          <img
-            src={selectedWaterfrontLocation.background}
-            alt={selectedWaterfrontLocation.label}
-            className="molo-bg absolute inset-0 h-full w-full object-cover opacity-95"
-            draggable={false}
-          />
+          <div className="absolute inset-0 flex items-center justify-center bg-black">
+            <img
+              src={selectedWaterfrontLocation.background}
+              alt={selectedWaterfrontLocation.label}
+              className="molo-bg max-h-full max-w-full object-contain opacity-95"
+              draggable={false}
+            />
+          </div>
 
-          <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/15 to-black/86" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/5 to-black/80" />
 
           <div className="relative flex h-[100dvh] w-full items-end px-4 pb-[98px] pt-20 text-center">
             <div className="molo-panel w-full">
@@ -554,7 +556,7 @@ export default function GuestApp() {
                 </p>
 
                 <p className="mt-2 text-sm text-white/70">
-                  Фото локації вже додано. Наступний крок — додати столи цієї зони.
+                  Фото тепер показується повністю. Наступний крок — додати столи цієї зони.
                 </p>
               </div>
             </div>
