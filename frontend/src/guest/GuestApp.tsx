@@ -6,7 +6,6 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock,
-  MapPin,
   Menu,
   Phone,
   Users,
@@ -36,6 +35,7 @@ type WaterfrontLocation = {
   key: string;
   label: string;
   description: string;
+  background: string;
 };
 
 const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
@@ -43,31 +43,37 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
     key: 'canopy',
     label: 'Навіс',
     description: 'Зона навісу',
+    background: '/maps/canopy-day-bg.png',
   },
   {
     key: 'gazebo',
     label: 'Велика альтанка',
     description: 'Окрема зона великої альтанки',
+    background: '/maps/gazebo-day-bg.png',
   },
   {
     key: 'rotang',
     label: 'Ротанг',
     description: 'Зона з ротанговими місцями',
+    background: '/maps/rotang-day-bg.png',
   },
   {
     key: 'embankment',
     label: 'Набережна',
     description: 'Загальна зона набережної',
+    background: '/maps/embankment-day-bg.png',
   },
   {
-    key: 'pier',
+    key: 'glass_gazebo',
     label: 'Скляна альтанка',
     description: 'Зона скляної альтанки',
+    background: '/maps/glass-gazebo-day-bg.png',
   },
   {
-    key: 'water_pier',
+    key: 'water_gazebo',
     label: 'Альтанка на воді',
     description: 'Зона альтанки на воді',
+    background: '/maps/water-gazebo-day-bg.png',
   },
 ];
 
@@ -518,22 +524,39 @@ export default function GuestApp() {
       )}
 
       {step === 'location_placeholder' && selectedWaterfrontLocation && (
-        <section className="molo-screen flex min-h-[100dvh] items-center justify-center bg-black px-4 py-20 pb-[120px] text-center text-white">
-          <div className="molo-panel w-full max-w-2xl rounded-[34px] border border-amber-200/40 bg-black/30 p-7 shadow-2xl backdrop-blur-md">
-            <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
-              Локація
-            </p>
+        <section className="molo-screen fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden bg-black text-white">
+          <img
+            src={selectedWaterfrontLocation.background}
+            alt={selectedWaterfrontLocation.label}
+            className="molo-bg absolute inset-0 h-full w-full object-cover opacity-95"
+            draggable={false}
+          />
 
-            <h1 className="mt-3 text-4xl font-black tracking-tight">
-              {selectedWaterfrontLocation.label}
-            </h1>
+          <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/15 to-black/86" />
 
-            <p className="mx-auto mt-4 max-w-xl text-white/75">
-              Фон цієї локації ще не додано. Після завантаження картинки сюди підключимо вибір столів.
-            </p>
+          <div className="relative flex h-[100dvh] w-full items-end px-4 pb-[98px] pt-20 text-center">
+            <div className="molo-panel w-full">
+              <p className="text-xs uppercase tracking-[0.4em] text-amber-100/80">
+                Локація
+              </p>
 
-            <div className="mt-6 rounded-[30px] border border-dashed border-amber-200/30 bg-white/[0.03] p-8 text-amber-100/70">
-              Очікується фон локації
+              <h1 className="mx-auto mt-3 max-w-[620px] text-4xl font-black leading-tight text-white">
+                {selectedWaterfrontLocation.label}
+              </h1>
+
+              <p className="mx-auto mt-3 max-w-[560px] text-base leading-snug text-white/85">
+                {selectedWaterfrontLocation.description}
+              </p>
+
+              <div className="mx-auto mt-5 w-full max-w-[620px] rounded-[28px] border border-amber-200/70 bg-black/15 p-5 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm">
+                <p className="text-lg font-semibold text-amber-100">
+                  Вибір столів скоро буде підключено
+                </p>
+
+                <p className="mt-2 text-sm text-white/70">
+                  Фото локації вже додано. Наступний крок — додати столи цієї зони.
+                </p>
+              </div>
             </div>
           </div>
         </section>
@@ -597,173 +620,4 @@ export default function GuestApp() {
             </div>
 
             {restaurant?.status === 'booking_closed' && (
-              <div className="mb-4 rounded-2xl border border-amber-200/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-                {restaurant.bookingClosedMessage}
-              </div>
-            )}
-
-            <div className="overflow-hidden rounded-[30px] border border-amber-200/30 bg-black/60 p-2">
-              <img
-                src="/maps/hall-bg.png"
-                alt="Зал ресторану"
-                className="max-h-[68vh] w-full rounded-[24px] object-contain"
-                draggable={false}
-              />
-            </div>
-
-            <div className="mt-5 rounded-[28px] border border-amber-200/30 bg-black/30 p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold">Столи</h2>
-
-                <div className="flex flex-wrap gap-2 text-[11px] text-white/65">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                    Вільний
-                  </span>
-
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
-                    Заброньований
-                  </span>
-
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-neutral-500" />
-                    Закритий
-                  </span>
-                </div>
-              </div>
-
-              {visibleTables.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-amber-200/30 bg-black/30 p-4 text-sm text-white/60">
-                  Столи ще не додано. Додай столи в конструкторі, і вони зʼявляться тут.
-                </p>
-              ) : (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {visibleTables.map((table: TableItem) => {
-                    const status = normalizeTableStatus(table.status);
-
-                    const isBlocked =
-                      restaurant?.status === 'booking_closed' ||
-                      status !== 'free' ||
-                      table.zone?.isClosed;
-
-                    return (
-                      <button
-                        key={table.id}
-                        onClick={() => selectTable(table)}
-                        className={`molo-button rounded-2xl border px-4 py-4 text-left ${tableButtonClass(
-                          table,
-                        )}`}
-                      >
-                        <span className="block text-lg font-black">
-                          Стіл {table.tableNumber}
-                        </span>
-
-                        <span className="mt-1 block text-sm opacity-80">
-                          до {table.seats} гостей
-                        </span>
-
-                        <span className="mt-2 block text-xs font-semibold uppercase tracking-[0.15em] opacity-80">
-                          {STATUS_TEXT[status]}
-                        </span>
-
-                        {isBlocked ? (
-                          <span className="mt-2 block text-xs opacity-70">
-                            Натисніть, щоб зателефонувати
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {step === 'form' && selectedTable && (
-        <section className="molo-screen flex min-h-[100dvh] items-center justify-center bg-black px-4 py-20 pb-[120px] text-white">
-          <div className="molo-panel w-full max-w-2xl rounded-[32px] border border-amber-200/35 bg-black/35 p-6 shadow-2xl backdrop-blur-md">
-            <h1 className="text-2xl font-semibold">
-              Стіл №{selectedTable.tableNumber}
-            </h1>
-
-            <p className="mt-2 text-white/70">
-              до {selectedTable.seats} гостей · {date} · {time}
-            </p>
-
-            <div className="mt-6 grid gap-4">
-              <input
-                placeholder="Ваше імʼя"
-                value={form.fullName}
-                onChange={(event) => setForm({ ...form, fullName: event.target.value })}
-                className="w-full rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3 outline-none"
-              />
-
-              <input
-                placeholder="Телефон"
-                value={form.phone}
-                onChange={(event) => setForm({ ...form, phone: event.target.value })}
-                className="w-full rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3 outline-none"
-              />
-
-              <label className="rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3">
-                <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-white/55">
-                  <Users className="h-4 w-4" />
-                  Кількість гостей
-                </span>
-
-                <input
-                  value={form.guestsCount}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      guestsCount: Number(event.target.value),
-                    })
-                  }
-                  min={1}
-                  type="number"
-                  className="mt-2 w-full bg-transparent outline-none"
-                />
-              </label>
-
-              <textarea
-                placeholder="Побажання"
-                value={form.wishes}
-                onChange={(event) => setForm({ ...form, wishes: event.target.value })}
-                className="min-h-24 w-full rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3 outline-none"
-              />
-
-              {error && <p className="text-sm text-red-300">{error}</p>}
-
-              <GoldButton onClick={submit} disabled={loading}>
-                {loading ? 'Надсилаємо...' : 'Надіслати заявку'}
-              </GoldButton>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {step === 'success' && (
-        <section className="molo-screen flex min-h-[100dvh] items-center justify-center bg-black px-4 py-20 pb-[120px] text-center text-white">
-          <div className="molo-panel w-full max-w-2xl rounded-[32px] border border-emerald-400/25 bg-emerald-950/40 p-6 shadow-2xl backdrop-blur-xl">
-            <CheckCircle2 className="mx-auto mb-4 h-12 w-12 text-emerald-400" />
-
-            <h1 className="text-2xl font-semibold">Заявку надіслано</h1>
-
-            <p className="mt-3 text-white/70">
-              Адміністратор отримає заявку та підтвердить бронювання.
-            </p>
-
-            <div className="mt-6">
-              <GoldButton onClick={() => setStep('home')}>
-                На головну
-              </GoldButton>
-            </div>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
+              <div className="mb-4 rounded-2xl border border-amber-200/30 bg-amber-500/10 p-
