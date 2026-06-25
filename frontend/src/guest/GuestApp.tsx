@@ -43,6 +43,9 @@ type VisualHallTable = {
   seats: number;
   x: number;
   y: number;
+  w: number;
+  h: number;
+  shape: 'round' | 'rect';
 };
 
 const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
@@ -85,22 +88,22 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 ];
 
 const HALL_VISUAL_TABLES: VisualHallTable[] = [
-  { number: 1, seats: 4, x: 15, y: 72 },
-  { number: 2, seats: 4, x: 25, y: 58 },
-  { number: 3, seats: 4, x: 32, y: 43 },
-  { number: 4, seats: 4, x: 39, y: 25 },
+  { number: 1, seats: 4, x: 16.5, y: 77.5, w: 7.5, h: 5.6, shape: 'rect' },
+  { number: 2, seats: 4, x: 25.5, y: 64.5, w: 7.2, h: 5.4, shape: 'rect' },
+  { number: 3, seats: 4, x: 33.2, y: 49.5, w: 7.2, h: 5.4, shape: 'rect' },
+  { number: 4, seats: 4, x: 40.4, y: 31.2, w: 6.8, h: 5.1, shape: 'rect' },
 
-  { number: 5, seats: 6, x: 42, y: 65 },
-  { number: 6, seats: 6, x: 48, y: 49 },
-  { number: 7, seats: 6, x: 54, y: 30 },
-  { number: 8, seats: 6, x: 55, y: 78 },
-  { number: 9, seats: 6, x: 61, y: 60 },
-  { number: 10, seats: 6, x: 66, y: 43 },
+  { number: 5, seats: 6, x: 42.6, y: 71.2, w: 8.1, h: 8.1, shape: 'round' },
+  { number: 6, seats: 6, x: 48.5, y: 55.6, w: 7.8, h: 7.8, shape: 'round' },
+  { number: 7, seats: 6, x: 54.4, y: 37.4, w: 7.5, h: 7.5, shape: 'round' },
+  { number: 8, seats: 6, x: 55.8, y: 84.2, w: 8.4, h: 8.4, shape: 'round' },
+  { number: 9, seats: 6, x: 61.7, y: 66.5, w: 8.1, h: 8.1, shape: 'round' },
+  { number: 10, seats: 6, x: 66.8, y: 49.8, w: 7.8, h: 7.8, shape: 'round' },
 
-  { number: 11, seats: 4, x: 82, y: 48 },
-  { number: 12, seats: 4, x: 83, y: 39 },
-  { number: 13, seats: 4, x: 84, y: 31 },
-  { number: 14, seats: 4, x: 85, y: 23 },
+  { number: 11, seats: 4, x: 82.7, y: 55.2, w: 5.8, h: 4.8, shape: 'rect' },
+  { number: 12, seats: 4, x: 83.2, y: 45.7, w: 5.8, h: 4.8, shape: 'rect' },
+  { number: 13, seats: 4, x: 83.8, y: 36.8, w: 5.8, h: 4.8, shape: 'rect' },
+  { number: 14, seats: 4, x: 84.5, y: 27.9, w: 5.8, h: 4.8, shape: 'rect' },
 ];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
@@ -141,24 +144,24 @@ function createFallbackTable(visualTable: VisualHallTable): TableItem {
   } as unknown as TableItem;
 }
 
-function tableButtonClassByStatus(status: TableStatus) {
+function hallTableGlowClass(status: TableStatus) {
   if (status === 'pending') {
-    return 'border-sky-300 bg-sky-500/35 text-sky-50 shadow-[0_0_22px_rgba(56,189,248,.35)]';
+    return 'border-sky-200/90 bg-sky-400/30 text-sky-50 shadow-[0_0_18px_rgba(56,189,248,.7),inset_0_0_18px_rgba(56,189,248,.22)]';
   }
 
   if (status === 'reserved') {
-    return 'border-amber-200 bg-amber-400/35 text-amber-50 shadow-[0_0_22px_rgba(251,191,36,.35)]';
+    return 'border-amber-100/90 bg-amber-300/30 text-amber-50 shadow-[0_0_18px_rgba(251,191,36,.72),inset_0_0_18px_rgba(251,191,36,.22)]';
   }
 
   if (status === 'occupied') {
-    return 'border-red-300 bg-red-500/35 text-red-50 shadow-[0_0_22px_rgba(239,68,68,.35)]';
+    return 'border-red-200/90 bg-red-500/32 text-red-50 shadow-[0_0_18px_rgba(239,68,68,.72),inset_0_0_18px_rgba(239,68,68,.22)]';
   }
 
   if (status === 'closed') {
-    return 'border-neutral-300 bg-neutral-500/35 text-neutral-100 shadow-[0_0_18px_rgba(115,115,115,.28)]';
+    return 'border-neutral-200/80 bg-neutral-500/32 text-neutral-100 shadow-[0_0_14px_rgba(115,115,115,.55),inset_0_0_16px_rgba(255,255,255,.12)]';
   }
 
-  return 'border-emerald-300 bg-emerald-500/35 text-emerald-50 shadow-[0_0_22px_rgba(16,185,129,.35)]';
+  return 'border-emerald-100/90 bg-emerald-400/30 text-emerald-50 shadow-[0_0_18px_rgba(16,185,129,.7),inset_0_0_18px_rgba(16,185,129,.22)]';
 }
 
 function GoldButton({
@@ -707,16 +710,24 @@ export default function GuestApp() {
                     <button
                       key={visualTable.number}
                       onClick={() => selectVisualHallTable(visualTable)}
-                      className={`molo-button absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-sm font-black backdrop-blur-md sm:h-11 sm:w-11 sm:text-base ${tableButtonClassByStatus(
+                      className={`molo-button absolute -translate-x-1/2 -translate-y-1/2 border text-[10px] font-black leading-none backdrop-blur-[2px] sm:text-xs ${hallTableGlowClass(
                         status,
-                      )}`}
+                      )} ${
+                        visualTable.shape === 'round'
+                          ? 'rounded-full'
+                          : 'rounded-[10px]'
+                      }`}
                       style={{
                         left: `${visualTable.x}%`,
                         top: `${visualTable.y}%`,
+                        width: `${visualTable.w}%`,
+                        height: `${visualTable.h}%`,
                       }}
                       title={`Стіл ${visualTable.number}`}
                     >
-                      {visualTable.number}
+                      <span className="drop-shadow-[0_1px_2px_rgba(0,0,0,.85)]">
+                        {visualTable.number}
+                      </span>
                     </button>
                   );
                 })}
@@ -756,7 +767,7 @@ export default function GuestApp() {
               </div>
 
               <p className="rounded-2xl border border-dashed border-amber-200/30 bg-black/30 p-4 text-sm text-white/60">
-                Натисніть на номер столу прямо на фото залу. Позиції можна буде трохи підправити після перевірки на телефоні.
+                Натисніть прямо на підсвічену столешню. Якщо якась підсвітка стоїть не точно — скинь скрин, і я підправлю координати.
               </p>
             </div>
           </div>
