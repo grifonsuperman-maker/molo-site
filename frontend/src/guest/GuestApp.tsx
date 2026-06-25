@@ -29,13 +29,20 @@ type Step =
   | 'form'
   | 'success';
 
-type TableStatus = 'free' | 'reserved' | 'occupied' | 'closed';
+type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'closed';
 
 type WaterfrontLocation = {
   key: string;
   label: string;
   description: string;
   background: string;
+};
+
+type VisualHallTable = {
+  number: number;
+  seats: number;
+  x: number;
+  y: number;
 };
 
 const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
@@ -77,14 +84,35 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
   },
 ];
 
+const HALL_VISUAL_TABLES: VisualHallTable[] = [
+  { number: 1, seats: 4, x: 15, y: 72 },
+  { number: 2, seats: 4, x: 25, y: 58 },
+  { number: 3, seats: 4, x: 32, y: 43 },
+  { number: 4, seats: 4, x: 39, y: 25 },
+
+  { number: 5, seats: 6, x: 42, y: 65 },
+  { number: 6, seats: 6, x: 48, y: 49 },
+  { number: 7, seats: 6, x: 54, y: 30 },
+  { number: 8, seats: 6, x: 55, y: 78 },
+  { number: 9, seats: 6, x: 61, y: 60 },
+  { number: 10, seats: 6, x: 66, y: 43 },
+
+  { number: 11, seats: 4, x: 82, y: 48 },
+  { number: 12, seats: 4, x: 83, y: 39 },
+  { number: 13, seats: 4, x: 84, y: 31 },
+  { number: 14, seats: 4, x: 85, y: 23 },
+];
+
 const STATUS_TEXT: Record<TableStatus, string> = {
   free: 'Вільний',
+  pending: 'Очікує підтвердження',
   reserved: 'Заброньований',
   occupied: 'Зайнятий',
   closed: 'Закритий',
 };
 
 function normalizeTableStatus(status: unknown): TableStatus {
+  if (status === 'pending' || status === 'awaiting_confirmation') return 'pending';
   if (status === 'reserved' || status === 'booked') return 'reserved';
   if (status === 'occupied') return 'occupied';
   if (status === 'closed') return 'closed';
@@ -103,22 +131,34 @@ function getMapFromResponse(value: unknown): FullMapResponse | null {
   return data.data ?? data;
 }
 
-function tableButtonClass(table: TableItem) {
-  const status = normalizeTableStatus(table.status);
+function createFallbackTable(visualTable: VisualHallTable): TableItem {
+  return {
+    id: `hall-visual-${visualTable.number}`,
+    tableNumber: visualTable.number,
+    seats: visualTable.seats,
+    status: 'free',
+    isVisible: true,
+  } as unknown as TableItem;
+}
+
+function tableButtonClassByStatus(status: TableStatus) {
+  if (status === 'pending') {
+    return 'border-sky-300 bg-sky-500/35 text-sky-50 shadow-[0_0_22px_rgba(56,189,248,.35)]';
+  }
 
   if (status === 'reserved') {
-    return 'border-red-300 bg-red-500/20 text-red-100 shadow-[0_0_24px_rgba(239,68,68,.18)]';
+    return 'border-amber-200 bg-amber-400/35 text-amber-50 shadow-[0_0_22px_rgba(251,191,36,.35)]';
   }
 
   if (status === 'occupied') {
-    return 'border-amber-300 bg-amber-500/20 text-amber-100 shadow-[0_0_24px_rgba(245,158,11,.18)]';
+    return 'border-red-300 bg-red-500/35 text-red-50 shadow-[0_0_22px_rgba(239,68,68,.35)]';
   }
 
   if (status === 'closed') {
-    return 'border-neutral-400 bg-neutral-500/20 text-neutral-200 shadow-[0_0_18px_rgba(115,115,115,.18)]';
+    return 'border-neutral-300 bg-neutral-500/35 text-neutral-100 shadow-[0_0_18px_rgba(115,115,115,.28)]';
   }
 
-  return 'border-emerald-300 bg-emerald-500/20 text-emerald-100 shadow-[0_0_24px_rgba(16,185,129,.18)]';
+  return 'border-emerald-300 bg-emerald-500/35 text-emerald-50 shadow-[0_0_22px_rgba(16,185,129,.35)]';
 }
 
 function GoldButton({
@@ -180,6 +220,17 @@ export default function GuestApp() {
       .catch(() => {});
   }
 
+  function findRealTableByNumber(tableNumber: number) {
+    return visibleTables.find(
+      (table) => Number(table.tableNumber) === Number(tableNumber),
+    );
+  }
+
+  function getVisualTableStatus(visualTable: VisualHallTable): TableStatus {
+    const realTable = findRealTableByNumber(visualTable.number);
+    return normalizeTableStatus(realTable?.status);
+  }
+
   function callAdmin() {
     if (restaurant?.phone) {
       window.location.href = `tel:${restaurant.phone}`;
@@ -229,6 +280,12 @@ export default function GuestApp() {
     setStep('form');
   }
 
+  function selectVisualHallTable(visualTable: VisualHallTable) {
+    const realTable = findRealTableByNumber(visualTable.number);
+    const table = realTable ?? createFallbackTable(visualTable);
+    selectTable(table);
+  }
+
   function openWaterfrontLocation(location: WaterfrontLocation) {
     setSelectedWaterfrontLocation(location);
     setStep('location_placeholder');
@@ -236,6 +293,13 @@ export default function GuestApp() {
 
   async function submit() {
     if (!selectedTable) return;
+
+    if (String(selectedTable.id).startsWith('hall-visual-')) {
+      alert(
+        'Цей стіл ще не привʼязаний до бази. Спочатку додай столи 1–14 у конструкторі або адмінці.',
+      );
+      return;
+    }
 
     const result = await run(() =>
       bookingsApi.create({
@@ -556,7 +620,7 @@ export default function GuestApp() {
                 </p>
 
                 <p className="mt-2 text-sm text-white/70">
-                  Фото тепер показується повністю. Наступний крок — додати столи цієї зони.
+                  Наступний крок — додати клікабельні столи цієї зони.
                 </p>
               </div>
             </div>
@@ -628,17 +692,40 @@ export default function GuestApp() {
             )}
 
             <div className="overflow-hidden rounded-[30px] border border-amber-200/30 bg-black/60 p-2">
-              <img
-                src="/maps/hall-bg.png"
-                alt="Зал ресторану"
-                className="max-h-[68vh] w-full rounded-[24px] object-contain"
-                draggable={false}
-              />
+              <div className="relative mx-auto w-full overflow-hidden rounded-[24px]">
+                <img
+                  src="/maps/hall-bg.png"
+                  alt="Зал ресторану"
+                  className="w-full rounded-[24px] object-contain"
+                  draggable={false}
+                />
+
+                {HALL_VISUAL_TABLES.map((visualTable) => {
+                  const status = getVisualTableStatus(visualTable);
+
+                  return (
+                    <button
+                      key={visualTable.number}
+                      onClick={() => selectVisualHallTable(visualTable)}
+                      className={`molo-button absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-sm font-black backdrop-blur-md sm:h-11 sm:w-11 sm:text-base ${tableButtonClassByStatus(
+                        status,
+                      )}`}
+                      style={{
+                        left: `${visualTable.x}%`,
+                        top: `${visualTable.y}%`,
+                      }}
+                      title={`Стіл ${visualTable.number}`}
+                    >
+                      {visualTable.number}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="mt-5 rounded-[28px] border border-amber-200/30 bg-black/30 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold">Столи</h2>
+                <h2 className="text-lg font-semibold">Статуси столів</h2>
 
                 <div className="flex flex-wrap gap-2 text-[11px] text-white/65">
                   <span className="inline-flex items-center gap-1">
@@ -647,8 +734,18 @@ export default function GuestApp() {
                   </span>
 
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
+                    Очікує
+                  </span>
+
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
                     Заброньований
+                  </span>
+
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
+                    Зайнятий
                   </span>
 
                   <span className="inline-flex items-center gap-1">
@@ -658,50 +755,9 @@ export default function GuestApp() {
                 </div>
               </div>
 
-              {visibleTables.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-amber-200/30 bg-black/30 p-4 text-sm text-white/60">
-                  Столи ще не додано. Додай столи в конструкторі, і вони зʼявляться тут.
-                </p>
-              ) : (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {visibleTables.map((table: TableItem) => {
-                    const status = normalizeTableStatus(table.status);
-
-                    const isBlocked =
-                      restaurant?.status === 'booking_closed' ||
-                      status !== 'free' ||
-                      table.zone?.isClosed;
-
-                    return (
-                      <button
-                        key={table.id}
-                        onClick={() => selectTable(table)}
-                        className={`molo-button rounded-2xl border px-4 py-4 text-left ${tableButtonClass(
-                          table,
-                        )}`}
-                      >
-                        <span className="block text-lg font-black">
-                          Стіл {table.tableNumber}
-                        </span>
-
-                        <span className="mt-1 block text-sm opacity-80">
-                          до {table.seats} гостей
-                        </span>
-
-                        <span className="mt-2 block text-xs font-semibold uppercase tracking-[0.15em] opacity-80">
-                          {STATUS_TEXT[status]}
-                        </span>
-
-                        {isBlocked ? (
-                          <span className="mt-2 block text-xs opacity-70">
-                            Натисніть, щоб зателефонувати
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              <p className="rounded-2xl border border-dashed border-amber-200/30 bg-black/30 p-4 text-sm text-white/60">
+                Натисніть на номер столу прямо на фото залу. Позиції можна буде трохи підправити після перевірки на телефоні.
+              </p>
             </div>
           </div>
         </section>
