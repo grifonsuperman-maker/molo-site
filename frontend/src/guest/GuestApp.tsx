@@ -88,22 +88,22 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 ];
 
 const HALL_VISUAL_TABLES: VisualHallTable[] = [
-  { number: 1, seats: 4, x: 16.8, y: 74.8, w: 7.2, h: 5.2, shape: 'rect' },
-  { number: 2, seats: 4, x: 26.2, y: 63.0, w: 7.2, h: 5.2, shape: 'rect' },
-  { number: 3, seats: 4, x: 34.0, y: 50.0, w: 7.0, h: 5.0, shape: 'rect' },
-  { number: 4, seats: 4, x: 41.0, y: 34.0, w: 6.8, h: 5.0, shape: 'rect' },
+  { number: 1, seats: 4, x: 15.4, y: 72.2, w: 6.6, h: 4.9, shape: 'rect' },
+  { number: 2, seats: 4, x: 25.1, y: 60.3, w: 6.8, h: 5.0, shape: 'rect' },
+  { number: 3, seats: 4, x: 32.5, y: 48.0, w: 6.8, h: 5.0, shape: 'rect' },
+  { number: 4, seats: 4, x: 39.5, y: 31.2, w: 6.4, h: 4.8, shape: 'rect' },
 
-  { number: 5, seats: 6, x: 42.8, y: 68.0, w: 7.4, h: 7.4, shape: 'round' },
-  { number: 6, seats: 6, x: 49.8, y: 55.0, w: 7.2, h: 7.2, shape: 'round' },
-  { number: 7, seats: 6, x: 55.2, y: 39.0, w: 7.0, h: 7.0, shape: 'round' },
-  { number: 8, seats: 6, x: 56.6, y: 78.2, w: 7.8, h: 7.8, shape: 'round' },
-  { number: 9, seats: 6, x: 62.8, y: 64.0, w: 7.4, h: 7.4, shape: 'round' },
-  { number: 10, seats: 6, x: 67.8, y: 50.8, w: 7.2, h: 7.2, shape: 'round' },
+  { number: 5, seats: 6, x: 41.9, y: 66.3, w: 7.2, h: 7.2, shape: 'round' },
+  { number: 6, seats: 6, x: 49.2, y: 52.6, w: 7.0, h: 7.0, shape: 'round' },
+  { number: 7, seats: 6, x: 55.0, y: 36.8, w: 6.8, h: 6.8, shape: 'round' },
+  { number: 8, seats: 6, x: 56.2, y: 75.7, w: 7.6, h: 7.6, shape: 'round' },
+  { number: 9, seats: 6, x: 62.1, y: 61.5, w: 7.2, h: 7.2, shape: 'round' },
+  { number: 10, seats: 6, x: 67.7, y: 48.2, w: 7.0, h: 7.0, shape: 'round' },
 
-  { number: 11, seats: 4, x: 79.5, y: 55.5, w: 5.2, h: 4.4, shape: 'rect' },
-  { number: 12, seats: 4, x: 80.0, y: 47.0, w: 5.2, h: 4.4, shape: 'rect' },
-  { number: 13, seats: 4, x: 80.6, y: 38.6, w: 5.2, h: 4.4, shape: 'rect' },
-  { number: 14, seats: 4, x: 81.2, y: 30.2, w: 5.2, h: 4.4, shape: 'rect' },
+  { number: 11, seats: 4, x: 78.0, y: 53.8, w: 4.8, h: 4.0, shape: 'rect' },
+  { number: 12, seats: 4, x: 78.5, y: 45.5, w: 4.8, h: 4.0, shape: 'rect' },
+  { number: 13, seats: 4, x: 79.0, y: 37.0, w: 4.8, h: 4.0, shape: 'rect' },
+  { number: 14, seats: 4, x: 79.5, y: 28.8, w: 4.8, h: 4.0, shape: 'rect' },
 ];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
