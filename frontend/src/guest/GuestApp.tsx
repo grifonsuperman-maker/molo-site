@@ -43,9 +43,6 @@ type VisualHallTable = {
   seats: number;
   x: number;
   y: number;
-  w: number;
-  h: number;
-  shape: 'round' | 'rect';
 };
 
 const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
@@ -88,22 +85,22 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 ];
 
 const HALL_VISUAL_TABLES: VisualHallTable[] = [
-  { number: 1, seats: 4, x: 15.4, y: 72.2, w: 6.6, h: 4.9, shape: 'rect' },
-  { number: 2, seats: 4, x: 25.1, y: 60.3, w: 6.8, h: 5.0, shape: 'rect' },
-  { number: 3, seats: 4, x: 32.5, y: 48.0, w: 6.8, h: 5.0, shape: 'rect' },
-  { number: 4, seats: 4, x: 39.5, y: 31.2, w: 6.4, h: 4.8, shape: 'rect' },
+  { number: 1, seats: 4, x: 16.8, y: 75.0 },
+  { number: 2, seats: 4, x: 25.8, y: 63.2 },
+  { number: 3, seats: 4, x: 33.4, y: 50.5 },
+  { number: 4, seats: 4, x: 40.8, y: 34.4 },
 
-  { number: 5, seats: 6, x: 41.9, y: 66.3, w: 7.2, h: 7.2, shape: 'round' },
-  { number: 6, seats: 6, x: 49.2, y: 52.6, w: 7.0, h: 7.0, shape: 'round' },
-  { number: 7, seats: 6, x: 55.0, y: 36.8, w: 6.8, h: 6.8, shape: 'round' },
-  { number: 8, seats: 6, x: 56.2, y: 75.7, w: 7.6, h: 7.6, shape: 'round' },
-  { number: 9, seats: 6, x: 62.1, y: 61.5, w: 7.2, h: 7.2, shape: 'round' },
-  { number: 10, seats: 6, x: 67.7, y: 48.2, w: 7.0, h: 7.0, shape: 'round' },
+  { number: 5, seats: 6, x: 42.8, y: 68.0 },
+  { number: 6, seats: 6, x: 49.6, y: 55.4 },
+  { number: 7, seats: 6, x: 55.2, y: 39.2 },
+  { number: 8, seats: 6, x: 56.8, y: 78.4 },
+  { number: 9, seats: 6, x: 62.7, y: 64.1 },
+  { number: 10, seats: 6, x: 67.6, y: 51.0 },
 
-  { number: 11, seats: 4, x: 78.0, y: 53.8, w: 4.8, h: 4.0, shape: 'rect' },
-  { number: 12, seats: 4, x: 78.5, y: 45.5, w: 4.8, h: 4.0, shape: 'rect' },
-  { number: 13, seats: 4, x: 79.0, y: 37.0, w: 4.8, h: 4.0, shape: 'rect' },
-  { number: 14, seats: 4, x: 79.5, y: 28.8, w: 4.8, h: 4.0, shape: 'rect' },
+  { number: 11, seats: 4, x: 80.4, y: 57.0 },
+  { number: 12, seats: 4, x: 80.9, y: 49.2 },
+  { number: 13, seats: 4, x: 81.4, y: 40.4 },
+  { number: 14, seats: 4, x: 82.0, y: 32.0 },
 ];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
@@ -144,24 +141,24 @@ function createFallbackTable(visualTable: VisualHallTable): TableItem {
   } as unknown as TableItem;
 }
 
-function hallTableGlowClass(status: TableStatus) {
+function markerClass(status: TableStatus) {
   if (status === 'pending') {
-    return 'border-sky-200/90 bg-sky-400/30 text-sky-50 shadow-[0_0_18px_rgba(56,189,248,.7),inset_0_0_18px_rgba(56,189,248,.22)]';
+    return 'border-sky-200 bg-sky-500/80 text-white shadow-[0_0_18px_rgba(56,189,248,.7)]';
   }
 
   if (status === 'reserved') {
-    return 'border-amber-100/90 bg-amber-300/30 text-amber-50 shadow-[0_0_18px_rgba(251,191,36,.72),inset_0_0_18px_rgba(251,191,36,.22)]';
+    return 'border-amber-100 bg-amber-400/85 text-white shadow-[0_0_18px_rgba(251,191,36,.75)]';
   }
 
   if (status === 'occupied') {
-    return 'border-red-200/90 bg-red-500/32 text-red-50 shadow-[0_0_18px_rgba(239,68,68,.72),inset_0_0_18px_rgba(239,68,68,.22)]';
+    return 'border-red-200 bg-red-500/85 text-white shadow-[0_0_18px_rgba(239,68,68,.75)]';
   }
 
   if (status === 'closed') {
-    return 'border-neutral-200/80 bg-neutral-500/32 text-neutral-100 shadow-[0_0_14px_rgba(115,115,115,.55),inset_0_0_16px_rgba(255,255,255,.12)]';
+    return 'border-neutral-200 bg-neutral-500/85 text-white shadow-[0_0_14px_rgba(115,115,115,.65)]';
   }
 
-  return 'border-emerald-100/90 bg-emerald-400/30 text-emerald-50 shadow-[0_0_18px_rgba(16,185,129,.7),inset_0_0_18px_rgba(16,185,129,.22)]';
+  return 'border-emerald-100 bg-emerald-500/80 text-white shadow-[0_0_18px_rgba(16,185,129,.72)]';
 }
 
 function GoldButton({
@@ -275,7 +272,7 @@ export default function GuestApp() {
     const status = normalizeTableStatus(table.status);
 
     if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
-      callAdmin();
+      alert(`Стіл недоступний: ${STATUS_TEXT[status]}`);
       return;
     }
 
@@ -299,7 +296,7 @@ export default function GuestApp() {
 
     if (String(selectedTable.id).startsWith('hall-visual-')) {
       alert(
-        'Цей стіл ще не привʼязаний до бази. Спочатку додай столи 1–14 у конструкторі або адмінці.',
+        'Цей стіл ще не привʼязаний до бази. Столи 1–14 потрібно один раз додати в базу, потім бронювання запрацює повністю.',
       );
       return;
     }
@@ -411,7 +408,7 @@ export default function GuestApp() {
           }
 
           .molo-button:active {
-            transform: scale(0.985);
+            transform: scale(0.94);
           }
 
           .molo-button:hover {
@@ -710,22 +707,16 @@ export default function GuestApp() {
                     <button
                       key={visualTable.number}
                       onClick={() => selectVisualHallTable(visualTable)}
-                      className={`molo-button absolute -translate-x-1/2 -translate-y-1/2 border text-[10px] font-black leading-none backdrop-blur-[2px] sm:text-xs ${hallTableGlowClass(
+                      className={`molo-button absolute flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-[10px] font-black leading-none backdrop-blur-[2px] sm:h-7 sm:w-7 sm:text-xs ${markerClass(
                         status,
-                      )} ${
-                        visualTable.shape === 'round'
-                          ? 'rounded-full'
-                          : 'rounded-[10px]'
-                      }`}
+                      )}`}
                       style={{
                         left: `${visualTable.x}%`,
                         top: `${visualTable.y}%`,
-                        width: `${visualTable.w}%`,
-                        height: `${visualTable.h}%`,
                       }}
                       title={`Стіл ${visualTable.number}`}
                     >
-                      <span className="drop-shadow-[0_1px_2px_rgba(0,0,0,.85)]">
+                      <span className="drop-shadow-[0_1px_2px_rgba(0,0,0,.9)]">
                         {visualTable.number}
                       </span>
                     </button>
@@ -767,7 +758,7 @@ export default function GuestApp() {
               </div>
 
               <p className="rounded-2xl border border-dashed border-amber-200/30 bg-black/30 p-4 text-sm text-white/60">
-                Натисніть прямо на підсвічену столешню. Якщо якась підсвітка стоїть не точно — скинь скрин, і я підправлю координати.
+                Натисніть на номер столу прямо на фото залу.
               </p>
             </div>
           </div>
