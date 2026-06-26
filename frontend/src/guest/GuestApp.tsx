@@ -43,6 +43,8 @@ type VisualHallTable = {
   seats: number;
   x: number;
   y: number;
+  clickW: number;
+  clickH: number;
 };
 
 const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
@@ -85,22 +87,22 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 ];
 
 const HALL_VISUAL_TABLES: VisualHallTable[] = [
-  { number: 1, seats: 4, x: 16.8, y: 75.0 },
-  { number: 2, seats: 4, x: 25.8, y: 63.2 },
-  { number: 3, seats: 4, x: 33.4, y: 50.5 },
-  { number: 4, seats: 4, x: 40.8, y: 34.4 },
+  { number: 1, seats: 4, x: 16.8, y: 75.0, clickW: 9, clickH: 8 },
+  { number: 2, seats: 4, x: 25.8, y: 63.2, clickW: 9, clickH: 8 },
+  { number: 3, seats: 4, x: 33.4, y: 50.5, clickW: 9, clickH: 8 },
+  { number: 4, seats: 4, x: 40.8, y: 34.4, clickW: 9, clickH: 8 },
 
-  { number: 5, seats: 6, x: 42.8, y: 68.0 },
-  { number: 6, seats: 6, x: 49.6, y: 55.4 },
-  { number: 7, seats: 6, x: 55.2, y: 39.2 },
-  { number: 8, seats: 6, x: 56.8, y: 78.4 },
-  { number: 9, seats: 6, x: 62.7, y: 64.1 },
-  { number: 10, seats: 6, x: 67.6, y: 51.0 },
+  { number: 5, seats: 6, x: 42.8, y: 68.0, clickW: 10, clickH: 10 },
+  { number: 6, seats: 6, x: 49.6, y: 55.4, clickW: 10, clickH: 10 },
+  { number: 7, seats: 6, x: 55.2, y: 39.2, clickW: 10, clickH: 10 },
+  { number: 8, seats: 6, x: 56.8, y: 78.4, clickW: 10, clickH: 10 },
+  { number: 9, seats: 6, x: 62.7, y: 64.1, clickW: 10, clickH: 10 },
+  { number: 10, seats: 6, x: 67.6, y: 51.0, clickW: 10, clickH: 10 },
 
-  { number: 11, seats: 4, x: 80.4, y: 57.0 },
-  { number: 12, seats: 4, x: 80.9, y: 49.2 },
-  { number: 13, seats: 4, x: 81.4, y: 40.4 },
-  { number: 14, seats: 4, x: 82.0, y: 32.0 },
+  { number: 11, seats: 4, x: 80.4, y: 57.0, clickW: 8, clickH: 7 },
+  { number: 12, seats: 4, x: 80.9, y: 49.2, clickW: 8, clickH: 7 },
+  { number: 13, seats: 4, x: 81.4, y: 40.4, clickW: 8, clickH: 7 },
+  { number: 14, seats: 4, x: 82.0, y: 32.0, clickW: 8, clickH: 7 },
 ];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
@@ -141,24 +143,24 @@ function createFallbackTable(visualTable: VisualHallTable): TableItem {
   } as unknown as TableItem;
 }
 
-function markerClass(status: TableStatus) {
+function numberClass(status: TableStatus) {
   if (status === 'pending') {
-    return 'border-sky-200 bg-sky-500/80 text-white shadow-[0_0_18px_rgba(56,189,248,.7)]';
+    return 'text-sky-200 drop-shadow-[0_0_8px_rgba(56,189,248,.95)]';
   }
 
   if (status === 'reserved') {
-    return 'border-amber-100 bg-amber-400/85 text-white shadow-[0_0_18px_rgba(251,191,36,.75)]';
+    return 'text-amber-200 drop-shadow-[0_0_8px_rgba(251,191,36,.95)]';
   }
 
   if (status === 'occupied') {
-    return 'border-red-200 bg-red-500/85 text-white shadow-[0_0_18px_rgba(239,68,68,.75)]';
+    return 'text-red-200 drop-shadow-[0_0_8px_rgba(239,68,68,.95)]';
   }
 
   if (status === 'closed') {
-    return 'border-neutral-200 bg-neutral-500/85 text-white shadow-[0_0_14px_rgba(115,115,115,.65)]';
+    return 'text-neutral-300 drop-shadow-[0_0_8px_rgba(115,115,115,.95)]';
   }
 
-  return 'border-emerald-100 bg-emerald-500/80 text-white shadow-[0_0_18px_rgba(16,185,129,.72)]';
+  return 'text-white drop-shadow-[0_2px_3px_rgba(0,0,0,.95)]';
 }
 
 function GoldButton({
@@ -408,13 +410,29 @@ export default function GuestApp() {
           }
 
           .molo-button:active {
-            transform: scale(0.94);
+            transform: scale(0.96);
           }
 
           .molo-button:hover {
             border-color: rgba(253, 230, 138, 1);
             box-shadow: 0 0 42px rgba(251, 191, 36, 0.2);
             background: rgba(0, 0, 0, 0.18);
+          }
+
+          .hall-number {
+            -webkit-text-stroke: 1px rgba(0,0,0,.65);
+            text-shadow:
+              0 2px 3px rgba(0,0,0,.95),
+              0 0 8px rgba(0,0,0,.9);
+          }
+
+          .hall-click:hover .hall-number,
+          .hall-click:active .hall-number {
+            color: rgb(253 230 138);
+            -webkit-text-stroke: 1px rgba(0,0,0,.8);
+            text-shadow:
+              0 2px 3px rgba(0,0,0,.95),
+              0 0 14px rgba(251,191,36,.95);
           }
         `}
       </style>
@@ -707,16 +725,20 @@ export default function GuestApp() {
                     <button
                       key={visualTable.number}
                       onClick={() => selectVisualHallTable(visualTable)}
-                      className={`molo-button absolute flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-[10px] font-black leading-none backdrop-blur-[2px] sm:h-7 sm:w-7 sm:text-xs ${markerClass(
-                        status,
-                      )}`}
+                      className="hall-click absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-transparent"
                       style={{
                         left: `${visualTable.x}%`,
                         top: `${visualTable.y}%`,
+                        width: `${visualTable.clickW}%`,
+                        height: `${visualTable.clickH}%`,
                       }}
                       title={`Стіл ${visualTable.number}`}
                     >
-                      <span className="drop-shadow-[0_1px_2px_rgba(0,0,0,.9)]">
+                      <span
+                        className={`hall-number text-xl font-black leading-none sm:text-3xl ${numberClass(
+                          status,
+                        )}`}
+                      >
                         {visualTable.number}
                       </span>
                     </button>
