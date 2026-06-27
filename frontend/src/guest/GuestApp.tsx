@@ -87,22 +87,22 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 ];
 
 const HALL_VISUAL_TABLES: VisualHallTable[] = [
-  { number: 1, seats: 4, x: 16.8, y: 75.0, clickW: 9, clickH: 8 },
-  { number: 2, seats: 4, x: 25.8, y: 63.2, clickW: 9, clickH: 8 },
-  { number: 3, seats: 4, x: 33.4, y: 50.5, clickW: 9, clickH: 8 },
-  { number: 4, seats: 4, x: 40.8, y: 34.4, clickW: 9, clickH: 8 },
+  { number: 1, seats: 4, x: 17.2, y: 75.0, clickW: 9, clickH: 8 },
+  { number: 2, seats: 4, x: 25.8, y: 63.4, clickW: 9, clickH: 8 },
+  { number: 3, seats: 4, x: 33.6, y: 50.7, clickW: 9, clickH: 8 },
+  { number: 4, seats: 4, x: 41.0, y: 34.6, clickW: 9, clickH: 8 },
 
-  { number: 5, seats: 6, x: 42.8, y: 68.0, clickW: 10, clickH: 10 },
-  { number: 6, seats: 6, x: 49.6, y: 55.4, clickW: 10, clickH: 10 },
-  { number: 7, seats: 6, x: 55.2, y: 39.2, clickW: 10, clickH: 10 },
-  { number: 8, seats: 6, x: 56.8, y: 78.4, clickW: 10, clickH: 10 },
-  { number: 9, seats: 6, x: 62.7, y: 64.1, clickW: 10, clickH: 10 },
-  { number: 10, seats: 6, x: 67.6, y: 51.0, clickW: 10, clickH: 10 },
+  { number: 5, seats: 6, x: 42.8, y: 68.6, clickW: 10, clickH: 10 },
+  { number: 6, seats: 6, x: 49.7, y: 55.8, clickW: 10, clickH: 10 },
+  { number: 7, seats: 6, x: 55.2, y: 39.4, clickW: 10, clickH: 10 },
+  { number: 8, seats: 6, x: 56.9, y: 79.0, clickW: 10, clickH: 10 },
+  { number: 9, seats: 6, x: 62.7, y: 64.0, clickW: 10, clickH: 10 },
+  { number: 10, seats: 6, x: 68.0, y: 50.5, clickW: 10, clickH: 10 },
 
-  { number: 11, seats: 4, x: 80.4, y: 57.0, clickW: 8, clickH: 7 },
-  { number: 12, seats: 4, x: 80.9, y: 49.2, clickW: 8, clickH: 7 },
-  { number: 13, seats: 4, x: 81.4, y: 40.4, clickW: 8, clickH: 7 },
-  { number: 14, seats: 4, x: 82.0, y: 32.0, clickW: 8, clickH: 7 },
+  { number: 11, seats: 4, x: 79.6, y: 57.0, clickW: 8, clickH: 7 },
+  { number: 12, seats: 4, x: 81.4, y: 49.0, clickW: 8, clickH: 7 },
+  { number: 13, seats: 4, x: 81.6, y: 40.5, clickW: 8, clickH: 7 },
+  { number: 14, seats: 4, x: 82.2, y: 32.0, clickW: 8, clickH: 7 },
 ];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
@@ -420,16 +420,16 @@ export default function GuestApp() {
           }
 
           .hall-number {
-            -webkit-text-stroke: 1px rgba(0,0,0,.65);
+            -webkit-text-stroke: 1px rgba(0,0,0,.7);
             text-shadow:
               0 2px 3px rgba(0,0,0,.95),
-              0 0 8px rgba(0,0,0,.9);
+              0 0 8px rgba(0,0,0,.95);
           }
 
           .hall-click:hover .hall-number,
           .hall-click:active .hall-number {
             color: rgb(253 230 138);
-            -webkit-text-stroke: 1px rgba(0,0,0,.8);
+            -webkit-text-stroke: 1px rgba(0,0,0,.85);
             text-shadow:
               0 2px 3px rgba(0,0,0,.95),
               0 0 14px rgba(251,191,36,.95);
