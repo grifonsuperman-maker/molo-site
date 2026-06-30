@@ -92,8 +92,10 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 const HALL_VISUAL_TABLES: VisualHallTable[] = [
   { number: 1, seats: 4, x: 18.4, y: 67.5, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
   { number: 2, seats: 4, x: 25.9, y: 52.0, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
-  { number: 3, seats: 4, x: 32.7, y: 37.5, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
-  { number: 4, seats: 4, x: 38.0, y: 24.8, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+
+  // Столы 3 и 4 чуть сдвинуты выше и левее
+  { number: 3, seats: 4, x: 32.0, y: 36.7, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 4, seats: 4, x: 37.3, y: 23.8, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
 
   { number: 5, seats: 6, x: 39.6, y: 59.0, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
   { number: 6, seats: 6, x: 44.7, y: 45.1, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
