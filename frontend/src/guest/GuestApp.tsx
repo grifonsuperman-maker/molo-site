@@ -45,6 +45,9 @@ type VisualHallTable = {
   y: number;
   clickW: number;
   clickH: number;
+  glowW: number;
+  glowH: number;
+  shape: 'round' | 'rect';
 };
 
 const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
@@ -87,22 +90,22 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 ];
 
 const HALL_VISUAL_TABLES: VisualHallTable[] = [
-  { number: 1, seats: 4, x: 17.2, y: 75.0, clickW: 9, clickH: 8 },
-  { number: 2, seats: 4, x: 25.8, y: 63.4, clickW: 9, clickH: 8 },
-  { number: 3, seats: 4, x: 33.6, y: 50.7, clickW: 9, clickH: 8 },
-  { number: 4, seats: 4, x: 41.0, y: 34.6, clickW: 9, clickH: 8 },
+  { number: 1, seats: 4, x: 18.4, y: 67.5, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 2, seats: 4, x: 25.9, y: 52.0, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 3, seats: 4, x: 32.7, y: 37.5, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 4, seats: 4, x: 38.0, y: 24.8, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
 
-  { number: 5, seats: 6, x: 42.8, y: 68.6, clickW: 10, clickH: 10 },
-  { number: 6, seats: 6, x: 49.7, y: 55.8, clickW: 10, clickH: 10 },
-  { number: 7, seats: 6, x: 55.2, y: 39.4, clickW: 10, clickH: 10 },
-  { number: 8, seats: 6, x: 56.9, y: 79.0, clickW: 10, clickH: 10 },
-  { number: 9, seats: 6, x: 62.7, y: 64.0, clickW: 10, clickH: 10 },
-  { number: 10, seats: 6, x: 68.0, y: 50.5, clickW: 10, clickH: 10 },
+  { number: 5, seats: 6, x: 39.6, y: 59.0, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 6, seats: 6, x: 44.7, y: 45.1, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 7, seats: 6, x: 50.8, y: 29.4, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 8, seats: 6, x: 52.1, y: 71.5, clickW: 14, clickH: 12, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 9, seats: 6, x: 57.0, y: 50.5, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 10, seats: 6, x: 62.0, y: 35.4, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
 
-  { number: 11, seats: 4, x: 79.6, y: 57.0, clickW: 8, clickH: 7 },
-  { number: 12, seats: 4, x: 81.4, y: 49.0, clickW: 8, clickH: 7 },
-  { number: 13, seats: 4, x: 81.6, y: 40.5, clickW: 8, clickH: 7 },
-  { number: 14, seats: 4, x: 82.2, y: 32.0, clickW: 8, clickH: 7 },
+  { number: 11, seats: 4, x: 77.7, y: 37.0, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
+  { number: 12, seats: 4, x: 77.8, y: 31.0, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
+  { number: 13, seats: 4, x: 77.9, y: 25.2, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
+  { number: 14, seats: 4, x: 78.0, y: 19.5, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
 ];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
@@ -169,7 +172,7 @@ function tableHighlightClass(status: TableStatus, active: boolean) {
 
 function tableHighlightOpacityClass(status: TableStatus, active: boolean) {
   if (active) return 'opacity-100';
-  if (status === 'free') return 'opacity-0 group-hover:opacity-75 group-active:opacity-100';
+  if (status === 'free') return 'opacity-0';
   return 'opacity-100';
 }
 
@@ -305,13 +308,13 @@ export default function GuestApp() {
     if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
       window.setTimeout(() => {
         alert(`Стіл недоступний: ${STATUS_TEXT[status]}`);
-      }, 180);
+      }, 220);
       return;
     }
 
     window.setTimeout(() => {
       selectTable(table);
-    }, 320);
+    }, 650);
   }
 
   function openWaterfrontLocation(location: WaterfrontLocation) {
@@ -781,7 +784,7 @@ export default function GuestApp() {
                     <button
                       key={visualTable.number}
                       onClick={() => selectVisualHallTable(visualTable)}
-                      className="hall-click group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-transparent"
+                      className="hall-click group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center bg-transparent"
                       style={{
                         left: `${visualTable.x}%`,
                         top: `${visualTable.y}%`,
@@ -792,12 +795,17 @@ export default function GuestApp() {
                       aria-label={`Стіл ${visualTable.number}`}
                     >
                       <span
-                        className={`hall-table-highlight pointer-events-none h-full w-full rounded-full blur-[1px] ${tableHighlightClass(
+                        className={`hall-table-highlight pointer-events-none blur-[1px] ${tableHighlightClass(
                           status,
                           isActive,
                         )} ${tableHighlightOpacityClass(status, isActive)} ${
                           isActive ? 'hall-table-highlight-active' : ''
                         }`}
+                        style={{
+                          width: `${visualTable.glowW}%`,
+                          height: `${visualTable.glowH}%`,
+                          borderRadius: visualTable.shape === 'round' ? '999px' : '16px',
+                        }}
                       />
                     </button>
                   );
