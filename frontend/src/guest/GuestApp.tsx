@@ -52,37 +52,37 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
     key: 'canopy',
     label: 'Навіс',
     description: 'Зона навісу',
-    background: '/maps/canopy-day-bg.png',
+    background: '/maps/canopy-day-numbered.png',
   },
   {
     key: 'gazebo',
     label: 'Велика альтанка',
     description: 'Окрема зона великої альтанки',
-    background: '/maps/gazebo-day-bg.png',
+    background: '/maps/gazebo-day-numbered.png',
   },
   {
     key: 'rotang',
     label: 'Ротанг',
     description: 'Зона з ротанговими місцями',
-    background: '/maps/rotang-day-bg.png',
+    background: '/maps/rotang-day-numbered.png',
   },
   {
     key: 'embankment',
     label: 'Набережна',
     description: 'Загальна зона набережної',
-    background: '/maps/embankment-day-bg.png',
+    background: '/maps/embankment-day-numbered.png',
   },
   {
     key: 'glass_gazebo',
     label: 'Скляна альтанка',
     description: 'Зона скляної альтанки',
-    background: '/maps/glass-gazebo-day-bg.png',
+    background: '/maps/glass-gazebo-day-numbered.png',
   },
   {
     key: 'water_gazebo',
     label: 'Альтанка на воді',
     description: 'Зона альтанки на воді',
-    background: '/maps/water-gazebo-day-bg.png',
+    background: '/maps/water-gazebo-day-numbered.png',
   },
 ];
 
@@ -143,24 +143,34 @@ function createFallbackTable(visualTable: VisualHallTable): TableItem {
   } as unknown as TableItem;
 }
 
-function numberClass(status: TableStatus) {
+function tableHighlightClass(status: TableStatus, active: boolean) {
+  if (active) {
+    return 'bg-amber-300/45 ring-2 ring-amber-100/95 shadow-[0_0_34px_rgba(251,191,36,.95)]';
+  }
+
   if (status === 'pending') {
-    return 'text-sky-200 drop-shadow-[0_0_8px_rgba(56,189,248,.95)]';
+    return 'bg-blue-600/35 ring-2 ring-blue-300/85 shadow-[0_0_28px_rgba(37,99,235,.85)]';
   }
 
   if (status === 'reserved') {
-    return 'text-amber-200 drop-shadow-[0_0_8px_rgba(251,191,36,.95)]';
+    return 'bg-orange-500/35 ring-2 ring-orange-200/85 shadow-[0_0_28px_rgba(249,115,22,.85)]';
   }
 
   if (status === 'occupied') {
-    return 'text-red-200 drop-shadow-[0_0_8px_rgba(239,68,68,.95)]';
+    return 'bg-red-600/38 ring-2 ring-red-200/90 shadow-[0_0_30px_rgba(239,68,68,.9)]';
   }
 
   if (status === 'closed') {
-    return 'text-neutral-300 drop-shadow-[0_0_8px_rgba(115,115,115,.95)]';
+    return 'bg-neutral-500/35 ring-2 ring-neutral-300/75 shadow-[0_0_22px_rgba(115,115,115,.8)]';
   }
 
-  return 'text-white drop-shadow-[0_2px_3px_rgba(0,0,0,.95)]';
+  return 'bg-emerald-400/0 ring-0 shadow-none';
+}
+
+function tableHighlightOpacityClass(status: TableStatus, active: boolean) {
+  if (active) return 'opacity-100';
+  if (status === 'free') return 'opacity-0 group-hover:opacity-75 group-active:opacity-100';
+  return 'opacity-100';
 }
 
 function GoldButton({
@@ -190,6 +200,7 @@ export default function GuestApp() {
   const [selectedTable, setSelectedTable] = useState<TableItem | null>(null);
   const [selectedWaterfrontLocation, setSelectedWaterfrontLocation] =
     useState<WaterfrontLocation | null>(null);
+  const [activeTableNumber, setActiveTableNumber] = useState<number | null>(null);
 
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState('19:00');
@@ -247,6 +258,8 @@ export default function GuestApp() {
   }
 
   function goBack() {
+    setActiveTableNumber(null);
+
     if (step === 'form') {
       setStep('hall_map');
       return;
@@ -285,7 +298,20 @@ export default function GuestApp() {
   function selectVisualHallTable(visualTable: VisualHallTable) {
     const realTable = findRealTableByNumber(visualTable.number);
     const table = realTable ?? createFallbackTable(visualTable);
-    selectTable(table);
+    const status = normalizeTableStatus(table.status);
+
+    setActiveTableNumber(visualTable.number);
+
+    if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
+      window.setTimeout(() => {
+        alert(`Стіл недоступний: ${STATUS_TEXT[status]}`);
+      }, 180);
+      return;
+    }
+
+    window.setTimeout(() => {
+      selectTable(table);
+    }, 320);
   }
 
   function openWaterfrontLocation(location: WaterfrontLocation) {
@@ -383,6 +409,25 @@ export default function GuestApp() {
             }
           }
 
+          @keyframes tableSpring {
+            0% {
+              transform: scale(0.55);
+              opacity: 0;
+            }
+            48% {
+              transform: scale(1.22);
+              opacity: 1;
+            }
+            72% {
+              transform: scale(0.92);
+              opacity: 1;
+            }
+            100% {
+              transform: scale(1);
+              opacity: 1;
+            }
+          }
+
           .molo-screen {
             animation: moloFadeIn 420ms ease-out both;
           }
@@ -419,20 +464,21 @@ export default function GuestApp() {
             background: rgba(0, 0, 0, 0.18);
           }
 
-          .hall-number {
-            -webkit-text-stroke: 1px rgba(0,0,0,.7);
-            text-shadow:
-              0 2px 3px rgba(0,0,0,.95),
-              0 0 8px rgba(0,0,0,.95);
+          .hall-table-highlight {
+            transition:
+              opacity 180ms ease,
+              transform 180ms ease,
+              box-shadow 180ms ease,
+              background 180ms ease;
+            transform-origin: center;
           }
 
-          .hall-click:hover .hall-number,
-          .hall-click:active .hall-number {
-            color: rgb(253 230 138);
-            -webkit-text-stroke: 1px rgba(0,0,0,.85);
-            text-shadow:
-              0 2px 3px rgba(0,0,0,.95),
-              0 0 14px rgba(251,191,36,.95);
+          .hall-table-highlight-active {
+            animation: tableSpring 420ms cubic-bezier(0.18, 1.65, 0.35, 1) both;
+          }
+
+          .hall-click:active .hall-table-highlight {
+            transform: scale(0.9);
           }
         `}
       </style>
@@ -606,41 +652,50 @@ export default function GuestApp() {
       )}
 
       {step === 'location_placeholder' && selectedWaterfrontLocation && (
-        <section className="molo-screen fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden bg-black text-white">
-          <div className="absolute inset-0 flex items-center justify-center bg-black">
-            <img
-              src={selectedWaterfrontLocation.background}
-              alt={selectedWaterfrontLocation.label}
-              className="molo-bg max-h-full max-w-full object-contain opacity-95"
-              draggable={false}
-            />
-          </div>
-
-          <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/5 to-black/80" />
-
-          <div className="relative flex h-[100dvh] w-full items-end px-4 pb-[98px] pt-20 text-center">
-            <div className="molo-panel w-full">
-              <p className="text-xs uppercase tracking-[0.4em] text-amber-100/80">
+        <section className="molo-screen min-h-[100dvh] bg-black px-4 py-20 pb-[120px] text-white">
+          <div className="molo-panel mx-auto max-w-6xl">
+            <div className="mb-4">
+              <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
                 Локація
               </p>
 
-              <h1 className="mx-auto mt-3 max-w-[620px] text-4xl font-black leading-tight text-white">
+              <h1 className="mt-2 text-4xl font-black tracking-tight">
                 {selectedWaterfrontLocation.label}
               </h1>
 
-              <p className="mx-auto mt-3 max-w-[560px] text-base leading-snug text-white/85">
+              <p className="mt-2 text-white/70">
                 {selectedWaterfrontLocation.description}
               </p>
+            </div>
 
-              <div className="mx-auto mt-5 w-full max-w-[620px] rounded-[28px] border border-amber-200/70 bg-black/15 p-5 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm">
-                <p className="text-lg font-semibold text-amber-100">
-                  Вибір столів скоро буде підключено
-                </p>
-
-                <p className="mt-2 text-sm text-white/70">
-                  Наступний крок — додати клікабельні столи цієї зони.
-                </p>
+            <div className="overflow-hidden rounded-[30px] border border-amber-200/30 bg-black/60 p-2">
+              <div className="relative mx-auto w-full overflow-hidden rounded-[24px]">
+                <img
+                  src={selectedWaterfrontLocation.background}
+                  alt={selectedWaterfrontLocation.label}
+                  className="w-full rounded-[24px] object-contain"
+                  draggable={false}
+                />
               </div>
+            </div>
+
+            <div className="mt-5 rounded-[28px] border border-amber-200/30 bg-black/30 p-4 text-center">
+              <p className="text-lg font-semibold text-amber-100">
+                Вибір столів цієї зони скоро буде підключено
+              </p>
+
+              <p className="mx-auto mt-2 max-w-2xl text-sm text-white/65">
+                Фото з номерами вже підключено. Наступний крок — додати невидимі
+                зони кліку для столів цієї локації.
+              </p>
+
+              <button
+                onClick={callAdmin}
+                className="molo-button mt-4 inline-flex items-center justify-center gap-3 rounded-[22px] border border-amber-200/80 bg-black/20 px-5 py-3 text-sm font-semibold text-amber-100"
+              >
+                <Phone className="h-4 w-4 text-amber-200" />
+                Забронювати через адміністратора
+              </button>
             </div>
           </div>
         </section>
@@ -712,7 +767,7 @@ export default function GuestApp() {
             <div className="overflow-hidden rounded-[30px] border border-amber-200/30 bg-black/60 p-2">
               <div className="relative mx-auto w-full overflow-hidden rounded-[24px]">
                 <img
-                  src="/maps/hall-bg.png"
+                  src="/maps/hall-bg-numbered.png"
                   alt="Зал ресторану"
                   className="w-full rounded-[24px] object-contain"
                   draggable={false}
@@ -720,12 +775,13 @@ export default function GuestApp() {
 
                 {HALL_VISUAL_TABLES.map((visualTable) => {
                   const status = getVisualTableStatus(visualTable);
+                  const isActive = activeTableNumber === visualTable.number;
 
                   return (
                     <button
                       key={visualTable.number}
                       onClick={() => selectVisualHallTable(visualTable)}
-                      className="hall-click absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-transparent"
+                      className="hall-click group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-transparent"
                       style={{
                         left: `${visualTable.x}%`,
                         top: `${visualTable.y}%`,
@@ -733,14 +789,16 @@ export default function GuestApp() {
                         height: `${visualTable.clickH}%`,
                       }}
                       title={`Стіл ${visualTable.number}`}
+                      aria-label={`Стіл ${visualTable.number}`}
                     >
                       <span
-                        className={`hall-number text-xl font-black leading-none sm:text-3xl ${numberClass(
+                        className={`hall-table-highlight pointer-events-none h-full w-full rounded-full blur-[1px] ${tableHighlightClass(
                           status,
-                        )}`}
-                      >
-                        {visualTable.number}
-                      </span>
+                          isActive,
+                        )} ${tableHighlightOpacityClass(status, isActive)} ${
+                          isActive ? 'hall-table-highlight-active' : ''
+                        }`}
+                      />
                     </button>
                   );
                 })}
@@ -758,12 +816,12 @@ export default function GuestApp() {
                   </span>
 
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-blue-600" />
                     Очікує
                   </span>
 
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-orange-500" />
                     Заброньований
                   </span>
 
