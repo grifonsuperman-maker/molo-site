@@ -90,24 +90,22 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 ];
 
 const HALL_VISUAL_TABLES: VisualHallTable[] = [
-  { number: 1, seats: 4, x: 18.4, y: 67.5, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
-  { number: 2, seats: 4, x: 25.9, y: 52.0, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 1, seats: 4, x: 17.4, y: 61.8, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 2, seats: 4, x: 23.4, y: 48.2, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 3, seats: 4, x: 30.1, y: 31.7, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 4, seats: 4, x: 34.7, y: 20.2, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
 
-  // Столы 3 и 4 чуть сдвинуты выше и левее
-  { number: 3, seats: 4, x: 32.0, y: 36.7, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
-  { number: 4, seats: 4, x: 37.3, y: 23.8, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 5, seats: 6, x: 36.4, y: 54.0, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 6, seats: 6, x: 40.9, y: 36.4, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 7, seats: 6, x: 46.6, y: 25.0, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 8, seats: 6, x: 48.2, y: 66.2, clickW: 14, clickH: 12, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 9, seats: 6, x: 51.1, y: 45.2, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 10, seats: 6, x: 56.3, y: 32.0, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
 
-  { number: 5, seats: 6, x: 39.6, y: 59.0, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 6, seats: 6, x: 44.7, y: 45.1, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 7, seats: 6, x: 50.8, y: 29.4, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 8, seats: 6, x: 52.1, y: 71.5, clickW: 14, clickH: 12, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 9, seats: 6, x: 57.0, y: 50.5, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 10, seats: 6, x: 62.0, y: 35.4, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
-
-  { number: 11, seats: 4, x: 77.7, y: 37.0, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
-  { number: 12, seats: 4, x: 77.8, y: 31.0, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
-  { number: 13, seats: 4, x: 77.9, y: 25.2, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
-  { number: 14, seats: 4, x: 78.0, y: 19.5, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
+  { number: 11, seats: 4, x: 71.0, y: 34.0, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
+  { number: 12, seats: 4, x: 70.9, y: 28.3, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
+  { number: 13, seats: 4, x: 70.9, y: 23.1, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
+  { number: 14, seats: 4, x: 71.0, y: 18.7, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
 ];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
