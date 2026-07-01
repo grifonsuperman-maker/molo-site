@@ -38,17 +38,32 @@ type WaterfrontLocation = {
   background: string;
 };
 
-type VisualHallTable = {
-  number: number;
-  seats: number;
-  x: number;
-  y: number;
-  clickW: number;
-  clickH: number;
-  glowW: number;
-  glowH: number;
-  shape: 'round' | 'rect';
-};
+type SvgTableShape =
+  | {
+      number: number;
+      seats: number;
+      kind: 'ellipse';
+      cx: number;
+      cy: number;
+      rx: number;
+      ry: number;
+    }
+  | {
+      number: number;
+      seats: number;
+      kind: 'polygon';
+      points: string;
+    }
+  | {
+      number: number;
+      seats: number;
+      kind: 'rect';
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      rx: number;
+    };
 
 const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
   {
@@ -89,24 +104,125 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
   },
 ];
 
-const HALL_VISUAL_TABLES: VisualHallTable[] = [
-  { number: 1, seats: 4, x: 18.4, y: 67.5, clickW: 8.0, clickH: 5.9, glowW: 100, glowH: 100, shape: 'rect' },
-  { number: 2, seats: 4, x: 25.9, y: 52.0, clickW: 7.6, clickH: 5.3, glowW: 100, glowH: 100, shape: 'rect' },
-
-  { number: 3, seats: 4, x: 31.7, y: 36.8, clickW: 7.2, clickH: 4.8, glowW: 100, glowH: 100, shape: 'rect' },
-  { number: 4, seats: 4, x: 36.5, y: 23.2, clickW: 7.0, clickH: 4.5, glowW: 100, glowH: 100, shape: 'rect' },
-
-  { number: 5, seats: 6, x: 39.6, y: 59.0, clickW: 10.4, clickH: 8.8, glowW: 100, glowH: 100, shape: 'round' },
-  { number: 6, seats: 6, x: 44.2, y: 42.6, clickW: 9.0, clickH: 7.4, glowW: 100, glowH: 100, shape: 'round' },
-  { number: 7, seats: 6, x: 50.8, y: 29.4, clickW: 9.0, clickH: 7.4, glowW: 100, glowH: 100, shape: 'round' },
-  { number: 8, seats: 6, x: 52.1, y: 71.5, clickW: 11.6, clickH: 10.2, glowW: 100, glowH: 100, shape: 'round' },
-  { number: 9, seats: 6, x: 57.0, y: 50.5, clickW: 10.2, clickH: 8.4, glowW: 100, glowH: 100, shape: 'round' },
-  { number: 10, seats: 6, x: 62.0, y: 35.4, clickW: 9.4, clickH: 7.4, glowW: 100, glowH: 100, shape: 'round' },
-
-  { number: 11, seats: 4, x: 77.7, y: 37.0, clickW: 7.2, clickH: 4.8, glowW: 100, glowH: 100, shape: 'rect' },
-  { number: 12, seats: 4, x: 77.8, y: 31.0, clickW: 7.0, clickH: 4.7, glowW: 100, glowH: 100, shape: 'rect' },
-  { number: 13, seats: 4, x: 77.9, y: 25.2, clickW: 6.8, clickH: 4.5, glowW: 100, glowH: 100, shape: 'rect' },
-  { number: 14, seats: 4, x: 78.0, y: 19.5, clickW: 6.5, clickH: 4.3, glowW: 100, glowH: 100, shape: 'rect' },
+const HALL_TABLE_SHAPES: SvgTableShape[] = [
+  {
+    number: 1,
+    seats: 4,
+    kind: 'polygon',
+    points: '193 736 333 708 411 752 267 802',
+  },
+  {
+    number: 2,
+    seats: 4,
+    kind: 'polygon',
+    points: '321 560 469 535 520 580 363 625',
+  },
+  {
+    number: 3,
+    seats: 4,
+    kind: 'polygon',
+    points: '434 392 569 378 612 415 471 454',
+  },
+  {
+    number: 4,
+    seats: 4,
+    kind: 'polygon',
+    points: '520 251 650 239 704 276 566 313',
+  },
+  {
+    number: 5,
+    seats: 6,
+    kind: 'ellipse',
+    cx: 616,
+    cy: 662,
+    rx: 78,
+    ry: 54,
+  },
+  {
+    number: 6,
+    seats: 6,
+    kind: 'ellipse',
+    cx: 690,
+    cy: 444,
+    rx: 74,
+    ry: 56,
+  },
+  {
+    number: 7,
+    seats: 6,
+    kind: 'ellipse',
+    cx: 782,
+    cy: 315,
+    rx: 78,
+    ry: 48,
+  },
+  {
+    number: 8,
+    seats: 6,
+    kind: 'ellipse',
+    cx: 811,
+    cy: 812,
+    rx: 92,
+    ry: 77,
+  },
+  {
+    number: 9,
+    seats: 6,
+    kind: 'ellipse',
+    cx: 864,
+    cy: 550,
+    rx: 85,
+    ry: 62,
+  },
+  {
+    number: 10,
+    seats: 6,
+    kind: 'ellipse',
+    cx: 934,
+    cy: 382,
+    rx: 74,
+    ry: 47,
+  },
+  {
+    number: 11,
+    seats: 4,
+    kind: 'rect',
+    x: 1087,
+    y: 397,
+    width: 118,
+    height: 68,
+    rx: 24,
+  },
+  {
+    number: 12,
+    seats: 4,
+    kind: 'rect',
+    x: 1114,
+    y: 349,
+    width: 104,
+    height: 55,
+    rx: 12,
+  },
+  {
+    number: 13,
+    seats: 4,
+    kind: 'rect',
+    x: 1114,
+    y: 281,
+    width: 104,
+    height: 55,
+    rx: 12,
+  },
+  {
+    number: 14,
+    seats: 4,
+    kind: 'rect',
+    x: 1118,
+    y: 216,
+    width: 96,
+    height: 52,
+    rx: 12,
+  },
 ];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
@@ -115,6 +231,15 @@ const STATUS_TEXT: Record<TableStatus, string> = {
   reserved: 'Заброньований',
   occupied: 'Зайнятий',
   closed: 'Закритий',
+};
+
+const STATUS_COLOR: Record<TableStatus | 'selected', string> = {
+  free: '#ffffff',
+  selected: '#facc15',
+  pending: '#38bdf8',
+  reserved: '#fb923c',
+  occupied: '#fb5252',
+  closed: '#e5e7eb',
 };
 
 function normalizeTableStatus(status: unknown): TableStatus {
@@ -137,44 +262,27 @@ function getMapFromResponse(value: unknown): FullMapResponse | null {
   return data.data ?? data;
 }
 
-function createFallbackTable(visualTable: VisualHallTable): TableItem {
+function createFallbackTable(tableShape: SvgTableShape): TableItem {
   return {
-    id: `hall-visual-${visualTable.number}`,
-    tableNumber: visualTable.number,
-    seats: visualTable.seats,
+    id: `hall-visual-${tableShape.number}`,
+    tableNumber: tableShape.number,
+    seats: tableShape.seats,
     status: 'free',
     isVisible: true,
   } as unknown as TableItem;
 }
 
-function tableHighlightClass(status: TableStatus, active: boolean) {
-  if (active) {
-    return 'border border-amber-100/95 bg-amber-300/18 shadow-[0_0_7px_rgba(255,255,255,.75),0_0_18px_rgba(251,191,36,.95),0_0_38px_rgba(251,191,36,.65),inset_0_0_18px_rgba(251,191,36,.34)]';
-  }
-
-  if (status === 'pending') {
-    return 'border border-blue-200/95 bg-blue-500/16 shadow-[0_0_7px_rgba(219,234,254,.8),0_0_18px_rgba(37,99,235,.95),0_0_38px_rgba(37,99,235,.65),inset_0_0_18px_rgba(37,99,235,.34)]';
-  }
-
-  if (status === 'reserved') {
-    return 'border border-orange-200/95 bg-orange-500/16 shadow-[0_0_7px_rgba(255,237,213,.8),0_0_18px_rgba(249,115,22,.95),0_0_38px_rgba(249,115,22,.65),inset_0_0_18px_rgba(249,115,22,.34)]';
-  }
-
-  if (status === 'occupied') {
-    return 'border border-red-200/95 bg-red-500/16 shadow-[0_0_7px_rgba(254,226,226,.8),0_0_18px_rgba(239,68,68,.95),0_0_38px_rgba(239,68,68,.65),inset_0_0_18px_rgba(239,68,68,.34)]';
-  }
-
-  if (status === 'closed') {
-    return 'border border-neutral-100/85 bg-neutral-400/12 shadow-[0_0_7px_rgba(245,245,245,.65),0_0_18px_rgba(180,180,180,.75),0_0_34px_rgba(115,115,115,.58),inset_0_0_18px_rgba(245,245,245,.24)]';
-  }
-
-  return 'border border-transparent bg-transparent shadow-none';
+function svgFilterId(status: TableStatus | 'selected') {
+  if (status === 'selected') return 'moloGlowSelected';
+  if (status === 'pending') return 'moloGlowPending';
+  if (status === 'reserved') return 'moloGlowReserved';
+  if (status === 'occupied') return 'moloGlowOccupied';
+  if (status === 'closed') return 'moloGlowClosed';
+  return 'moloGlowFree';
 }
 
-function tableHighlightOpacityClass(status: TableStatus, active: boolean) {
-  if (active) return 'opacity-100';
-  if (status === 'free') return 'opacity-0';
-  return 'opacity-100';
+function shouldShowTableGlow(status: TableStatus, isActive: boolean) {
+  return isActive || status !== 'free';
 }
 
 function GoldButton({
@@ -194,6 +302,102 @@ function GoldButton({
     >
       {children}
     </button>
+  );
+}
+
+function TableShapeElement({
+  shape,
+  color,
+  visible,
+  active,
+  onClick,
+}: {
+  shape: SvgTableShape;
+  color: string;
+  visible: boolean;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const commonVisibleProps = {
+    fill: visible ? color : 'transparent',
+    fillOpacity: visible ? 0.12 : 0,
+    stroke: visible ? color : 'transparent',
+    strokeWidth: visible ? 3 : 0,
+    filter: visible ? `url(#${svgFilterId(active ? 'selected' : 'free')})` : undefined,
+    className: active ? 'hall-table-svg-glow hall-table-svg-glow-active' : 'hall-table-svg-glow',
+    pointerEvents: 'none' as const,
+  };
+
+  const hitProps = {
+    fill: 'transparent',
+    stroke: 'transparent',
+    strokeWidth: 0,
+    onClick,
+    role: 'button',
+    tabIndex: 0,
+    'aria-label': `Стіл ${shape.number}`,
+    className: 'cursor-pointer outline-none',
+    onKeyDown: (event: React.KeyboardEvent<SVGElement>) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onClick();
+      }
+    },
+  };
+
+  if (shape.kind === 'ellipse') {
+    return (
+      <g>
+        {visible && (
+          <ellipse
+            cx={shape.cx}
+            cy={shape.cy}
+            rx={shape.rx}
+            ry={shape.ry}
+            {...commonVisibleProps}
+          />
+        )}
+        <ellipse
+          cx={shape.cx}
+          cy={shape.cy}
+          rx={shape.rx}
+          ry={shape.ry}
+          {...hitProps}
+        />
+      </g>
+    );
+  }
+
+  if (shape.kind === 'polygon') {
+    return (
+      <g>
+        {visible && <polygon points={shape.points} {...commonVisibleProps} />}
+        <polygon points={shape.points} {...hitProps} />
+      </g>
+    );
+  }
+
+  return (
+    <g>
+      {visible && (
+        <rect
+          x={shape.x}
+          y={shape.y}
+          width={shape.width}
+          height={shape.height}
+          rx={shape.rx}
+          {...commonVisibleProps}
+        />
+      )}
+      <rect
+        x={shape.x}
+        y={shape.y}
+        width={shape.width}
+        height={shape.height}
+        rx={shape.rx}
+        {...hitProps}
+      />
+    </g>
   );
 }
 
@@ -243,8 +447,8 @@ export default function GuestApp() {
     );
   }
 
-  function getVisualTableStatus(visualTable: VisualHallTable): TableStatus {
-    const realTable = findRealTableByNumber(visualTable.number);
+  function getShapeTableStatus(tableShape: SvgTableShape): TableStatus {
+    const realTable = findRealTableByNumber(tableShape.number);
     return normalizeTableStatus(realTable?.status);
   }
 
@@ -299,23 +503,24 @@ export default function GuestApp() {
     setStep('form');
   }
 
-  function selectVisualHallTable(visualTable: VisualHallTable) {
-    const realTable = findRealTableByNumber(visualTable.number);
-    const table = realTable ?? createFallbackTable(visualTable);
+  function selectVisualHallTable(tableShape: SvgTableShape) {
+    const realTable = findRealTableByNumber(tableShape.number);
+    const table = realTable ?? createFallbackTable(tableShape);
     const status = normalizeTableStatus(table.status);
 
-    setActiveTableNumber(visualTable.number);
-
     if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
+      setActiveTableNumber(null);
       window.setTimeout(() => {
         alert(`Стіл недоступний: ${STATUS_TEXT[status]}`);
-      }, 220);
+      }, 120);
       return;
     }
 
+    setActiveTableNumber(tableShape.number);
+
     window.setTimeout(() => {
       selectTable(table);
-    }, 650);
+    }, 560);
   }
 
   function openWaterfrontLocation(location: WaterfrontLocation) {
@@ -413,22 +618,18 @@ export default function GuestApp() {
             }
           }
 
-          @keyframes tableSpring {
+          @keyframes tableSvgSpring {
             0% {
-              transform: translate(-50%, -50%) scale(0.55);
               opacity: 0;
+              transform: scale(0.74);
             }
-            48% {
-              transform: translate(-50%, -50%) scale(1.22);
+            52% {
               opacity: 1;
-            }
-            72% {
-              transform: translate(-50%, -50%) scale(0.92);
-              opacity: 1;
+              transform: scale(1.08);
             }
             100% {
-              transform: translate(-50%, -50%) scale(1);
               opacity: 1;
+              transform: scale(1);
             }
           }
 
@@ -468,27 +669,13 @@ export default function GuestApp() {
             background: rgba(0, 0, 0, 0.18);
           }
 
-          .hall-table-highlight {
-            transform: translate(-50%, -50%);
-            transition:
-              opacity 180ms ease,
-              transform 180ms ease,
-              box-shadow 180ms ease,
-              background 180ms ease;
+          .hall-table-svg-glow {
+            transform-box: fill-box;
             transform-origin: center;
           }
 
-          .hall-table-highlight-active {
-            animation: tableSpring 420ms cubic-bezier(0.18, 1.65, 0.35, 1) both;
-          }
-
-          .hall-hit-shape {
-            cursor: pointer;
-            outline: none;
-          }
-
-          .hall-hit-shape:active {
-            opacity: 0.02;
+          .hall-table-svg-glow-active {
+            animation: tableSvgSpring 420ms cubic-bezier(0.18, 1.65, 0.35, 1) both;
           }
         `}
       </style>
@@ -783,77 +970,59 @@ export default function GuestApp() {
                   draggable={false}
                 />
 
-                {HALL_VISUAL_TABLES.map((visualTable) => {
-                  const status = getVisualTableStatus(visualTable);
-                  const isActive = activeTableNumber === visualTable.number;
-                  const glowWidth = (visualTable.clickW * visualTable.glowW) / 100;
-                  const glowHeight = (visualTable.clickH * visualTable.glowH) / 100;
-
-                  return (
-                    <span
-                      key={`highlight-${visualTable.number}`}
-                      className={`hall-table-highlight pointer-events-none absolute ${tableHighlightClass(
-                        status,
-                        isActive,
-                      )} ${tableHighlightOpacityClass(status, isActive)} ${
-                        isActive ? 'hall-table-highlight-active' : ''
-                      }`}
-                      style={{
-                        left: `${visualTable.x}%`,
-                        top: `${visualTable.y}%`,
-                        width: `${glowWidth}%`,
-                        height: `${glowHeight}%`,
-                        borderRadius: visualTable.shape === 'round' ? '999px' : '14px',
-                      }}
-                    />
-                  );
-                })}
-
                 <svg
                   className="absolute inset-0 h-full w-full"
-                  viewBox="0 0 100 100"
+                  viewBox="0 0 1536 1152"
                   preserveAspectRatio="none"
-                  aria-label="Карта столів залу"
+                  aria-hidden={false}
                 >
-                  {HALL_VISUAL_TABLES.map((visualTable) => {
-                    const commonProps = {
-                      onClick: () => selectVisualHallTable(visualTable),
-                      className: 'hall-hit-shape',
-                      fill: 'transparent',
-                      stroke: 'transparent',
-                      tabIndex: 0,
-                      role: 'button',
-                      'aria-label': `Стіл ${visualTable.number}`,
-                    } as const;
+                  <defs>
+                    <filter id="moloGlowFree" x="-50%" y="-50%" width="200%" height="200%">
+                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#ffffff" floodOpacity="0.55" />
+                    </filter>
 
-                    if (visualTable.shape === 'round') {
-                      return (
-                        <ellipse
-                          key={`hit-${visualTable.number}`}
-                          cx={visualTable.x}
-                          cy={visualTable.y}
-                          rx={visualTable.clickW / 2}
-                          ry={visualTable.clickH / 2}
-                          {...commonProps}
-                        >
-                          <title>{`Стіл ${visualTable.number}`}</title>
-                        </ellipse>
-                      );
-                    }
+                    <filter id="moloGlowSelected" x="-50%" y="-50%" width="200%" height="200%">
+                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#facc15" floodOpacity="0.95" />
+                      <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#facc15" floodOpacity="0.55" />
+                    </filter>
+
+                    <filter id="moloGlowPending" x="-50%" y="-50%" width="200%" height="200%">
+                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#38bdf8" floodOpacity="0.95" />
+                      <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#38bdf8" floodOpacity="0.55" />
+                    </filter>
+
+                    <filter id="moloGlowReserved" x="-50%" y="-50%" width="200%" height="200%">
+                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#fb923c" floodOpacity="0.95" />
+                      <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#fb923c" floodOpacity="0.55" />
+                    </filter>
+
+                    <filter id="moloGlowOccupied" x="-50%" y="-50%" width="200%" height="200%">
+                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#fb5252" floodOpacity="0.95" />
+                      <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#fb5252" floodOpacity="0.55" />
+                    </filter>
+
+                    <filter id="moloGlowClosed" x="-50%" y="-50%" width="200%" height="200%">
+                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#e5e7eb" floodOpacity="0.75" />
+                      <feDropShadow dx="0" dy="0" stdDeviation="10" floodColor="#e5e7eb" floodOpacity="0.35" />
+                    </filter>
+                  </defs>
+
+                  {HALL_TABLE_SHAPES.map((tableShape) => {
+                    const status = getShapeTableStatus(tableShape);
+                    const isActive = activeTableNumber === tableShape.number;
+                    const visible = shouldShowTableGlow(status, isActive);
+                    const glowStatus = isActive ? 'selected' : status;
+                    const color = STATUS_COLOR[glowStatus];
 
                     return (
-                      <rect
-                        key={`hit-${visualTable.number}`}
-                        x={visualTable.x - visualTable.clickW / 2}
-                        y={visualTable.y - visualTable.clickH / 2}
-                        width={visualTable.clickW}
-                        height={visualTable.clickH}
-                        rx={1.2}
-                        ry={1.2}
-                        {...commonProps}
-                      >
-                        <title>{`Стіл ${visualTable.number}`}</title>
-                      </rect>
+                      <TableShapeElement
+                        key={tableShape.number}
+                        shape={tableShape}
+                        color={color}
+                        visible={visible}
+                        active={isActive}
+                        onClick={() => selectVisualHallTable(tableShape)}
+                      />
                     );
                   })}
                 </svg>
@@ -871,7 +1040,7 @@ export default function GuestApp() {
                   </span>
 
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-blue-600" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
                     Очікує
                   </span>
 
