@@ -90,22 +90,23 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
 ];
 
 const HALL_VISUAL_TABLES: VisualHallTable[] = [
-  { number: 1, seats: 4, x: 18.4, y: 67.5, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
-  { number: 2, seats: 4, x: 25.9, y: 52.0, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
-  { number: 3, seats: 4, x: 32.4, y: 36.0, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
-  { number: 4, seats: 4, x: 37.4, y: 22.7, clickW: 12, clickH: 9, glowW: 74, glowH: 58, shape: 'rect' },
+  { number: 1, seats: 4, x: 18.4, y: 67.5, clickW: 8.0, clickH: 5.9, glowW: 100, glowH: 100, shape: 'rect' },
+  { number: 2, seats: 4, x: 25.9, y: 52.0, clickW: 7.6, clickH: 5.3, glowW: 100, glowH: 100, shape: 'rect' },
 
-  { number: 5, seats: 6, x: 39.6, y: 59.0, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 6, seats: 6, x: 44.4, y: 42.0, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 7, seats: 6, x: 50.8, y: 29.4, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 8, seats: 6, x: 52.1, y: 71.5, clickW: 14, clickH: 12, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 9, seats: 6, x: 57.0, y: 50.5, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
-  { number: 10, seats: 6, x: 62.0, y: 35.4, clickW: 13, clickH: 11, glowW: 82, glowH: 72, shape: 'round' },
+  { number: 3, seats: 4, x: 31.7, y: 36.8, clickW: 7.2, clickH: 4.8, glowW: 100, glowH: 100, shape: 'rect' },
+  { number: 4, seats: 4, x: 36.5, y: 23.2, clickW: 7.0, clickH: 4.5, glowW: 100, glowH: 100, shape: 'rect' },
 
-  { number: 11, seats: 4, x: 77.7, y: 37.0, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
-  { number: 12, seats: 4, x: 77.8, y: 31.0, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
-  { number: 13, seats: 4, x: 77.9, y: 25.2, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
-  { number: 14, seats: 4, x: 78.0, y: 19.5, clickW: 10, clickH: 7, glowW: 80, glowH: 64, shape: 'rect' },
+  { number: 5, seats: 6, x: 39.6, y: 59.0, clickW: 10.4, clickH: 8.8, glowW: 100, glowH: 100, shape: 'round' },
+  { number: 6, seats: 6, x: 44.2, y: 42.6, clickW: 9.0, clickH: 7.4, glowW: 100, glowH: 100, shape: 'round' },
+  { number: 7, seats: 6, x: 50.8, y: 29.4, clickW: 9.0, clickH: 7.4, glowW: 100, glowH: 100, shape: 'round' },
+  { number: 8, seats: 6, x: 52.1, y: 71.5, clickW: 11.6, clickH: 10.2, glowW: 100, glowH: 100, shape: 'round' },
+  { number: 9, seats: 6, x: 57.0, y: 50.5, clickW: 10.2, clickH: 8.4, glowW: 100, glowH: 100, shape: 'round' },
+  { number: 10, seats: 6, x: 62.0, y: 35.4, clickW: 9.4, clickH: 7.4, glowW: 100, glowH: 100, shape: 'round' },
+
+  { number: 11, seats: 4, x: 77.7, y: 37.0, clickW: 7.2, clickH: 4.8, glowW: 100, glowH: 100, shape: 'rect' },
+  { number: 12, seats: 4, x: 77.8, y: 31.0, clickW: 7.0, clickH: 4.7, glowW: 100, glowH: 100, shape: 'rect' },
+  { number: 13, seats: 4, x: 77.9, y: 25.2, clickW: 6.8, clickH: 4.5, glowW: 100, glowH: 100, shape: 'rect' },
+  { number: 14, seats: 4, x: 78.0, y: 19.5, clickW: 6.5, clickH: 4.3, glowW: 100, glowH: 100, shape: 'rect' },
 ];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
@@ -148,26 +149,26 @@ function createFallbackTable(visualTable: VisualHallTable): TableItem {
 
 function tableHighlightClass(status: TableStatus, active: boolean) {
   if (active) {
-    return 'bg-amber-300/45 ring-2 ring-amber-100/95 shadow-[0_0_34px_rgba(251,191,36,.95)]';
+    return 'border border-amber-100/95 bg-amber-300/18 shadow-[0_0_7px_rgba(255,255,255,.75),0_0_18px_rgba(251,191,36,.95),0_0_38px_rgba(251,191,36,.65),inset_0_0_18px_rgba(251,191,36,.34)]';
   }
 
   if (status === 'pending') {
-    return 'bg-blue-600/35 ring-2 ring-blue-300/85 shadow-[0_0_28px_rgba(37,99,235,.85)]';
+    return 'border border-blue-200/95 bg-blue-500/16 shadow-[0_0_7px_rgba(219,234,254,.8),0_0_18px_rgba(37,99,235,.95),0_0_38px_rgba(37,99,235,.65),inset_0_0_18px_rgba(37,99,235,.34)]';
   }
 
   if (status === 'reserved') {
-    return 'bg-orange-500/35 ring-2 ring-orange-200/85 shadow-[0_0_28px_rgba(249,115,22,.85)]';
+    return 'border border-orange-200/95 bg-orange-500/16 shadow-[0_0_7px_rgba(255,237,213,.8),0_0_18px_rgba(249,115,22,.95),0_0_38px_rgba(249,115,22,.65),inset_0_0_18px_rgba(249,115,22,.34)]';
   }
 
   if (status === 'occupied') {
-    return 'bg-red-600/38 ring-2 ring-red-200/90 shadow-[0_0_30px_rgba(239,68,68,.9)]';
+    return 'border border-red-200/95 bg-red-500/16 shadow-[0_0_7px_rgba(254,226,226,.8),0_0_18px_rgba(239,68,68,.95),0_0_38px_rgba(239,68,68,.65),inset_0_0_18px_rgba(239,68,68,.34)]';
   }
 
   if (status === 'closed') {
-    return 'bg-neutral-500/35 ring-2 ring-neutral-300/75 shadow-[0_0_22px_rgba(115,115,115,.8)]';
+    return 'border border-neutral-100/85 bg-neutral-400/12 shadow-[0_0_7px_rgba(245,245,245,.65),0_0_18px_rgba(180,180,180,.75),0_0_34px_rgba(115,115,115,.58),inset_0_0_18px_rgba(245,245,245,.24)]';
   }
 
-  return 'bg-emerald-400/0 ring-0 shadow-none';
+  return 'border border-transparent bg-transparent shadow-none';
 }
 
 function tableHighlightOpacityClass(status: TableStatus, active: boolean) {
@@ -414,19 +415,19 @@ export default function GuestApp() {
 
           @keyframes tableSpring {
             0% {
-              transform: scale(0.55);
+              transform: translate(-50%, -50%) scale(0.55);
               opacity: 0;
             }
             48% {
-              transform: scale(1.22);
+              transform: translate(-50%, -50%) scale(1.22);
               opacity: 1;
             }
             72% {
-              transform: scale(0.92);
+              transform: translate(-50%, -50%) scale(0.92);
               opacity: 1;
             }
             100% {
-              transform: scale(1);
+              transform: translate(-50%, -50%) scale(1);
               opacity: 1;
             }
           }
@@ -468,6 +469,7 @@ export default function GuestApp() {
           }
 
           .hall-table-highlight {
+            transform: translate(-50%, -50%);
             transition:
               opacity 180ms ease,
               transform 180ms ease,
@@ -480,8 +482,13 @@ export default function GuestApp() {
             animation: tableSpring 420ms cubic-bezier(0.18, 1.65, 0.35, 1) both;
           }
 
-          .hall-click:active .hall-table-highlight {
-            transform: scale(0.9);
+          .hall-hit-shape {
+            cursor: pointer;
+            outline: none;
+          }
+
+          .hall-hit-shape:active {
+            opacity: 0.02;
           }
         `}
       </style>
@@ -779,42 +786,77 @@ export default function GuestApp() {
                 {HALL_VISUAL_TABLES.map((visualTable) => {
                   const status = getVisualTableStatus(visualTable);
                   const isActive = activeTableNumber === visualTable.number;
+                  const glowWidth = (visualTable.clickW * visualTable.glowW) / 100;
+                  const glowHeight = (visualTable.clickH * visualTable.glowH) / 100;
 
                   return (
-                    <button
-                      key={visualTable.number}
-                      onClick={() => selectVisualHallTable(visualTable)}
-                      className="hall-click group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center bg-transparent"
+                    <span
+                      key={`highlight-${visualTable.number}`}
+                      className={`hall-table-highlight pointer-events-none absolute ${tableHighlightClass(
+                        status,
+                        isActive,
+                      )} ${tableHighlightOpacityClass(status, isActive)} ${
+                        isActive ? 'hall-table-highlight-active' : ''
+                      }`}
                       style={{
                         left: `${visualTable.x}%`,
                         top: `${visualTable.y}%`,
-                        width: `${visualTable.clickW}%`,
-                        height: `${visualTable.clickH}%`,
-                        borderRadius: visualTable.shape === 'round' ? '999px' : '16px',
-                        clipPath:
-                          visualTable.shape === 'round'
-                            ? 'ellipse(50% 50% at 50% 50%)'
-                            : 'inset(0 round 16px)',
+                        width: `${glowWidth}%`,
+                        height: `${glowHeight}%`,
+                        borderRadius: visualTable.shape === 'round' ? '999px' : '14px',
                       }}
-                      title={`Стіл ${visualTable.number}`}
-                      aria-label={`Стіл ${visualTable.number}`}
-                    >
-                      <span
-                        className={`hall-table-highlight pointer-events-none blur-[1px] ${tableHighlightClass(
-                          status,
-                          isActive,
-                        )} ${tableHighlightOpacityClass(status, isActive)} ${
-                          isActive ? 'hall-table-highlight-active' : ''
-                        }`}
-                        style={{
-                          width: `${visualTable.glowW}%`,
-                          height: `${visualTable.glowH}%`,
-                          borderRadius: visualTable.shape === 'round' ? '999px' : '16px',
-                        }}
-                      />
-                    </button>
+                    />
                   );
                 })}
+
+                <svg
+                  className="absolute inset-0 h-full w-full"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  aria-label="Карта столів залу"
+                >
+                  {HALL_VISUAL_TABLES.map((visualTable) => {
+                    const commonProps = {
+                      onClick: () => selectVisualHallTable(visualTable),
+                      className: 'hall-hit-shape',
+                      fill: 'transparent',
+                      stroke: 'transparent',
+                      tabIndex: 0,
+                      role: 'button',
+                      'aria-label': `Стіл ${visualTable.number}`,
+                    } as const;
+
+                    if (visualTable.shape === 'round') {
+                      return (
+                        <ellipse
+                          key={`hit-${visualTable.number}`}
+                          cx={visualTable.x}
+                          cy={visualTable.y}
+                          rx={visualTable.clickW / 2}
+                          ry={visualTable.clickH / 2}
+                          {...commonProps}
+                        >
+                          <title>{`Стіл ${visualTable.number}`}</title>
+                        </ellipse>
+                      );
+                    }
+
+                    return (
+                      <rect
+                        key={`hit-${visualTable.number}`}
+                        x={visualTable.x - visualTable.clickW / 2}
+                        y={visualTable.y - visualTable.clickH / 2}
+                        width={visualTable.clickW}
+                        height={visualTable.clickH}
+                        rx={1.2}
+                        ry={1.2}
+                        {...commonProps}
+                      >
+                        <title>{`Стіл ${visualTable.number}`}</title>
+                      </rect>
+                    );
+                  })}
+                </svg>
               </div>
             </div>
 
