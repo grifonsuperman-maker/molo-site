@@ -38,16 +38,7 @@ type WaterfrontLocation = {
   background: string;
 };
 
-type SvgTableShape =
-  | {
-      number: number;
-      seats: number;
-      kind: 'ellipse';
-      cx: number;
-      cy: number;
-      rx: number;
-      ry: number;
-    }
+type HallSvgShape =
   | {
       number: number;
       seats: number;
@@ -57,13 +48,15 @@ type SvgTableShape =
   | {
       number: number;
       seats: number;
-      kind: 'rect';
-      x: number;
-      y: number;
-      width: number;
-      height: number;
+      kind: 'ellipse';
+      cx: number;
+      cy: number;
       rx: number;
+      ry: number;
     };
+
+const HALL_VIEWBOX_WIDTH = 1536;
+const HALL_VIEWBOX_HEIGHT = 1152;
 
 const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
   {
@@ -104,124 +97,115 @@ const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
   },
 ];
 
-const HALL_TABLE_SHAPES: SvgTableShape[] = [
+// Координаты из утверждённого технического превью:
+// наружная сторона оранжевых точек + жирный неон.
+const HALL_SVG_TABLES: HallSvgShape[] = [
+  // 1–4
   {
     number: 1,
     seats: 4,
     kind: 'polygon',
-    points: '193 736 333 708 411 752 267 802',
+    points: '234,730 363,752 331,814 200,790',
   },
   {
     number: 2,
     seats: 4,
     kind: 'polygon',
-    points: '321 560 469 535 520 580 363 625',
+    points: '354,550 466,564 442,613 326,598',
   },
   {
     number: 3,
     seats: 4,
     kind: 'polygon',
-    points: '434 392 569 378 612 415 471 454',
+    points: '461,350 559,358 538,399 438,390',
   },
   {
     number: 4,
     seats: 4,
     kind: 'polygon',
-    points: '520 251 650 239 704 276 566 313',
+    points: '544,223 642,228 625,263 527,256',
   },
+
+  // 5–10
   {
     number: 5,
     seats: 6,
     kind: 'ellipse',
-    cx: 616,
-    cy: 662,
-    rx: 78,
-    ry: 54,
+    cx: 617,
+    cy: 666,
+    rx: 63,
+    ry: 50,
   },
   {
     number: 6,
     seats: 6,
     kind: 'ellipse',
-    cx: 690,
-    cy: 444,
-    rx: 74,
-    ry: 56,
+    cx: 689.5,
+    cy: 455,
+    rx: 56.5,
+    ry: 40,
   },
   {
     number: 7,
     seats: 6,
     kind: 'ellipse',
-    cx: 782,
-    cy: 315,
-    rx: 78,
-    ry: 48,
+    cx: 784,
+    cy: 311,
+    rx: 53,
+    ry: 37,
   },
   {
     number: 8,
     seats: 6,
     kind: 'ellipse',
-    cx: 811,
-    cy: 812,
-    rx: 92,
-    ry: 77,
+    cx: 802,
+    cy: 825.5,
+    rx: 75,
+    ry: 61.5,
   },
   {
     number: 9,
     seats: 6,
     kind: 'ellipse',
-    cx: 864,
-    cy: 550,
-    rx: 85,
-    ry: 62,
+    cx: 866,
+    cy: 564,
+    rx: 65,
+    ry: 45,
   },
   {
     number: 10,
     seats: 6,
     kind: 'ellipse',
-    cx: 934,
-    cy: 382,
-    rx: 74,
-    ry: 47,
+    cx: 943.5,
+    cy: 390.5,
+    rx: 57.5,
+    ry: 38.5,
   },
+
+  // 11–14
   {
     number: 11,
     seats: 4,
-    kind: 'rect',
-    x: 1087,
-    y: 397,
-    width: 118,
-    height: 68,
-    rx: 24,
+    kind: 'polygon',
+    points: '1142,409 1223,411 1225,453 1142,450',
   },
   {
     number: 12,
     seats: 4,
-    kind: 'rect',
-    x: 1114,
-    y: 349,
-    width: 104,
-    height: 55,
-    rx: 12,
+    kind: 'polygon',
+    points: '1140,344 1220,344 1220,390 1140,384',
   },
   {
     number: 13,
     seats: 4,
-    kind: 'rect',
-    x: 1114,
-    y: 281,
-    width: 104,
-    height: 55,
-    rx: 12,
+    kind: 'polygon',
+    points: '1138,285 1215,285 1215,326 1137,322',
   },
   {
     number: 14,
     seats: 4,
-    kind: 'rect',
-    x: 1118,
-    y: 216,
-    width: 96,
-    height: 52,
-    rx: 12,
+    kind: 'polygon',
+    points: '1134,230 1211,230 1211,267 1134,263',
   },
 ];
 
@@ -231,15 +215,6 @@ const STATUS_TEXT: Record<TableStatus, string> = {
   reserved: 'Заброньований',
   occupied: 'Зайнятий',
   closed: 'Закритий',
-};
-
-const STATUS_COLOR: Record<TableStatus | 'selected', string> = {
-  free: '#ffffff',
-  selected: '#facc15',
-  pending: '#38bdf8',
-  reserved: '#fb923c',
-  occupied: '#fb5252',
-  closed: '#e5e7eb',
 };
 
 function normalizeTableStatus(status: unknown): TableStatus {
@@ -262,27 +237,25 @@ function getMapFromResponse(value: unknown): FullMapResponse | null {
   return data.data ?? data;
 }
 
-function createFallbackTable(tableShape: SvgTableShape): TableItem {
+function createFallbackTable(tableNumber: number, seats: number): TableItem {
   return {
-    id: `hall-visual-${tableShape.number}`,
-    tableNumber: tableShape.number,
-    seats: tableShape.seats,
+    id: `hall-visual-${tableNumber}`,
+    tableNumber,
+    seats,
     status: 'free',
     isVisible: true,
   } as unknown as TableItem;
 }
 
-function svgFilterId(status: TableStatus | 'selected') {
-  if (status === 'selected') return 'moloGlowSelected';
-  if (status === 'pending') return 'moloGlowPending';
-  if (status === 'reserved') return 'moloGlowReserved';
-  if (status === 'occupied') return 'moloGlowOccupied';
-  if (status === 'closed') return 'moloGlowClosed';
-  return 'moloGlowFree';
-}
+function getTableNeonColor(status: TableStatus, active: boolean) {
+  if (active) return '#facc15';
 
-function shouldShowTableGlow(status: TableStatus, isActive: boolean) {
-  return isActive || status !== 'free';
+  if (status === 'pending') return '#38bdf8';
+  if (status === 'reserved') return '#fb923c';
+  if (status === 'occupied') return '#ff3b4f';
+  if (status === 'closed') return '#bdbdbd';
+
+  return '#ffffff';
 }
 
 function GoldButton({
@@ -302,102 +275,6 @@ function GoldButton({
     >
       {children}
     </button>
-  );
-}
-
-function TableShapeElement({
-  shape,
-  color,
-  visible,
-  active,
-  onClick,
-}: {
-  shape: SvgTableShape;
-  color: string;
-  visible: boolean;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const commonVisibleProps = {
-    fill: visible ? color : 'transparent',
-    fillOpacity: visible ? 0.12 : 0,
-    stroke: visible ? color : 'transparent',
-    strokeWidth: visible ? 3 : 0,
-    filter: visible ? `url(#${svgFilterId(active ? 'selected' : 'free')})` : undefined,
-    className: active ? 'hall-table-svg-glow hall-table-svg-glow-active' : 'hall-table-svg-glow',
-    pointerEvents: 'none' as const,
-  };
-
-  const hitProps = {
-    fill: 'transparent',
-    stroke: 'transparent',
-    strokeWidth: 0,
-    onClick,
-    role: 'button',
-    tabIndex: 0,
-    'aria-label': `Стіл ${shape.number}`,
-    className: 'cursor-pointer outline-none',
-    onKeyDown: (event: React.KeyboardEvent<SVGElement>) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        onClick();
-      }
-    },
-  };
-
-  if (shape.kind === 'ellipse') {
-    return (
-      <g>
-        {visible && (
-          <ellipse
-            cx={shape.cx}
-            cy={shape.cy}
-            rx={shape.rx}
-            ry={shape.ry}
-            {...commonVisibleProps}
-          />
-        )}
-        <ellipse
-          cx={shape.cx}
-          cy={shape.cy}
-          rx={shape.rx}
-          ry={shape.ry}
-          {...hitProps}
-        />
-      </g>
-    );
-  }
-
-  if (shape.kind === 'polygon') {
-    return (
-      <g>
-        {visible && <polygon points={shape.points} {...commonVisibleProps} />}
-        <polygon points={shape.points} {...hitProps} />
-      </g>
-    );
-  }
-
-  return (
-    <g>
-      {visible && (
-        <rect
-          x={shape.x}
-          y={shape.y}
-          width={shape.width}
-          height={shape.height}
-          rx={shape.rx}
-          {...commonVisibleProps}
-        />
-      )}
-      <rect
-        x={shape.x}
-        y={shape.y}
-        width={shape.width}
-        height={shape.height}
-        rx={shape.rx}
-        {...hitProps}
-      />
-    </g>
   );
 }
 
@@ -447,8 +324,9 @@ export default function GuestApp() {
     );
   }
 
-  function getShapeTableStatus(tableShape: SvgTableShape): TableStatus {
-    const realTable = findRealTableByNumber(tableShape.number);
+  function getVisualTableStatus(tableNumber: number): TableStatus {
+    const realTable = findRealTableByNumber(tableNumber);
+    if (realTable?.zone?.isClosed) return 'closed';
     return normalizeTableStatus(realTable?.status);
   }
 
@@ -503,24 +381,23 @@ export default function GuestApp() {
     setStep('form');
   }
 
-  function selectVisualHallTable(tableShape: SvgTableShape) {
-    const realTable = findRealTableByNumber(tableShape.number);
-    const table = realTable ?? createFallbackTable(tableShape);
+  function selectSvgHallTable(svgTable: HallSvgShape) {
+    const realTable = findRealTableByNumber(svgTable.number);
+    const table = realTable ?? createFallbackTable(svgTable.number, svgTable.seats);
     const status = normalizeTableStatus(table.status);
 
+    setActiveTableNumber(svgTable.number);
+
     if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
-      setActiveTableNumber(null);
       window.setTimeout(() => {
         alert(`Стіл недоступний: ${STATUS_TEXT[status]}`);
-      }, 120);
+      }, 220);
       return;
     }
 
-    setActiveTableNumber(tableShape.number);
-
     window.setTimeout(() => {
       selectTable(table);
-    }, 560);
+    }, 650);
   }
 
   function openWaterfrontLocation(location: WaterfrontLocation) {
@@ -533,7 +410,7 @@ export default function GuestApp() {
 
     if (String(selectedTable.id).startsWith('hall-visual-')) {
       alert(
-        'Цей стіл ще не привʼязаний до бази. Столи 1–14 потрібно один раз додати в базу, потім бронювання запрацює повністю.',
+        'Цей стіл ще не привʼязаний до базы. Столи 1–14 потрібно один раз додати в базу, потім бронювання запрацює повністю.',
       );
       return;
     }
@@ -569,113 +446,38 @@ export default function GuestApp() {
       <style>
         {`
           @keyframes moloFadeIn {
-            from {
-              opacity: 0;
-              transform: translateY(10px) scale(0.985);
-              filter: blur(5px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-              filter: blur(0);
-            }
+            from { opacity: 0; transform: translateY(10px) scale(0.985); filter: blur(5px); }
+            to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
           }
 
           @keyframes moloPanelUp {
-            from {
-              opacity: 0;
-              transform: translateY(28px) scale(0.98);
-              filter: blur(6px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-              filter: blur(0);
-            }
+            from { opacity: 0; transform: translateY(28px) scale(0.98); filter: blur(6px); }
+            to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
           }
 
           @keyframes moloBgZoom {
-            from {
-              opacity: 0.72;
-              transform: scale(1.015);
-            }
-            to {
-              opacity: 1;
-              transform: scale(1);
-            }
+            from { opacity: 0.72; transform: scale(1.015); }
+            to { opacity: 1; transform: scale(1); }
           }
 
           @keyframes moloLogoPop {
-            from {
-              opacity: 0;
-              transform: translateY(-10px) scale(0.9);
-              filter: blur(5px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-              filter: blur(0);
-            }
+            from { opacity: 0; transform: translateY(-10px) scale(0.9); filter: blur(5px); }
+            to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
           }
 
-          @keyframes tableSvgSpring {
-            0% {
-              opacity: 0;
-              transform: scale(0.74);
-            }
-            52% {
-              opacity: 1;
-              transform: scale(1.08);
-            }
-            100% {
-              opacity: 1;
-              transform: scale(1);
-            }
-          }
-
-          .molo-screen {
-            animation: moloFadeIn 420ms ease-out both;
-          }
-
-          .molo-panel {
-            animation: moloPanelUp 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
-          }
-
-          .molo-bg {
-            animation: moloBgZoom 900ms ease-out both;
-            transform-origin: center;
-          }
-
-          .molo-logo {
-            animation: moloLogoPop 650ms cubic-bezier(0.16, 1, 0.3, 1) both;
-          }
+          .molo-screen { animation: moloFadeIn 420ms ease-out both; }
+          .molo-panel { animation: moloPanelUp 520ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+          .molo-bg { animation: moloBgZoom 900ms ease-out both; transform-origin: center; }
+          .molo-logo { animation: moloLogoPop 650ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 
           .molo-button {
-            transition:
-              transform 180ms ease,
-              border-color 180ms ease,
-              box-shadow 180ms ease,
-              background 180ms ease,
-              opacity 180ms ease;
+            transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease, opacity 180ms ease;
           }
-
-          .molo-button:active {
-            transform: scale(0.96);
-          }
-
+          .molo-button:active { transform: scale(0.96); }
           .molo-button:hover {
             border-color: rgba(253, 230, 138, 1);
             box-shadow: 0 0 42px rgba(251, 191, 36, 0.2);
             background: rgba(0, 0, 0, 0.18);
-          }
-
-          .hall-table-svg-glow {
-            transform-box: fill-box;
-            transform-origin: center;
-          }
-
-          .hall-table-svg-glow-active {
-            animation: tableSvgSpring 420ms cubic-bezier(0.18, 1.65, 0.35, 1) both;
           }
         `}
       </style>
@@ -734,7 +536,7 @@ export default function GuestApp() {
                   className="molo-button inline-flex items-center justify-center gap-4 rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm sm:text-2xl"
                 >
                   <Menu className="h-7 w-7 text-amber-200" />
-                  Меню
+                  Menu
                 </button>
 
                 <button
@@ -971,58 +773,182 @@ export default function GuestApp() {
                 />
 
                 <svg
-                  className="absolute inset-0 h-full w-full"
-                  viewBox="0 0 1536 1152"
-                  preserveAspectRatio="none"
-                  aria-hidden={false}
+                  className="absolute inset-0 z-50 h-full w-full"
+                  viewBox={`0 0 ${HALL_VIEWBOX_WIDTH} ${HALL_VIEWBOX_HEIGHT}`}
+                  preserveAspectRatio="xMidYMid meet"
                 >
-                  <defs>
-                    <filter id="moloGlowFree" x="-50%" y="-50%" width="200%" height="200%">
-                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#ffffff" floodOpacity="0.55" />
-                    </filter>
+                  {HALL_SVG_TABLES.map((svgTable) => {
+                    const status = getVisualTableStatus(svgTable.number);
+                    const isActive = activeTableNumber === svgTable.number;
+                    const color = getTableNeonColor(status, isActive);
 
-                    <filter id="moloGlowSelected" x="-50%" y="-50%" width="200%" height="200%">
-                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#facc15" floodOpacity="0.95" />
-                      <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#facc15" floodOpacity="0.55" />
-                    </filter>
+                    const shouldShowVisibleNeon = isActive || status !== 'free';
 
-                    <filter id="moloGlowPending" x="-50%" y="-50%" width="200%" height="200%">
-                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#38bdf8" floodOpacity="0.95" />
-                      <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#38bdf8" floodOpacity="0.55" />
-                    </filter>
+                    const neonStyle = {
+                      filter: `
+                        drop-shadow(0 0 6px ${color})
+                        drop-shadow(0 0 14px ${color})
+                        drop-shadow(0 0 26px ${color})
+                      `,
+                      transition: 'all 180ms ease',
+                    };
 
-                    <filter id="moloGlowReserved" x="-50%" y="-50%" width="200%" height="200%">
-                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#fb923c" floodOpacity="0.95" />
-                      <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#fb923c" floodOpacity="0.55" />
-                    </filter>
-
-                    <filter id="moloGlowOccupied" x="-50%" y="-50%" width="200%" height="200%">
-                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#fb5252" floodOpacity="0.95" />
-                      <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#fb5252" floodOpacity="0.55" />
-                    </filter>
-
-                    <filter id="moloGlowClosed" x="-50%" y="-50%" width="200%" height="200%">
-                      <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#e5e7eb" floodOpacity="0.75" />
-                      <feDropShadow dx="0" dy="0" stdDeviation="10" floodColor="#e5e7eb" floodOpacity="0.35" />
-                    </filter>
-                  </defs>
-
-                  {HALL_TABLE_SHAPES.map((tableShape) => {
-                    const status = getShapeTableStatus(tableShape);
-                    const isActive = activeTableNumber === tableShape.number;
-                    const visible = shouldShowTableGlow(status, isActive);
-                    const glowStatus = isActive ? 'selected' : status;
-                    const color = STATUS_COLOR[glowStatus];
+                    const handleClick = () => selectSvgHallTable(svgTable);
 
                     return (
-                      <TableShapeElement
-                        key={tableShape.number}
-                        shape={tableShape}
-                        color={color}
-                        visible={visible}
-                        active={isActive}
-                        onClick={() => selectVisualHallTable(tableShape)}
-                      />
+                      <g
+                        key={`hall-svg-table-${svgTable.number}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Стіл ${svgTable.number}`}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            selectSvgHallTable(svgTable);
+                          }
+                        }}
+                      >
+                        {svgTable.kind === 'polygon' ? (
+                          <>
+                            <polygon
+                              points={svgTable.points}
+                              fill="transparent"
+                              stroke="transparent"
+                              strokeWidth={40}
+                              cursor="pointer"
+                              pointerEvents="all"
+                              onClick={handleClick}
+                            />
+
+                            {shouldShowVisibleNeon && (
+                              <>
+                                <polygon
+                                  points={svgTable.points}
+                                  fill={color}
+                                  fillOpacity={isActive ? 0.14 : 0.08}
+                                  stroke={color}
+                                  strokeWidth={22}
+                                  strokeOpacity={0.28}
+                                  strokeLinejoin="round"
+                                  style={neonStyle}
+                                  cursor="pointer"
+                                  pointerEvents="none"
+                                />
+
+                                <polygon
+                                  points={svgTable.points}
+                                  fill="transparent"
+                                  stroke={color}
+                                  strokeWidth={13}
+                                  strokeOpacity={0.78}
+                                  strokeLinejoin="round"
+                                  style={neonStyle}
+                                  cursor="pointer"
+                                  pointerEvents="none"
+                                />
+
+                                <polygon
+                                  points={svgTable.points}
+                                  fill="transparent"
+                                  stroke={color}
+                                  strokeWidth={6}
+                                  strokeOpacity={1}
+                                  strokeLinejoin="round"
+                                  style={neonStyle}
+                                  cursor="pointer"
+                                  pointerEvents="none"
+                                />
+
+                                <polygon
+                                  points={svgTable.points}
+                                  fill="transparent"
+                                  stroke="white"
+                                  strokeWidth={2}
+                                  strokeOpacity={0.65}
+                                  strokeLinejoin="round"
+                                  cursor="pointer"
+                                  pointerEvents="none"
+                                />
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <ellipse
+                              cx={svgTable.cx}
+                              cy={svgTable.cy}
+                              rx={svgTable.rx}
+                              ry={svgTable.ry}
+                              fill="transparent"
+                              stroke="transparent"
+                              strokeWidth={40}
+                              cursor="pointer"
+                              pointerEvents="all"
+                              onClick={handleClick}
+                            />
+
+                            {shouldShowVisibleNeon && (
+                              <>
+                                <ellipse
+                                  cx={svgTable.cx}
+                                  cy={svgTable.cy}
+                                  rx={svgTable.rx}
+                                  ry={svgTable.ry}
+                                  fill={color}
+                                  fillOpacity={isActive ? 0.14 : 0.08}
+                                  stroke={color}
+                                  strokeWidth={22}
+                                  strokeOpacity={0.28}
+                                  style={neonStyle}
+                                  cursor="pointer"
+                                  pointerEvents="none"
+                                />
+
+                                <ellipse
+                                  cx={svgTable.cx}
+                                  cy={svgTable.cy}
+                                  rx={svgTable.rx}
+                                  ry={svgTable.ry}
+                                  fill="transparent"
+                                  stroke={color}
+                                  strokeWidth={13}
+                                  strokeOpacity={0.78}
+                                  style={neonStyle}
+                                  cursor="pointer"
+                                  pointerEvents="none"
+                                />
+
+                                <ellipse
+                                  cx={svgTable.cx}
+                                  cy={svgTable.cy}
+                                  rx={svgTable.rx}
+                                  ry={svgTable.ry}
+                                  fill="transparent"
+                                  stroke={color}
+                                  strokeWidth={6}
+                                  strokeOpacity={1}
+                                  style={neonStyle}
+                                  cursor="pointer"
+                                  pointerEvents="none"
+                                />
+
+                                <ellipse
+                                  cx={svgTable.cx}
+                                  cy={svgTable.cy}
+                                  rx={svgTable.rx}
+                                  ry={svgTable.ry}
+                                  fill="transparent"
+                                  stroke="white"
+                                  strokeWidth={2}
+                                  strokeOpacity={0.65}
+                                  cursor="pointer"
+                                  pointerEvents="none"
+                                />
+                              </>
+                            )}
+                          </>
+                        )}
+                      </g>
                     );
                   })}
                 </svg>
@@ -1035,7 +961,7 @@ export default function GuestApp() {
 
                 <div className="flex flex-wrap gap-2 text-[11px] text-white/65">
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-white border border-neutral-400" />
                     Вільний
                   </span>
 
