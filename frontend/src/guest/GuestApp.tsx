@@ -479,6 +479,18 @@ export default function GuestApp() {
             box-shadow: 0 0 42px rgba(251, 191, 36, 0.2);
             background: rgba(0, 0, 0, 0.18);
           }
+
+          .hall-svg-map,
+          .hall-svg-map * {
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            user-select: none;
+          }
+
+          .hall-svg-hit {
+            touch-action: manipulation;
+          }
         `}
       </style>
 
@@ -773,7 +785,7 @@ export default function GuestApp() {
                 />
 
                 <svg
-                  className="absolute inset-0 z-50 h-full w-full"
+                  className="hall-svg-map absolute inset-0 z-50 h-full w-full"
                   viewBox={`0 0 ${HALL_VIEWBOX_WIDTH} ${HALL_VIEWBOX_HEIGHT}`}
                   preserveAspectRatio="xMidYMid meet"
                 >
@@ -796,25 +808,15 @@ export default function GuestApp() {
                     const handleClick = () => selectSvgHallTable(svgTable);
 
                     return (
-                      <g
-                        key={`hall-svg-table-${svgTable.number}`}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Стіл ${svgTable.number}`}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            selectSvgHallTable(svgTable);
-                          }
-                        }}
-                      >
+                      <g key={`hall-svg-table-${svgTable.number}`}>
                         {svgTable.kind === 'polygon' ? (
                           <>
                             <polygon
+                              className="hall-svg-hit"
                               points={svgTable.points}
-                              fill="transparent"
-                              stroke="transparent"
-                              strokeWidth={40}
+                              fill="#000000"
+                              fillOpacity={0}
+                              stroke="none"
                               cursor="pointer"
                               pointerEvents="all"
                               onClick={handleClick}
@@ -824,14 +826,12 @@ export default function GuestApp() {
                               <>
                                 <polygon
                                   points={svgTable.points}
-                                  fill={color}
-                                  fillOpacity={isActive ? 0.14 : 0.08}
+                                  fill="transparent"
                                   stroke={color}
                                   strokeWidth={22}
                                   strokeOpacity={0.28}
                                   strokeLinejoin="round"
                                   style={neonStyle}
-                                  cursor="pointer"
                                   pointerEvents="none"
                                 />
 
@@ -843,7 +843,6 @@ export default function GuestApp() {
                                   strokeOpacity={0.78}
                                   strokeLinejoin="round"
                                   style={neonStyle}
-                                  cursor="pointer"
                                   pointerEvents="none"
                                 />
 
@@ -855,7 +854,6 @@ export default function GuestApp() {
                                   strokeOpacity={1}
                                   strokeLinejoin="round"
                                   style={neonStyle}
-                                  cursor="pointer"
                                   pointerEvents="none"
                                 />
 
@@ -866,7 +864,6 @@ export default function GuestApp() {
                                   strokeWidth={2}
                                   strokeOpacity={0.65}
                                   strokeLinejoin="round"
-                                  cursor="pointer"
                                   pointerEvents="none"
                                 />
                               </>
@@ -875,13 +872,14 @@ export default function GuestApp() {
                         ) : (
                           <>
                             <ellipse
+                              className="hall-svg-hit"
                               cx={svgTable.cx}
                               cy={svgTable.cy}
                               rx={svgTable.rx}
                               ry={svgTable.ry}
-                              fill="transparent"
-                              stroke="transparent"
-                              strokeWidth={40}
+                              fill="#000000"
+                              fillOpacity={0}
+                              stroke="none"
                               cursor="pointer"
                               pointerEvents="all"
                               onClick={handleClick}
@@ -894,13 +892,11 @@ export default function GuestApp() {
                                   cy={svgTable.cy}
                                   rx={svgTable.rx}
                                   ry={svgTable.ry}
-                                  fill={color}
-                                  fillOpacity={isActive ? 0.14 : 0.08}
+                                  fill="transparent"
                                   stroke={color}
                                   strokeWidth={22}
                                   strokeOpacity={0.28}
                                   style={neonStyle}
-                                  cursor="pointer"
                                   pointerEvents="none"
                                 />
 
@@ -914,7 +910,6 @@ export default function GuestApp() {
                                   strokeWidth={13}
                                   strokeOpacity={0.78}
                                   style={neonStyle}
-                                  cursor="pointer"
                                   pointerEvents="none"
                                 />
 
@@ -928,7 +923,6 @@ export default function GuestApp() {
                                   strokeWidth={6}
                                   strokeOpacity={1}
                                   style={neonStyle}
-                                  cursor="pointer"
                                   pointerEvents="none"
                                 />
 
@@ -941,7 +935,6 @@ export default function GuestApp() {
                                   stroke="white"
                                   strokeWidth={2}
                                   strokeOpacity={0.65}
-                                  cursor="pointer"
                                   pointerEvents="none"
                                 />
                               </>
