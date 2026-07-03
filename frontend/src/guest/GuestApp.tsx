@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, KeyboardEvent } from 'react';
 
 import {
   ArrowLeft,
@@ -20,194 +20,53 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 const FALLBACK_MENU =
   'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
 
-type Step =
-  | 'home'
-  | 'location_choice'
-  | 'hall_map'
-  | 'waterfront_choice'
-  | 'location_placeholder'
-  | 'form'
-  | 'success';
+type Step = 'home' | 'location_choice' | 'waterfront_choice' | 'map' | 'form' | 'success';
 
 type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'closed';
+type Point = [number, number];
 
-type WaterfrontLocation = {
+type PolygonShape = {
+  kind: 'polygon';
+  points: Point[];
+  expand?: number;
+};
+
+type EllipseShape = {
+  kind: 'ellipse';
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  expand?: number;
+};
+
+type EllipsePathShape = {
+  kind: 'ellipsePath';
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  rotation?: number;
+  expand?: number;
+};
+
+type VisualTableShape = PolygonShape | EllipseShape | EllipsePathShape;
+
+type VisualTable = {
+  number: number;
+  seats: number;
+  shape: VisualTableShape;
+};
+
+type LocationMap = {
   key: string;
   label: string;
   description: string;
   background: string;
+  width: number;
+  height: number;
+  tables: VisualTable[];
 };
-
-type HallSvgShape =
-  | {
-      number: number;
-      seats: number;
-      kind: 'polygon';
-      points: string;
-    }
-  | {
-      number: number;
-      seats: number;
-      kind: 'ellipse';
-      cx: number;
-      cy: number;
-      rx: number;
-      ry: number;
-    };
-
-const HALL_VIEWBOX_WIDTH = 1536;
-const HALL_VIEWBOX_HEIGHT = 1152;
-
-const WATERFRONT_LOCATIONS: WaterfrontLocation[] = [
-  {
-    key: 'canopy',
-    label: 'Навіс',
-    description: 'Зона навісу',
-    background: '/maps/canopy-day-numbered.png',
-  },
-  {
-    key: 'gazebo',
-    label: 'Велика альтанка',
-    description: 'Окрема зона великої альтанки',
-    background: '/maps/gazebo-day-numbered.png',
-  },
-  {
-    key: 'rotang',
-    label: 'Ротанг',
-    description: 'Зона з ротанговими місцями',
-    background: '/maps/rotang-day-numbered.png',
-  },
-  {
-    key: 'embankment',
-    label: 'Набережна',
-    description: 'Загальна зона набережної',
-    background: '/maps/embankment-day-numbered.png',
-  },
-  {
-    key: 'glass_gazebo',
-    label: 'Скляна альтанка',
-    description: 'Зона скляної альтанки',
-    background: '/maps/glass-gazebo-day-numbered.png',
-  },
-  {
-    key: 'water_gazebo',
-    label: 'Альтанка на воді',
-    description: 'Зона альтанки на воді',
-    background: '/maps/water-gazebo-day-numbered.png',
-  },
-];
-
-// Координаты из утверждённого технического превью:
-// наружная сторона оранжевых точек + жирный неон.
-const HALL_SVG_TABLES: HallSvgShape[] = [
-  // 1–4
-  {
-    number: 1,
-    seats: 4,
-    kind: 'polygon',
-    points: '234,730 363,752 331,814 200,790',
-  },
-  {
-    number: 2,
-    seats: 4,
-    kind: 'polygon',
-    points: '354,550 466,564 442,613 326,598',
-  },
-  {
-    number: 3,
-    seats: 4,
-    kind: 'polygon',
-    points: '461,350 559,358 538,399 438,390',
-  },
-  {
-    number: 4,
-    seats: 4,
-    kind: 'polygon',
-    points: '544,223 642,228 625,263 527,256',
-  },
-
-  // 5–10
-  {
-    number: 5,
-    seats: 6,
-    kind: 'ellipse',
-    cx: 617,
-    cy: 666,
-    rx: 63,
-    ry: 50,
-  },
-  {
-    number: 6,
-    seats: 6,
-    kind: 'ellipse',
-    cx: 689.5,
-    cy: 455,
-    rx: 56.5,
-    ry: 40,
-  },
-  {
-    number: 7,
-    seats: 6,
-    kind: 'ellipse',
-    cx: 784,
-    cy: 311,
-    rx: 53,
-    ry: 37,
-  },
-  {
-    number: 8,
-    seats: 6,
-    kind: 'ellipse',
-    cx: 802,
-    cy: 825.5,
-    rx: 75,
-    ry: 61.5,
-  },
-  {
-    number: 9,
-    seats: 6,
-    kind: 'ellipse',
-    cx: 866,
-    cy: 564,
-    rx: 65,
-    ry: 45,
-  },
-  {
-    number: 10,
-    seats: 6,
-    kind: 'ellipse',
-    cx: 943.5,
-    cy: 390.5,
-    rx: 57.5,
-    ry: 38.5,
-  },
-
-  // 11–14
-  {
-    number: 11,
-    seats: 4,
-    kind: 'polygon',
-    points: '1142,409 1223,411 1225,453 1142,450',
-  },
-  {
-    number: 12,
-    seats: 4,
-    kind: 'polygon',
-    points: '1140,344 1220,344 1220,390 1140,384',
-  },
-  {
-    number: 13,
-    seats: 4,
-    kind: 'polygon',
-    points: '1138,285 1215,285 1215,326 1137,322',
-  },
-  {
-    number: 14,
-    seats: 4,
-    kind: 'polygon',
-    points: '1134,230 1211,230 1211,267 1134,263',
-  },
-];
 
 const STATUS_TEXT: Record<TableStatus, string> = {
   free: 'Вільний',
@@ -216,6 +75,150 @@ const STATUS_TEXT: Record<TableStatus, string> = {
   occupied: 'Зайнятий',
   closed: 'Закритий',
 };
+
+const STATUS_COLORS: Record<TableStatus | 'active', string> = {
+  active: '#facc15',
+  pending: '#38bdf8',
+  reserved: '#fb923c',
+  occupied: '#ff3b4f',
+  closed: '#bdbdbd',
+  free: '#ffffff',
+};
+
+const LOCATIONS: LocationMap[] = [
+  {
+    key: 'hall',
+    label: 'Зал ресторану',
+    description: 'Зал 1–14',
+    background: '/maps/hall-bg-numbered.png',
+    width: 1536,
+    height: 1152,
+    tables: [
+      { number: 1, seats: 4, shape: { kind: 'polygon', points: [[234, 730], [363, 752], [331, 814], [200, 790]] } },
+      { number: 2, seats: 4, shape: { kind: 'polygon', points: [[354, 550], [466, 564], [442, 613], [326, 598]] } },
+      { number: 3, seats: 4, shape: { kind: 'polygon', points: [[461, 350], [559, 358], [538, 399], [438, 390]] } },
+      { number: 4, seats: 4, shape: { kind: 'polygon', points: [[544, 223], [642, 228], [625, 263], [527, 256]] } },
+      { number: 5, seats: 6, shape: { kind: 'ellipse', cx: 617, cy: 666, rx: 63, ry: 50 } },
+      { number: 6, seats: 6, shape: { kind: 'ellipse', cx: 689.5, cy: 455, rx: 56.5, ry: 40 } },
+      { number: 7, seats: 6, shape: { kind: 'ellipse', cx: 784, cy: 311, rx: 53, ry: 37 } },
+      { number: 8, seats: 6, shape: { kind: 'ellipse', cx: 802, cy: 825.5, rx: 75, ry: 61.5 } },
+      { number: 9, seats: 6, shape: { kind: 'ellipse', cx: 866, cy: 564, rx: 65, ry: 45 } },
+      { number: 10, seats: 6, shape: { kind: 'ellipse', cx: 943.5, cy: 390.5, rx: 57.5, ry: 38.5 } },
+      { number: 11, seats: 4, shape: { kind: 'polygon', points: [[1142, 409], [1223, 411], [1225, 453], [1142, 450]] } },
+      { number: 12, seats: 4, shape: { kind: 'polygon', points: [[1140, 344], [1220, 344], [1220, 390], [1140, 384]] } },
+      { number: 13, seats: 4, shape: { kind: 'polygon', points: [[1138, 285], [1215, 285], [1215, 326], [1137, 322]] } },
+      { number: 14, seats: 4, shape: { kind: 'polygon', points: [[1134, 230], [1211, 230], [1211, 267], [1134, 263]] } },
+    ],
+  },
+  {
+    key: 'canopy',
+    label: 'Навіс',
+    description: 'Зона навісу 15–20',
+    background: '/maps/canopy-day-numbered.png',
+    width: 1536,
+    height: 1152,
+    tables: [
+      { number: 15, seats: 4, shape: { kind: 'polygon', points: [[915, 976], [1105, 1000], [1133, 1091], [908, 1056]], expand: 9 } },
+      { number: 16, seats: 4, shape: { kind: 'polygon', points: [[919, 877], [1063, 890], [1079, 937], [916, 918]], expand: 9 } },
+      { number: 17, seats: 4, shape: { kind: 'polygon', points: [[925, 816], [1038, 823], [1049, 854], [924, 843]], expand: 9 } },
+      { number: 18, seats: 4, shape: { kind: 'polygon', points: [[485, 913], [637, 940], [590, 1002], [417, 975]], expand: 9 } },
+      { number: 19, seats: 4, shape: { kind: 'polygon', points: [[573, 843], [688, 858], [661, 891], [535, 876]], expand: 9 } },
+      { number: 20, seats: 4, shape: { kind: 'polygon', points: [[627, 796], [729, 805], [708, 829], [602, 819]], expand: 9 } },
+    ],
+  },
+  {
+    key: 'gazebo',
+    label: 'Велика альтанка',
+    description: 'Велика альтанка 21–36',
+    background: '/maps/gazebo-day-numbered.png',
+    width: 1024,
+    height: 1536,
+    tables: [
+      { number: 28, seats: 4, shape: { kind: 'polygon', points: [[471, 486], [538, 485], [536, 527], [465, 527]], expand: 9 } },
+      { number: 27, seats: 4, shape: { kind: 'polygon', points: [[456, 585], [529, 585], [525, 637], [448, 637]], expand: 9 } },
+      { number: 26, seats: 4, shape: { kind: 'polygon', points: [[443, 701], [518, 702], [512, 762], [434, 762]], expand: 9 } },
+      { number: 25, seats: 4, shape: { kind: 'polygon', points: [[429, 835], [506, 835], [499, 900], [419, 900]], expand: 9 } },
+      { number: 24, seats: 4, shape: { kind: 'polygon', points: [[417, 916], [498, 917], [492, 987], [406, 987]], expand: 9 } },
+      { number: 23, seats: 4, shape: { kind: 'polygon', points: [[397, 1056], [483, 1056], [483, 1151], [388, 1150]], expand: 3 } },
+      { number: 22, seats: 4, shape: { kind: 'polygon', points: [[375, 1213], [468, 1213], [457, 1331], [357, 1331]], expand: 0 } },
+      { number: 21, seats: 4, shape: { kind: 'polygon', points: [[357, 1331], [457, 1331], [448, 1444], [340, 1443]], expand: 0 } },
+      { number: 36, seats: 4, shape: { kind: 'polygon', points: [[731, 484], [796, 484], [801, 527], [734, 527]], expand: 9 } },
+      { number: 35, seats: 4, shape: { kind: 'polygon', points: [[738, 585], [808, 585], [814, 636], [740, 636]], expand: 9 } },
+      { number: 34, seats: 4, shape: { kind: 'polygon', points: [[746, 702], [818, 702], [823, 762], [749, 762]], expand: 9 } },
+      { number: 33, seats: 4, shape: { kind: 'polygon', points: [[749, 780], [826, 780], [833, 843], [753, 843]], expand: 9 } },
+      { number: 32, seats: 4, shape: { kind: 'polygon', points: [[757, 910], [836, 910], [845, 985], [762, 985]], expand: 9 } },
+      { number: 31, seats: 4, shape: { kind: 'polygon', points: [[762, 1063], [848, 1063], [859, 1149], [766, 1149]], expand: 9 } },
+      { number: 30, seats: 4, shape: { kind: 'polygon', points: [[768, 1168], [861, 1168], [871, 1262], [772, 1261]], expand: 9 } },
+      { number: 29, seats: 4, shape: { kind: 'polygon', points: [[773, 1344], [872, 1345], [884, 1451], [779, 1450]], expand: 9 } },
+    ],
+  },
+  {
+    key: 'rotang',
+    label: 'Ротанг',
+    description: 'Ротанг 37–39',
+    background: '/maps/rotang-day-numbered.png',
+    width: 1536,
+    height: 975,
+    tables: [
+      { number: 37, seats: 4, shape: { kind: 'ellipsePath', cx: 273, cy: 778, rx: 90, ry: 55, rotation: -7 } },
+      { number: 38, seats: 4, shape: { kind: 'ellipsePath', cx: 1194, cy: 628, rx: 72, ry: 39, rotation: 0 } },
+      { number: 39, seats: 4, shape: { kind: 'ellipsePath', cx: 1458, cy: 561, rx: 43, ry: 19, rotation: 4 } },
+    ],
+  },
+  {
+    key: 'embankment',
+    label: 'Набережна',
+    description: 'Набережна 40–44',
+    background: '/maps/embankment-day-numbered.png',
+    width: 1536,
+    height: 864,
+    tables: [
+      { number: 40, seats: 4, shape: { kind: 'polygon', points: [[153, 543], [217, 506], [302, 508], [246, 548]], expand: 7 } },
+      { number: 41, seats: 4, shape: { kind: 'polygon', points: [[474, 552], [511, 518], [593, 515], [566, 553]], expand: 7 } },
+      { number: 42, seats: 4, shape: { kind: 'polygon', points: [[776, 557], [781, 517], [862, 518], [867, 558]], expand: 7 } },
+      { number: 43, seats: 4, shape: { kind: 'polygon', points: [[1063, 559], [1039, 520], [1118, 520], [1151, 559]], expand: 7 } },
+      { number: 44, seats: 4, shape: { kind: 'polygon', points: [[1318, 562], [1267, 522], [1348, 522], [1402, 562]], expand: 7 } },
+    ],
+  },
+  {
+    key: 'glass_gazebo',
+    label: 'Скляна альтанка',
+    description: 'Скляна альтанка 45–50',
+    background: '/maps/glass-gazebo-day-numbered.png',
+    width: 1536,
+    height: 1143,
+    tables: [
+      { number: 45, seats: 4, shape: { kind: 'polygon', points: [[856, 300], [989, 300], [1000, 330], [858, 330]], expand: 7 } },
+      { number: 46, seats: 4, shape: { kind: 'polygon', points: [[860, 396], [1030, 396], [1042, 436], [863, 436]], expand: 7 } },
+      { number: 47, seats: 4, shape: { kind: 'polygon', points: [[872, 529], [1075, 528], [1095, 591], [880, 591]], expand: 7 } },
+      { number: 48, seats: 4, shape: { kind: 'polygon', points: [[895, 742], [1152, 742], [1186, 855], [905, 854]], expand: 8 } },
+      { number: 49, seats: 4, shape: { kind: 'polygon', points: [[535, 302], [668, 300], [665, 330], [525, 331]], expand: 7 } },
+      { number: 50, seats: 4, shape: { kind: 'polygon', points: [[391, 746], [642, 746], [631, 855], [351, 855]], expand: 8 } },
+    ],
+  },
+  {
+    key: 'water_gazebo',
+    label: 'Альтанка на воді',
+    description: 'Альтанка на воді 100–109',
+    background: '/maps/water-gazebo-day-numbered.png',
+    width: 1158,
+    height: 1536,
+    tables: [
+      { number: 100, seats: 4, shape: { kind: 'polygon', points: [[225, 984], [343, 1024], [293, 1079], [172, 1033]], expand: 7 } },
+      { number: 101, seats: 4, shape: { kind: 'polygon', points: [[352, 840], [464, 876], [426, 920], [311, 882]], expand: 7 } },
+      { number: 102, seats: 4, shape: { kind: 'polygon', points: [[470, 710], [575, 741], [542, 777], [437, 746]], expand: 7 } },
+      { number: 103, seats: 4, shape: { kind: 'polygon', points: [[645, 517], [700, 528], [681, 556], [627, 543]], expand: 5 } },
+      { number: 104, seats: 4, shape: { kind: 'polygon', points: [[761, 545], [814, 556], [796, 582], [742, 570]], expand: 5 } },
+      { number: 105, seats: 4, shape: { kind: 'polygon', points: [[886, 573], [940, 584], [926, 612], [872, 599]], expand: 5 } },
+      { number: 106, seats: 4, shape: { kind: 'polygon', points: [[1008, 601], [1060, 613], [1048, 643], [992, 629]], expand: 5 } },
+      { number: 107, seats: 4, shape: { kind: 'polygon', points: [[838, 826], [920, 847], [892, 883], [811, 860]], expand: 3 } },
+      { number: 108, seats: 4, shape: { kind: 'polygon', points: [[738, 968], [815, 993], [795, 1038], [709, 1016]], expand: 4 } },
+      { number: 109, seats: 4, shape: { kind: 'polygon', points: [[616, 1158], [723, 1194], [697, 1244], [586, 1200]], expand: 0 } },
+    ],
+  },
+];
+
+const WATERFRONT_LOCATION_KEYS = ['canopy', 'gazebo', 'rotang', 'embankment', 'glass_gazebo', 'water_gazebo'];
 
 function normalizeTableStatus(status: unknown): TableStatus {
   if (status === 'pending' || status === 'awaiting_confirmation') return 'pending';
@@ -227,35 +230,105 @@ function normalizeTableStatus(status: unknown): TableStatus {
 
 function getRestaurantFromResponse(value: unknown): Restaurant | null {
   if (!value || typeof value !== 'object') return null;
-  const data = value as any;
-  return data.data ?? data;
+  const data = value as { data?: Restaurant } | Restaurant;
+  return 'data' in data && data.data ? data.data : (data as Restaurant);
 }
 
 function getMapFromResponse(value: unknown): FullMapResponse | null {
   if (!value || typeof value !== 'object') return null;
-  const data = value as any;
-  return data.data ?? data;
+  const data = value as { data?: FullMapResponse } | FullMapResponse;
+  return 'data' in data && data.data ? data.data : (data as FullMapResponse);
 }
 
 function createFallbackTable(tableNumber: number, seats: number): TableItem {
   return {
-    id: `hall-visual-${tableNumber}`,
-    tableNumber,
+    id: `visual-${tableNumber}`,
+    tableNumber: String(tableNumber),
     seats,
+    shape: 'visual',
+    photoUrl: null,
     status: 'free',
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    rotation: 0,
     isVisible: true,
-  } as unknown as TableItem;
+  };
 }
 
 function getTableNeonColor(status: TableStatus, active: boolean) {
-  if (active) return '#facc15';
+  if (active) return STATUS_COLORS.active;
+  return STATUS_COLORS[status];
+}
 
-  if (status === 'pending') return '#38bdf8';
-  if (status === 'reserved') return '#fb923c';
-  if (status === 'occupied') return '#ff3b4f';
-  if (status === 'closed') return '#bdbdbd';
+function expandPolygon(points: Point[], amount = 0): Point[] {
+  if (!amount) return points;
 
-  return '#ffffff';
+  const cx = points.reduce((sum, [x]) => sum + x, 0) / points.length;
+  const cy = points.reduce((sum, [, y]) => sum + y, 0) / points.length;
+
+  return points.map(([x, y]) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+    const scale = (distance + amount) / distance;
+    return [cx + dx * scale, cy + dy * scale];
+  });
+}
+
+function round(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function pointList(points: Point[]): string {
+  return points.map(([x, y]) => `${round(x)},${round(y)}`).join(' ');
+}
+
+function ellipsePath(shape: EllipsePathShape): string {
+  const steps = 72;
+  const rotation = ((shape.rotation ?? 0) * Math.PI) / 180;
+  const rx = shape.rx + (shape.expand ?? 0);
+  const ry = shape.ry + (shape.expand ?? 0);
+  const points: Point[] = [];
+
+  for (let i = 0; i < steps; i += 1) {
+    const t = (Math.PI * 2 * i) / steps;
+    const x = rx * Math.cos(t);
+    const y = ry * Math.sin(t);
+    const xr = x * Math.cos(rotation) - y * Math.sin(rotation);
+    const yr = x * Math.sin(rotation) + y * Math.cos(rotation);
+    points.push([shape.cx + xr, shape.cy + yr]);
+  }
+
+  return `M ${pointList([points[0]])} L ${pointList(points.slice(1))} Z`;
+}
+
+function shapeRenderData(shape: VisualTableShape):
+  | { tag: 'polygon'; points: string }
+  | { tag: 'ellipse'; cx: number; cy: number; rx: number; ry: number }
+  | { tag: 'path'; d: string } {
+  if (shape.kind === 'polygon') {
+    return {
+      tag: 'polygon',
+      points: pointList(expandPolygon(shape.points, shape.expand ?? 0)),
+    };
+  }
+
+  if (shape.kind === 'ellipse') {
+    return {
+      tag: 'ellipse',
+      cx: shape.cx,
+      cy: shape.cy,
+      rx: shape.rx + (shape.expand ?? 0),
+      ry: shape.ry + (shape.expand ?? 0),
+    };
+  }
+
+  return {
+    tag: 'path',
+    d: ellipsePath(shape),
+  };
 }
 
 function GoldButton({
@@ -278,13 +351,80 @@ function GoldButton({
   );
 }
 
+function VisibleContour({ shape, color, glowId }: { shape: VisualTableShape; color: string; glowId: string }) {
+  const data = shapeRenderData(shape);
+  const commonProps = {
+    fill: 'none',
+    stroke: color,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    pointerEvents: 'none' as const,
+  };
+
+  if (data.tag === 'polygon') {
+    return (
+      <>
+        <polygon points={data.points} {...commonProps} strokeWidth={16} strokeOpacity={0.2} filter={`url(#${glowId})`} />
+        <polygon points={data.points} {...commonProps} strokeWidth={8} strokeOpacity={0.55} filter={`url(#${glowId})`} />
+        <polygon points={data.points} {...commonProps} strokeWidth={3} strokeOpacity={1} filter={`url(#${glowId})`} />
+        <polygon points={data.points} fill="none" stroke="white" strokeWidth={1.4} strokeOpacity={0.7} pointerEvents="none" />
+      </>
+    );
+  }
+
+  if (data.tag === 'ellipse') {
+    return (
+      <>
+        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} strokeWidth={16} strokeOpacity={0.2} filter={`url(#${glowId})`} />
+        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} strokeWidth={8} strokeOpacity={0.55} filter={`url(#${glowId})`} />
+        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} strokeWidth={3} strokeOpacity={1} filter={`url(#${glowId})`} />
+        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} fill="none" stroke="white" strokeWidth={1.4} strokeOpacity={0.7} pointerEvents="none" />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <path d={data.d} {...commonProps} strokeWidth={16} strokeOpacity={0.2} filter={`url(#${glowId})`} />
+      <path d={data.d} {...commonProps} strokeWidth={8} strokeOpacity={0.55} filter={`url(#${glowId})`} />
+      <path d={data.d} {...commonProps} strokeWidth={3} strokeOpacity={1} filter={`url(#${glowId})`} />
+      <path d={data.d} fill="none" stroke="white" strokeWidth={1.4} strokeOpacity={0.7} pointerEvents="none" />
+    </>
+  );
+}
+
+function ClickZone({ table, onPick }: { table: VisualTable; onPick: (table: VisualTable) => void }) {
+  const data = shapeRenderData(table.shape);
+  const commonProps = {
+    className: 'molo-svg-hit',
+    fill: '#ffffff',
+    fillOpacity: 0,
+    stroke: 'none',
+    cursor: 'pointer',
+    pointerEvents: 'all' as const,
+    role: 'button',
+    tabIndex: 0,
+    'aria-label': `Стіл ${table.number}`,
+    onClick: () => onPick(table),
+    onKeyDown: (event: KeyboardEvent<SVGElement>) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onPick(table);
+      }
+    },
+  };
+
+  if (data.tag === 'polygon') return <polygon points={data.points} {...commonProps} />;
+  if (data.tag === 'ellipse') return <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} />;
+  return <path d={data.d} {...commonProps} />;
+}
+
 export default function GuestApp() {
   const [step, setStep] = useState<Step>('home');
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [map, setMap] = useState<FullMapResponse | null>(null);
+  const [selectedLocationKey, setSelectedLocationKey] = useState('hall');
   const [selectedTable, setSelectedTable] = useState<TableItem | null>(null);
-  const [selectedWaterfrontLocation, setSelectedWaterfrontLocation] =
-    useState<WaterfrontLocation | null>(null);
   const [activeTableNumber, setActiveTableNumber] = useState<number | null>(null);
 
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -310,6 +450,10 @@ export default function GuestApp() {
   const visibleTables = useMemo(() => {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
   }, [map]);
+
+  const currentLocation = useMemo(() => {
+    return LOCATIONS.find((location) => location.key === selectedLocationKey) ?? LOCATIONS[0];
+  }, [selectedLocationKey]);
 
   function refreshMap() {
     mapApi
@@ -343,21 +487,32 @@ export default function GuestApp() {
     window.open(restaurant?.menuUrl || FALLBACK_MENU, '_blank');
   }
 
+  function openLocation(locationKey: string) {
+    setSelectedLocationKey(locationKey);
+    setSelectedTable(null);
+    setActiveTableNumber(null);
+    setStep('map');
+  }
+
   function goBack() {
     setActiveTableNumber(null);
 
     if (step === 'form') {
-      setStep('hall_map');
+      setStep('map');
       return;
     }
 
-    if (step === 'hall_map' || step === 'waterfront_choice') {
+    if (step === 'map') {
+      if (selectedLocationKey === 'hall') {
+        setStep('location_choice');
+      } else {
+        setStep('waterfront_choice');
+      }
+      return;
+    }
+
+    if (step === 'waterfront_choice') {
       setStep('location_choice');
-      return;
-    }
-
-    if (step === 'location_placeholder') {
-      setStep('waterfront_choice');
       return;
     }
 
@@ -381,12 +536,12 @@ export default function GuestApp() {
     setStep('form');
   }
 
-  function selectSvgHallTable(svgTable: HallSvgShape) {
-    const realTable = findRealTableByNumber(svgTable.number);
-    const table = realTable ?? createFallbackTable(svgTable.number, svgTable.seats);
+  function selectVisualTable(visualTable: VisualTable) {
+    const realTable = findRealTableByNumber(visualTable.number);
+    const table = realTable ?? createFallbackTable(visualTable.number, visualTable.seats);
     const status = normalizeTableStatus(table.status);
 
-    setActiveTableNumber(svgTable.number);
+    setActiveTableNumber(visualTable.number);
 
     if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
       window.setTimeout(() => {
@@ -400,17 +555,12 @@ export default function GuestApp() {
     }, 650);
   }
 
-  function openWaterfrontLocation(location: WaterfrontLocation) {
-    setSelectedWaterfrontLocation(location);
-    setStep('location_placeholder');
-  }
-
   async function submit() {
     if (!selectedTable) return;
 
-    if (String(selectedTable.id).startsWith('hall-visual-')) {
+    if (String(selectedTable.id).startsWith('visual-')) {
       alert(
-        'Цей стіл ще не привʼязаний до базы. Столи 1–14 потрібно один раз додати в базу, потім бронювання запрацює повністю.',
+        'Цей стіл ще не привʼязаний до бази. Потрібно додати столи в адмінці/базі, потім бронювання запрацює повністю.',
       );
       return;
     }
@@ -480,15 +630,15 @@ export default function GuestApp() {
             background: rgba(0, 0, 0, 0.18);
           }
 
-          .hall-svg-map,
-          .hall-svg-map * {
+          .molo-svg-map,
+          .molo-svg-map * {
             outline: none;
             -webkit-tap-highlight-color: transparent;
             -webkit-touch-callout: none;
             user-select: none;
           }
 
-          .hall-svg-hit {
+          .molo-svg-hit {
             touch-action: manipulation;
           }
         `}
@@ -581,7 +731,7 @@ export default function GuestApp() {
 
           <button
             aria-label="Зал ресторану"
-            onClick={() => setStep('hall_map')}
+            onClick={() => openLocation('hall')}
             className="absolute left-[38%] top-[23%] h-[42%] w-[34%] rounded-[32px] border border-amber-200/0 bg-amber-300/0 transition active:scale-[0.99]"
           />
 
@@ -607,7 +757,7 @@ export default function GuestApp() {
 
               <div className="mx-auto mt-5 grid w-full max-w-[560px] gap-3">
                 <button
-                  onClick={() => setStep('hall_map')}
+                  onClick={() => openLocation('hall')}
                   className="molo-button rounded-[24px] border border-amber-200/95 bg-black/10 px-5 py-4 text-lg font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.14)] backdrop-blur-sm sm:text-xl"
                 >
                   Зал ресторану
@@ -647,10 +797,10 @@ export default function GuestApp() {
               </h1>
 
               <div className="mx-auto mt-5 grid w-full max-w-[680px] grid-cols-2 gap-3">
-                {WATERFRONT_LOCATIONS.map((location) => (
+                {LOCATIONS.filter((location) => WATERFRONT_LOCATION_KEYS.includes(location.key)).map((location) => (
                   <button
                     key={location.key}
-                    onClick={() => openWaterfrontLocation(location)}
+                    onClick={() => openLocation(location.key)}
                     className="molo-button rounded-[22px] border border-amber-200/90 bg-black/10 px-4 py-4 text-base font-semibold text-amber-100 shadow-[0_0_28px_rgba(251,191,36,.12)] backdrop-blur-sm sm:text-lg"
                   >
                     {location.label}
@@ -662,63 +812,13 @@ export default function GuestApp() {
         </section>
       )}
 
-      {step === 'location_placeholder' && selectedWaterfrontLocation && (
-        <section className="molo-screen min-h-[100dvh] bg-black px-4 py-20 pb-[120px] text-white">
-          <div className="molo-panel mx-auto max-w-6xl">
-            <div className="mb-4">
-              <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
-                Локація
-              </p>
-
-              <h1 className="mt-2 text-4xl font-black tracking-tight">
-                {selectedWaterfrontLocation.label}
-              </h1>
-
-              <p className="mt-2 text-white/70">
-                {selectedWaterfrontLocation.description}
-              </p>
-            </div>
-
-            <div className="overflow-hidden rounded-[30px] border border-amber-200/30 bg-black/60 p-2">
-              <div className="relative mx-auto w-full overflow-hidden rounded-[24px]">
-                <img
-                  src={selectedWaterfrontLocation.background}
-                  alt={selectedWaterfrontLocation.label}
-                  className="w-full rounded-[24px] object-contain"
-                  draggable={false}
-                />
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-[28px] border border-amber-200/30 bg-black/30 p-4 text-center">
-              <p className="text-lg font-semibold text-amber-100">
-                Вибір столів цієї зони скоро буде підключено
-              </p>
-
-              <p className="mx-auto mt-2 max-w-2xl text-sm text-white/65">
-                Фото з номерами вже підключено. Наступний крок — додати невидимі
-                зони кліку для столів цієї локації.
-              </p>
-
-              <button
-                onClick={callAdmin}
-                className="molo-button mt-4 inline-flex items-center justify-center gap-3 rounded-[22px] border border-amber-200/80 bg-black/20 px-5 py-3 text-sm font-semibold text-amber-100"
-              >
-                <Phone className="h-4 w-4 text-amber-200" />
-                Забронювати через адміністратора
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {step === 'hall_map' && (
+      {step === 'map' && (
         <section className="molo-screen min-h-[100dvh] bg-black px-4 py-20 pb-[120px] text-white">
           <div className="molo-panel mx-auto max-w-6xl">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
-                  Зал ресторану
+                  {currentLocation.description}
                 </p>
 
                 <h1 className="mt-2 text-4xl font-black tracking-tight">
@@ -726,7 +826,7 @@ export default function GuestApp() {
                 </h1>
 
                 <p className="mt-2 text-white/70">
-                  Оберіть дату, час і вільний стіл.
+                  Оберіть дату, час і натисніть на стіл прямо на фото.
                 </p>
               </div>
 
@@ -778,169 +878,44 @@ export default function GuestApp() {
             <div className="overflow-hidden rounded-[30px] border border-amber-200/30 bg-black/60 p-2">
               <div className="relative mx-auto w-full overflow-hidden rounded-[24px]">
                 <img
-                  src="/maps/hall-bg-numbered.png"
-                  alt="Зал ресторану"
+                  src={currentLocation.background}
+                  alt={currentLocation.label}
                   className="w-full rounded-[24px] object-contain"
                   draggable={false}
                 />
 
                 <svg
-                  className="hall-svg-map absolute inset-0 z-50 h-full w-full"
-                  viewBox={`0 0 ${HALL_VIEWBOX_WIDTH} ${HALL_VIEWBOX_HEIGHT}`}
+                  className="molo-svg-map absolute inset-0 z-50 h-full w-full"
+                  viewBox={`0 0 ${currentLocation.width} ${currentLocation.height}`}
                   preserveAspectRatio="xMidYMid meet"
                 >
-                  {HALL_SVG_TABLES.map((svgTable) => {
-                    const status = getVisualTableStatus(svgTable.number);
-                    const isActive = activeTableNumber === svgTable.number;
-                    const color = getTableNeonColor(status, isActive);
+                  <defs>
+                    <filter id={`molo-neon-${currentLocation.key}`} x="-50%" y="-50%" width="200%" height="200%">
+                      <feGaussianBlur stdDeviation="4" result="blur" />
+                      <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                  </defs>
 
+                  {currentLocation.tables.map((visualTable) => {
+                    const status = getVisualTableStatus(visualTable.number);
+                    const isActive = activeTableNumber === visualTable.number;
+                    const color = getTableNeonColor(status, isActive);
                     const shouldShowVisibleNeon = isActive || status !== 'free';
 
-                    const neonStyle = {
-                      filter: `
-                        drop-shadow(0 0 6px ${color})
-                        drop-shadow(0 0 14px ${color})
-                        drop-shadow(0 0 26px ${color})
-                      `,
-                      transition: 'all 180ms ease',
-                    };
-
-                    const handleClick = () => selectSvgHallTable(svgTable);
-
                     return (
-                      <g key={`hall-svg-table-${svgTable.number}`}>
-                        {svgTable.kind === 'polygon' ? (
-                          <>
-                            <polygon
-                              className="hall-svg-hit"
-                              points={svgTable.points}
-                              fill="#000000"
-                              fillOpacity={0}
-                              stroke="none"
-                              cursor="pointer"
-                              pointerEvents="all"
-                              onClick={handleClick}
-                            />
-
-                            {shouldShowVisibleNeon && (
-                              <>
-                                <polygon
-                                  points={svgTable.points}
-                                  fill="transparent"
-                                  stroke={color}
-                                  strokeWidth={22}
-                                  strokeOpacity={0.28}
-                                  strokeLinejoin="round"
-                                  style={neonStyle}
-                                  pointerEvents="none"
-                                />
-
-                                <polygon
-                                  points={svgTable.points}
-                                  fill="transparent"
-                                  stroke={color}
-                                  strokeWidth={13}
-                                  strokeOpacity={0.78}
-                                  strokeLinejoin="round"
-                                  style={neonStyle}
-                                  pointerEvents="none"
-                                />
-
-                                <polygon
-                                  points={svgTable.points}
-                                  fill="transparent"
-                                  stroke={color}
-                                  strokeWidth={6}
-                                  strokeOpacity={1}
-                                  strokeLinejoin="round"
-                                  style={neonStyle}
-                                  pointerEvents="none"
-                                />
-
-                                <polygon
-                                  points={svgTable.points}
-                                  fill="transparent"
-                                  stroke="white"
-                                  strokeWidth={2}
-                                  strokeOpacity={0.65}
-                                  strokeLinejoin="round"
-                                  pointerEvents="none"
-                                />
-                              </>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <ellipse
-                              className="hall-svg-hit"
-                              cx={svgTable.cx}
-                              cy={svgTable.cy}
-                              rx={svgTable.rx}
-                              ry={svgTable.ry}
-                              fill="#000000"
-                              fillOpacity={0}
-                              stroke="none"
-                              cursor="pointer"
-                              pointerEvents="all"
-                              onClick={handleClick}
-                            />
-
-                            {shouldShowVisibleNeon && (
-                              <>
-                                <ellipse
-                                  cx={svgTable.cx}
-                                  cy={svgTable.cy}
-                                  rx={svgTable.rx}
-                                  ry={svgTable.ry}
-                                  fill="transparent"
-                                  stroke={color}
-                                  strokeWidth={22}
-                                  strokeOpacity={0.28}
-                                  style={neonStyle}
-                                  pointerEvents="none"
-                                />
-
-                                <ellipse
-                                  cx={svgTable.cx}
-                                  cy={svgTable.cy}
-                                  rx={svgTable.rx}
-                                  ry={svgTable.ry}
-                                  fill="transparent"
-                                  stroke={color}
-                                  strokeWidth={13}
-                                  strokeOpacity={0.78}
-                                  style={neonStyle}
-                                  pointerEvents="none"
-                                />
-
-                                <ellipse
-                                  cx={svgTable.cx}
-                                  cy={svgTable.cy}
-                                  rx={svgTable.rx}
-                                  ry={svgTable.ry}
-                                  fill="transparent"
-                                  stroke={color}
-                                  strokeWidth={6}
-                                  strokeOpacity={1}
-                                  style={neonStyle}
-                                  pointerEvents="none"
-                                />
-
-                                <ellipse
-                                  cx={svgTable.cx}
-                                  cy={svgTable.cy}
-                                  rx={svgTable.rx}
-                                  ry={svgTable.ry}
-                                  fill="transparent"
-                                  stroke="white"
-                                  strokeWidth={2}
-                                  strokeOpacity={0.65}
-                                  pointerEvents="none"
-                                />
-                              </>
-                            )}
-                          </>
+                      <g key={`svg-table-${visualTable.number}`}>
+                        {shouldShowVisibleNeon && (
+                          <VisibleContour
+                            shape={visualTable.shape}
+                            color={color}
+                            glowId={`molo-neon-${currentLocation.key}`}
+                          />
                         )}
+
+                        <ClickZone table={visualTable} onPick={selectVisualTable} />
                       </g>
                     );
                   })}
@@ -954,34 +929,30 @@ export default function GuestApp() {
 
                 <div className="flex flex-wrap gap-2 text-[11px] text-white/65">
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-white border border-neutral-400" />
+                    <span className="h-2.5 w-2.5 rounded-full border border-neutral-400 bg-white" />
                     Вільний
                   </span>
-
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#38bdf8]" />
                     Очікує
                   </span>
-
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-orange-500" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#fb923c]" />
                     Заброньований
                   </span>
-
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#ff3b4f]" />
                     Зайнятий
                   </span>
-
                   <span className="inline-flex items-center gap-1">
-                    <span className="h-2.5 w-2.5 rounded-full bg-neutral-500" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#bdbdbd]" />
                     Закритий
                   </span>
                 </div>
               </div>
 
               <p className="rounded-2xl border border-dashed border-amber-200/30 bg-black/30 p-4 text-sm text-white/60">
-                Натисніть на номер столу прямо на фото залу.
+                Вільні столи не світяться постійно. Контур зʼявляється при виборі або коли стіл має статус.
               </p>
             </div>
           </div>
