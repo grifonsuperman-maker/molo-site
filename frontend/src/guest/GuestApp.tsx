@@ -4,26 +4,107 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock,
+  MapPin,
   Menu,
   Phone,
+  RefreshCcw,
   Users,
 } from 'lucide-react';
 
-import type { FullMapResponse, MapObject, Restaurant, TableItem, Zone } from '../api/types';
+import type { FullMapResponse, Restaurant, TableItem } from '../api/types';
+import { bookingsApi } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
-import { bookingsApi } from '../api/bookings';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 
 const FALLBACK_MENU =
   'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
 
-type Step = 'home' | 'map' | 'form' | 'success';
-type TableStatus = 'free' | 'reserved' | 'occupied' | 'closed';
+type Step = 'entry' | 'waterfront' | 'zone' | 'form' | 'success';
+type TableStatusView = 'free' | 'reserved' | 'occupied' | 'closed';
 
-const STATUS_TEXT: Record<TableStatus, string> = {
+type LocationId =
+  | 'hall'
+  | 'canopy'
+  | 'gazebo'
+  | 'rotang'
+  | 'embankment'
+  | 'pier'
+  | 'water_pier';
+
+type LocationConfig = {
+  id: LocationId;
+  label: string;
+  shortLabel: string;
+  background: string;
+  fallbackText: string;
+  zoneKeywords: string[];
+};
+
+const LOCATIONS: LocationConfig[] = [
+  {
+    id: 'hall',
+    label: 'Зал',
+    shortLabel: 'Зал',
+    background: '/maps/hall-bg.png',
+    fallbackText: 'Фон залу ще не завантажено',
+    zoneKeywords: ['зал', 'hall', 'restaurant', 'ресторан'],
+  },
+  {
+    id: 'canopy',
+    label: 'Навіс',
+    shortLabel: 'Навіс',
+    background: '/maps/canopy-bg.png',
+    fallbackText: 'Фон навісу ще не завантажено',
+    zoneKeywords: ['навіс', 'навес', 'canopy'],
+  },
+  {
+    id: 'gazebo',
+    label: 'Велика бесідка',
+    shortLabel: 'Бесідка',
+    background: '/maps/gazebo-bg.png',
+    fallbackText: 'Фон великої бесідки ще не завантажено',
+    zoneKeywords: ['бесідка', 'беседка', 'gazebo'],
+  },
+  {
+    id: 'rotang',
+    label: 'Ротанг',
+    shortLabel: 'Ротанг',
+    background: '/maps/rotang-bg.png',
+    fallbackText: 'Фон ротангу ще не завантажено',
+    zoneKeywords: ['ротанг', 'rotang', 'rattan'],
+  },
+  {
+    id: 'embankment',
+    label: 'Набережна',
+    shortLabel: 'Набережна',
+    background: '/maps/embankment-bg.png',
+    fallbackText: 'Фон набережної ще не завантажено',
+    zoneKeywords: ['набережна', 'набережная', 'embankment', 'waterfront'],
+  },
+  {
+    id: 'pier',
+    label: 'Причал',
+    shortLabel: 'Причал',
+    background: '/maps/pier-bg.png',
+    fallbackText: 'Фон причалу ще не завантажено',
+    zoneKeywords: ['причал', 'pier'],
+  },
+  {
+    id: 'water_pier',
+    label: 'Причал на воді',
+    shortLabel: 'На воді',
+    background: '/maps/water-pier-bg.png',
+    fallbackText: 'Фон причалу на воді ще не завантажено',
+    zoneKeywords: ['воді', 'воде', 'water'],
+  },
+];
+
+const WATERFRONT_LOCATIONS = LOCATIONS.filter((location) => location.id !== 'hall');
+
+const STATUS_TEXT: Record<TableStatusView, string> = {
   free: 'Вільний',
-  reserved: 'Бронь',
+  reserved: 'Заброньовано',
   occupied: 'Зайнятий',
   closed: 'Закритий',
 };
@@ -33,7 +114,7 @@ function numberValue(value: unknown, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function normalizeTableStatus(status: unknown): TableStatus {
+function normalizeTableStatus(status: unknown): TableStatusView {
   if (status === 'reserved' || status === 'booked') return 'reserved';
   if (status === 'occupied') return 'occupied';
   if (status === 'closed') return 'closed';
@@ -42,70 +123,45 @@ function normalizeTableStatus(status: unknown): TableStatus {
 
 function getRestaurantFromResponse(value: unknown): Restaurant | null {
   if (!value || typeof value !== 'object') return null;
-
-  const data = value as any;
-  return data.data ?? data;
+  const data = value as { data?: Restaurant };
+  return data.data ?? (value as Restaurant);
 }
 
 function getMapFromResponse(value: unknown): FullMapResponse | null {
   if (!value || typeof value !== 'object') return null;
-
-  const data = value as any;
-  return data.data ?? data;
+  const data = value as { data?: FullMapResponse };
+  return data.data ?? (value as FullMapResponse);
 }
 
 function mapWidth(map: FullMapResponse | null) {
-  return numberValue(map?.restaurant?.mapWidth, 1200);
+  return numberValue(map?.restaurant?.mapWidth, 2200);
 }
 
 function mapHeight(map: FullMapResponse | null) {
-  return numberValue(map?.restaurant?.mapHeight, 800);
+  return numberValue(map?.restaurant?.mapHeight, 1500);
 }
 
-/**
- * ВАЖНО:
- * Координаты переводятся в проценты.
- * Поэтому карта уменьшается на телефоне вместе со столами,
- * и подсветка не уезжает в сторону.
- */
 function toPercent(value: unknown, total: number) {
   const safeTotal = total || 1;
   return `${(numberValue(value) / safeTotal) * 100}%`;
 }
 
-function mapItemStyle(
-  item: {
-    x?: unknown;
-    y?: unknown;
-    width?: unknown;
-    height?: unknown;
-    rotation?: unknown;
-  },
+function tableStyle(
+  table: TableItem,
   currentMapWidth: number,
   currentMapHeight: number,
-  fallbackWidth: number,
-  fallbackHeight: number,
 ): CSSProperties {
   return {
-    left: toPercent(item.x, currentMapWidth),
-    top: toPercent(item.y, currentMapHeight),
-    width: toPercent(numberValue(item.width, fallbackWidth), currentMapWidth),
-    height: toPercent(numberValue(item.height, fallbackHeight), currentMapHeight),
-    transform: `rotate(${numberValue(item.rotation)}deg)`,
+    left: toPercent(table.x, currentMapWidth),
+    top: toPercent(table.y, currentMapHeight),
+    width: toPercent(numberValue(table.width, 86), currentMapWidth),
+    height: toPercent(numberValue(table.height, 86), currentMapHeight),
+    transform: `rotate(${numberValue(table.rotation)}deg)`,
     transformOrigin: 'center center',
   };
 }
 
-/**
- * ЛОГИКА СВЕЧЕНИЯ СТОЛОВ:
- *
- * 1. Свободный стол НЕ светится целый день.
- * 2. Когда человек нажал на свободный стол — только он светится золотым.
- * 3. Бронь — мягкий янтарный статус.
- * 4. Занятый — красный статус.
- * 5. Закрытый — серый приглушённый статус.
- */
-function tableGlowClass(table: TableItem, selected: boolean) {
+function tableClasses(table: TableItem, selected: boolean) {
   const status = normalizeTableStatus(table.status);
 
   if (selected) {
@@ -113,71 +169,42 @@ function tableGlowClass(table: TableItem, selected: boolean) {
   }
 
   if (status === 'reserved') {
-    return 'border-amber-300 bg-amber-500/25 shadow-[0_0_14px_rgba(251,191,36,.45)]';
+    return 'border-amber-200 bg-amber-500/35 shadow-[0_0_16px_rgba(251,191,36,.48)]';
   }
 
   if (status === 'occupied') {
-    return 'border-red-300 bg-red-500/30 shadow-[0_0_14px_rgba(248,113,113,.45)]';
+    return 'border-red-200 bg-red-600/40 shadow-[0_0_16px_rgba(248,113,113,.48)]';
   }
 
   if (status === 'closed') {
-    return 'border-neutral-300 bg-neutral-600/35 shadow-none';
+    return 'border-neutral-300 bg-neutral-600/40 shadow-none';
   }
 
   return 'border-white/35 bg-white/10 shadow-none';
 }
 
-function objectBackground(object: MapObject) {
-  if (object.objectType === 'floor_marble') {
-    return 'linear-gradient(135deg, rgba(255,255,255,.9), rgba(255,255,255,.35)), repeating-linear-gradient(45deg, #d8d3c7, #d8d3c7 22px, #f5f5f4 22px, #f5f5f4 28px, #a8a29e 28px, #a8a29e 44px)';
-  }
-
-  if (object.objectType === 'floor_water') {
-    return 'linear-gradient(135deg, #082f49, #075985, #020617)';
-  }
-
-  if (object.objectType === 'floor_grass') {
-    return 'repeating-linear-gradient(45deg, #365314, #365314 12px, #65a30d 12px, #65a30d 20px)';
-  }
-
-  if (object.objectType === 'window') {
-    return 'linear-gradient(180deg, #7dd3fc, #38bdf8, #0f172a)';
-  }
-
-  if (object.objectType === 'fireplace') {
-    return 'radial-gradient(circle, #fde68a 0%, #f97316 35%, #dc2626 68%, #450a0a 100%)';
-  }
-
-  if (object.objectType === 'lamp_post' || object.objectType === 'spot_light') {
-    return 'radial-gradient(circle, #fef08a 0%, #facc15 35%, transparent 72%)';
-  }
-
-  return object.color || '#525252';
+function tableLabel(table: TableItem) {
+  return `Стіл ${table.tableNumber}`;
 }
 
-function objectRadius(object: MapObject) {
-  if (
-    object.objectType.includes('round') ||
-    object.objectType === 'bush' ||
-    object.objectType === 'tree'
-  ) {
-    return '999px';
+function tableMatchesLocation(table: TableItem, location: LocationConfig) {
+  const zoneName = table.zone?.name?.toLowerCase();
+
+  if (!zoneName) {
+    return true;
   }
 
-  if (object.objectType.startsWith('floor_')) return '26px';
-
-  return '14px';
+  return location.zoneKeywords.some((keyword) => zoneName.includes(keyword));
 }
 
 export default function GuestApp() {
-  const [step, setStep] = useState<Step>('home');
+  const [step, setStep] = useState<Step>('entry');
+  const [activeLocationId, setActiveLocationId] = useState<LocationId>('hall');
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [map, setMap] = useState<FullMapResponse | null>(null);
   const [selectedTable, setSelectedTable] = useState<TableItem | null>(null);
-
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState('19:00');
-
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -186,6 +213,12 @@ export default function GuestApp() {
   });
 
   const { loading, error, run } = useAsyncAction();
+
+  const activeLocation =
+    LOCATIONS.find((location) => location.id === activeLocationId) ?? LOCATIONS[0];
+
+  const currentMapWidth = mapWidth(map);
+  const currentMapHeight = mapHeight(map);
 
   useEffect(() => {
     restaurantApi
@@ -203,16 +236,16 @@ export default function GuestApp() {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
   }, [map]);
 
-  const visibleZones = useMemo(() => {
-    return (map?.zones || []).filter((zone) => zone.isVisible !== false);
-  }, [map]);
+  const locationTables = useMemo(() => {
+    return visibleTables.filter((table) => tableMatchesLocation(table, activeLocation));
+  }, [activeLocation, visibleTables]);
 
-  const visibleObjects = useMemo(() => {
-    return (map?.objects || []).filter((object) => object.isVisible !== false);
-  }, [map]);
-
-  const currentMapWidth = mapWidth(map);
-  const currentMapHeight = mapHeight(map);
+  function refreshMap() {
+    mapApi
+      .get()
+      .then((response) => setMap(getMapFromResponse(response)))
+      .catch(() => {});
+  }
 
   function callAdmin() {
     if (restaurant?.phone) {
@@ -227,13 +260,29 @@ export default function GuestApp() {
     window.open(restaurant?.menuUrl || FALLBACK_MENU, '_blank');
   }
 
+  function openLocation(locationId: LocationId) {
+    setSelectedTable(null);
+    setActiveLocationId(locationId);
+    setStep('zone');
+  }
+
   function goBack() {
     if (step === 'form') {
-      setStep('map');
+      setStep('zone');
       return;
     }
 
-    setStep('home');
+    if (step === 'zone' && activeLocationId !== 'hall') {
+      setStep('waterfront');
+      return;
+    }
+
+    if (step === 'waterfront' || step === 'zone') {
+      setStep('entry');
+      return;
+    }
+
+    setStep('entry');
   }
 
   function selectTable(table: TableItem) {
@@ -272,380 +321,395 @@ export default function GuestApp() {
 
   if (restaurant?.status === 'closed') {
     return (
-      <section className="rounded-3xl border border-red-500/30 bg-red-950/40 p-6 text-center">
-        <h1 className="text-2xl font-semibold">Ресторан зачинений</h1>
-        <p className="mt-3 whitespace-pre-line text-neutral-300">{restaurant.closeMessage}</p>
-      </section>
+      <div className="min-h-screen bg-neutral-950 px-4 py-6 text-white">
+        <section className="mx-auto max-w-md rounded-[34px] border border-red-400/25 bg-red-950/40 p-6 text-center shadow-2xl">
+          <h1 className="text-2xl font-semibold">Ресторан зачинений</h1>
+          <p className="mt-3 text-neutral-300">{restaurant.closeMessage}</p>
+        </section>
+      </div>
     );
   }
 
   return (
-    <div className="-mx-4 -my-5 min-h-[calc(100vh-6rem)] overflow-hidden bg-black px-4 py-5 text-white sm:-mx-6 sm:px-6">
-      {step !== 'home' && (
-        <button
-          onClick={goBack}
-          className="relative z-20 mb-4 flex items-center gap-2 rounded-full border border-white/15 bg-black/35 px-4 py-2 text-sm text-neutral-200 backdrop-blur-md"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Назад
-        </button>
-      )}
+    <div className="min-h-screen bg-neutral-950 px-3 py-4 text-white sm:px-6">
+      <div className="mx-auto max-w-6xl space-y-4">
+        {step !== 'entry' && (
+          <button
+            onClick={goBack}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-neutral-200 active:scale-95"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Назад
+          </button>
+        )}
 
-      {step === 'home' && (
-        <section className="relative flex min-h-[calc(100vh-8rem)] items-center justify-center overflow-hidden rounded-[34px] border border-white/10 bg-black shadow-2xl">
-          <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{
-              backgroundImage: 'url("/hero-bg.jpg")',
-            }}
-          />
+        {step === 'entry' && (
+          <section className="overflow-hidden rounded-[34px] border border-white/10 bg-neutral-900 shadow-2xl">
+            <div
+              className="relative min-h-[560px] bg-cover bg-center"
+              style={{
+                backgroundImage:
+                  'linear-gradient(180deg, rgba(0,0,0,.08), rgba(0,0,0,.66)), url("/maps/territory-bg.png")',
+              }}
+            >
+              <div className="absolute left-4 right-4 top-4 rounded-[28px] border border-white/15 bg-black/45 p-4 backdrop-blur-md sm:left-6 sm:right-6">
+                <p className="text-sm uppercase tracking-[.28em] text-amber-200">MOLO</p>
+                <h1 className="mt-1 text-3xl font-semibold">Оберіть напрямок</h1>
+                <p className="mt-2 text-sm text-neutral-200">
+                  Центральний вхід веде до ресторану. Боковий прохід — на набережну.
+                </p>
+              </div>
 
-          <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/45 to-black/85" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(250,204,21,.22),transparent_35%)]" />
+              <button
+                onClick={() => openLocation('hall')}
+                className="absolute left-[38%] top-[42%] flex min-h-28 w-[24%] items-center justify-center rounded-[28px] border-2 border-amber-200/90 bg-amber-400/20 px-3 text-center text-lg font-bold text-white shadow-[0_0_32px_rgba(251,191,36,.45)] backdrop-blur-[1px] active:scale-95"
+              >
+                Ресторан
+              </button>
 
-          <div className="relative z-10 w-full max-w-5xl px-5 py-10 text-center sm:px-10">
-            <div className="mx-auto flex max-w-3xl flex-col items-center rounded-[34px] border border-white/15 bg-black/35 px-5 py-8 shadow-2xl backdrop-blur-xl sm:px-12 sm:py-12">
-              <img
-                src="/logo.png"
-                alt="MOLO"
-                className="h-40 w-auto max-w-[85%] object-contain drop-shadow-[0_20px_45px_rgba(0,0,0,.85)] sm:h-56"
-              />
+              <button
+                onClick={() => setStep('waterfront')}
+                className="absolute left-[4%] top-[46%] flex min-h-24 w-[28%] items-center justify-center rounded-[28px] border-2 border-emerald-200/90 bg-emerald-500/20 px-3 text-center text-lg font-bold text-white shadow-[0_0_32px_rgba(16,185,129,.45)] backdrop-blur-[1px] active:scale-95"
+              >
+                На набережну
+              </button>
+            </div>
 
-              <p className="mt-5 text-xs uppercase tracking-[0.55em] text-amber-200 sm:text-sm">
-                Restaurant
-              </p>
+            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-3">
+              <button
+                onClick={() => openLocation('hall')}
+                className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 font-semibold active:scale-[0.99]"
+              >
+                Ресторан
+              </button>
 
-              <h1 className="mt-3 text-5xl font-semibold tracking-[0.12em] text-white sm:text-7xl">
-                MOLO
-              </h1>
+              <button
+                onClick={() => setStep('waterfront')}
+                className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 font-semibold active:scale-[0.99]"
+              >
+                На набережну
+              </button>
 
-              <p className="mt-5 max-w-xl text-base leading-relaxed text-neutral-200 sm:text-xl">
-                Бронювання столиків, меню та звʼязок з адміністратором.
-              </p>
+              <button
+                onClick={callAdmin}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-4 font-semibold active:scale-[0.99]"
+              >
+                <Phone className="h-4 w-4" />
+                Адміністратор
+              </button>
+            </div>
+          </section>
+        )}
 
-              <div className="mt-8 grid w-full max-w-xl gap-3">
+        {step === 'waterfront' && (
+          <section className="rounded-[34px] border border-white/10 bg-neutral-900 p-4 shadow-2xl sm:p-6">
+            <p className="text-sm uppercase tracking-[.28em] text-amber-200">Набережна</p>
+            <h1 className="mt-1 text-3xl font-semibold">Оберіть локацію</h1>
+            <p className="mt-2 text-sm text-neutral-300">
+              Натисніть на потрібну зону, щоб перейти до вибору столів.
+            </p>
+
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {WATERFRONT_LOCATIONS.map((location) => (
                 <button
-                  onClick={() => {
-                    setSelectedTable(null);
-                    setStep('map');
-                  }}
-                  className="rounded-2xl border border-amber-200/80 bg-amber-300/10 px-5 py-4 text-base font-semibold text-amber-100 shadow-[0_0_30px_rgba(251,191,36,.14)] backdrop-blur-md transition hover:bg-amber-300/20"
+                  key={location.id}
+                  onClick={() => openLocation(location.id)}
+                  className="flex min-h-28 flex-col items-start justify-between rounded-[28px] border border-white/10 bg-white/5 p-4 text-left active:scale-[0.99]"
                 >
-                  Забронювати столик
+                  <MapPin className="h-5 w-5 text-amber-200" />
+                  <span className="text-lg font-semibold">{location.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setStep('entry')}
+              className="mt-4 w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 font-semibold active:scale-[0.99]"
+            >
+              Загальний вид
+            </button>
+          </section>
+        )}
+
+        {step === 'zone' && (
+          <section className="overflow-hidden rounded-[34px] border border-white/10 bg-neutral-900 shadow-2xl">
+            <div className="flex flex-col gap-3 border-b border-white/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm uppercase tracking-[.28em] text-amber-200">Локація</p>
+                <h1 className="text-3xl font-semibold">{activeLocation.label}</h1>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:flex">
+                <button
+                  onClick={refreshMap}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  Оновити
                 </button>
 
                 <button
                   onClick={openMenu}
-                  className="flex items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/5 px-5 py-4 text-base font-semibold text-white backdrop-blur-md transition hover:bg-white/10"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm"
                 >
-                  <Menu className="h-5 w-5 text-amber-200" />
+                  <Menu className="h-4 w-4" />
                   Меню
                 </button>
+              </div>
+            </div>
 
+            <div className="grid gap-3 border-b border-white/10 p-4 sm:grid-cols-3">
+              <label className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
+                <span className="flex items-center gap-2 text-neutral-300">
+                  <CalendarDays className="h-4 w-4" />
+                  Дата
+                </span>
+
+                <input
+                  value={date}
+                  onChange={(event) => {
+                    setDate(event.target.value);
+                    setSelectedTable(null);
+                  }}
+                  type="date"
+                  className="mt-2 w-full bg-transparent text-sm outline-none"
+                />
+              </label>
+
+              <label className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
+                <span className="flex items-center gap-2 text-neutral-300">
+                  <Clock className="h-4 w-4" />
+                  Час
+                </span>
+
+                <input
+                  value={time}
+                  onChange={(event) => {
+                    setTime(event.target.value);
+                    setSelectedTable(null);
+                  }}
+                  type="time"
+                  step="300"
+                  className="mt-2 w-full bg-transparent text-sm outline-none"
+                />
+              </label>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
+                <span className="text-neutral-300">Статуси</span>
+
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 rounded border border-white/40 bg-white/20" />
+                    Вільний
+                  </span>
+
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 rounded bg-amber-300 shadow-[0_0_12px_rgba(251,191,36,.85)]" />
+                    Обраний
+                  </span>
+
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 rounded bg-amber-500 shadow-[0_0_10px_rgba(251,191,36,.45)]" />
+                    Бронь
+                  </span>
+
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 rounded bg-red-500 shadow-[0_0_10px_rgba(248,113,113,.45)]" />
+                    Зайнятий
+                  </span>
+
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 rounded bg-neutral-500" />
+                    Закритий
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {restaurant?.status === 'booking_closed' && (
+              <div className="m-4 rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+                {restaurant.bookingClosedMessage}
+              </div>
+            )}
+
+            <div className="p-3">
+              <div
+                className="relative mx-auto w-full overflow-hidden rounded-[30px] border border-white/10 bg-neutral-950 shadow-inner"
+                style={{
+                  maxWidth: currentMapWidth,
+                  aspectRatio: `${currentMapWidth} / ${currentMapHeight}`,
+                  backgroundImage: `linear-gradient(180deg, rgba(0,0,0,.04), rgba(0,0,0,.22)), url("${activeLocation.background}")`,
+                  backgroundSize: '100% 100%',
+                  backgroundPosition: 'center',
+                  backgroundRepeat: 'no-repeat',
+                }}
+              >
+                <div className="pointer-events-none absolute inset-0 flex items-end justify-center p-4">
+                  <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-200 backdrop-blur-md">
+                    {activeLocation.fallbackText}
+                  </div>
+                </div>
+
+                {locationTables.map((table) => {
+                  const status = normalizeTableStatus(table.status);
+                  const isSelected = selectedTable?.id === table.id;
+                  const isBlocked =
+                    restaurant?.status === 'booking_closed' ||
+                    status !== 'free' ||
+                    table.zone?.isClosed;
+
+                  return (
+                    <button
+                      key={table.id}
+                      onClick={() => selectTable(table)}
+                      className={`absolute z-10 flex items-center justify-center border-2 text-sm font-black text-white transition active:scale-95 ${
+                        table.shape === 'round' ? 'rounded-full' : 'rounded-2xl'
+                      } ${tableClasses(table, isSelected)}`}
+                      style={tableStyle(table, currentMapWidth, currentMapHeight)}
+                      title={STATUS_TEXT[status]}
+                    >
+                      <span className="rounded-lg bg-black/35 px-2 py-1">
+                        {isBlocked && status === 'closed' ? '✕ ' : ''}
+                        {table.tableNumber}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {selectedTable && (
+              <div className="border-t border-white/10 p-4">
                 <button
-                  onClick={callAdmin}
-                  className="flex items-center justify-center gap-3 rounded-2xl border border-emerald-300/35 bg-emerald-300/5 px-5 py-4 text-base font-semibold text-white backdrop-blur-md transition hover:bg-emerald-300/10"
+                  onClick={continueWithSelectedTable}
+                  className="w-full rounded-2xl border border-amber-200/80 bg-amber-300/10 px-5 py-4 font-semibold text-amber-100 shadow-[0_0_24px_rgba(251,191,36,.22)] active:scale-[0.99]"
                 >
-                  <Phone className="h-5 w-5 text-emerald-300" />
-                  Зателефонувати адміністратору
+                  Продовжити зі столом №{selectedTable.tableNumber}
                 </button>
               </div>
+            )}
 
-              <p className="mt-6 text-sm text-neutral-300">
-                Ми працюємо з 10:00 до 23:00
-              </p>
-            </div>
-          </div>
-        </section>
-      )}
+            <div className="grid grid-cols-2 gap-2 border-t border-white/10 p-4 sm:grid-cols-4">
+              <button
+                onClick={() => {
+                  setSelectedTable(null);
+                  setStep('entry');
+                }}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm"
+              >
+                Загальний вид
+              </button>
 
-      {step === 'map' && (
-        <section className="rounded-[34px] border border-white/10 bg-neutral-950/90 p-4 shadow-2xl backdrop-blur-xl">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-semibold">Карта ресторану</h1>
-              <p className="mt-1 text-sm text-neutral-400">
-                Оберіть дату, час і вільний стіл.
-              </p>
+              <button
+                onClick={() => openLocation('hall')}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm"
+              >
+                Зал
+              </button>
+
+              <button
+                onClick={() => {
+                  setSelectedTable(null);
+                  setStep('waterfront');
+                }}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm"
+              >
+                Набережна
+              </button>
+
+              <button
+                onClick={callAdmin}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm"
+              >
+                Дзвінок
+              </button>
             </div>
+          </section>
+        )}
+
+        {step === 'form' && selectedTable && (
+          <section className="rounded-[34px] border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6">
+            <h1 className="text-3xl font-semibold">{tableLabel(selectedTable)}</h1>
+
+            <p className="mt-2 text-neutral-300">
+              До {selectedTable.seats} гостей · {date} · {time}
+            </p>
+
+            <div className="mt-6 space-y-3">
+              <input
+                placeholder="Імʼя"
+                value={form.fullName}
+                onChange={(event) => setForm({ ...form, fullName: event.target.value })}
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
+              />
+
+              <input
+                placeholder="Телефон"
+                value={form.phone}
+                onChange={(event) => setForm({ ...form, phone: event.target.value })}
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
+              />
+
+              <label className="block rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-neutral-300">
+                <span className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Кількість гостей
+                </span>
+
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={form.guestsCount}
+                  onChange={(event) =>
+                    setForm({ ...form, guestsCount: Number(event.target.value) })
+                  }
+                  className="mt-2 w-full bg-transparent text-white outline-none"
+                />
+              </label>
+
+              <textarea
+                placeholder="Побажання"
+                value={form.wishes}
+                onChange={(event) => setForm({ ...form, wishes: event.target.value })}
+                className="min-h-24 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
+              />
+
+              {error && <p className="text-sm text-red-300">{error}</p>}
+
+              <button
+                disabled={loading}
+                onClick={submit}
+                className="w-full rounded-2xl border border-amber-200/80 bg-amber-300/10 px-5 py-4 font-semibold text-amber-100 disabled:opacity-50"
+              >
+                {loading ? 'Надсилаємо...' : 'Надіслати заявку'}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {step === 'success' && (
+          <section className="rounded-[34px] border border-emerald-400/25 bg-emerald-950/40 p-6 text-center shadow-2xl">
+            <CheckCircle2 className="mx-auto mb-4 h-12 w-12 text-emerald-400" />
+
+            <h1 className="text-2xl font-semibold">Заявку надіслано</h1>
+
+            <p className="mt-3 text-neutral-300">
+              Адміністратор отримає заявку та підтвердить бронювання.
+            </p>
 
             <button
-              onClick={() =>
-                mapApi
-                  .get()
-                  .then((response) => setMap(getMapFromResponse(response)))
-                  .catch(() => {})
-              }
-              className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-neutral-200"
-            >
-              Оновити
-            </button>
-          </div>
-
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="rounded-2xl border border-white/10 bg-white/5 p-3">
-              <span className="flex items-center gap-2 text-sm text-neutral-300">
-                <CalendarDays className="h-4 w-4 text-amber-200" />
-                Дата
-              </span>
-
-              <input
-                value={date}
-                onChange={(event) => {
-                  setDate(event.target.value);
-                  setSelectedTable(null);
-                }}
-                type="date"
-                className="mt-2 w-full bg-transparent text-sm outline-none"
-              />
-            </label>
-
-            <label className="rounded-2xl border border-white/10 bg-white/5 p-3">
-              <span className="flex items-center gap-2 text-sm text-neutral-300">
-                <Clock className="h-4 w-4 text-amber-200" />
-                Час
-              </span>
-
-              <input
-                value={time}
-                onChange={(event) => {
-                  setTime(event.target.value);
-                  setSelectedTable(null);
-                }}
-                type="time"
-                step="300"
-                className="mt-2 w-full bg-transparent text-sm outline-none"
-              />
-            </label>
-          </div>
-
-          {restaurant?.status === 'booking_closed' && (
-            <div className="mt-4 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
-              {restaurant.bookingClosedMessage}
-            </div>
-          )}
-
-          <div className="mt-5 rounded-[28px] border border-white/10 bg-black/50 p-3">
-            <div
-              className="relative mx-auto w-full overflow-hidden rounded-[24px] bg-[#12100c]"
-              style={{
-                maxWidth: currentMapWidth,
-                aspectRatio: `${currentMapWidth} / ${currentMapHeight}`,
-                backgroundImage:
-                  'radial-gradient(circle at 15% 15%, rgba(251,191,36,.10), transparent 28%), linear-gradient(135deg, #0f0d0a, #1c1710)',
-                backgroundSize: '100% 100%',
-                backgroundPosition: 'center',
-                backgroundRepeat: 'no-repeat',
+              onClick={() => {
+                setSelectedTable(null);
+                setStep('entry');
               }}
+              className="mt-6 w-full rounded-2xl border border-amber-200/80 bg-amber-300/10 px-5 py-4 font-semibold text-amber-100"
             >
-              {visibleZones.map((zone: Zone) => {
-                const zoneStyle = mapItemStyle(
-                  zone,
-                  currentMapWidth,
-                  currentMapHeight,
-                  260,
-                  180,
-                );
-
-                return (
-                  <div
-                    key={zone.id}
-                    className="absolute z-[1] flex items-center justify-center rounded-3xl border border-amber-200/25 bg-white/5 text-center text-xs font-semibold text-white/70 shadow-[0_0_18px_rgba(251,191,36,.18)]"
-                    style={{
-                      ...zoneStyle,
-                      backgroundColor: zone.color || 'rgba(255,255,255,.05)',
-                    }}
-                  >
-                    {zone.isClosed ? '🔒 ' : ''}
-                    {zone.name}
-                  </div>
-                );
-              })}
-
-              {visibleObjects.map((object: MapObject) => {
-                const objectStyle = mapItemStyle(
-                  object,
-                  currentMapWidth,
-                  currentMapHeight,
-                  100,
-                  100,
-                );
-
-                return (
-                  <div
-                    key={object.id}
-                    className="absolute z-[2] flex items-center justify-center border border-white/10 text-[10px] font-semibold text-white/70"
-                    style={{
-                      ...objectStyle,
-                      background: objectBackground(object),
-                      borderRadius: objectRadius(object),
-                    }}
-                  >
-                    {object.name || ''}
-                  </div>
-                );
-              })}
-
-              {visibleTables.map((table: TableItem) => {
-                const status = normalizeTableStatus(table.status);
-                const selected = selectedTable?.id === table.id;
-                const isBlocked =
-                  restaurant?.status === 'booking_closed' ||
-                  status !== 'free' ||
-                  table.zone?.isClosed;
-
-                const tableStyle = mapItemStyle(
-                  table,
-                  currentMapWidth,
-                  currentMapHeight,
-                  86,
-                  86,
-                );
-
-                return (
-                  <button
-                    key={table.id}
-                    onClick={() => selectTable(table)}
-                    className={`absolute z-10 flex items-center justify-center border-2 text-xs font-bold text-white transition duration-150 active:scale-95 ${
-                      table.shape === 'round' ? 'rounded-full' : 'rounded-xl'
-                    } ${tableGlowClass(table, selected)}`}
-                    style={tableStyle}
-                    title={STATUS_TEXT[status]}
-                  >
-                    {isBlocked && status === 'closed' ? (
-                      <span className="absolute inset-0 flex items-center justify-center rounded-[inherit] bg-black/45 text-3xl text-red-300">
-                        ✕
-                      </span>
-                    ) : null}
-
-                    <span className="relative z-10 rounded-full bg-black/35 px-2 py-1 shadow-[0_0_12px_rgba(0,0,0,.65)]">
-                      {table.tableNumber}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-3 text-xs text-neutral-300">
-            <span className="flex items-center gap-2">
-              <i className="h-3 w-3 rounded-full border border-white/35 bg-white/20" />
-              Вільний
-            </span>
-
-            <span className="flex items-center gap-2">
-              <i className="h-3 w-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(251,191,36,.45)]" />
-              Бронь
-            </span>
-
-            <span className="flex items-center gap-2">
-              <i className="h-3 w-3 rounded-full bg-red-500 shadow-[0_0_10px_rgba(248,113,113,.45)]" />
-              Зайнятий
-            </span>
-
-            <span className="flex items-center gap-2">
-              <i className="h-3 w-3 rounded-full bg-neutral-500" />
-              Закритий
-            </span>
-
-            <span className="flex items-center gap-2">
-              <i className="h-3 w-3 rounded-full bg-amber-300 shadow-[0_0_14px_rgba(251,191,36,.85)]" />
-              Обраний стіл
-            </span>
-          </div>
-
-          {selectedTable && (
-            <button
-              onClick={continueWithSelectedTable}
-              className="mt-4 w-full rounded-2xl border border-amber-200/80 bg-amber-300/10 px-5 py-4 font-semibold text-amber-100 shadow-[0_0_24px_rgba(251,191,36,.22)] transition hover:bg-amber-300/20"
-            >
-              Продовжити зі столом №{selectedTable.tableNumber}
+              На головну
             </button>
-          )}
-        </section>
-      )}
-
-      {step === 'form' && selectedTable && (
-        <section className="rounded-[34px] border border-white/10 bg-neutral-950/90 p-5 shadow-2xl backdrop-blur-xl">
-          <h1 className="text-2xl font-semibold">Стіл №{selectedTable.tableNumber}</h1>
-
-          <p className="mt-2 text-neutral-300">
-            до {selectedTable.seats} гостей · {date} · {time}
-          </p>
-
-          <div className="mt-5 grid gap-3">
-            <input
-              placeholder="Ваше імʼя"
-              value={form.fullName}
-              onChange={(event) => setForm({ ...form, fullName: event.target.value })}
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
-            />
-
-            <input
-              placeholder="Телефон"
-              value={form.phone}
-              onChange={(event) => setForm({ ...form, phone: event.target.value })}
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
-            />
-
-            <label className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-              <span className="mb-2 flex items-center gap-2 text-sm text-neutral-300">
-                <Users className="h-4 w-4 text-amber-200" />
-                Кількість гостей
-              </span>
-
-              <input
-                type="number"
-                min={1}
-                value={form.guestsCount}
-                onChange={(event) =>
-                  setForm({ ...form, guestsCount: Number(event.target.value) })
-                }
-                className="w-full bg-transparent outline-none"
-              />
-            </label>
-
-            <textarea
-              placeholder="Примітка"
-              value={form.wishes}
-              onChange={(event) => setForm({ ...form, wishes: event.target.value })}
-              className="min-h-24 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none"
-            />
-
-            {error && <p className="text-sm text-red-300">{error}</p>}
-
-            <button
-              disabled={loading}
-              onClick={submit}
-              className="w-full rounded-2xl border border-amber-200/80 bg-amber-300/10 px-5 py-4 font-semibold text-amber-100 disabled:opacity-50"
-            >
-              {loading ? 'Надсилаємо...' : 'Надіслати заявку'}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {step === 'success' && (
-        <section className="rounded-[34px] border border-emerald-400/25 bg-emerald-950/40 p-6 text-center shadow-2xl backdrop-blur-xl">
-          <CheckCircle2 className="mx-auto mb-4 h-12 w-12 text-emerald-400" />
-
-          <h1 className="text-2xl font-semibold">Заявку надіслано</h1>
-
-          <p className="mt-3 text-neutral-300">
-            Адміністратор отримає заявку та підтвердить бронювання.
-          </p>
-
-          <button
-            onClick={() => {
-              setSelectedTable(null);
-              setStep('home');
-            }}
-            className="mt-6 w-full rounded-2xl border border-amber-200/80 bg-amber-300/10 px-5 py-4 font-semibold text-amber-100"
-          >
-            На головну
-          </button>
-        </section>
-      )}
+          </section>
+        )}
+      </div>
     </div>
   );
 }
