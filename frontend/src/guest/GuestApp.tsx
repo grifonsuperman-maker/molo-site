@@ -744,6 +744,15 @@ export default function GuestApp() {
           .molo-svg-hit {
             touch-action: manipulation;
           }
+
+          .molo-duration-scroll {
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+          }
+
+          .molo-duration-scroll::-webkit-scrollbar {
+            display: none;
+          }
         `}
       </style>
 
@@ -916,34 +925,34 @@ export default function GuestApp() {
       )}
 
       {step === 'map' && (
-        <section className="molo-screen min-h-[100dvh] bg-black px-4 py-20 pb-[120px] text-white">
+        <section className="molo-screen min-h-[100dvh] bg-black px-3 pt-16 pb-[104px] text-white sm:px-4 sm:py-20 sm:pb-[120px]">
           <div className="molo-panel mx-auto max-w-6xl">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="mb-3 flex flex-col gap-2 sm:mb-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-sm uppercase tracking-[0.28em] text-amber-100/75">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-amber-100/75 sm:text-sm sm:tracking-[0.28em]">
                   {currentLocation.description}
                 </p>
 
-                <h1 className="mt-2 text-4xl font-black tracking-tight">
+                <h1 className="mt-1 text-2xl font-black tracking-tight sm:mt-2 sm:text-4xl">
                   Оберіть стіл
                 </h1>
 
-                <p className="mt-2 text-white/70">
+                <p className="mt-1 text-sm text-white/70 sm:mt-2 sm:text-base">
                   Оберіть дату, час і натисніть на стіл прямо на фото.
                 </p>
               </div>
 
               <button
                 onClick={refreshMap}
-                className="molo-button rounded-full border border-amber-200/60 bg-black/20 px-4 py-2 text-sm text-amber-100"
+                className="molo-button hidden rounded-full border border-amber-200/60 bg-black/20 px-4 py-2 text-sm text-amber-100 sm:inline-flex"
               >
                 Оновити
               </button>
             </div>
 
-            <div className="mb-4 grid gap-3 sm:grid-cols-2">
-              <label className="rounded-2xl border border-amber-200/35 bg-black/20 px-4 py-3">
-                <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-white/55">
+            <div className="mb-3 grid grid-cols-2 gap-2 sm:mb-4 sm:gap-3">
+              <label className="rounded-2xl border border-amber-200/35 bg-black/20 px-3 py-2.5 sm:px-4 sm:py-3">
+                <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-white/55 sm:gap-2 sm:text-xs sm:tracking-[0.18em]">
                   <CalendarDays className="h-4 w-4" />
                   Дата
                 </span>
@@ -953,12 +962,12 @@ export default function GuestApp() {
                   onChange={(event) => setDate(event.target.value)}
                   min={new Date().toISOString().slice(0, 10)}
                   type="date"
-                  className="mt-2 w-full bg-transparent text-sm outline-none"
+                  className="mt-1.5 w-full bg-transparent text-[13px] outline-none sm:mt-2 sm:text-sm"
                 />
               </label>
 
-              <label className="rounded-2xl border border-amber-200/35 bg-black/20 px-4 py-3">
-                <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-white/55">
+              <label className="rounded-2xl border border-amber-200/35 bg-black/20 px-3 py-2.5 sm:px-4 sm:py-3">
+                <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-white/55 sm:gap-2 sm:text-xs sm:tracking-[0.18em]">
                   <Clock className="h-4 w-4" />
                   Час приходу
                 </span>
@@ -968,24 +977,24 @@ export default function GuestApp() {
                   onChange={(event) => setTime(event.target.value)}
                   type="time"
                   step="300"
-                  className="mt-2 w-full bg-transparent text-sm outline-none"
+                  className="mt-1.5 w-full bg-transparent text-[13px] outline-none sm:mt-2 sm:text-sm"
                 />
               </label>
             </div>
 
-            <div className="mb-4 rounded-[28px] border border-amber-200/35 bg-black/25 p-4 shadow-[0_0_34px_rgba(251,191,36,.08)]">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mb-3 rounded-[22px] border border-amber-200/35 bg-black/25 p-3 shadow-[0_0_34px_rgba(251,191,36,.08)] sm:mb-4 sm:rounded-[28px] sm:p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-white/55">
+                  <p className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-white/55 sm:gap-2 sm:text-xs sm:tracking-[0.18em]">
                     <Clock className="h-4 w-4" />
                     Час відпочинку
                   </p>
 
-                  <p className="mt-2 text-2xl font-semibold text-amber-100">
+                  <p className="mt-1.5 text-xl font-semibold text-amber-100 sm:mt-2 sm:text-2xl">
                     Ваш час: {bookingPeriod}
                   </p>
 
-                  <p className="mt-1 text-sm text-white/60">
+                  <p className="mt-1 text-xs leading-snug text-white/60 sm:text-sm">
                     Відпочинок: {formatDuration(durationMinutes)} · підготовка столу {CLEANUP_MINUTES} хв · наступний гість з {availableAfterCleanup}
                   </p>
                 </div>
@@ -997,7 +1006,41 @@ export default function GuestApp() {
                 )}
               </div>
 
-              <div className="mt-4 space-y-3">
+              <div className="mt-3 block sm:hidden">
+                <p className="mb-2 text-[10px] uppercase tracking-[0.16em] text-white/45">Оберіть час</p>
+
+                <div className="molo-duration-scroll flex gap-2 overflow-x-auto pb-1">
+                  {DURATION_OPTIONS.map((option) => {
+                    const isLong = option.minutes > 180;
+                    const isSelected = !isCustomDuration && durationMinutes === option.minutes;
+
+                    return (
+                      <button
+                        key={`mobile-duration-${option.minutes}`}
+                        type="button"
+                        onClick={() => selectDuration(option.minutes)}
+                        className={`h-11 flex-none rounded-2xl border px-4 text-sm font-semibold transition ${isSelected ? (isLong ? 'border-sky-200 bg-sky-300/15 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,.16)]' : 'border-amber-200 bg-amber-300/20 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,.16)]') : 'border-white/15 bg-white/5 text-white/75'}`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+
+                  <label className={`h-11 w-[116px] flex-none rounded-2xl border px-3 py-1.5 text-sm font-semibold transition ${isCustomDuration ? 'border-sky-200 bg-sky-300/15 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,.16)]' : 'border-white/15 bg-white/5 text-white/75'}`}>
+                    <span className="block text-[9px] uppercase tracking-[0.12em] text-white/45">Свій</span>
+                    <input
+                      value={customDurationHours}
+                      onChange={(event) => updateCustomDuration(event.target.value)}
+                      onFocus={() => setIsCustomDuration(true)}
+                      inputMode="decimal"
+                      className="w-full bg-transparent text-sm leading-none outline-none"
+                      placeholder="3.5"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-4 hidden space-y-3 sm:block">
                 <div>
                   <p className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">До 3 годин</p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -1066,12 +1109,12 @@ export default function GuestApp() {
               </div>
             )}
 
-            <div className="overflow-hidden rounded-[30px] border border-amber-200/30 bg-black/60 p-2">
-              <div className="relative mx-auto w-full overflow-hidden rounded-[24px]">
+            <div className="overflow-hidden rounded-[22px] border border-amber-200/30 bg-black/60 p-1 sm:rounded-[30px] sm:p-2">
+              <div className="relative mx-auto w-full overflow-hidden rounded-[18px] sm:rounded-[24px]">
                 <img
                   src={currentLocation.background}
                   alt={currentLocation.label}
-                  className="block w-full rounded-[24px] object-contain"
+                  className="block w-full rounded-[18px] object-contain sm:rounded-[24px]"
                   draggable={false}
                 />
 
@@ -1104,7 +1147,7 @@ export default function GuestApp() {
               </div>
             </div>
 
-            <div className="mt-5 rounded-[28px] border border-amber-200/30 bg-black/30 p-4">
+            <div className="mt-5 hidden rounded-[28px] border border-amber-200/30 bg-black/30 p-4 sm:block">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold">Статуси столів</h2>
 
@@ -1151,7 +1194,7 @@ export default function GuestApp() {
               Стіл №{selectedTable.tableNumber}
             </h1>
 
-            <p className="mt-2 text-white/70">
+            <p className="mt-1 text-sm text-white/70 sm:mt-2 sm:text-base">
               до {selectedTable.seats} гостей · {date}
             </p>
 
@@ -1160,7 +1203,7 @@ export default function GuestApp() {
                 Стіл доступний
               </p>
 
-              <p className="mt-2 text-2xl font-semibold text-amber-100">
+              <p className="mt-1.5 text-xl font-semibold text-amber-100 sm:mt-2 sm:text-2xl">
                 Ваш час: {bookingPeriod}
               </p>
 
@@ -1185,7 +1228,7 @@ export default function GuestApp() {
               />
 
               <label className="rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3">
-                <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-white/55">
+                <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-white/55 sm:gap-2 sm:text-xs sm:tracking-[0.18em]">
                   <Users className="h-4 w-4" />
                   Кількість гостей
                 </span>
