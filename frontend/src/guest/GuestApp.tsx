@@ -68,6 +68,14 @@ type LocationMap = {
   tables: VisualTable[];
 };
 
+type TableAvailabilityNotice = {
+  tableNumber: string;
+  status: TableStatus;
+  bookedFrom: string;
+  bookedTo: string;
+  availableFrom: string;
+};
+
 const STATUS_TEXT: Record<TableStatus, string> = {
   free: 'Вільний',
   pending: 'Очікує підтвердження',
@@ -490,7 +498,7 @@ export default function GuestApp() {
   const [durationMinutes, setDurationMinutes] = useState(120);
   const [customDurationHours, setCustomDurationHours] = useState('3.5');
   const [isCustomDuration, setIsCustomDuration] = useState(false);
-  const [tableNotice, setTableNotice] = useState<{ tableNumber: string; status: TableStatus } | null>(null);
+  const [tableNotice, setTableNotice] = useState<TableAvailabilityNotice | null>(null);
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -543,6 +551,23 @@ export default function GuestApp() {
     const realTable = findRealTableByNumber(tableNumber);
     if (realTable?.zone?.isClosed) return 'closed';
     return normalizeTableStatus(realTable?.status);
+  }
+
+  function createTableNotice(table: TableItem, status: TableStatus): TableAvailabilityNotice {
+    return {
+      tableNumber: String(table.tableNumber),
+      status,
+      // Поки backend не віддає реальні броні по годинах, готуємо правильний формат.
+      // Коли підключимо backend, сюди прийдуть bookedFrom/bookedTo/availableFrom з бази.
+      bookedFrom: time,
+      bookedTo: bookingEndTime,
+      availableFrom: availableAfterCleanup,
+    };
+  }
+
+  function closeTableNotice() {
+    setTableNotice(null);
+    setActiveTableNumber(null);
   }
 
   function callAdmin() {
@@ -635,10 +660,7 @@ export default function GuestApp() {
 
     if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
       window.setTimeout(() => {
-        setTableNotice({
-          tableNumber: String(table.tableNumber),
-          status: table.zone?.isClosed ? 'closed' : status,
-        });
+        setTableNotice(createTableNotice(table, table.zone?.isClosed ? 'closed' : status));
       }, 220);
       return;
     }
@@ -1094,18 +1116,62 @@ export default function GuestApp() {
             )}
 
             {tableNotice && (
-              <div className="mb-4 rounded-[28px] border border-sky-200/35 bg-sky-500/10 p-4 text-sky-50 shadow-[0_0_34px_rgba(56,189,248,.08)]">
-                <p className="text-sm uppercase tracking-[0.18em] text-sky-100/70">
-                  Стіл №{tableNotice.tableNumber}: {STATUS_TEXT[tableNotice.status]}
-                </p>
+              <div className="mb-4 rounded-[28px] border border-amber-200/35 bg-black/55 p-4 text-white shadow-[0_0_34px_rgba(251,191,36,.08)] sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.22em] text-amber-100/55">
+                      Стіл недоступний
+                    </p>
 
-                <p className="mt-2 text-lg font-semibold">
-                  На ваш час {bookingPeriod} цей стіл недоступний.
-                </p>
+                    <h2 className="mt-1 text-2xl font-semibold text-amber-100">
+                      Стіл №{tableNotice.tableNumber} зайнятий
+                    </h2>
+                  </div>
 
-                <p className="mt-2 text-sm text-sky-50/75">
-                  Можна обрати інший стіл або змінити час приходу. Після підключення backend ми покажемо точні вільні вікна для цього столу.
-                </p>
+                  <span className="w-fit rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white/70">
+                    {STATUS_TEXT[tableNotice.status]}
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-white/45">
+                      Заброньовано
+                    </p>
+
+                    <p className="mt-1 text-2xl font-semibold text-white">
+                      {tableNotice.bookedFrom} — {tableNotice.bookedTo}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-emerald-200/20 bg-emerald-400/10 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-emerald-100/55">
+                      Вільний з
+                    </p>
+
+                    <p className="mt-1 text-2xl font-semibold text-emerald-100">
+                      {tableNotice.availableFrom}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={closeTableNotice}
+                    className="rounded-2xl border border-amber-200/55 bg-amber-300/15 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/20"
+                  >
+                    Змінити час
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={closeTableNotice}
+                    className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white/75 transition hover:bg-white/10"
+                  >
+                    Обрати інший стіл
+                  </button>
+                </div>
               </div>
             )}
 
