@@ -115,8 +115,8 @@ const LOCATIONS: LocationMap[] = [
     label: 'Навіс',
     description: 'Зона навісу 15–20',
     background: '/maps/canopy-day-numbered.png',
-    width: 1536,
-    height: 1152,
+    width: 1229,
+    height: 1536,
     tables: [
       { number: 15, seats: 4, shape: { kind: 'polygon', points: [[915, 976], [1105, 1000], [1133, 1091], [908, 1056]], expand: 9 } },
       { number: 16, seats: 4, shape: { kind: 'polygon', points: [[919, 877], [1063, 890], [1079, 937], [916, 918]], expand: 9 } },
@@ -131,7 +131,7 @@ const LOCATIONS: LocationMap[] = [
     label: 'Велика альтанка',
     description: 'Велика альтанка 21–36',
     background: '/maps/gazebo-day-numbered.png',
-    width: 1024,
+    width: 1229,
     height: 1536,
     tables: [
       { number: 28, seats: 4, shape: { kind: 'polygon', points: [[471, 486], [538, 485], [536, 527], [465, 527]], expand: 9 } },
