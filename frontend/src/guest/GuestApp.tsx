@@ -22,7 +22,7 @@ const FALLBACK_MENU =
 
 type Step = 'home' | 'location_choice' | 'waterfront_choice' | 'map' | 'form' | 'success';
 
-type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'closed';
+type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'cleaning' | 'closed';
 type Point = [number, number];
 
 type PolygonShape = {
@@ -73,6 +73,7 @@ const STATUS_TEXT: Record<TableStatus, string> = {
   pending: 'Очікує підтвердження',
   reserved: 'Заброньований',
   occupied: 'Зайнятий',
+  cleaning: 'Готується',
   closed: 'Закритий',
 };
 
@@ -81,6 +82,7 @@ const STATUS_COLORS: Record<TableStatus | 'active', string> = {
   pending: '#38bdf8',
   reserved: '#fb923c',
   occupied: '#ff3b4f',
+  cleaning: '#67e8f9',
   closed: '#bdbdbd',
   free: '#ffffff',
 };
@@ -220,10 +222,24 @@ const LOCATIONS: LocationMap[] = [
 
 const WATERFRONT_LOCATION_KEYS = ['canopy', 'gazebo', 'rotang', 'embankment', 'glass_gazebo', 'water_gazebo'];
 
+const CLEANUP_MINUTES = 15;
+
+const DURATION_OPTIONS = [
+  { label: '1 година', minutes: 60 },
+  { label: '1.5 години', minutes: 90 },
+  { label: '2 години', minutes: 120 },
+  { label: '2.5 години', minutes: 150 },
+  { label: '3 години', minutes: 180 },
+  { label: '4 години', minutes: 240 },
+  { label: '5 годин', minutes: 300 },
+  { label: '6 годин', minutes: 360 },
+];
+
 function normalizeTableStatus(status: unknown): TableStatus {
   if (status === 'pending' || status === 'awaiting_confirmation') return 'pending';
   if (status === 'reserved' || status === 'booked') return 'reserved';
   if (status === 'occupied') return 'occupied';
+  if (status === 'cleaning' || status === 'preparing') return 'cleaning';
   if (status === 'closed') return 'closed';
   return 'free';
 }
@@ -255,6 +271,39 @@ function createFallbackTable(tableNumber: number, seats: number): TableItem {
     rotation: 0,
     isVisible: true,
   };
+}
+function hourWord(hours: number): string {
+  if (hours === 1) return 'година';
+  if (hours >= 2 && hours <= 4) return 'години';
+  return 'годин';
+}
+
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} хв`;
+
+  const hours = minutes / 60;
+
+  if (Number.isInteger(hours)) {
+    return `${hours} ${hourWord(hours)}`;
+  }
+
+  return `${String(hours).replace('.', ',')} години`;
+}
+
+function timeToMinutes(value: string): number {
+  const [hours = '0', minutes = '0'] = value.split(':');
+  return Number(hours) * 60 + Number(minutes);
+}
+
+function minutesToTime(value: number): string {
+  const normalized = ((value % 1440) + 1440) % 1440;
+  const hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function addMinutesToTime(value: string, minutes: number): string {
+  return minutesToTime(timeToMinutes(value) + minutes);
 }
 
 function getTableNeonColor(status: TableStatus, active: boolean) {
@@ -438,6 +487,10 @@ export default function GuestApp() {
 
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState('19:00');
+  const [durationMinutes, setDurationMinutes] = useState(120);
+  const [customDurationHours, setCustomDurationHours] = useState('3.5');
+  const [isCustomDuration, setIsCustomDuration] = useState(false);
+  const [tableNotice, setTableNotice] = useState<{ tableNumber: string; status: TableStatus } | null>(null);
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -456,6 +509,11 @@ export default function GuestApp() {
     refreshMap();
   }, []);
 
+  useEffect(() => {
+    setTableNotice(null);
+    setActiveTableNumber(null);
+  }, [date, time, durationMinutes, selectedLocationKey]);
+
   const visibleTables = useMemo(() => {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
   }, [map]);
@@ -463,6 +521,10 @@ export default function GuestApp() {
   const currentLocation = useMemo(() => {
     return LOCATIONS.find((location) => location.key === selectedLocationKey) ?? LOCATIONS[0];
   }, [selectedLocationKey]);
+
+  const bookingEndTime = useMemo(() => addMinutesToTime(time, durationMinutes), [time, durationMinutes]);
+  const availableAfterCleanup = useMemo(() => addMinutesToTime(bookingEndTime, CLEANUP_MINUTES), [bookingEndTime]);
+  const bookingPeriod = `${time} — ${bookingEndTime}`;
 
   function refreshMap() {
     mapApi
@@ -500,6 +562,7 @@ export default function GuestApp() {
     setSelectedLocationKey(locationKey);
     setSelectedTable(null);
     setActiveTableNumber(null);
+    setTableNotice(null);
     setStep('map');
   }
 
@@ -533,6 +596,23 @@ export default function GuestApp() {
     setStep('home');
   }
 
+  function selectDuration(minutes: number) {
+    setDurationMinutes(minutes);
+    setIsCustomDuration(false);
+  }
+
+  function updateCustomDuration(value: string) {
+    setCustomDurationHours(value);
+    setIsCustomDuration(true);
+
+    const parsed = Number(value.replace(',', '.'));
+
+    if (Number.isFinite(parsed) && parsed > 0) {
+      const minutes = Math.round(parsed * 60);
+      setDurationMinutes(Math.min(720, Math.max(30, minutes)));
+    }
+  }
+
   function selectTable(table: TableItem) {
     const status = normalizeTableStatus(table.status);
 
@@ -541,6 +621,7 @@ export default function GuestApp() {
       return;
     }
 
+    setTableNotice(null);
     setSelectedTable(table);
     setStep('form');
   }
@@ -554,10 +635,15 @@ export default function GuestApp() {
 
     if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
       window.setTimeout(() => {
-        alert(`Стіл недоступний: ${STATUS_TEXT[status]}`);
+        setTableNotice({
+          tableNumber: String(table.tableNumber),
+          status: table.zone?.isClosed ? 'closed' : status,
+        });
       }, 220);
       return;
     }
+
+    setTableNotice(null);
 
     window.setTimeout(() => {
       selectTable(table);
@@ -574,6 +660,14 @@ export default function GuestApp() {
       return;
     }
 
+    const wishesWithTime = [
+      `Час відпочинку: ${formatDuration(durationMinutes)} (${bookingPeriod})`,
+      `Підготовка столу після гостей: ${CLEANUP_MINUTES} хв, наступний гість з ${availableAfterCleanup}`,
+      form.wishes.trim(),
+    ]
+      .filter(Boolean)
+      .join('\n');
+
     const result = await run(() =>
       bookingsApi.create({
         tableId: selectedTable.id,
@@ -582,7 +676,7 @@ export default function GuestApp() {
         bookingDate: date,
         bookingTime: time,
         guestsCount: Number(form.guestsCount),
-        wishes: form.wishes,
+        wishes: wishesWithTime,
       }),
     );
 
@@ -857,6 +951,7 @@ export default function GuestApp() {
                 <input
                   value={date}
                   onChange={(event) => setDate(event.target.value)}
+                  min={new Date().toISOString().slice(0, 10)}
                   type="date"
                   className="mt-2 w-full bg-transparent text-sm outline-none"
                 />
@@ -865,7 +960,7 @@ export default function GuestApp() {
               <label className="rounded-2xl border border-amber-200/35 bg-black/20 px-4 py-3">
                 <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-white/55">
                   <Clock className="h-4 w-4" />
-                  Час
+                  Час приходу
                 </span>
 
                 <input
@@ -878,9 +973,96 @@ export default function GuestApp() {
               </label>
             </div>
 
+            <div className="mb-4 rounded-[28px] border border-amber-200/35 bg-black/25 p-4 shadow-[0_0_34px_rgba(251,191,36,.08)]">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-white/55">
+                    <Clock className="h-4 w-4" />
+                    Час відпочинку
+                  </p>
+
+                  <p className="mt-2 text-2xl font-semibold text-amber-100">
+                    Ваш час: {bookingPeriod}
+                  </p>
+
+                  <p className="mt-1 text-sm text-white/60">
+                    Відпочинок: {formatDuration(durationMinutes)} · підготовка столу {CLEANUP_MINUTES} хв · наступний гість з {availableAfterCleanup}
+                  </p>
+                </div>
+
+                {durationMinutes > 180 && (
+                  <span className="w-fit rounded-full border border-sky-300/50 bg-sky-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-sky-100">
+                    Довге бронювання
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <div>
+                  <p className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">До 3 годин</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                    {DURATION_OPTIONS.filter((option) => option.minutes <= 180).map((option) => (
+                      <button
+                        key={option.minutes}
+                        type="button"
+                        onClick={() => selectDuration(option.minutes)}
+                        className={`rounded-2xl border px-3 py-3 text-sm font-semibold transition ${!isCustomDuration && durationMinutes === option.minutes ? 'border-amber-200 bg-amber-300/20 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,.16)]' : 'border-white/15 bg-white/5 text-white/75'}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">Більше 3 годин</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {DURATION_OPTIONS.filter((option) => option.minutes > 180).map((option) => (
+                      <button
+                        key={option.minutes}
+                        type="button"
+                        onClick={() => selectDuration(option.minutes)}
+                        className={`rounded-2xl border px-3 py-3 text-sm font-semibold transition ${!isCustomDuration && durationMinutes === option.minutes ? 'border-sky-200 bg-sky-300/15 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,.16)]' : 'border-white/15 bg-white/5 text-white/75'}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+
+                    <label className={`rounded-2xl border px-3 py-3 text-sm font-semibold transition ${isCustomDuration ? 'border-sky-200 bg-sky-300/15 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,.16)]' : 'border-white/15 bg-white/5 text-white/75'}`}>
+                      <span className="block text-[11px] uppercase tracking-[0.14em] text-white/45">Свій час</span>
+                      <input
+                        value={customDurationHours}
+                        onChange={(event) => updateCustomDuration(event.target.value)}
+                        onFocus={() => setIsCustomDuration(true)}
+                        inputMode="decimal"
+                        className="mt-1 w-full bg-transparent text-base outline-none"
+                        placeholder="3.5"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {restaurant?.status === 'booking_closed' && (
               <div className="mb-4 rounded-2xl border border-amber-200/30 bg-amber-500/10 p-4 text-sm text-amber-100">
                 {restaurant.bookingClosedMessage}
+              </div>
+            )}
+
+            {tableNotice && (
+              <div className="mb-4 rounded-[28px] border border-sky-200/35 bg-sky-500/10 p-4 text-sky-50 shadow-[0_0_34px_rgba(56,189,248,.08)]">
+                <p className="text-sm uppercase tracking-[0.18em] text-sky-100/70">
+                  Стіл №{tableNotice.tableNumber}: {STATUS_TEXT[tableNotice.status]}
+                </p>
+
+                <p className="mt-2 text-lg font-semibold">
+                  На ваш час {bookingPeriod} цей стіл недоступний.
+                </p>
+
+                <p className="mt-2 text-sm text-sky-50/75">
+                  Можна обрати інший стіл або змінити час приходу. Після підключення backend ми покажемо точні вільні вікна для цього столу.
+                </p>
               </div>
             )}
 
@@ -944,6 +1126,10 @@ export default function GuestApp() {
                     Зайнятий
                   </span>
                   <span className="inline-flex items-center gap-1">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#67e8f9]" />
+                    Готується
+                  </span>
+                  <span className="inline-flex items-center gap-1">
                     <span className="h-2.5 w-2.5 rounded-full bg-[#bdbdbd]" />
                     Закритий
                   </span>
@@ -966,8 +1152,22 @@ export default function GuestApp() {
             </h1>
 
             <p className="mt-2 text-white/70">
-              до {selectedTable.seats} гостей · {date} · {time}
+              до {selectedTable.seats} гостей · {date}
             </p>
+
+            <div className="mt-5 rounded-[26px] border border-amber-200/30 bg-amber-300/10 p-4">
+              <p className="text-sm uppercase tracking-[0.18em] text-amber-100/70">
+                Стіл доступний
+              </p>
+
+              <p className="mt-2 text-2xl font-semibold text-amber-100">
+                Ваш час: {bookingPeriod}
+              </p>
+
+              <p className="mt-1 text-sm text-white/70">
+                Відпочинок: {formatDuration(durationMinutes)} · наступний гість з {availableAfterCleanup}
+              </p>
+            </div>
 
             <div className="mt-6 grid gap-4">
               <input
@@ -1029,7 +1229,7 @@ export default function GuestApp() {
             <h1 className="text-2xl font-semibold">Заявку надіслано</h1>
 
             <p className="mt-3 text-white/70">
-              Адміністратор отримає заявку та підтвердить бронювання.
+              Адміністратор отримає заявку та підтвердить бронювання. У заявці буде ваш час {bookingPeriod}.
             </p>
 
             <div className="mt-6">
