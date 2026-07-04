@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode, KeyboardEvent } from 'react';
 
@@ -352,23 +351,32 @@ function GoldButton({
   );
 }
 
-function VisibleContour({ shape, color, glowId }: { shape: VisualTableShape; color: string; glowId: string }) {
+function VisibleContour({ shape, color }: { shape: VisualTableShape; color: string }) {
   const data = shapeRenderData(shape);
+  const neonStyle = {
+    filter: `
+      drop-shadow(0 0 6px ${color})
+      drop-shadow(0 0 14px ${color})
+      drop-shadow(0 0 26px ${color})
+    `,
+    transition: 'all 180ms ease',
+  };
   const commonProps = {
-    fill: 'none',
+    fill: 'transparent',
     stroke: color,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
+    style: neonStyle,
     pointerEvents: 'none' as const,
   };
 
   if (data.tag === 'polygon') {
     return (
       <>
-        <polygon points={data.points} {...commonProps} strokeWidth={16} strokeOpacity={0.2} filter={`url(#${glowId})`} />
-        <polygon points={data.points} {...commonProps} strokeWidth={8} strokeOpacity={0.55} filter={`url(#${glowId})`} />
-        <polygon points={data.points} {...commonProps} strokeWidth={3} strokeOpacity={1} filter={`url(#${glowId})`} />
-        <polygon points={data.points} fill="none" stroke="white" strokeWidth={1.4} strokeOpacity={0.7} pointerEvents="none" />
+        <polygon points={data.points} {...commonProps} strokeWidth={22} strokeOpacity={0.28} />
+        <polygon points={data.points} {...commonProps} strokeWidth={13} strokeOpacity={0.78} />
+        <polygon points={data.points} {...commonProps} strokeWidth={6} strokeOpacity={1} />
+        <polygon points={data.points} fill="transparent" stroke="white" strokeWidth={2} strokeOpacity={0.65} strokeLinejoin="round" pointerEvents="none" />
       </>
     );
   }
@@ -376,20 +384,20 @@ function VisibleContour({ shape, color, glowId }: { shape: VisualTableShape; col
   if (data.tag === 'ellipse') {
     return (
       <>
-        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} strokeWidth={16} strokeOpacity={0.2} filter={`url(#${glowId})`} />
-        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} strokeWidth={8} strokeOpacity={0.55} filter={`url(#${glowId})`} />
-        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} strokeWidth={3} strokeOpacity={1} filter={`url(#${glowId})`} />
-        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} fill="none" stroke="white" strokeWidth={1.4} strokeOpacity={0.7} pointerEvents="none" />
+        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} strokeWidth={22} strokeOpacity={0.28} />
+        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} strokeWidth={13} strokeOpacity={0.78} />
+        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} strokeWidth={6} strokeOpacity={1} />
+        <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} fill="transparent" stroke="white" strokeWidth={2} strokeOpacity={0.65} pointerEvents="none" />
       </>
     );
   }
 
   return (
     <>
-      <path d={data.d} {...commonProps} strokeWidth={16} strokeOpacity={0.2} filter={`url(#${glowId})`} />
-      <path d={data.d} {...commonProps} strokeWidth={8} strokeOpacity={0.55} filter={`url(#${glowId})`} />
-      <path d={data.d} {...commonProps} strokeWidth={3} strokeOpacity={1} filter={`url(#${glowId})`} />
-      <path d={data.d} fill="none" stroke="white" strokeWidth={1.4} strokeOpacity={0.7} pointerEvents="none" />
+      <path d={data.d} {...commonProps} strokeWidth={22} strokeOpacity={0.28} />
+      <path d={data.d} {...commonProps} strokeWidth={13} strokeOpacity={0.78} />
+      <path d={data.d} {...commonProps} strokeWidth={6} strokeOpacity={1} />
+      <path d={data.d} fill="transparent" stroke="white" strokeWidth={2} strokeOpacity={0.65} pointerEvents="none" />
     </>
   );
 }
@@ -881,24 +889,15 @@ export default function GuestApp() {
                 <img
                   src={currentLocation.background}
                   alt={currentLocation.label}
-                  className="w-full rounded-[24px] object-contain"
+                  className="block w-full rounded-[24px] object-contain"
                   draggable={false}
                 />
 
                 <svg
                   className="molo-svg-map absolute inset-0 z-50 h-full w-full"
                   viewBox={`0 0 ${currentLocation.width} ${currentLocation.height}`}
-                  preserveAspectRatio="xMidYMid meet"
+                  preserveAspectRatio="none"
                 >
-                  <defs>
-                    <filter id={`molo-neon-${currentLocation.key}`} x="-50%" y="-50%" width="200%" height="200%">
-                      <feGaussianBlur stdDeviation="4" result="blur" />
-                      <feMerge>
-                        <feMergeNode in="blur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                  </defs>
 
                   {currentLocation.tables.map((visualTable) => {
                     const status = getVisualTableStatus(visualTable.number);
@@ -912,7 +911,6 @@ export default function GuestApp() {
                           <VisibleContour
                             shape={visualTable.shape}
                             color={color}
-                            glowId={`molo-neon-${currentLocation.key}`}
                           />
                         )}
 
