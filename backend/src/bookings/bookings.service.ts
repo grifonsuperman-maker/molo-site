@@ -15,7 +15,6 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
-const ARRIVAL_GRACE_MINUTES = 15;
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 
 @Injectable()
@@ -74,7 +73,7 @@ export class BookingsService {
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
   }
 
-  private formatTimeLabel(time: string | null) {
+  private formatTimeLabel(time: string | null | undefined) {
     if (!time) return '-';
     const [hours = '00', minutes = '00'] = String(time).split(':');
     return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
@@ -95,15 +94,23 @@ export class BookingsService {
       bookingTime: this.formatTimeFromMinutes(startMinutes),
       departureTime: this.formatTimeFromMinutes(departureMinutes),
       availableFrom: this.formatTimeFromMinutes(availableFromMinutes),
+      bookingTimeLabel: this.formatTimeLabel(this.formatTimeFromMinutes(startMinutes)),
+      departureTimeLabel: this.formatTimeLabel(this.formatTimeFromMinutes(departureMinutes)),
+      availableFromLabel: this.formatTimeLabel(this.formatTimeFromMinutes(availableFromMinutes)),
     };
   }
 
-  private buildArrivalGraceUntil(bookingDate: string, bookingTime: string) {
-    const [year, month, day] = bookingDate.split('-').map(Number);
-    const startMinutes = this.parseTimeToMinutes(bookingTime);
-    const hours = Math.floor(startMinutes / 60);
-    const minutes = startMinutes % 60;
-    return new Date(year, month - 1, day, hours, minutes + ARRIVAL_GRACE_MINUTES, 0, 0);
+  private durationFromWishes(booking: Booking) {
+    const wishes = booking.wishes || '';
+    const match = wishes.match(/\((\d{2}:\d{2})\s*[—-]\s*(\d{2}:\d{2})\)/);
+
+    if (!match) return DEFAULT_DURATION_MINUTES;
+
+    const start = this.parseTimeToMinutes(match[1]);
+    const end = this.parseTimeToMinutes(match[2]);
+    const duration = end >= start ? end - start : end + 1440 - start;
+
+    return this.normalizeDuration(duration);
   }
 
   private getBookingStartMinutes(booking: Booking) {
@@ -112,15 +119,11 @@ export class BookingsService {
 
   private getBookingDepartureMinutes(booking: Booking) {
     const start = this.getBookingStartMinutes(booking);
-    return start + this.normalizeDuration(booking.durationMinutes);
+    return start + this.durationFromWishes(booking);
   }
 
   private getBookingAvailableFromMinutes(booking: Booking) {
-    const cleanup = Number.isFinite(Number(booking.cleanupMinutes))
-      ? Number(booking.cleanupMinutes)
-      : DEFAULT_CLEANUP_MINUTES;
-
-    return this.getBookingDepartureMinutes(booking) + cleanup;
+    return this.getBookingDepartureMinutes(booking) + DEFAULT_CLEANUP_MINUTES;
   }
 
   private bookingToAvailabilityConflict(booking: Booking) {
@@ -129,8 +132,8 @@ export class BookingsService {
     const availableFromMinutes = this.getBookingAvailableFromMinutes(booking);
 
     const bookedFrom = booking.bookingTime || this.formatTimeFromMinutes(startMinutes);
-    const bookedTo = booking.departureTime || this.formatTimeFromMinutes(departureMinutes);
-    const availableFrom = booking.availableFrom || this.formatTimeFromMinutes(availableFromMinutes);
+    const bookedTo = this.formatTimeFromMinutes(departureMinutes);
+    const availableFrom = this.formatTimeFromMinutes(availableFromMinutes);
 
     return {
       bookingId: booking.id,
@@ -182,7 +185,6 @@ export class BookingsService {
 
   private async resolveTableForBooking(dto: CreateBookingDto) {
     let table: TableEntity | null = null;
-
     const tableId = String(dto.tableId || '');
 
     if (dto.tableId && !tableId.startsWith('visual-')) {
@@ -220,7 +222,6 @@ export class BookingsService {
     }
 
     if (!table) throw new NotFoundException('Стіл не знайдено');
-
     return table;
   }
 
@@ -260,9 +261,9 @@ export class BookingsService {
         requestedFrom: timeInfo.bookingTime,
         requestedTo: timeInfo.departureTime,
         requestedAvailableFrom: timeInfo.availableFrom,
-        requestedFromLabel: this.formatTimeLabel(timeInfo.bookingTime),
-        requestedToLabel: this.formatTimeLabel(timeInfo.departureTime),
-        requestedAvailableFromLabel: this.formatTimeLabel(timeInfo.availableFrom),
+        requestedFromLabel: timeInfo.bookingTimeLabel,
+        requestedToLabel: timeInfo.departureTimeLabel,
+        requestedAvailableFromLabel: timeInfo.availableFromLabel,
         durationMinutes: timeInfo.durationMinutes,
         cleanupMinutes: timeInfo.cleanupMinutes,
         isAvailable: false,
@@ -282,9 +283,9 @@ export class BookingsService {
       requestedFrom: timeInfo.bookingTime,
       requestedTo: timeInfo.departureTime,
       requestedAvailableFrom: timeInfo.availableFrom,
-      requestedFromLabel: this.formatTimeLabel(timeInfo.bookingTime),
-      requestedToLabel: this.formatTimeLabel(timeInfo.departureTime),
-      requestedAvailableFromLabel: this.formatTimeLabel(timeInfo.availableFrom),
+      requestedFromLabel: timeInfo.bookingTimeLabel,
+      requestedToLabel: timeInfo.departureTimeLabel,
+      requestedAvailableFromLabel: timeInfo.availableFromLabel,
       durationMinutes: timeInfo.durationMinutes,
       cleanupMinutes: timeInfo.cleanupMinutes,
       isAvailable: !conflict,
@@ -296,72 +297,88 @@ export class BookingsService {
   }
 
   async create(dto: CreateBookingDto) {
-    await this.validateRestaurant();
-
-    const table = await this.resolveTableForBooking(dto);
-    await this.assertTableCanBeBooked(table);
-
-    let client = await this.clients.findOne({ where: { phone: dto.phone } });
-
-    if (!client) {
-      client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
-    }
-
-    if (client.isBlacklisted) throw new BadRequestException('Бронювання з цього номера недоступне');
-
-    const timeInfo = await this.assertNoTimeConflict(table.id, dto.bookingDate, dto.bookingTime, dto.durationMinutes);
-
-    const booking = await this.bookings.save(
-      this.bookings.create({
-        table,
-        client,
-        bookingDate: dto.bookingDate,
-        bookingTime: timeInfo.bookingTime,
-        durationMinutes: timeInfo.durationMinutes,
-        departureTime: timeInfo.departureTime,
-        cleanupMinutes: timeInfo.cleanupMinutes,
-        availableFrom: timeInfo.availableFrom,
-        arrivalGraceUntil: this.buildArrivalGraceUntil(dto.bookingDate, timeInfo.bookingTime),
-        guestsCount: dto.guestsCount,
-        wishes: dto.wishes || null,
-        status: 'pending',
-        source: 'mini_app',
-      }),
-    );
-
     try {
-      await this.logs.create('Створено заявку на бронювання', null, {
+      await this.validateRestaurant();
+
+      const table = await this.resolveTableForBooking(dto);
+      await this.assertTableCanBeBooked(table);
+
+      let client = await this.clients.findOne({ where: { phone: dto.phone } });
+
+      if (!client) {
+        client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
+      }
+
+      if (client.isBlacklisted) throw new BadRequestException('Бронювання з цього номера недоступне');
+
+      const timeInfo = await this.assertNoTimeConflict(
+        table.id,
+        dto.bookingDate,
+        dto.bookingTime,
+        dto.durationMinutes,
+      );
+
+      const originalWishes = dto.wishes || '';
+      const wishesWithSystemTime = [
+        `Час відпочинку: ${timeInfo.durationMinutes} хв (${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel})`,
+        `Підготовка столу після гостей: ${timeInfo.cleanupMinutes} хв, наступний гість з ${timeInfo.availableFromLabel}`,
+        originalWishes,
+      ].filter(Boolean).join('\n');
+
+      const booking = await this.bookings.save(
+        this.bookings.create({
+          table,
+          client,
+          bookingDate: dto.bookingDate,
+          bookingTime: timeInfo.bookingTime,
+          guestsCount: dto.guestsCount,
+          wishes: wishesWithSystemTime,
+          status: 'pending',
+          source: 'mini_app',
+        }),
+      );
+
+      try {
+        await this.logs.create('Створено заявку на бронювання', null, {
+          bookingId: booking.id,
+          tableNumber: table.tableNumber,
+          clientName: client.fullName,
+          time: `${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel}`,
+          durationMinutes: timeInfo.durationMinutes,
+        });
+      } catch (error) {
+        console.error('Booking log failed:', error);
+      }
+
+      try {
+        const full = await this.bookings.findOne({
+          where: { id: booking.id },
+          relations: ['table', 'client'],
+        });
+
+        if (full) await this.notifications.notifyNewBooking(full);
+      } catch (error) {
+        console.error('Booking notification failed:', error);
+      }
+
+      return {
+        message: 'Заявку на бронювання надіслано адміністратору',
         bookingId: booking.id,
-        tableNumber: table.tableNumber,
-        clientName: client.fullName,
-        time: `${this.formatTimeLabel(booking.bookingTime)} — ${this.formatTimeLabel(booking.departureTime)}`,
-        durationMinutes: booking.durationMinutes,
-      });
-    } catch (error) {
-      console.error('Booking log failed:', error);
+        status: booking.status,
+        bookingTime: timeInfo.bookingTime,
+        departureTime: timeInfo.departureTime,
+        availableFrom: timeInfo.availableFrom,
+        durationMinutes: timeInfo.durationMinutes,
+        cleanupMinutes: timeInfo.cleanupMinutes,
+      };
+    } catch (error: any) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+
+      console.error('Booking create failed:', error);
+      throw new BadRequestException(`Booking error: ${error?.message || 'unknown error'}`);
     }
-
-    try {
-      const full = await this.bookings.findOne({
-        where: { id: booking.id },
-        relations: ['table', 'client'],
-      });
-
-      if (full) await this.notifications.notifyNewBooking(full);
-    } catch (error) {
-      console.error('Booking notification failed:', error);
-    }
-
-    return {
-      message: 'Заявку на бронювання надіслано адміністратору',
-      bookingId: booking.id,
-      status: booking.status,
-      bookingTime: booking.bookingTime,
-      departureTime: booking.departureTime,
-      availableFrom: booking.availableFrom,
-      durationMinutes: booking.durationMinutes,
-      cleanupMinutes: booking.cleanupMinutes,
-    };
   }
 
   async getToday() {
@@ -390,7 +407,7 @@ export class BookingsService {
     if (!b.table) throw new BadRequestException('Стіл не знайдено');
     if (b.status !== 'pending') throw new BadRequestException('Це бронювання вже оброблено');
 
-    await this.assertNoTimeConflict(b.table.id, b.bookingDate, b.bookingTime, b.durationMinutes, b.id);
+    await this.assertNoTimeConflict(b.table.id, b.bookingDate, b.bookingTime, this.durationFromWishes(b), b.id);
 
     b.status = 'approved';
     b.approvedAt = new Date();
@@ -423,7 +440,6 @@ export class BookingsService {
 
     b.status = 'cancelled';
     b.cancelledAt = new Date();
-    b.cancelReason = 'admin_cancelled';
 
     if (b.table?.status === 'reserved') {
       b.table.status = 'free';
@@ -448,7 +464,6 @@ export class BookingsService {
     if (!b.table) throw new BadRequestException('Стіл не знайдено');
     if (b.status !== 'approved') throw new BadRequestException('Посадити можна тільки підтверджене бронювання');
 
-    b.checkedInAt = new Date();
     b.table.status = 'occupied';
 
     if (b.client) {
@@ -538,20 +553,16 @@ export class BookingsService {
     if (r.status !== 'pending') throw new BadRequestException('Цей запит уже оброблено');
     if (!r.booking.table) throw new BadRequestException('Стіл не знайдено');
 
-    const timeInfo = await this.assertNoTimeConflict(
+    await this.assertNoTimeConflict(
       r.booking.table.id,
       r.requestedDate,
       r.requestedTime,
-      r.booking.durationMinutes,
+      this.durationFromWishes(r.booking),
       r.booking.id,
     );
 
     r.booking.bookingDate = r.requestedDate;
-    r.booking.bookingTime = timeInfo.bookingTime;
-    r.booking.departureTime = timeInfo.departureTime;
-    r.booking.cleanupMinutes = timeInfo.cleanupMinutes;
-    r.booking.availableFrom = timeInfo.availableFrom;
-    r.booking.arrivalGraceUntil = this.buildArrivalGraceUntil(r.requestedDate, timeInfo.bookingTime);
+    r.booking.bookingTime = this.buildTimeInfo(r.requestedTime, this.durationFromWishes(r.booking)).bookingTime;
 
     r.status = 'approved';
     r.resolvedAt = new Date();
