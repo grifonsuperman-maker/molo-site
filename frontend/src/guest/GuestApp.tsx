@@ -698,6 +698,7 @@ export default function GuestApp() {
         bookingDate: date,
         bookingTime: time,
         guestsCount: Number(form.guestsCount),
+        durationMinutes,
         wishes: wishesWithTime,
       }),
     );
