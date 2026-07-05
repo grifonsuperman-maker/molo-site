@@ -37,7 +37,26 @@ export class NotificationsService {
     );
   }
 
+  private timeLabel(time: string | null | undefined) {
+    if (!time) return '-';
+    const [hours = '00', minutes = '00'] = String(time).split(':');
+    return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
+  }
+
+  private durationLabel(minutes: number | null | undefined) {
+    const safeMinutes = Number(minutes || 120);
+    const hours = Math.floor(safeMinutes / 60);
+    const rest = safeMinutes % 60;
+
+    if (hours > 0 && rest > 0) return `${hours} год ${rest} хв`;
+    if (hours > 0) return `${hours} год`;
+    return `${safeMinutes} хв`;
+  }
+
   async notifyNewBooking(booking: Booking) {
+    const timeRange = `${this.timeLabel(booking.bookingTime)} — ${this.timeLabel(booking.departureTime)}`;
+    const longBookingLine = booking.durationMinutes > 180 ? '⚠️ <b>Довге бронювання</b>' : null;
+
     const text = [
       '🟠 <b>Нове бронювання</b>',
       '',
@@ -45,10 +64,13 @@ export class NotificationsService {
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
-      `🕒 Час: <b>${booking.bookingTime}</b>`,
+      `🕒 Час: <b>${timeRange}</b>`,
+      `⏳ Відпочинок: <b>${this.durationLabel(booking.durationMinutes)}</b>`,
+      `🧽 Наступний гість з: <b>${this.timeLabel(booking.availableFrom)}</b>`,
+      longBookingLine,
       `👥 Гостей: <b>${booking.guestsCount}</b>`,
       `📝 Побажання: ${booking.wishes || '-'}`,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 
     const replyMarkup = {
       inline_keyboard: [
@@ -70,7 +92,7 @@ export class NotificationsService {
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
-      `🕒 Час: <b>${booking.bookingTime}</b>`,
+      `🕒 Час: <b>${this.timeLabel(booking.bookingTime)} — ${this.timeLabel(booking.departureTime)}</b>`,
     ].join('\n');
 
     await this.sendToRoles(['owner', 'admin', 'waiter'], text);
@@ -83,7 +105,7 @@ export class NotificationsService {
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
-      `🕒 Час: <b>${booking.bookingTime}</b>`,
+      `🕒 Час: <b>${this.timeLabel(booking.bookingTime)} — ${this.timeLabel(booking.departureTime)}</b>`,
     ].join('\n');
 
     await this.sendToRoles(['owner', 'admin', 'waiter'], text);
@@ -98,8 +120,8 @@ export class NotificationsService {
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
       '',
-      `Було: <b>${booking.bookingDate} ${booking.bookingTime}</b>`,
-      `Нове: <b>${request.requestedDate} ${request.requestedTime}</b>`,
+      `Було: <b>${booking.bookingDate} ${this.timeLabel(booking.bookingTime)}</b>`,
+      `Нове: <b>${request.requestedDate} ${this.timeLabel(request.requestedTime)}</b>`,
     ].join('\n');
 
     const replyMarkup = {
@@ -122,7 +144,7 @@ export class NotificationsService {
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
-      `🕒 Час бронювання: <b>${booking.bookingTime}</b>`,
+      `🕒 Час бронювання: <b>${this.timeLabel(booking.bookingTime)}</b>`,
       '',
       'Минуло 15 хвилин після часу бронювання.',
     ].join('\n');
