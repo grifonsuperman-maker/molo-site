@@ -2,7 +2,9 @@ import { api } from './client';
 import type { Booking } from './types';
 
 export type CreateBookingPayload = {
-  tableId: string;
+  tableId?: string;
+  tableNumber?: string;
+  seats?: number;
   fullName: string;
   phone: string;
   bookingDate: string;
