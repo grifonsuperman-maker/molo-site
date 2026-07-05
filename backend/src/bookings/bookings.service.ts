@@ -329,20 +329,28 @@ export class BookingsService {
       }),
     );
 
-    await this.logs.create('Створено заявку на бронювання', null, {
-      bookingId: booking.id,
-      tableNumber: table.tableNumber,
-      clientName: client.fullName,
-      time: `${this.formatTimeLabel(booking.bookingTime)} — ${this.formatTimeLabel(booking.departureTime)}`,
-      durationMinutes: booking.durationMinutes,
-    });
+    try {
+      await this.logs.create('Створено заявку на бронювання', null, {
+        bookingId: booking.id,
+        tableNumber: table.tableNumber,
+        clientName: client.fullName,
+        time: `${this.formatTimeLabel(booking.bookingTime)} — ${this.formatTimeLabel(booking.departureTime)}`,
+        durationMinutes: booking.durationMinutes,
+      });
+    } catch (error) {
+      console.error('Booking log failed:', error);
+    }
 
-    const full = await this.bookings.findOne({
-      where: { id: booking.id },
-      relations: ['table', 'client'],
-    });
+    try {
+      const full = await this.bookings.findOne({
+        where: { id: booking.id },
+        relations: ['table', 'client'],
+      });
 
-    if (full) await this.notifications.notifyNewBooking(full);
+      if (full) await this.notifications.notifyNewBooking(full);
+    } catch (error) {
+      console.error('Booking notification failed:', error);
+    }
 
     return {
       message: 'Заявку на бронювання надіслано адміністратору',
