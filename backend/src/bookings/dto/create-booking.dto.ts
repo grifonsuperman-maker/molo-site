@@ -10,7 +10,7 @@ import {
 } from 'class-validator';
 
 export class CreateBookingDto {
-  // Якщо стіл вже є в базі, frontend передасть його uuid.
+  // Якщо стіл вже є в базі, frontend передасть uuid.
   // Якщо це поки тільки SVG-стіл, frontend передасть visual-15 + tableNumber.
   @IsOptional()
   @IsString()
@@ -47,6 +47,8 @@ export class CreateBookingDto {
   @Min(1)
   guestsCount: number;
 
+  // Тимчасово backend приймає durationMinutes, але зберігає час у wishes.
+  // Так бронювання не ламається, навіть якщо база ще без нових колонок.
   @IsOptional()
   @Type(() => Number)
   @IsInt()
