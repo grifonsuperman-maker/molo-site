@@ -675,13 +675,6 @@ export default function GuestApp() {
   async function submit() {
     if (!selectedTable) return;
 
-    if (String(selectedTable.id).startsWith('visual-')) {
-      alert(
-        'Цей стіл ще не привʼязаний до бази. Потрібно додати столи в адмінці/базі, потім бронювання запрацює повністю.',
-      );
-      return;
-    }
-
     const wishesWithTime = [
       `Час відпочинку: ${formatDuration(durationMinutes)} (${bookingPeriod})`,
       `Підготовка столу після гостей: ${CLEANUP_MINUTES} хв, наступний гість з ${availableAfterCleanup}`,
@@ -693,6 +686,8 @@ export default function GuestApp() {
     const result = await run(() =>
       bookingsApi.create({
         tableId: selectedTable.id,
+        tableNumber: String(selectedTable.tableNumber),
+        seats: selectedTable.seats,
         fullName: form.fullName,
         phone: form.phone,
         bookingDate: date,
