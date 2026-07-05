@@ -30,7 +30,12 @@ export class BookingsService {
   ) {}
 
   async restaurant() {
-    const r = await this.restaurants.findOne({ order: { createdAt: 'ASC' } });
+    const restaurants = await this.restaurants.find({
+      order: { createdAt: 'ASC' },
+      take: 1,
+    });
+
+    const r = restaurants[0];
     if (!r) throw new NotFoundException('Ресторан не знайдено');
     return r;
   }
