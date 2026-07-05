@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { CheckAvailabilityDto } from './dto/check-availability.dto';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
 import { Public } from '../common/decorators/public.decorator';
@@ -14,6 +15,12 @@ export class BookingsController {
   @Post()
   create(@Body() dto: CreateBookingDto) {
     return this.service.create(dto);
+  }
+
+  @Public()
+  @Get('availability')
+  availability(@Query() dto: CheckAvailabilityDto) {
+    return this.service.checkAvailability(dto);
   }
 
   @Roles('owner', 'admin', 'waiter')
