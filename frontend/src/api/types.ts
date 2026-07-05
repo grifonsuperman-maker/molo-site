@@ -1,10 +1,104 @@
-export type RestaurantStatus='open'|'booking_closed'|'closed';
-export type TableStatus='free'|'reserved'|'occupied'|'closed';
-export type BookingStatus='pending'|'approved'|'rejected'|'cancelled'|'completed';
-export type Restaurant={id:string;name:string;phone:string|null;menuUrl:string|null;status:RestaurantStatus;closeMessage:string;bookingClosedMessage:string;mapWidth?:number;mapHeight?:number};
-export type Zone={id:string;name:string;color:string|null;photoUrl:string|null;description:string|null;x:number;y:number;width:number;height:number;rotation:number;isClosed:boolean;isVisible:boolean};
-export type TableItem={id:string;tableNumber:string;seats:number;shape:string;photoUrl:string|null;status:TableStatus;x:number;y:number;width:number;height:number;rotation:number;isVisible:boolean;zone?:Zone|null};
-export type Client={id:string;fullName:string;phone:string;visitsCount:number;totalGuests:number;isRegular:boolean;isBlacklisted:boolean};
-export type Booking={id:string;table:TableItem|null;client:Client|null;bookingDate:string;bookingTime:string;guestsCount:number;wishes:string|null;status:BookingStatus;source:'mini_app'|'phone'|'admin_manual';createdAt:string};
-export type MapObject={id:string;objectType:string;name:string|null;x:number;y:number;width:number;height:number;rotation:number;color:string|null;isVisible:boolean;zone?:Zone|null};
-export type FullMapResponse={restaurant:Restaurant;zones:Zone[];tables:TableItem[];objects:MapObject[]};
+export type RestaurantStatus = 'open' | 'booking_closed' | 'closed';
+export type TableStatus = 'free' | 'reserved' | 'occupied' | 'closed';
+export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
+
+export type Restaurant = {
+  id: string;
+  name: string;
+  phone: string | null;
+  menuUrl: string | null;
+  status: RestaurantStatus;
+  closeMessage: string;
+  bookingClosedMessage: string;
+  mapWidth?: number;
+  mapHeight?: number;
+};
+
+export type Zone = {
+  id: string;
+  name: string;
+  color: string | null;
+  photoUrl: string | null;
+  description: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  isClosed: boolean;
+  isVisible: boolean;
+};
+
+export type TableItem = {
+  id: string;
+  tableNumber: string;
+  seats: number;
+  shape: string;
+  photoUrl: string | null;
+  status: TableStatus;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  isVisible: boolean;
+  zone?: Zone | null;
+};
+
+export type Client = {
+  id: string;
+  fullName: string;
+  phone: string;
+  visitsCount: number;
+  totalGuests: number;
+  isRegular: boolean;
+  isBlacklisted: boolean;
+};
+
+export type Booking = {
+  id: string;
+  table: TableItem | null;
+  client: Client | null;
+  bookingDate: string;
+  bookingTime: string;
+  durationMinutes: number;
+  departureTime: string | null;
+  cleanupMinutes: number;
+  availableFrom: string | null;
+  arrivalGraceUntil: string | null;
+  waitExtendedUntil: string | null;
+  waitExtendedCount: number;
+  checkedInAt: string | null;
+  noShowAlertSentAt: string | null;
+  guestsCount: number;
+  wishes: string | null;
+  status: BookingStatus;
+  source: 'mini_app' | 'phone' | 'admin_manual';
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
+  cancelledAt?: string | null;
+  completedAt?: string | null;
+  lateNotifiedAt?: string | null;
+  createdAt: string;
+};
+
+export type MapObject = {
+  id: string;
+  objectType: string;
+  name: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  color: string | null;
+  isVisible: boolean;
+  zone?: Zone | null;
+};
+
+export type FullMapResponse = {
+  restaurant: Restaurant;
+  zones: Zone[];
+  tables: TableItem[];
+  objects: MapObject[];
+};
