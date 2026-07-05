@@ -180,6 +180,50 @@ export class BookingsService {
     }
   }
 
+  private async resolveTableForBooking(dto: CreateBookingDto) {
+    let table: TableEntity | null = null;
+
+    const tableId = String(dto.tableId || '');
+
+    if (dto.tableId && !tableId.startsWith('visual-')) {
+      table = await this.tables.findOne({ where: { id: dto.tableId }, relations: ['zone'] });
+    }
+
+    if (!table && dto.tableNumber) {
+      table = await this.tables.findOne({
+        where: { tableNumber: String(dto.tableNumber) },
+        relations: ['zone'],
+      });
+    }
+
+    if (!table && dto.tableNumber) {
+      table = await this.tables.save(
+        this.tables.create({
+          tableNumber: String(dto.tableNumber),
+          seats: dto.seats || dto.guestsCount || 4,
+          shape: 'rectangle',
+          photoUrl: null,
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 80,
+          rotation: 0,
+          status: 'free',
+          isVisible: true,
+        }),
+      );
+
+      table = await this.tables.findOne({
+        where: { id: table.id },
+        relations: ['zone'],
+      });
+    }
+
+    if (!table) throw new NotFoundException('Стіл не знайдено');
+
+    return table;
+  }
+
   private async assertNoTimeConflict(
     tableId: string,
     bookingDate: string,
@@ -254,9 +298,7 @@ export class BookingsService {
   async create(dto: CreateBookingDto) {
     await this.validateRestaurant();
 
-    const table = await this.tables.findOne({ where: { id: dto.tableId }, relations: ['zone'] });
-    if (!table) throw new NotFoundException('Стіл не знайдено');
-
+    const table = await this.resolveTableForBooking(dto);
     await this.assertTableCanBeBooked(table);
 
     let client = await this.clients.findOne({ where: { phone: dto.phone } });
