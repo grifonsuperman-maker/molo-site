@@ -5,14 +5,27 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
   Max,
   Min,
 } from 'class-validator';
 
 export class CreateBookingDto {
-  @IsUUID()
-  tableId: string;
+  // Якщо стіл вже є в базі, frontend передасть його uuid.
+  // Якщо це поки тільки SVG-стіл, frontend передасть visual-15 + tableNumber.
+  @IsOptional()
+  @IsString()
+  tableId?: string;
+
+  @IsOptional()
+  @IsString()
+  tableNumber?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(30)
+  seats?: number;
 
   @IsString()
   @IsNotEmpty()
@@ -34,8 +47,6 @@ export class CreateBookingDto {
   @Min(1)
   guestsCount: number;
 
-  // Скільки гість планує відпочивати.
-  // За замовчуванням 2 години. Максимум 12 годин, щоб "свій час" теж працював.
   @IsOptional()
   @Type(() => Number)
   @IsInt()
