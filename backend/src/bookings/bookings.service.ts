@@ -468,12 +468,20 @@ export class BookingsService {
         booking,
         requestedDate: dto.requestedDate,
         requestedTime: dto.requestedTime,
-        reason: dto.reason || null,
       }),
     );
 
     await this.notifications.notifyRescheduleRequest(request);
     return { message: 'Запит на перенесення надіслано', requestId: request.id };
+  }
+
+  async getPendingReschedules() {
+    return this.reschedules.find({
+      where: { status: 'pending' },
+      relations: ['booking', 'booking.table', 'booking.client'],
+      order: { createdAt: 'DESC' },
+      take: 100,
+    });
   }
 
   async approveReschedule(requestId: string) {
