@@ -1,5 +1,5 @@
 export type RestaurantStatus = 'open' | 'booking_closed' | 'closed';
-export type TableStatus = 'free' | 'reserved' | 'occupied' | 'closed';
+export type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'cleaning' | 'closed';
 export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
 
 export type Restaurant = {
@@ -61,15 +61,15 @@ export type Booking = {
   client: Client | null;
   bookingDate: string;
   bookingTime: string;
-  durationMinutes: number;
-  departureTime: string | null;
-  cleanupMinutes: number;
-  availableFrom: string | null;
-  arrivalGraceUntil: string | null;
-  waitExtendedUntil: string | null;
-  waitExtendedCount: number;
-  checkedInAt: string | null;
-  noShowAlertSentAt: string | null;
+  durationMinutes?: number;
+  departureTime?: string | null;
+  cleanupMinutes?: number;
+  availableFrom?: string | null;
+  arrivalGraceUntil?: string | null;
+  waitExtendedUntil?: string | null;
+  waitExtendedCount?: number;
+  checkedInAt?: string | null;
+  noShowAlertSentAt?: string | null;
   guestsCount: number;
   wishes: string | null;
   status: BookingStatus;
