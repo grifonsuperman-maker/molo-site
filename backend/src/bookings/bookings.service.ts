@@ -252,6 +252,12 @@ export class BookingsService {
     return timeInfo;
   }
 
+  private async setTableStatus(table: TableEntity | null, status: TableEntity['status']) {
+    if (!table) return;
+    table.status = status;
+    await this.tables.save(table);
+  }
+
   async checkAvailability(dto: CheckAvailabilityDto) {
     const table = await this.tables.findOne({ where: { id: dto.tableId }, relations: ['zone'] });
     if (!table) throw new NotFoundException('Стіл не знайдено');
@@ -343,6 +349,8 @@ export class BookingsService {
         }),
       );
 
+      await this.setTableStatus(table, 'pending');
+
       try {
         await this.logs.create('Створено заявку на бронювання', null, {
           bookingId: booking.id,
@@ -387,213 +395,106 @@ export class BookingsService {
   }
 
   async getToday() {
-    const today = new Date().toISOString().slice(0, 10);
-
     return this.bookings.find({
-      where: { bookingDate: today },
       relations: ['table', 'client'],
-      order: { bookingTime: 'ASC' },
+      order: { createdAt: 'DESC' },
+      take: 300,
     });
-  }
-
-  async getBooking(id: string) {
-    const b = await this.bookings.findOne({
-      where: { id },
-      relations: ['table', 'client'],
-    });
-
-    if (!b) throw new NotFoundException('Бронювання не знайдено');
-    return b;
   }
 
   async approve(id: string) {
-    const b = await this.getBooking(id);
-
-    if (!b.table) throw new BadRequestException('Стіл не знайдено');
-    if (b.status !== 'pending') throw new BadRequestException('Це бронювання вже оброблено');
-
-    await this.assertNoTimeConflict(b.table.id, b.bookingDate, b.bookingTime, this.durationFromWishes(b), b.id);
-
-    b.status = 'approved';
-    b.approvedAt = new Date();
-    b.table.status = 'reserved';
-
-    await this.tables.save(b.table);
-    await this.bookings.save(b);
-    await this.logs.create('Бронювання підтверджено', null, { bookingId: b.id });
-    await this.notifications.notifyBookingApproved(b);
-
+    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+    booking.status = 'approved';
+    booking.approvedAt = new Date();
+    await this.bookings.save(booking);
+    await this.setTableStatus(booking.table, 'reserved');
+    await this.logs.create('Підтверджено бронювання', null, { bookingId: id });
+    await this.notifications.notifyBookingApproved(booking);
     return { message: 'Бронювання підтверджено' };
   }
 
   async reject(id: string) {
-    const b = await this.getBooking(id);
-
-    if (b.status !== 'pending') throw new BadRequestException('Це бронювання вже оброблено');
-
-    b.status = 'rejected';
-    b.rejectedAt = new Date();
-
-    await this.bookings.save(b);
-    await this.logs.create('Бронювання відхилено', null, { bookingId: b.id });
-
+    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+    booking.status = 'rejected';
+    booking.rejectedAt = new Date();
+    await this.bookings.save(booking);
+    await this.setTableStatus(booking.table, 'free');
+    await this.logs.create('Відхилено бронювання', null, { bookingId: id });
+    await this.notifications.notifyBookingCancelled(booking);
     return { message: 'Бронювання відхилено' };
   }
 
   async cancel(id: string) {
-    const b = await this.getBooking(id);
-
-    b.status = 'cancelled';
-    b.cancelledAt = new Date();
-
-    if (b.table?.status === 'reserved') {
-      b.table.status = 'free';
-      await this.tables.save(b.table);
-    }
-
-    if (b.client) {
-      b.client.cancellationsCount += 1;
-      await this.clients.save(b.client);
-    }
-
-    await this.bookings.save(b);
-    await this.logs.create('Бронювання скасовано', null, { bookingId: b.id });
-    await this.notifications.notifyBookingCancelled(b);
-
+    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+    booking.status = 'cancelled';
+    booking.cancelledAt = new Date();
+    await this.bookings.save(booking);
+    await this.setTableStatus(booking.table, 'free');
+    await this.logs.create('Скасовано бронювання', null, { bookingId: id });
+    await this.notifications.notifyBookingCancelled(booking);
     return { message: 'Бронювання скасовано' };
   }
 
   async checkIn(id: string) {
-    const b = await this.getBooking(id);
-
-    if (!b.table) throw new BadRequestException('Стіл не знайдено');
-    if (b.status !== 'approved') throw new BadRequestException('Посадити можна тільки підтверджене бронювання');
-
-    b.table.status = 'occupied';
-
-    if (b.client) {
-      b.client.visitsCount += 1;
-      b.client.totalGuests += b.guestsCount;
-      b.client.lastVisitAt = new Date();
-      await this.clients.save(b.client);
-    }
-
-    await this.tables.save(b.table);
-    await this.bookings.save(b);
-    await this.logs.create('Гості прийшли', null, { bookingId: b.id });
-
-    return { message: 'Гості прийшли, стіл зайнятий' };
+    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+    booking.status = 'approved';
+    await this.bookings.save(booking);
+    await this.setTableStatus(booking.table, 'occupied');
+    await this.logs.create('Гості прийшли', null, { bookingId: id });
+    return { message: 'Гості відмічені як присутні' };
   }
 
   async complete(id: string) {
-    const b = await this.getBooking(id);
-
-    if (!b.table) throw new BadRequestException('Стіл не знайдено');
-
-    b.status = 'completed';
-    b.completedAt = new Date();
-    b.table.status = 'free';
-
-    await this.tables.save(b.table);
-    await this.bookings.save(b);
-    await this.logs.create('Стіл звільнено', null, { bookingId: b.id });
-
-    return { message: 'Стіл вільний' };
+    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+    booking.status = 'completed';
+    booking.completedAt = new Date();
+    await this.bookings.save(booking);
+    await this.setTableStatus(booking.table, 'free');
+    await this.logs.create('Стіл звільнено', null, { bookingId: id });
+    return { message: 'Стіл звільнено' };
   }
 
   async requestReschedule(id: string, dto: RequestRescheduleDto) {
-    const b = await this.getBooking(id);
+    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+    if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
-    if (!['pending', 'approved'].includes(b.status)) {
-      throw new BadRequestException('Для цього бронювання не можна запросити перенесення');
-    }
-
-    const r = await this.reschedules.save(
+    const request = await this.reschedules.save(
       this.reschedules.create({
-        booking: b,
+        booking,
         requestedDate: dto.requestedDate,
         requestedTime: dto.requestedTime,
-        status: 'pending',
+        reason: dto.reason || null,
       }),
     );
 
-    if (b.client) {
-      b.client.reschedulesCount += 1;
-      await this.clients.save(b.client);
-    }
-
-    const full = await this.reschedules.findOne({
-      where: { id: r.id },
-      relations: ['booking', 'booking.table', 'booking.client'],
-    });
-
-    if (full) await this.notifications.notifyRescheduleRequest(full);
-
-    await this.logs.create('Гість запросив перенесення бронювання', null, {
-      bookingId: b.id,
-      requestId: r.id,
-    });
-
-    return {
-      message: 'Запит на перенесення надіслано адміністратору',
-      requestId: r.id,
-    };
-  }
-
-  async getPendingReschedules() {
-    return this.reschedules.find({
-      where: { status: 'pending' },
-      relations: ['booking', 'booking.table', 'booking.client'],
-      order: { createdAt: 'DESC' },
-    });
+    await this.notifications.notifyRescheduleRequest(request);
+    return { message: 'Запит на перенесення надіслано', requestId: request.id };
   }
 
   async approveReschedule(requestId: string) {
-    const r = await this.reschedules.findOne({
-      where: { id: requestId },
-      relations: ['booking', 'booking.table', 'booking.client'],
-    });
-
-    if (!r) throw new NotFoundException('Запит на перенесення не знайдено');
-    if (r.status !== 'pending') throw new BadRequestException('Цей запит уже оброблено');
-    if (!r.booking.table) throw new BadRequestException('Стіл не знайдено');
-
-    await this.assertNoTimeConflict(
-      r.booking.table.id,
-      r.requestedDate,
-      r.requestedTime,
-      this.durationFromWishes(r.booking),
-      r.booking.id,
-    );
-
-    r.booking.bookingDate = r.requestedDate;
-    r.booking.bookingTime = this.buildTimeInfo(r.requestedTime, this.durationFromWishes(r.booking)).bookingTime;
-
-    r.status = 'approved';
-    r.resolvedAt = new Date();
-
-    await this.bookings.save(r.booking);
-    await this.reschedules.save(r);
-    await this.logs.create('Перенесення бронювання підтверджено', null, { requestId: r.id });
-
-    return { message: 'Перенесення бронювання підтверджено' };
+    const request = await this.reschedules.findOne({ where: { id: requestId }, relations: ['booking'] });
+    if (!request) throw new NotFoundException('Запит не знайдено');
+    request.status = 'approved';
+    request.resolvedAt = new Date();
+    request.booking.bookingDate = request.requestedDate;
+    request.booking.bookingTime = request.requestedTime;
+    await this.bookings.save(request.booking);
+    await this.reschedules.save(request);
+    return { message: 'Перенесення підтверджено' };
   }
 
   async rejectReschedule(requestId: string, dto: RejectRescheduleDto) {
-    const r = await this.reschedules.findOne({
-      where: { id: requestId },
-      relations: ['booking'],
-    });
-
-    if (!r) throw new NotFoundException('Запит на перенесення не знайдено');
-
-    r.status = 'rejected';
-    r.adminComment = dto.adminComment || null;
-    r.resolvedAt = new Date();
-
-    await this.reschedules.save(r);
-    await this.logs.create('Перенесення бронювання відхилено', null, { requestId: r.id });
-
-    return { message: 'Перенесення бронювання відхилено' };
+    const request = await this.reschedules.findOne({ where: { id: requestId } });
+    if (!request) throw new NotFoundException('Запит не знайдено');
+    request.status = 'rejected';
+    request.adminComment = dto.adminComment || null;
+    request.resolvedAt = new Date();
+    await this.reschedules.save(request);
+    return { message: 'Перенесення відхилено' };
   }
 }
