@@ -43,6 +43,32 @@ export type BookingAvailability = {
   };
 };
 
+
+export type TableRuntimeStatus = {
+  tableId: string;
+  tableNumber: string;
+  status: 'free' | 'pending' | 'reserved' | 'occupied' | 'cleaning' | 'closed';
+  reason: string | null;
+  conflict: BookingAvailability['conflict'];
+};
+
+export type TableStatusesResponse = {
+  bookingDate: string;
+  bookingTime: string;
+  durationMinutes: number;
+  cleanupMinutes: number;
+  requestedFrom: string;
+  requestedTo: string;
+  requestedAvailableFrom: string;
+  requestedFromLabel: string;
+  requestedToLabel: string;
+  requestedAvailableFromLabel: string;
+  today: string;
+  statuses: Record<string, TableRuntimeStatus>;
+};
+
+type ActionResponse = { message: string };
+
 export const bookingsApi = {
   create: (b: CreateBookingPayload) =>
     api.post<{
@@ -66,10 +92,20 @@ export const bookingsApi = {
       `/bookings/availability?tableId=${encodeURIComponent(params.tableId)}&bookingDate=${encodeURIComponent(params.bookingDate)}&bookingTime=${encodeURIComponent(params.bookingTime)}&durationMinutes=${encodeURIComponent(String(params.durationMinutes || 120))}`,
     ),
 
+  tableStatuses: (params: {
+    bookingDate: string;
+    bookingTime: string;
+    durationMinutes?: number;
+  }) =>
+    api.get<TableStatusesResponse>(
+      `/bookings/table-statuses?bookingDate=${encodeURIComponent(params.bookingDate)}&bookingTime=${encodeURIComponent(params.bookingTime)}&durationMinutes=${encodeURIComponent(String(params.durationMinutes || 120))}`,
+    ),
+
   getToday: () => api.get<Booking[]>('/bookings/today'),
-  approve: (id: string) => api.patch<{ message: string }>(`/bookings/${id}/approve`),
-  reject: (id: string) => api.patch<{ message: string }>(`/bookings/${id}/reject`),
-  cancel: (id: string) => api.patch<{ message: string }>(`/bookings/${id}/cancel`),
-  checkIn: (id: string) => api.patch<{ message: string }>(`/bookings/${id}/check-in`),
-  complete: (id: string) => api.patch<{ message: string }>(`/bookings/${id}/complete`),
+  approve: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/approve`),
+  reject: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/reject`),
+  cancel: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/cancel`),
+  noShow: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/no-show`),
+  checkIn: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/check-in`),
+  complete: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/complete`),
 };
