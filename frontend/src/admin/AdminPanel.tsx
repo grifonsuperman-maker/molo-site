@@ -4,13 +4,15 @@ import type { ReactNode } from 'react';
 import { bookingsApi } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
+import { tablesApi } from '../api/tables';
 import type { Booking, FullMapResponse, Restaurant, TableItem, TableStatus } from '../api/types';
 
 type Tab = 'dashboard' | 'bookings' | 'tables' | 'clients' | 'settings';
-type BookingAction = 'approve' | 'reject' | 'cancel';
+type BookingAction = 'approve' | 'reject' | 'cancel' | 'checkIn' | 'complete' | 'noShow' | 'prepareTable';
+type TableAction = 'free' | 'occupied' | 'cleaning' | 'close' | 'open';
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: 'Очікує',
+  pending: 'Очікує підтвердження',
   approved: 'Підтверджено',
   rejected: 'Відхилено',
   cancelled: 'Скасовано',
@@ -41,14 +43,17 @@ const BOOKING_STATUS_STYLES: Record<string, string> = {
   rejected: 'border-red-300/35 bg-red-400/10 text-red-100',
   cancelled: 'border-neutral-400/25 bg-neutral-500/10 text-neutral-200',
   completed: 'border-emerald-300/35 bg-emerald-400/10 text-emerald-100',
+  no_show: 'border-red-300/45 bg-red-500/15 text-red-100',
 };
 
 const BOOKING_FILTERS = [
   { key: 'all', label: 'Всі' },
   { key: 'pending', label: 'Очікують' },
   { key: 'approved', label: 'Підтверджені' },
-  { key: 'rejected', label: 'Відхилені' },
   { key: 'completed', label: 'Завершені' },
+  { key: 'cancelled', label: 'Скасовані' },
+  { key: 'rejected', label: 'Відхилені' },
+  { key: 'no_show', label: 'No-show' },
 ];
 
 function unwrapData<T>(value: T | { data?: T }): T {
@@ -67,10 +72,8 @@ function formatTime(value: string | null | undefined): string {
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return '-';
-
   const [year, month, day] = String(value).split('-');
   if (!year || !month || !day) return String(value);
-
   return `${day}.${month}.${year}`;
 }
 
@@ -96,6 +99,30 @@ function uniqueLines(lines: string[]): string[] {
   });
 }
 
+function hourWord(hours: number): string {
+  if (hours === 1) return 'година';
+  if (hours >= 2 && hours <= 4) return 'години';
+  return 'годин';
+}
+
+function durationLabel(minutes: number): string {
+  if (!minutes || !Number.isFinite(minutes)) return '-';
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours > 0 && rest > 0) return `${hours} ${hourWord(hours)} ${rest} хв`;
+  if (hours > 0) return `${hours} ${hourWord(hours)}`;
+  return `${minutes} хв`;
+}
+
+function isNoShow(booking: Booking): boolean {
+  return String(booking.wishes || '').includes('[NO_SHOW]');
+}
+
+function bookingViewStatus(booking: Booking): string {
+  if (isNoShow(booking)) return 'no_show';
+  return booking.status;
+}
+
 function parseBookingDetails(booking: Booking) {
   const lines = uniqueLines(splitLines(booking.wishes));
   const durationLines = lines.filter((line) => /^Час відпочинку:/i.test(line));
@@ -105,23 +132,38 @@ function parseBookingDetails(booking: Booking) {
   const cleanupLine = cleanupLines[0] || '';
 
   const rangeMatch = durationLine.match(/\((\d{2}:\d{2})\s*[—-]\s*(\d{2}:\d{2})\)/);
-  const durationText = durationLine.replace(/^Час відпочинку:\s*/i, '').replace(/\s*\(.+\)\s*$/, '').trim();
+  const durationMinutesMatch = durationLine.match(/Час відпочинку:\s*(\d+)\s*хв/i);
+  const availableFromMatch = cleanupLine.match(/наступний гість з\s+(\d{2}:\d{2})/i);
+  const durationMinutes = booking.durationMinutes || (durationMinutesMatch ? Number(durationMinutesMatch[1]) : 0);
+
+  const durationText = durationLine
+    .replace(/^Час відпочинку:\s*/i, '')
+    .replace(/\s*\(.+\)\s*$/, '')
+    .trim();
 
   const cleanupText = cleanupLine.replace(/^Підготовка столу після гостей:\s*/i, '').trim();
 
   const guestWishes = lines.filter(
-    (line) => !/^Час відпочинку:/i.test(line) && !/^Підготовка столу/i.test(line),
+    (line) =>
+      !/^Час відпочинку:/i.test(line) &&
+      !/^Підготовка столу/i.test(line) &&
+      !line.includes('[NO_SHOW]'),
   );
 
   return {
     period: rangeMatch ? `${rangeMatch[1]} — ${rangeMatch[2]}` : `${formatTime(booking.bookingTime)} — -`,
-    durationText: durationText || (booking.durationMinutes ? `${booking.durationMinutes} хв` : '-'),
+    durationText: durationText || durationLabel(durationMinutes),
     cleanupText: cleanupText || '-',
+    availableFrom: availableFromMatch?.[1] || '-',
+    durationMinutes,
     guestWishes,
+    isLong: Number(durationMinutes || 0) > 180,
   };
 }
 
-function bookingStatusLabel(status: string): string {
+function bookingStatusLabel(booking: Booking): string {
+  const status = bookingViewStatus(booking);
+  if (status === 'no_show') return 'No-show';
   return STATUS_LABELS[status] || status;
 }
 
@@ -129,8 +171,8 @@ function tableStatusLabel(status: TableStatus): string {
   return TABLE_STATUS_LABELS[status] || status;
 }
 
-function bookingStatusClass(status: string): string {
-  return BOOKING_STATUS_STYLES[status] || 'border-white/15 bg-white/5 text-white/80';
+function bookingStatusClass(booking: Booking): string {
+  return BOOKING_STATUS_STYLES[bookingViewStatus(booking)] || 'border-white/15 bg-white/5 text-white/80';
 }
 
 function statusOrder(status: TableStatus): number {
@@ -142,6 +184,18 @@ function statusOrder(status: TableStatus): number {
     closed: 5,
     free: 6,
   }[status];
+}
+
+function actionText(action: BookingAction): string {
+  return {
+    approve: 'Бронювання підтверджено',
+    reject: 'Бронювання відхилено',
+    cancel: 'Бронювання скасовано',
+    checkIn: 'Гість прийшов, стіл зайнятий',
+    complete: 'Бронювання завершено, стіл вільний',
+    noShow: 'No-show: бронь знято',
+    prepareTable: 'Стіл відправлено на підготовку',
+  }[action];
 }
 
 export default function AdminPanel() {
@@ -157,6 +211,7 @@ export default function AdminPanel() {
   const [flashId, setFlashId] = useState<string | null>(null);
   const [bookingFilter, setBookingFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
 
   async function load() {
     setLoading(true);
@@ -192,24 +247,19 @@ export default function AdminPanel() {
   }, []);
 
   const activeBookings = useMemo(
-    () => bookings.filter((booking) => booking.status !== 'cancelled' && booking.status !== 'rejected'),
+    () => bookings.filter((booking) => booking.status !== 'cancelled' && booking.status !== 'rejected' && !isNoShow(booking)),
     [bookings],
   );
 
   const stats = useMemo(() => {
     const pending = bookings.filter((booking) => booking.status === 'pending').length;
     const approved = bookings.filter((booking) => booking.status === 'approved').length;
-    const rejected = bookings.filter((booking) => booking.status === 'rejected').length;
+    const completed = bookings.filter((booking) => booking.status === 'completed').length;
+    const noShow = bookings.filter(isNoShow).length;
+    const longBookings = bookings.filter((booking) => parseBookingDetails(booking).isLong).length;
     const guests = activeBookings.reduce((sum, booking) => sum + Number(booking.guestsCount || 0), 0);
 
-    return {
-      bookings: bookings.length,
-      active: activeBookings.length,
-      pending,
-      approved,
-      rejected,
-      guests,
-    };
+    return { bookings: bookings.length, active: activeBookings.length, pending, approved, completed, noShow, longBookings, guests };
   }, [bookings, activeBookings]);
 
   const tables = useMemo<TableItem[]>(() => {
@@ -221,33 +271,15 @@ export default function AdminPanel() {
   }, [fullMap]);
 
   const tableStats = useMemo(() => {
-    const initial: Record<TableStatus, number> = {
-      free: 0,
-      pending: 0,
-      reserved: 0,
-      occupied: 0,
-      cleaning: 0,
-      closed: 0,
-    };
-
+    const initial: Record<TableStatus, number> = { free: 0, pending: 0, reserved: 0, occupied: 0, cleaning: 0, closed: 0 };
     tables.forEach((table) => {
       initial[table.status] = (initial[table.status] || 0) + 1;
     });
-
     return initial;
   }, [tables]);
 
   const clients = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        name: string;
-        phone: string;
-        bookings: number;
-        guests: number;
-        lastDate: string;
-      }
-    >();
+    const map = new Map<string, { name: string; phone: string; bookings: number; guests: number; lastDate: string }>();
 
     bookings.forEach((booking) => {
       const phone = booking.client?.phone || '-';
@@ -261,11 +293,7 @@ export default function AdminPanel() {
 
       current.bookings += 1;
       current.guests += Number(booking.guestsCount || 0);
-
-      if (booking.bookingDate > current.lastDate) {
-        current.lastDate = booking.bookingDate;
-      }
-
+      if (booking.bookingDate > current.lastDate) current.lastDate = booking.bookingDate;
       map.set(phone, current);
     });
 
@@ -276,12 +304,20 @@ export default function AdminPanel() {
     const searchValue = search.trim().toLowerCase();
 
     return bookings.filter((booking) => {
-      if (bookingFilter !== 'all' && booking.status !== bookingFilter) return false;
+      if (bookingFilter !== 'all') {
+        if (bookingFilter === 'no_show') {
+          if (!isNoShow(booking)) return false;
+        } else if (booking.status !== bookingFilter) {
+          return false;
+        }
+      }
 
+      if (dateFilter && booking.bookingDate !== dateFilter) return false;
       if (!searchValue) return true;
 
       const haystack = [
         booking.table?.tableNumber,
+        booking.table?.zone?.name,
         booking.client?.fullName,
         booking.client?.phone,
         booking.bookingDate,
@@ -295,7 +331,7 @@ export default function AdminPanel() {
 
       return haystack.includes(searchValue);
     });
-  }, [bookings, bookingFilter, search]);
+  }, [bookings, bookingFilter, search, dateFilter]);
 
   async function runRestaurantAction(action: 'open' | 'closeBooking' | 'close') {
     const key = `restaurant:${action}`;
@@ -343,36 +379,56 @@ export default function AdminPanel() {
     }
   }
 
-  async function runBookingAction(id: string, action: BookingAction) {
-    const key = `${id}:${action}`;
+  async function runBookingAction(booking: Booking, action: BookingAction) {
+    const key = `${booking.id}:${action}`;
     setBusyAction(key);
     setNotice(null);
     setError(null);
 
     try {
-      if (action === 'approve') {
-        await bookingsApi.approve(id);
-        setNotice('Бронювання підтверджено');
+      if (action === 'approve') await bookingsApi.approve(booking.id);
+      if (action === 'reject') await bookingsApi.reject(booking.id);
+      if (action === 'cancel') await bookingsApi.cancel(booking.id);
+      if (action === 'checkIn') await bookingsApi.checkIn(booking.id);
+      if (action === 'complete') await bookingsApi.complete(booking.id);
+      if (action === 'noShow') await bookingsApi.noShow(booking.id);
+
+      if (action === 'prepareTable') {
+        if (!booking.table?.id) throw new Error('Стіл не привʼязаний до бронювання');
+        await tablesApi.cleaning(booking.table.id);
       }
 
-      if (action === 'reject') {
-        await bookingsApi.reject(id);
-        setNotice('Бронювання відхилено');
-      }
-
-      if (action === 'cancel') {
-        await bookingsApi.cancel(id);
-        setNotice('Бронювання скасовано');
-      }
-
-      setFlashId(id);
+      setNotice(actionText(action));
+      setFlashId(booking.id);
       await load();
-
-      window.setTimeout(() => {
-        setFlashId((current) => (current === id ? null : current));
-      }, 1600);
+      window.setTimeout(() => setFlashId((current) => (current === booking.id ? null : current)), 1600);
     } catch (err: any) {
       setError(err?.message || 'Помилка бронювання');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function runTableAction(table: TableItem, action: TableAction) {
+    const key = `table:${table.id}:${action}`;
+    setBusyAction(key);
+    setNotice(null);
+    setError(null);
+
+    try {
+      if (action === 'free') await tablesApi.free(table.id);
+      if (action === 'occupied') await tablesApi.occupied(table.id);
+      if (action === 'cleaning') await tablesApi.cleaning(table.id);
+      if (action === 'close') await tablesApi.close(table.id);
+      if (action === 'open') await tablesApi.open(table.id);
+
+      const nextStatus: TableStatus =
+        action === 'open' ? 'free' : action === 'close' ? 'closed' : action;
+
+      setNotice(`Стіл №${table.tableNumber}: ${tableStatusLabel(nextStatus)}`);
+      await load();
+    } catch (err: any) {
+      setError(err?.message || 'Не вдалося змінити статус столу');
     } finally {
       setBusyAction(null);
     }
@@ -384,31 +440,14 @@ export default function AdminPanel() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-amber-100/55">MOLO Restaurant</p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight">Панель керування</h1>
-            <p className="mt-2 text-sm text-white/55">
-              Бронювання, статус ресторану, столи, клієнти та швидкі дії.
-            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight">Панель адміністратора</h1>
+            <p className="mt-2 text-sm text-white/55">Бронювання, гості, статуси столів та швидкі дії зміни.</p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <RestaurantButton
-              label="Відкрити"
-              tone="green"
-              busy={busyAction === 'restaurant:open'}
-              onClick={() => runRestaurantAction('open')}
-            />
-            <RestaurantButton
-              label="Закрити бронювання"
-              tone="yellow"
-              busy={busyAction === 'restaurant:closeBooking'}
-              onClick={() => runRestaurantAction('closeBooking')}
-            />
-            <RestaurantButton
-              label="Закрити ресторан"
-              tone="red"
-              busy={busyAction === 'restaurant:close'}
-              onClick={() => runRestaurantAction('close')}
-            />
+            <RestaurantButton label="Відкрити" tone="green" busy={busyAction === 'restaurant:open'} onClick={() => runRestaurantAction('open')} />
+            <RestaurantButton label="Закрити бронь" tone="yellow" busy={busyAction === 'restaurant:closeBooking'} onClick={() => runRestaurantAction('closeBooking')} />
+            <RestaurantButton label="Закрити ресторан" tone="red" busy={busyAction === 'restaurant:close'} onClick={() => runRestaurantAction('close')} />
           </div>
         </div>
 
@@ -419,24 +458,13 @@ export default function AdminPanel() {
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/70">
             Заявок: <b className="text-white">{bookings.length}</b>
           </span>
-          <button
-            type="button"
-            onClick={load}
-            disabled={loading}
-            className="rounded-full border border-amber-200/40 bg-amber-300/10 px-3 py-1 font-semibold text-amber-100 transition active:scale-95 disabled:opacity-50"
-          >
+          <button type="button" onClick={load} disabled={loading} className="rounded-full border border-amber-200/40 bg-amber-300/10 px-3 py-1 font-semibold text-amber-100 transition active:scale-95 disabled:opacity-50">
             {loading ? 'Оновлюємо...' : 'Оновити'}
           </button>
         </div>
 
         {(notice || error) && (
-          <div
-            className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${
-              error
-                ? 'border-red-300/30 bg-red-500/10 text-red-100'
-                : 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100'
-            }`}
-          >
+          <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${error ? 'border-red-300/30 bg-red-500/10 text-red-100' : 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100'}`}>
             {error || notice}
           </div>
         )}
@@ -444,16 +472,7 @@ export default function AdminPanel() {
 
       <nav className="mb-5 grid grid-cols-2 gap-2 md:grid-cols-5">
         {(['dashboard', 'bookings', 'tables', 'clients', 'settings'] as Tab[]).map((item) => (
-          <button
-            key={item}
-            type="button"
-            onClick={() => setTab(item)}
-            className={`rounded-2xl px-4 py-4 text-sm font-semibold transition active:scale-[0.97] ${
-              tab === item
-                ? 'bg-amber-300 text-neutral-950 shadow-[0_0_26px_rgba(251,191,36,.18)]'
-                : 'bg-neutral-900 text-white/80'
-            }`}
-          >
+          <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-2xl px-4 py-4 text-sm font-semibold transition active:scale-[0.97] ${tab === item ? 'bg-amber-300 text-neutral-950 shadow-[0_0_26px_rgba(251,191,36,.18)]' : 'bg-neutral-900 text-white/80'}`}>
             {label(item)}
           </button>
         ))}
@@ -461,13 +480,15 @@ export default function AdminPanel() {
 
       {tab === 'dashboard' && (
         <section className="space-y-5">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <Stat label="Усього заявок" value={stats.bookings} />
-            <Stat label="Активних броней" value={stats.active} />
+            <Stat label="Активних" value={stats.active} />
             <Stat label="Гостей" value={stats.guests} />
             <Stat label="Очікують" value={stats.pending} tone="blue" />
             <Stat label="Підтверджені" value={stats.approved} tone="orange" />
-            <Stat label="Відхилені" value={stats.rejected} tone="red" />
+            <Stat label="Завершені" value={stats.completed} tone="green" />
+            <Stat label="No-show" value={stats.noShow} tone="red" />
+            <Stat label="Довгі броні" value={stats.longBookings} tone="purple" />
           </div>
 
           <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
@@ -476,21 +497,13 @@ export default function AdminPanel() {
                 <h2 className="text-xl font-bold">Останні заявки</h2>
                 <p className="mt-1 text-sm text-white/45">Швидкий перегляд останніх бронювань.</p>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setTab('bookings')}
-                className="rounded-2xl border border-amber-200/40 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-100 transition active:scale-95"
-              >
+              <button type="button" onClick={() => setTab('bookings')} className="rounded-2xl border border-amber-200/40 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-100 transition active:scale-95">
                 Всі броні
               </button>
             </div>
 
             <div className="grid gap-3">
-              {bookings.slice(0, 5).map((booking) => (
-                <SmallBookingRow key={booking.id} booking={booking} />
-              ))}
-
+              {bookings.slice(0, 5).map((booking) => <SmallBookingRow key={booking.id} booking={booking} />)}
               {!bookings.length && <EmptyState text="Поки немає бронювань." />}
             </div>
           </div>
@@ -518,34 +531,26 @@ export default function AdminPanel() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-2xl font-black">Бронювання</h2>
-                <p className="mt-1 text-sm text-white/45">
-                  Підтвердження, відхилення, дзвінок гостю, час та побажання.
-                </p>
+                <p className="mt-1 text-sm text-white/45">Підтвердження, відхилення, дзвінок, no-show, прихід гостя та стіл.</p>
               </div>
 
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Пошук: стіл, імʼя, телефон..."
-                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none lg:max-w-[320px]"
-              />
+              <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[520px]">
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Пошук: стіл, імʼя, телефон..." className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none" />
+                <input type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none" />
+              </div>
             </div>
 
             <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
               {BOOKING_FILTERS.map((filter) => (
-                <button
-                  key={filter.key}
-                  type="button"
-                  onClick={() => setBookingFilter(filter.key)}
-                  className={`flex-none rounded-2xl border px-4 py-2 text-sm font-semibold transition active:scale-95 ${
-                    bookingFilter === filter.key
-                      ? 'border-amber-200 bg-amber-300/20 text-amber-100'
-                      : 'border-white/10 bg-white/[0.03] text-white/65'
-                  }`}
-                >
+                <button key={filter.key} type="button" onClick={() => setBookingFilter(filter.key)} className={`flex-none rounded-2xl border px-4 py-2 text-sm font-semibold transition active:scale-95 ${bookingFilter === filter.key ? 'border-amber-200 bg-amber-300/20 text-amber-100' : 'border-white/10 bg-white/[0.03] text-white/65'}`}>
                   {filter.label}
                 </button>
               ))}
+              {dateFilter && (
+                <button type="button" onClick={() => setDateFilter('')} className="flex-none rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-white/65 transition active:scale-95">
+                  Скинути дату
+                </button>
+              )}
             </div>
           </div>
 
@@ -556,12 +561,9 @@ export default function AdminPanel() {
                 booking={booking}
                 flash={flashId === booking.id}
                 busyAction={busyAction}
-                onApprove={() => runBookingAction(booking.id, 'approve')}
-                onReject={() => runBookingAction(booking.id, 'reject')}
-                onCancel={() => runBookingAction(booking.id, 'cancel')}
+                onAction={(action) => runBookingAction(booking, action)}
               />
             ))}
-
             {!filteredBookings.length && <EmptyState text="За цим фільтром бронювань немає." />}
           </div>
         </section>
@@ -571,32 +573,13 @@ export default function AdminPanel() {
         <section className="space-y-4">
           <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
             <h2 className="text-2xl font-black">Столи і статуси</h2>
-            <p className="mt-2 text-sm text-white/45">
-              Це контрольний список столів з бази. Повне керування зонами та позиціями буде в конструкторі.
-            </p>
+            <p className="mt-2 text-sm text-white/45">Тут адмін може вручну змінити стан столу на зміні.</p>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {tables.map((table) => (
-              <div key={table.id} className="rounded-[24px] border border-white/10 bg-neutral-950 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-2xl font-black">Стіл №{table.tableNumber}</p>
-                    <p className="mt-1 text-sm text-white/45">до {table.seats} гостей</p>
-                  </div>
-
-                  <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/70">
-                    <span className={`h-2.5 w-2.5 rounded-full ${TABLE_STATUS_DOT[table.status]}`} />
-                    {tableStatusLabel(table.status)}
-                  </span>
-                </div>
-
-                <p className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-3 text-sm text-white/55">
-                  Зона: {table.zone?.name || 'без зони'}
-                </p>
-              </div>
+              <TableCard key={table.id} table={table} busyAction={busyAction} onAction={(action) => runTableAction(table, action)} />
             ))}
-
             {!tables.length && <EmptyState text="Столи ще не завантажились або їх немає в базі." />}
           </div>
         </section>
@@ -606,9 +589,7 @@ export default function AdminPanel() {
         <section className="space-y-4">
           <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
             <h2 className="text-2xl font-black">Клієнти</h2>
-            <p className="mt-2 text-sm text-white/45">
-              Поки список формується з бронювань. Окрему клієнтську базу зробимо пізніше.
-            </p>
+            <p className="mt-2 text-sm text-white/45">Поки список формується з бронювань. Повну базу гостей зробимо в пульті директора.</p>
           </div>
 
           <div className="grid gap-3">
@@ -617,11 +598,8 @@ export default function AdminPanel() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xl font-bold">{client.name}</p>
-                    <a className="mt-1 block text-sm text-amber-100" href={`tel:${normalizePhone(client.phone)}`}>
-                      {client.phone}
-                    </a>
+                    <a className="mt-1 block text-sm text-amber-100" href={`tel:${normalizePhone(client.phone)}`}>{client.phone}</a>
                   </div>
-
                   <div className="grid grid-cols-3 gap-2 text-center sm:min-w-[280px]">
                     <MiniStat label="Броні" value={client.bookings} />
                     <MiniStat label="Гості" value={client.guests} />
@@ -630,7 +608,6 @@ export default function AdminPanel() {
                 </div>
               </div>
             ))}
-
             {!clients.length && <EmptyState text="Клієнтів поки немає." />}
           </div>
         </section>
@@ -640,27 +617,16 @@ export default function AdminPanel() {
         <section className="space-y-4">
           <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
             <h2 className="text-2xl font-black">Налаштування ресторану</h2>
-            <p className="mt-2 text-sm text-white/45">
-              Тут поки основні перемикачі статусу. Повні налаштування додамо після пультів.
-            </p>
+            <p className="mt-2 text-sm text-white/45">Тут поки основні перемикачі статусу. Повні правила буде змінювати директор.</p>
           </div>
 
           <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
             <label>
               <span className="text-sm uppercase tracking-[0.18em] text-white/45">Повідомлення при закритті</span>
-              <textarea
-                value={closeMessage}
-                onChange={(event) => setCloseMessage(event.target.value)}
-                className="mt-3 min-h-32 w-full rounded-2xl border border-white/10 bg-black/30 p-4 outline-none"
-              />
+              <textarea value={closeMessage} onChange={(event) => setCloseMessage(event.target.value)} className="mt-3 min-h-32 w-full rounded-2xl border border-white/10 bg-black/30 p-4 outline-none" />
             </label>
 
-            <button
-              type="button"
-              onClick={saveSettings}
-              disabled={busyAction === 'settings:save'}
-              className="mt-4 rounded-2xl bg-amber-300 px-5 py-4 font-bold text-neutral-950 transition active:scale-95 disabled:opacity-60"
-            >
+            <button type="button" onClick={saveSettings} disabled={busyAction === 'settings:save'} className="mt-4 rounded-2xl bg-amber-300 px-5 py-4 font-bold text-neutral-950 transition active:scale-95 disabled:opacity-60">
               {busyAction === 'settings:save' ? 'Зберігаємо...' : '💾 Зберегти'}
             </button>
           </div>
@@ -674,109 +640,124 @@ function BookingCard({
   booking,
   flash,
   busyAction,
-  onApprove,
-  onReject,
-  onCancel,
+  onAction,
 }: {
   booking: Booking;
   flash: boolean;
   busyAction: string | null;
-  onApprove: () => void;
-  onReject: () => void;
-  onCancel: () => void;
+  onAction: (action: BookingAction) => void;
 }) {
   const details = parseBookingDetails(booking);
   const phone = booking.client?.phone || '-';
+  const tableStatus = booking.table?.status;
+  const busyPrefix = `${booking.id}:`;
+  const isBusy = Boolean(busyAction?.startsWith(busyPrefix));
+  const viewStatus = bookingViewStatus(booking);
   const canApprove = booking.status === 'pending' || booking.status === 'rejected';
   const canReject = booking.status === 'pending' || booking.status === 'approved';
+  const canWork = booking.status === 'approved' && viewStatus !== 'no_show';
+  const canNoShow = (booking.status === 'pending' || booking.status === 'approved') && viewStatus !== 'no_show';
+  const canCancel = booking.status !== 'cancelled' && booking.status !== 'completed' && booking.status !== 'rejected';
 
   return (
-    <article
-      className={`rounded-[28px] border p-4 shadow-2xl transition ${
-        flash
-          ? 'border-emerald-300/45 bg-emerald-400/10'
-          : 'border-white/10 bg-neutral-950'
-      }`}
-    >
+    <article className={`rounded-[28px] border p-4 shadow-2xl transition ${flash ? 'border-emerald-300/45 bg-emerald-400/10' : 'border-white/10 bg-neutral-950'}`}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-2xl font-black">Стіл №{booking.table?.tableNumber || '-'}</h3>
-            <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${bookingStatusClass(booking.status)}`}>
-              {bookingStatusLabel(booking.status)}
-            </span>
+            <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${bookingStatusClass(booking)}`}>{bookingStatusLabel(booking)}</span>
+            {tableStatus && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/70">
+                <span className={`h-2.5 w-2.5 rounded-full ${TABLE_STATUS_DOT[tableStatus]}`} />
+                {tableStatusLabel(tableStatus)}
+              </span>
+            )}
+            {details.isLong && <span className="rounded-full border border-purple-300/30 bg-purple-400/10 px-3 py-1 text-xs font-semibold text-purple-100">Довга бронь</span>}
           </div>
 
-          <p className="mt-2 text-sm text-white/50">
-            {formatDate(booking.bookingDate)} · {details.period} · {booking.guestsCount} гостей
-          </p>
+          <p className="mt-2 text-sm text-white/50">{formatDate(booking.bookingDate)} · {details.period} · {booking.guestsCount} гостей</p>
+          <p className="mt-1 text-xs text-white/35">Зона: {booking.table?.zone?.name || 'без зони'}</p>
         </div>
 
-        <div className="flex gap-2">
-          <ActionButton
-            label={busyAction === `${booking.id}:approve` ? '...' : '✅'}
-            title="Підтвердити"
-            tone="green"
-            disabled={!canApprove || Boolean(busyAction)}
-            onClick={onApprove}
-          />
-          <ActionButton
-            label={busyAction === `${booking.id}:reject` ? '...' : '❌'}
-            title="Відхилити"
-            tone="red"
-            disabled={!canReject || Boolean(busyAction)}
-            onClick={onReject}
-          />
+        <div className="grid grid-cols-2 gap-2 sm:flex">
+          <ActionButton label="✅ Прийняти" busyLabel="Приймаємо..." busy={busyAction === `${booking.id}:approve`} tone="green" disabled={!canApprove || Boolean(busyAction)} onClick={() => onAction('approve')} />
+          <ActionButton label="❌ Відхилити" busyLabel="Відхиляємо..." busy={busyAction === `${booking.id}:reject`} tone="red" disabled={!canReject || Boolean(busyAction)} onClick={() => onAction('reject')} />
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <InfoBox label="Гість" value={booking.client?.fullName || '-'} />
-        <InfoBox
-          label="Телефон"
-          value={
-            <a className="text-amber-100 underline decoration-amber-200/30" href={`tel:${normalizePhone(phone)}`}>
-              {phone}
-            </a>
-          }
-        />
+        <InfoBox label="Телефон" value={<a className="text-amber-100 underline decoration-amber-200/30" href={`tel:${normalizePhone(phone)}`}>{phone}</a>} />
+        <InfoBox label="Дата" value={formatDate(booking.bookingDate)} />
+        <InfoBox label="Час" value={details.period} />
         <InfoBox label="Відпочинок" value={details.durationText} />
-        <InfoBox label="Підготовка" value={details.cleanupText} />
+        <InfoBox label="Вільний з" value={details.availableFrom} />
       </div>
 
       <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-4">
         <p className="text-xs uppercase tracking-[0.18em] text-white/40">Побажання гостя</p>
         {details.guestWishes.length ? (
           <div className="mt-2 space-y-1 text-sm text-white/75">
-            {details.guestWishes.map((line, index) => (
-              <p key={`${booking.id}-wish-${index}`}>{line}</p>
-            ))}
+            {details.guestWishes.map((line, index) => <p key={`${booking.id}-wish-${index}`}>{line}</p>)}
           </div>
         ) : (
           <p className="mt-2 text-sm text-white/35">Без побажань</p>
         )}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <a
-          href={`tel:${normalizePhone(phone)}`}
-          className="rounded-2xl border border-amber-200/35 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-100 transition active:scale-95"
-        >
-          📞 Подзвонити
-        </a>
-
-        {booking.status !== 'cancelled' && booking.status !== 'completed' && (
-          <button
-            type="button"
-            disabled={Boolean(busyAction)}
-            onClick={onCancel}
-            className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white/65 transition active:scale-95 disabled:opacity-50"
-          >
-            {busyAction === `${booking.id}:cancel` ? '...' : 'Скасувати'}
-          </button>
-        )}
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        <a href={`tel:${normalizePhone(phone)}`} className="rounded-2xl border border-amber-200/35 bg-amber-300/10 px-4 py-3 text-center text-sm font-semibold text-amber-100 transition active:scale-95">📞 Подзвонити</a>
+        <ActionButton label="👋 Гість прийшов" busyLabel="Відмічаємо..." busy={busyAction === `${booking.id}:checkIn`} tone="blue" disabled={!canWork || Boolean(busyAction)} onClick={() => onAction('checkIn')} />
+        <ActionButton label="🧽 Готується" busyLabel="Ставимо..." busy={busyAction === `${booking.id}:prepareTable`} tone="cyan" disabled={!booking.table?.id || Boolean(busyAction)} onClick={() => onAction('prepareTable')} />
+        <ActionButton label="✅ Стіл вільний" busyLabel="Завершуємо..." busy={busyAction === `${booking.id}:complete`} tone="neutral" disabled={!canWork || Boolean(busyAction)} onClick={() => onAction('complete')} />
+        <ActionButton label="🚫 No-show" busyLabel="Знімаємо..." busy={busyAction === `${booking.id}:noShow`} tone="red" disabled={!canNoShow || Boolean(busyAction)} onClick={() => onAction('noShow')} />
+        <ActionButton label="Скасувати" busyLabel="Скасовуємо..." busy={busyAction === `${booking.id}:cancel`} tone="neutral" disabled={!canCancel || Boolean(busyAction)} onClick={() => onAction('cancel')} />
+        {isBusy && <span className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-sm text-white/50">Дія виконується...</span>}
       </div>
     </article>
+  );
+}
+
+function TableCard({
+  table,
+  busyAction,
+  onAction,
+}: {
+  table: TableItem;
+  busyAction: string | null;
+  onAction: (action: TableAction) => void;
+}) {
+  const busyPrefix = `table:${table.id}:`;
+  const isBusy = Boolean(busyAction?.startsWith(busyPrefix));
+
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-neutral-950 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-2xl font-black">Стіл №{table.tableNumber}</p>
+          <p className="mt-1 text-sm text-white/45">до {table.seats} гостей</p>
+        </div>
+        <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/70">
+          <span className={`h-2.5 w-2.5 rounded-full ${TABLE_STATUS_DOT[table.status]}`} />
+          {tableStatusLabel(table.status)}
+        </span>
+      </div>
+
+      <p className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-3 text-sm text-white/55">Зона: {table.zone?.name || 'без зони'}</p>
+
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <ActionButton label="Вільний" busyLabel="..." busy={busyAction === `${busyPrefix}free`} tone="neutral" disabled={Boolean(busyAction)} onClick={() => onAction('free')} />
+        <ActionButton label="Зайнятий" busyLabel="..." busy={busyAction === `${busyPrefix}occupied`} tone="red" disabled={Boolean(busyAction)} onClick={() => onAction('occupied')} />
+        <ActionButton label="Готується" busyLabel="..." busy={busyAction === `${busyPrefix}cleaning`} tone="cyan" disabled={Boolean(busyAction)} onClick={() => onAction('cleaning')} />
+        {table.status === 'closed' ? (
+          <ActionButton label="Відкрити" busyLabel="..." busy={busyAction === `${busyPrefix}open`} tone="green" disabled={Boolean(busyAction)} onClick={() => onAction('open')} />
+        ) : (
+          <ActionButton label="Закрити" busyLabel="..." busy={busyAction === `${busyPrefix}close`} tone="red" disabled={Boolean(busyAction)} onClick={() => onAction('close')} />
+        )}
+      </div>
+
+      {isBusy && <p className="mt-3 text-center text-xs text-white/40">Змінюємо статус...</p>}
+    </div>
   );
 }
 
@@ -787,46 +768,20 @@ function SmallBookingRow({ booking }: { booking: Booking }) {
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-semibold">
-            №{booking.table?.tableNumber || '-'} · {booking.client?.fullName || '-'}
-          </p>
-          <p className="mt-1 text-sm text-white/45">
-            {formatDate(booking.bookingDate)} · {details.period}
-          </p>
+          <p className="font-semibold">№{booking.table?.tableNumber || '-'} · {booking.client?.fullName || '-'}</p>
+          <p className="mt-1 text-sm text-white/45">{formatDate(booking.bookingDate)} · {details.period}</p>
         </div>
-
-        <span className={`rounded-full border px-3 py-1 text-xs ${bookingStatusClass(booking.status)}`}>
-          {bookingStatusLabel(booking.status)}
-        </span>
+        <span className={`rounded-full border px-3 py-1 text-xs ${bookingStatusClass(booking)}`}>{bookingStatusLabel(booking)}</span>
       </div>
     </div>
   );
 }
 
-function RestaurantButton({
-  label,
-  tone,
-  busy,
-  onClick,
-}: {
-  label: string;
-  tone: 'green' | 'yellow' | 'red';
-  busy: boolean;
-  onClick: () => void;
-}) {
-  const classes = {
-    green: 'bg-emerald-500 text-white',
-    yellow: 'bg-amber-400 text-neutral-950',
-    red: 'bg-red-600 text-white',
-  }[tone];
+function RestaurantButton({ label, tone, busy, onClick }: { label: string; tone: 'green' | 'yellow' | 'red'; busy: boolean; onClick: () => void }) {
+  const classes = { green: 'bg-emerald-500 text-white', yellow: 'bg-amber-400 text-neutral-950', red: 'bg-red-600 text-white' }[tone];
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      className={`rounded-2xl px-4 py-3 text-sm font-bold transition active:scale-95 disabled:opacity-60 ${classes}`}
-    >
+    <button type="button" onClick={onClick} disabled={busy} className={`rounded-2xl px-4 py-3 text-sm font-bold transition active:scale-95 disabled:opacity-60 ${classes}`}>
       {busy ? '...' : label}
     </button>
   );
@@ -834,28 +789,30 @@ function RestaurantButton({
 
 function ActionButton({
   label,
-  title,
+  busyLabel,
   tone,
+  busy,
   disabled,
   onClick,
 }: {
   label: string;
-  title: string;
-  tone: 'green' | 'red';
+  busyLabel: string;
+  tone: 'green' | 'red' | 'blue' | 'cyan' | 'neutral';
+  busy: boolean;
   disabled: boolean;
   onClick: () => void;
 }) {
-  const classes = tone === 'green' ? 'bg-emerald-500' : 'bg-red-600';
+  const classes = {
+    green: 'border-emerald-300/25 bg-emerald-500/90 text-white',
+    red: 'border-red-300/25 bg-red-600/90 text-white',
+    blue: 'border-sky-300/25 bg-sky-500/90 text-white',
+    cyan: 'border-cyan-200/25 bg-cyan-400/90 text-neutral-950',
+    neutral: 'border-white/10 bg-white/[0.05] text-white/75',
+  }[tone];
 
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      className={`h-12 min-w-12 rounded-2xl px-4 text-lg font-black text-white shadow-lg transition active:scale-90 disabled:opacity-35 ${classes}`}
-    >
-      {label}
+    <button type="button" onClick={onClick} disabled={disabled || busy} className={`rounded-2xl border px-4 py-3 text-sm font-bold transition active:scale-95 disabled:opacity-35 ${classes}`}>
+      {busy ? busyLabel : label}
     </button>
   );
 }
@@ -878,20 +835,14 @@ function MiniStat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-function Stat({
-  label,
-  value,
-  tone = 'default',
-}: {
-  label: string;
-  value: number | string;
-  tone?: 'default' | 'blue' | 'orange' | 'red';
-}) {
+function Stat({ label, value, tone = 'default' }: { label: string; value: number | string; tone?: 'default' | 'blue' | 'orange' | 'red' | 'green' | 'purple' }) {
   const toneClass = {
     default: 'border-white/10 bg-neutral-950',
     blue: 'border-sky-300/25 bg-sky-400/10',
     orange: 'border-orange-300/25 bg-orange-400/10',
     red: 'border-red-300/25 bg-red-400/10',
+    green: 'border-emerald-300/25 bg-emerald-400/10',
+    purple: 'border-purple-300/25 bg-purple-400/10',
   }[tone];
 
   return (
@@ -903,19 +854,9 @@ function Stat({
 }
 
 function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="rounded-[24px] border border-dashed border-white/10 bg-white/[0.03] p-6 text-center text-white/45">
-      {text}
-    </div>
-  );
+  return <div className="rounded-[24px] border border-dashed border-white/10 bg-white/[0.03] p-6 text-center text-white/45">{text}</div>;
 }
 
 function label(tab: Tab) {
-  return {
-    dashboard: 'Головна',
-    bookings: 'Бронювання',
-    tables: 'Столи',
-    clients: 'Клієнти',
-    settings: 'Налаштування',
-  }[tab];
+  return { dashboard: 'Головна', bookings: 'Бронювання', tables: 'Столи', clients: 'Клієнти', settings: 'Налаштування' }[tab];
 }
