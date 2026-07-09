@@ -22,6 +22,12 @@ export class BookingsController {
     return this.service.checkAvailability(dto);
   }
 
+  @Public()
+  @Get('table-statuses')
+  tableStatuses(@Query() dto: any) {
+    return this.service.getTableStatuses(dto);
+  }
+
   // Тимчасово відкрито для тестового нижнього перемикача "Адмін".
   // Коли зробимо нормальні /admin /waiter /director з логіном — повернемо Roles.
   @Public()
@@ -46,6 +52,12 @@ export class BookingsController {
   @Patch(':id/cancel')
   cancel(@Param('id') id: string) {
     return this.service.cancel(id);
+  }
+
+  @Public()
+  @Patch(':id/no-show')
+  noShow(@Param('id') id: string) {
+    return this.service.noShow(id);
   }
 
   @Public()
