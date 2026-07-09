@@ -13,6 +13,7 @@ import {
 
 import type { FullMapResponse, Restaurant, TableItem } from '../api/types';
 import { bookingsApi } from '../api/bookings';
+import type { TableRuntimeStatus } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { useAsyncAction } from '../hooks/useAsyncAction';
@@ -499,6 +500,7 @@ export default function GuestApp() {
   const [customDurationHours, setCustomDurationHours] = useState('3.5');
   const [isCustomDuration, setIsCustomDuration] = useState(false);
   const [tableNotice, setTableNotice] = useState<TableAvailabilityNotice | null>(null);
+  const [dateStatuses, setDateStatuses] = useState<Record<string, TableRuntimeStatus>>({});
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -520,6 +522,7 @@ export default function GuestApp() {
   useEffect(() => {
     setTableNotice(null);
     setActiveTableNumber(null);
+    refreshDateStatuses();
   }, [date, time, durationMinutes, selectedLocationKey]);
 
   const visibleTables = useMemo(() => {
@@ -539,6 +542,18 @@ export default function GuestApp() {
       .get()
       .then((response) => setMap(getMapFromResponse(response)))
       .catch(() => {});
+
+    refreshDateStatuses();
+  }
+
+  function refreshDateStatuses() {
+    bookingsApi
+      .tableStatuses({ bookingDate: date, bookingTime: time, durationMinutes })
+      .then((response) => {
+        const payload = (response as any)?.data || response;
+        setDateStatuses(payload?.statuses || {});
+      })
+      .catch(() => setDateStatuses({}));
   }
 
   function findRealTableByNumber(tableNumber: number) {
@@ -547,21 +562,52 @@ export default function GuestApp() {
     );
   }
 
+  function getRuntimeStatus(tableNumber: number | string): TableRuntimeStatus | null {
+    return dateStatuses[String(tableNumber)] || null;
+  }
+
   function getVisualTableStatus(tableNumber: number): TableStatus {
     const realTable = findRealTableByNumber(tableNumber);
+    const runtime = getRuntimeStatus(tableNumber);
+
     if (realTable?.zone?.isClosed) return 'closed';
-    return normalizeTableStatus(realTable?.status);
+    if (runtime?.status) return normalizeTableStatus(runtime.status);
+
+    const physicalStatus = normalizeTableStatus(realTable?.status);
+
+    if (physicalStatus === 'closed' || physicalStatus === 'occupied' || physicalStatus === 'cleaning') {
+      return physicalStatus;
+    }
+
+    // pending/reserved більше не беремо з table.status, бо це може бути майбутня бронь.
+    return 'free';
+  }
+
+  function getSelectableTableStatus(table: TableItem): TableStatus {
+    const runtime = getRuntimeStatus(table.tableNumber);
+
+    if (table.zone?.isClosed) return 'closed';
+    if (runtime?.status) return normalizeTableStatus(runtime.status);
+
+    const physicalStatus = normalizeTableStatus(table.status);
+
+    if (physicalStatus === 'closed' || physicalStatus === 'occupied' || physicalStatus === 'cleaning') {
+      return physicalStatus;
+    }
+
+    return 'free';
   }
 
   function createTableNotice(table: TableItem, status: TableStatus): TableAvailabilityNotice {
+    const runtime = getRuntimeStatus(table.tableNumber);
+    const conflict = runtime?.conflict;
+
     return {
       tableNumber: String(table.tableNumber),
       status,
-      // Поки backend не віддає реальні броні по годинах, готуємо правильний формат.
-      // Коли підключимо backend, сюди прийдуть bookedFrom/bookedTo/availableFrom з бази.
-      bookedFrom: time,
-      bookedTo: bookingEndTime,
-      availableFrom: availableAfterCleanup,
+      bookedFrom: conflict?.bookedFromLabel || time,
+      bookedTo: conflict?.bookedToLabel || bookingEndTime,
+      availableFrom: conflict?.availableFromLabel || availableAfterCleanup,
     };
   }
 
@@ -639,7 +685,7 @@ export default function GuestApp() {
   }
 
   function selectTable(table: TableItem) {
-    const status = normalizeTableStatus(table.status);
+    const status = getSelectableTableStatus(table);
 
     if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
       alert(`Стіл недоступний: ${STATUS_TEXT[status]}`);
@@ -654,7 +700,7 @@ export default function GuestApp() {
   function selectVisualTable(visualTable: VisualTable) {
     const realTable = findRealTableByNumber(visualTable.number);
     const table = realTable ?? createFallbackTable(visualTable.number, visualTable.seats);
-    const status = normalizeTableStatus(table.status);
+    const status = getSelectableTableStatus(table);
 
     setActiveTableNumber(visualTable.number);
 
@@ -698,7 +744,11 @@ export default function GuestApp() {
       }),
     );
 
-    if (result) setStep('success');
+    if (result) {
+      refreshMap();
+      refreshDateStatuses();
+      setStep('success');
+    }
   }
 
   if (restaurant?.status === 'closed') {
