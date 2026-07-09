@@ -30,20 +30,16 @@ export class BookingsService {
   ) {}
 
   async restaurant() {
-    const restaurants = await this.restaurants.find({
-      order: { createdAt: 'ASC' },
-      take: 1,
-    });
-
-    const r = restaurants[0];
-    if (!r) throw new NotFoundException('Ресторан не знайдено');
-    return r;
+    const restaurants = await this.restaurants.find({ order: { createdAt: 'ASC' }, take: 1 });
+    const restaurant = restaurants[0];
+    if (!restaurant) throw new NotFoundException('Ресторан не знайдено');
+    return restaurant;
   }
 
   async validateRestaurant() {
-    const r = await this.restaurant();
-    if (r.status === 'closed') throw new BadRequestException(r.closeMessage);
-    if (r.status === 'booking_closed') throw new BadRequestException(r.bookingClosedMessage);
+    const restaurant = await this.restaurant();
+    if (restaurant.status === 'closed') throw new BadRequestException(restaurant.closeMessage);
+    if (restaurant.status === 'booking_closed') throw new BadRequestException(restaurant.bookingClosedMessage);
   }
 
   private normalizeDuration(durationMinutes?: number) {
@@ -163,10 +159,7 @@ export class BookingsService {
       .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
       .orderBy('booking.bookingTime', 'ASC');
 
-    if (excludeBookingId) {
-      query.andWhere('booking.id != :excludeBookingId', { excludeBookingId });
-    }
-
+    if (excludeBookingId) query.andWhere('booking.id != :excludeBookingId', { excludeBookingId });
     return query.getMany();
   }
 
@@ -174,7 +167,6 @@ export class BookingsService {
     return activeBookings.find((booking) => {
       const existingStart = this.getBookingStartMinutes(booking);
       const existingAvailableFrom = this.getBookingAvailableFromMinutes(booking);
-
       return requestedStartMinutes < existingAvailableFrom && requestedAvailableFromMinutes > existingStart;
     });
   }
@@ -197,10 +189,7 @@ export class BookingsService {
     }
 
     if (!table && dto.tableNumber) {
-      table = await this.tables.findOne({
-        where: { tableNumber: String(dto.tableNumber) },
-        relations: ['zone'],
-      });
+      table = await this.tables.findOne({ where: { tableNumber: String(dto.tableNumber) }, relations: ['zone'] });
     }
 
     if (!table && dto.tableNumber) {
@@ -220,10 +209,7 @@ export class BookingsService {
         }),
       );
 
-      table = await this.tables.findOne({
-        where: { id: table.id },
-        relations: ['zone'],
-      });
+      table = await this.tables.findOne({ where: { id: table.id }, relations: ['zone'] });
     }
 
     if (!table) throw new NotFoundException('Стіл не знайдено');
@@ -243,7 +229,6 @@ export class BookingsService {
 
     if (conflict) {
       const conflictInfo = this.bookingToAvailabilityConflict(conflict);
-
       throw new BadRequestException(
         `Стіл зайнятий ${conflictInfo.bookedFromLabel} — ${conflictInfo.bookedToLabel}. Вільний з ${conflictInfo.availableFromLabel}`,
       );
@@ -256,6 +241,63 @@ export class BookingsService {
     if (!table) return;
     table.status = status;
     await this.tables.save(table);
+  }
+
+  private restaurantDateToday() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Kyiv',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+
+    const year = parts.find((part) => part.type === 'year')?.value || '1970';
+    const month = parts.find((part) => part.type === 'month')?.value || '01';
+    const day = parts.find((part) => part.type === 'day')?.value || '01';
+
+    return `${year}-${month}-${day}`;
+  }
+
+  private isBookingToday(bookingDate: string | null | undefined) {
+    return String(bookingDate || '') === this.restaurantDateToday();
+  }
+
+  private async setTableStatusOnlyForToday(
+    table: TableEntity | null,
+    status: TableEntity['status'],
+    bookingDate: string,
+  ) {
+    if (!table) return;
+
+    // Важливо: майбутня бронь не повинна фарбувати стіл сьогодні.
+    // Статус table.status — це фізичний статус столу зараз, а не всі майбутні броні.
+    if (!this.isBookingToday(bookingDate)) return;
+
+    await this.setTableStatus(table, status);
+  }
+
+  private async safeLog(action: string, details?: Record<string, unknown>) {
+    try {
+      await this.logs.create(action, null, details || {});
+    } catch (error) {
+      console.error('Booking log failed:', error);
+    }
+  }
+
+  private async safeNotify(action: () => Promise<unknown>) {
+    try {
+      await action();
+    } catch (error) {
+      console.error('Booking notification failed:', error);
+    }
+  }
+
+  private markNoShowInWishes(booking: Booking) {
+    const current = booking.wishes || '';
+    if (current.includes('[NO_SHOW]')) return current;
+    return [current, `[NO_SHOW] Гість не прийшов. Бронь знято адміністратором ${new Date().toISOString()}.`]
+      .filter(Boolean)
+      .join('\n');
   }
 
   async checkAvailability(dto: CheckAvailabilityDto) {
@@ -307,6 +349,75 @@ export class BookingsService {
     };
   }
 
+  async getTableStatuses(dto: Partial<CheckAvailabilityDto>) {
+    const bookingDate = String(dto.bookingDate || '');
+    const bookingTime = String(dto.bookingTime || '19:00');
+    const timeInfo = this.buildTimeInfo(bookingTime, dto.durationMinutes);
+    const today = this.restaurantDateToday();
+
+    const tables = await this.tables.find({ relations: ['zone'], order: { tableNumber: 'ASC' } as any });
+
+    const activeBookings = await this.bookings
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.table', 'table')
+      .leftJoinAndSelect('booking.client', 'client')
+      .where('booking.bookingDate = :bookingDate', { bookingDate })
+      .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
+      .orderBy('booking.bookingTime', 'ASC')
+      .getMany();
+
+    const result: Record<string, unknown> = {};
+
+    for (const table of tables) {
+      const tableNumber = String(table.tableNumber);
+      const tableBookings = activeBookings.filter(
+        (booking) => booking.table?.id === table.id || String(booking.table?.tableNumber) === tableNumber,
+      );
+      const conflict = this.findConflict(tableBookings, timeInfo.startMinutes, timeInfo.availableFromMinutes);
+      const conflictInfo = conflict ? this.bookingToAvailabilityConflict(conflict) : null;
+
+      let status: TableEntity['status'] = 'free';
+      let reason: string | null = null;
+
+      if (!table.isVisible || table.zone?.isVisible === false) {
+        status = 'closed';
+        reason = 'hidden';
+      } else if (table.status === 'closed' || table.zone?.isClosed) {
+        status = 'closed';
+        reason = 'closed';
+      } else if (conflict) {
+        status = conflict.status === 'pending' ? 'pending' : 'reserved';
+        reason = 'booking_conflict';
+      } else if (bookingDate === today && (table.status === 'occupied' || table.status === 'cleaning')) {
+        status = table.status;
+        reason = 'physical_status_today';
+      }
+
+      result[tableNumber] = {
+        tableId: table.id,
+        tableNumber,
+        status,
+        reason,
+        conflict: conflictInfo,
+      };
+    }
+
+    return {
+      bookingDate,
+      bookingTime: timeInfo.bookingTime,
+      durationMinutes: timeInfo.durationMinutes,
+      cleanupMinutes: timeInfo.cleanupMinutes,
+      requestedFrom: timeInfo.bookingTime,
+      requestedTo: timeInfo.departureTime,
+      requestedAvailableFrom: timeInfo.availableFrom,
+      requestedFromLabel: timeInfo.bookingTimeLabel,
+      requestedToLabel: timeInfo.departureTimeLabel,
+      requestedAvailableFromLabel: timeInfo.availableFromLabel,
+      today,
+      statuses: result,
+    };
+  }
+
   async create(dto: CreateBookingDto) {
     try {
       await this.validateRestaurant();
@@ -315,19 +426,10 @@ export class BookingsService {
       await this.assertTableCanBeBooked(table);
 
       let client = await this.clients.findOne({ where: { phone: dto.phone } });
-
-      if (!client) {
-        client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
-      }
-
+      if (!client) client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
       if (client.isBlacklisted) throw new BadRequestException('Бронювання з цього номера недоступне');
 
-      const timeInfo = await this.assertNoTimeConflict(
-        table.id,
-        dto.bookingDate,
-        dto.bookingTime,
-        dto.durationMinutes,
-      );
+      const timeInfo = await this.assertNoTimeConflict(table.id, dto.bookingDate, dto.bookingTime, dto.durationMinutes);
 
       const originalWishes = dto.wishes || '';
       const wishesWithSystemTime = [
@@ -349,30 +451,19 @@ export class BookingsService {
         }),
       );
 
-      await this.setTableStatus(table, 'pending');
+      await this.setTableStatusOnlyForToday(table, 'pending', dto.bookingDate);
+      await this.safeLog('Створено заявку на бронювання', {
+        bookingId: booking.id,
+        tableNumber: table.tableNumber,
+        clientName: client.fullName,
+        time: `${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel}`,
+        durationMinutes: timeInfo.durationMinutes,
+      });
 
-      try {
-        await this.logs.create('Створено заявку на бронювання', null, {
-          bookingId: booking.id,
-          tableNumber: table.tableNumber,
-          clientName: client.fullName,
-          time: `${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel}`,
-          durationMinutes: timeInfo.durationMinutes,
-        });
-      } catch (error) {
-        console.error('Booking log failed:', error);
-      }
-
-      try {
-        const full = await this.bookings.findOne({
-          where: { id: booking.id },
-          relations: ['table', 'client'],
-        });
-
+      await this.safeNotify(async () => {
+        const full = await this.bookings.findOne({ where: { id: booking.id }, relations: ['table', 'client'] });
         if (full) await this.notifications.notifyNewBooking(full);
-      } catch (error) {
-        console.error('Booking notification failed:', error);
-      }
+      });
 
       return {
         message: 'Заявку на бронювання надіслано адміністратору',
@@ -385,77 +476,90 @@ export class BookingsService {
         cleanupMinutes: timeInfo.cleanupMinutes,
       };
     } catch (error: any) {
-      if (error instanceof BadRequestException || error instanceof NotFoundException) {
-        throw error;
-      }
-
+      if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
       console.error('Booking create failed:', error);
       throw new BadRequestException(`Booking error: ${error?.message || 'unknown error'}`);
     }
   }
 
   async getToday() {
-    return this.bookings.find({
-      relations: ['table', 'client'],
-      order: { createdAt: 'DESC' },
-      take: 300,
-    });
+    return this.bookings.find({ relations: ['table', 'client'], order: { createdAt: 'DESC' }, take: 300 });
   }
 
   async approve(id: string) {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
     booking.status = 'approved';
     booking.approvedAt = new Date();
     await this.bookings.save(booking);
-    await this.setTableStatus(booking.table, 'reserved');
-    await this.logs.create('Підтверджено бронювання', null, { bookingId: id });
-    await this.notifications.notifyBookingApproved(booking);
+    await this.setTableStatusOnlyForToday(booking.table, 'reserved', booking.bookingDate);
+    await this.safeLog('Підтверджено бронювання', { bookingId: id });
+    await this.safeNotify(() => this.notifications.notifyBookingApproved(booking));
     return { message: 'Бронювання підтверджено' };
   }
 
   async reject(id: string) {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
     booking.status = 'rejected';
     booking.rejectedAt = new Date();
     await this.bookings.save(booking);
-    await this.setTableStatus(booking.table, 'free');
-    await this.logs.create('Відхилено бронювання', null, { bookingId: id });
-    await this.notifications.notifyBookingCancelled(booking);
+    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    await this.safeLog('Відхилено бронювання', { bookingId: id });
+    await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Бронювання відхилено' };
   }
 
   async cancel(id: string) {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
     booking.status = 'cancelled';
     booking.cancelledAt = new Date();
     await this.bookings.save(booking);
-    await this.setTableStatus(booking.table, 'free');
-    await this.logs.create('Скасовано бронювання', null, { bookingId: id });
-    await this.notifications.notifyBookingCancelled(booking);
+    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    await this.safeLog('Скасовано бронювання', { bookingId: id });
+    await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Бронювання скасовано' };
+  }
+
+  async noShow(id: string) {
+    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
+    booking.status = 'cancelled';
+    booking.cancelledAt = new Date();
+    booking.wishes = this.markNoShowInWishes(booking);
+    await this.bookings.save(booking);
+    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    await this.safeLog('No-show: гість не прийшов', { bookingId: id, tableNumber: booking.table?.tableNumber || null });
+    await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
+    return { message: 'Гість не прийшов. Бронювання знято, стіл вільний.' };
   }
 
   async checkIn(id: string) {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
     booking.status = 'approved';
+    if (!booking.approvedAt) booking.approvedAt = new Date();
     await this.bookings.save(booking);
-    await this.setTableStatus(booking.table, 'occupied');
-    await this.logs.create('Гості прийшли', null, { bookingId: id });
+    await this.setTableStatusOnlyForToday(booking.table, 'occupied', booking.bookingDate);
+    await this.safeLog('Гості прийшли', { bookingId: id });
     return { message: 'Гості відмічені як присутні' };
   }
 
   async complete(id: string) {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
     booking.status = 'completed';
     booking.completedAt = new Date();
     await this.bookings.save(booking);
-    await this.setTableStatus(booking.table, 'free');
-    await this.logs.create('Стіл звільнено', null, { bookingId: id });
+    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    await this.safeLog('Стіл звільнено', { bookingId: id });
     return { message: 'Стіл звільнено' };
   }
 
@@ -464,14 +568,10 @@ export class BookingsService {
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
     const request = await this.reschedules.save(
-      this.reschedules.create({
-        booking,
-        requestedDate: dto.requestedDate,
-        requestedTime: dto.requestedTime,
-      }),
+      this.reschedules.create({ booking, requestedDate: dto.requestedDate, requestedTime: dto.requestedTime }),
     );
 
-    await this.notifications.notifyRescheduleRequest(request);
+    await this.safeNotify(() => this.notifications.notifyRescheduleRequest(request));
     return { message: 'Запит на перенесення надіслано', requestId: request.id };
   }
 
@@ -487,6 +587,7 @@ export class BookingsService {
   async approveReschedule(requestId: string) {
     const request = await this.reschedules.findOne({ where: { id: requestId }, relations: ['booking'] });
     if (!request) throw new NotFoundException('Запит не знайдено');
+
     request.status = 'approved';
     request.resolvedAt = new Date();
     request.booking.bookingDate = request.requestedDate;
@@ -499,6 +600,7 @@ export class BookingsService {
   async rejectReschedule(requestId: string, dto: RejectRescheduleDto) {
     const request = await this.reschedules.findOne({ where: { id: requestId } });
     if (!request) throw new NotFoundException('Запит не знайдено');
+
     request.status = 'rejected';
     request.adminComment = dto.adminComment || null;
     request.resolvedAt = new Date();
