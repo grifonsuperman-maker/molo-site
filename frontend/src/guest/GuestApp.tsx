@@ -16,6 +16,8 @@ import { bookingsApi } from '../api/bookings';
 import type { TableRuntimeStatus, BookingPublicStatus } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
+import { waiterCallsApi } from '../api/waiterCalls';
+import type { GuestWaiterCallStatus } from '../api/waiterCalls';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 
 const FALLBACK_MENU =
@@ -503,6 +505,9 @@ export default function GuestApp() {
   const [dateStatuses, setDateStatuses] = useState<Record<string, TableRuntimeStatus>>({});
   const [lastBookingId, setLastBookingId] = useState<string | null>(null);
   const [bookingStatus, setBookingStatus] = useState<BookingPublicStatus | null>(null);
+  const [waiterCallStatus, setWaiterCallStatus] = useState<GuestWaiterCallStatus | null>(null);
+  const [waiterCallBusy, setWaiterCallBusy] = useState(false);
+  const [waiterCallMessage, setWaiterCallMessage] = useState<string | null>(null);
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -540,10 +545,17 @@ export default function GuestApp() {
       } catch {
         // Якщо статус не вдалось отримати, не ламаємо екран успіху.
       }
+
+      try {
+        const callStatus = await waiterCallsApi.guestStatus(lastBookingId as string);
+        if (!stopped) setWaiterCallStatus(callStatus);
+      } catch {
+        if (!stopped) setWaiterCallStatus(null);
+      }
     }
 
     refreshBookingStatus();
-    const timer = window.setInterval(refreshBookingStatus, 30000);
+    const timer = window.setInterval(refreshBookingStatus, 15000);
 
     return () => {
       stopped = true;
@@ -649,6 +661,24 @@ export default function GuestApp() {
     }
 
     alert('Телефон адміністратора ще не додано.');
+  }
+
+  async function callWaiter() {
+    if (!lastBookingId || waiterCallBusy) return;
+
+    setWaiterCallBusy(true);
+    setWaiterCallMessage(null);
+
+    try {
+      const result = await waiterCallsApi.createFromGuest(lastBookingId);
+      setWaiterCallMessage(result.message || 'Виклик офіціанта відправлено');
+      const status = await waiterCallsApi.guestStatus(lastBookingId);
+      setWaiterCallStatus(status);
+    } catch (callError: any) {
+      setWaiterCallMessage(callError?.message || 'Не вдалося викликати офіціанта');
+    } finally {
+      setWaiterCallBusy(false);
+    }
   }
 
   function openMenu() {
@@ -773,6 +803,8 @@ export default function GuestApp() {
     if (result) {
       setLastBookingId(result.bookingId);
       setBookingStatus(null);
+      setWaiterCallStatus(null);
+      setWaiterCallMessage(null);
       refreshMap();
       refreshDateStatuses();
       setStep('success');
@@ -1447,7 +1479,45 @@ export default function GuestApp() {
               )}
 
               {bookingStatus?.status === 'approved' && (
-                <p className="mt-2 text-sm text-emerald-100">Бронювання підтверджено ✅</p>
+                <div className="mt-3 rounded-2xl border border-emerald-300/25 bg-emerald-400/10 p-4 text-center">
+                  <p className="text-sm font-semibold text-emerald-100">Бронювання підтверджено ✅</p>
+
+                  {!waiterCallStatus?.canCall && (
+                    <p className="mt-2 text-xs text-white/55">
+                      Кнопка виклику офіціанта зʼявиться після того, як адміністратор або офіціант відмітить: “Гість прийшов”.
+                    </p>
+                  )}
+
+                  {waiterCallStatus?.canCall && !waiterCallStatus.activeCall && (
+                    <button
+                      type="button"
+                      onClick={callWaiter}
+                      disabled={waiterCallBusy}
+                      className="mt-4 w-full rounded-2xl border border-amber-200/60 bg-amber-300/20 px-5 py-4 text-base font-black text-amber-100 transition active:scale-95 disabled:opacity-60"
+                    >
+                      {waiterCallBusy ? 'Відправляємо...' : '🔔 Викликати офіціанта'}
+                    </button>
+                  )}
+
+                  {waiterCallStatus?.activeCall && (
+                    <div className="mt-4 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-amber-100">
+                      <p className="font-bold">
+                        {waiterCallStatus.activeCall.status === 'accepted'
+                          ? 'Офіціант прийняв виклик'
+                          : 'Виклик офіціанта відправлено'}
+                      </p>
+                      <p className="mt-1 text-xs text-white/60">
+                        {waiterCallStatus.activeCall.waiterName
+                          ? `Офіціант: ${waiterCallStatus.activeCall.waiterName}`
+                          : 'Виклик у загальному списку офіціантів'}
+                      </p>
+                    </div>
+                  )}
+
+                  {waiterCallMessage && (
+                    <p className="mt-3 text-xs text-amber-100">{waiterCallMessage}</p>
+                  )}
+                </div>
               )}
 
               {(bookingStatus?.status === 'rejected' || bookingStatus?.status === 'cancelled') && (
