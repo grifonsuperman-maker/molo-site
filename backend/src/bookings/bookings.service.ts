@@ -15,6 +15,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
+const PENDING_REMINDER_MINUTES = 15;
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 
 @Injectable()
@@ -300,6 +301,58 @@ export class BookingsService {
       .join('\n');
   }
 
+
+  private pendingAgeMinutes(booking: Booking) {
+    if (!booking.createdAt) return 0;
+
+    const createdAt = new Date(booking.createdAt).getTime();
+    if (!Number.isFinite(createdAt)) return 0;
+
+    return Math.max(0, Math.floor((Date.now() - createdAt) / 60000));
+  }
+
+  private isPendingReminderDue(booking: Booking) {
+    return booking.status === 'pending' && this.pendingAgeMinutes(booking) >= PENDING_REMINDER_MINUTES;
+  }
+
+  private async publicBookingStatusPayload(booking: Booking) {
+    let restaurantPhone: string | null = null;
+
+    try {
+      const restaurant = await this.restaurant();
+      restaurantPhone = restaurant.phone || null;
+    } catch {
+      restaurantPhone = null;
+    }
+
+    const ageMinutes = this.pendingAgeMinutes(booking);
+    const timeInfo = this.bookingToAvailabilityConflict(booking);
+
+    return {
+      bookingId: booking.id,
+      status: booking.status,
+      tableNumber: booking.table?.tableNumber || null,
+      bookingDate: booking.bookingDate,
+      bookingTime: booking.bookingTime,
+      bookedFrom: timeInfo.bookedFrom,
+      bookedTo: timeInfo.bookedTo,
+      availableFrom: timeInfo.availableFrom,
+      bookedFromLabel: timeInfo.bookedFromLabel,
+      bookedToLabel: timeInfo.bookedToLabel,
+      availableFromLabel: timeInfo.availableFromLabel,
+      guestsCount: booking.guestsCount,
+      createdAt: booking.createdAt,
+      approvedAt: booking.approvedAt,
+      rejectedAt: booking.rejectedAt,
+      cancelledAt: booking.cancelledAt,
+      completedAt: booking.completedAt,
+      pendingAgeMinutes: ageMinutes,
+      pendingReminderMinutes: PENDING_REMINDER_MINUTES,
+      isPendingTooLong: this.isPendingReminderDue(booking),
+      restaurantPhone,
+    };
+  }
+
   async checkAvailability(dto: CheckAvailabilityDto) {
     const table = await this.tables.findOne({ where: { id: dto.tableId }, relations: ['zone'] });
     if (!table) throw new NotFoundException('Стіл не знайдено');
@@ -480,6 +533,27 @@ export class BookingsService {
       console.error('Booking create failed:', error);
       throw new BadRequestException(`Booking error: ${error?.message || 'unknown error'}`);
     }
+  }
+
+  async getPublicStatus(id: string) {
+    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
+    return this.publicBookingStatusPayload(booking);
+  }
+
+  async getPendingReminders() {
+    const threshold = new Date(Date.now() - PENDING_REMINDER_MINUTES * 60 * 1000);
+
+    return this.bookings
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.table', 'table')
+      .leftJoinAndSelect('booking.client', 'client')
+      .where('booking.status = :status', { status: 'pending' })
+      .andWhere('booking.createdAt <= :threshold', { threshold })
+      .orderBy('booking.createdAt', 'ASC')
+      .take(100)
+      .getMany();
   }
 
   async getToday() {
