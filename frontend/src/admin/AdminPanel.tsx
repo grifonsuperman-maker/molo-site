@@ -10,6 +10,25 @@ import type { Booking, FullMapResponse, Restaurant, TableItem, TableStatus } fro
 type Tab = 'dashboard' | 'bookings' | 'tables' | 'clients' | 'settings';
 type BookingAction = 'approve' | 'reject' | 'cancel' | 'checkIn' | 'complete' | 'noShow' | 'prepareTable';
 type TableAction = 'free' | 'occupied' | 'cleaning' | 'close' | 'open';
+type LocationKey = 'hall' | 'canopy' | 'gazebo' | 'rotang' | 'embankment' | 'glass_gazebo' | 'water_gazebo' | 'other';
+type BookingView = 'locations' | 'all' | 'pending' | 'long_pending' | LocationKey;
+
+type LocationInfo = {
+  key: LocationKey;
+  label: string;
+  description: string;
+};
+
+const LOCATIONS: LocationInfo[] = [
+  { key: 'hall', label: 'Зал ресторану', description: 'Столи 1–14' },
+  { key: 'canopy', label: 'Навіс', description: 'Столи 15–20' },
+  { key: 'gazebo', label: 'Велика альтанка', description: 'Столи 21–36' },
+  { key: 'rotang', label: 'Ротанг', description: 'Столи 37–39' },
+  { key: 'embankment', label: 'Набережна', description: 'Столи 40–44' },
+  { key: 'glass_gazebo', label: 'Скляна альтанка', description: 'Столи 45–50' },
+  { key: 'water_gazebo', label: 'Альтанка на воді', description: 'Столи 100–109' },
+  { key: 'other', label: 'Інші столи', description: 'Столи без локації' },
+];
 
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Очікує підтвердження',
@@ -47,16 +66,7 @@ const BOOKING_STATUS_STYLES: Record<string, string> = {
 };
 
 const PENDING_REMINDER_MINUTES = 15;
-
-const BOOKING_FILTERS = [
-  { key: 'all', label: 'Всі' },
-  { key: 'pending', label: 'Очікують' },
-  { key: 'approved', label: 'Підтверджені' },
-  { key: 'completed', label: 'Завершені' },
-  { key: 'cancelled', label: 'Скасовані' },
-  { key: 'rejected', label: 'Відхилені' },
-  { key: 'no_show', label: 'No-show' },
-];
+const ACTIVE_BOOKING_STATUSES = new Set(['pending', 'approved']);
 
 function unwrapData<T>(value: T | { data?: T }): T {
   if (value && typeof value === 'object' && 'data' in value && (value as { data?: T }).data) {
@@ -176,7 +186,7 @@ function parseBookingDetails(booking: Booking) {
 
 function bookingStatusLabel(booking: Booking): string {
   const status = bookingViewStatus(booking);
-  if (status === 'no_show') return 'No-show';
+  if (status === 'no_show') return 'Гість не прийшов';
   return STATUS_LABELS[status] || status;
 }
 
@@ -206,9 +216,38 @@ function actionText(action: BookingAction): string {
     cancel: 'Бронювання скасовано',
     checkIn: 'Гість прийшов, стіл зайнятий',
     complete: 'Бронювання завершено, стіл вільний',
-    noShow: 'No-show: бронь знято',
+    noShow: 'Гість не прийшов: бронь знято',
     prepareTable: 'Стіл відправлено на підготовку',
   }[action];
+}
+
+function tableNumberValue(booking: Booking): number {
+  return Number(booking.table?.tableNumber || 0);
+}
+
+function getLocationKeyByTableNumber(value: number): LocationKey {
+  if (value >= 1 && value <= 14) return 'hall';
+  if (value >= 15 && value <= 20) return 'canopy';
+  if (value >= 21 && value <= 36) return 'gazebo';
+  if (value >= 37 && value <= 39) return 'rotang';
+  if (value >= 40 && value <= 44) return 'embankment';
+  if (value >= 45 && value <= 50) return 'glass_gazebo';
+  if (value >= 100 && value <= 109) return 'water_gazebo';
+  return 'other';
+}
+
+function getBookingLocationKey(booking: Booking): LocationKey {
+  return getLocationKeyByTableNumber(tableNumberValue(booking));
+}
+
+function sortBookings(a: Booking, b: Booking) {
+  const timeCompare = String(a.bookingTime || '').localeCompare(String(b.bookingTime || ''));
+  if (timeCompare !== 0) return timeCompare;
+  return tableNumberValue(a) - tableNumberValue(b);
+}
+
+function isActiveBooking(booking: Booking) {
+  return ACTIVE_BOOKING_STATUSES.has(booking.status) && !isNoShow(booking);
 }
 
 export default function AdminPanel() {
@@ -222,9 +261,8 @@ export default function AdminPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
-  const [bookingFilter, setBookingFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+  const [bookingsView, setBookingsView] = useState<BookingView>('locations');
 
   async function load() {
     setLoading(true);
@@ -259,28 +297,33 @@ export default function AdminPanel() {
     load();
   }, []);
 
-  const activeBookings = useMemo(
-    () => bookings.filter((booking) => booking.status !== 'cancelled' && booking.status !== 'rejected' && !isNoShow(booking)),
-    [bookings],
-  );
+  const todayBookings = useMemo(() => [...bookings].sort(sortBookings), [bookings]);
 
+  const activeBookings = useMemo(() => todayBookings.filter(isActiveBooking), [todayBookings]);
 
-  const pendingReminders = useMemo(
-    () => bookings.filter(isPendingTooLong),
-    [bookings],
-  );
+  const pendingReminders = useMemo(() => todayBookings.filter(isPendingTooLong), [todayBookings]);
 
   const stats = useMemo(() => {
-    const pending = bookings.filter((booking) => booking.status === 'pending').length;
-    const approved = bookings.filter((booking) => booking.status === 'approved').length;
-    const completed = bookings.filter((booking) => booking.status === 'completed').length;
-    const noShow = bookings.filter(isNoShow).length;
-    const longBookings = bookings.filter((booking) => parseBookingDetails(booking).isLong).length;
+    const pending = todayBookings.filter((booking) => booking.status === 'pending').length;
+    const approved = todayBookings.filter((booking) => booking.status === 'approved').length;
+    const completed = todayBookings.filter((booking) => booking.status === 'completed').length;
+    const noShow = todayBookings.filter(isNoShow).length;
+    const longBookings = todayBookings.filter((booking) => parseBookingDetails(booking).isLong).length;
     const pendingLong = pendingReminders.length;
     const guests = activeBookings.reduce((sum, booking) => sum + Number(booking.guestsCount || 0), 0);
 
-    return { bookings: bookings.length, active: activeBookings.length, pending, pendingLong, approved, completed, noShow, longBookings, guests };
-  }, [bookings, activeBookings, pendingReminders]);
+    return {
+      bookings: todayBookings.length,
+      active: activeBookings.length,
+      pending,
+      pendingLong,
+      approved,
+      completed,
+      noShow,
+      longBookings,
+      guests,
+    };
+  }, [todayBookings, activeBookings, pendingReminders]);
 
   const tables = useMemo<TableItem[]>(() => {
     return [...(fullMap?.tables || [])].sort((a, b) => {
@@ -301,7 +344,7 @@ export default function AdminPanel() {
   const clients = useMemo(() => {
     const map = new Map<string, { name: string; phone: string; bookings: number; guests: number; lastDate: string }>();
 
-    bookings.forEach((booking) => {
+    todayBookings.forEach((booking) => {
       const phone = booking.client?.phone || '-';
       const current = map.get(phone) || {
         name: booking.client?.fullName || '-',
@@ -318,23 +361,37 @@ export default function AdminPanel() {
     });
 
     return Array.from(map.values()).sort((a, b) => b.lastDate.localeCompare(a.lastDate));
-  }, [bookings]);
+  }, [todayBookings]);
 
-  const filteredBookings = useMemo(() => {
+  const locationCounts = useMemo(() => {
+    const counts = Object.fromEntries(LOCATIONS.map((location) => [location.key, 0])) as Record<LocationKey, number>;
+
+    activeBookings.forEach((booking) => {
+      const key = getBookingLocationKey(booking);
+      counts[key] += 1;
+    });
+
+    return counts;
+  }, [activeBookings]);
+
+  const selectedLocation = useMemo(
+    () => LOCATIONS.find((location) => location.key === bookingsView) || null,
+    [bookingsView],
+  );
+
+  const bookingSource = useMemo(() => {
+    if (bookingsView === 'locations') return [] as Booking[];
+    if (bookingsView === 'all') return todayBookings;
+    if (bookingsView === 'pending') return todayBookings.filter((booking) => booking.status === 'pending');
+    if (bookingsView === 'long_pending') return pendingReminders;
+    return todayBookings.filter((booking) => getBookingLocationKey(booking) === bookingsView);
+  }, [bookingsView, todayBookings, pendingReminders]);
+
+  const visibleBookings = useMemo(() => {
     const searchValue = search.trim().toLowerCase();
+    if (!searchValue) return bookingSource;
 
-    return bookings.filter((booking) => {
-      if (bookingFilter !== 'all') {
-        if (bookingFilter === 'no_show') {
-          if (!isNoShow(booking)) return false;
-        } else if (booking.status !== bookingFilter) {
-          return false;
-        }
-      }
-
-      if (dateFilter && booking.bookingDate !== dateFilter) return false;
-      if (!searchValue) return true;
-
+    return bookingSource.filter((booking) => {
       const haystack = [
         booking.table?.tableNumber,
         booking.table?.zone?.name,
@@ -351,7 +408,7 @@ export default function AdminPanel() {
 
       return haystack.includes(searchValue);
     });
-  }, [bookings, bookingFilter, search, dateFilter]);
+  }, [bookingSource, search]);
 
   async function runRestaurantAction(action: 'open' | 'closeBooking' | 'close') {
     const key = `restaurant:${action}`;
@@ -442,8 +499,7 @@ export default function AdminPanel() {
       if (action === 'close') await tablesApi.close(table.id);
       if (action === 'open') await tablesApi.open(table.id);
 
-      const nextStatus: TableStatus =
-        action === 'open' ? 'free' : action === 'close' ? 'closed' : action;
+      const nextStatus: TableStatus = action === 'open' ? 'free' : action === 'close' ? 'closed' : action;
 
       setNotice(`Стіл №${table.tableNumber}: ${tableStatusLabel(nextStatus)}`);
       await load();
@@ -452,6 +508,11 @@ export default function AdminPanel() {
     } finally {
       setBusyAction(null);
     }
+  }
+
+  function openBookingsView(view: BookingView) {
+    setBookingsView(view);
+    setSearch('');
   }
 
   return (
@@ -476,9 +537,14 @@ export default function AdminPanel() {
             Статус: <b className="text-white">{restaurant?.status || '-'}</b>
           </span>
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/70">
-            Заявок: <b className="text-white">{bookings.length}</b>
+            Заявок сьогодні: <b className="text-white">{todayBookings.length}</b>
           </span>
-          <button type="button" onClick={load} disabled={loading} className="rounded-full border border-amber-200/40 bg-amber-300/10 px-3 py-1 font-semibold text-amber-100 transition active:scale-95 disabled:opacity-50">
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="rounded-full border border-amber-200/40 bg-amber-300/10 px-3 py-1 font-semibold text-amber-100 transition active:scale-95 disabled:opacity-50"
+          >
             {loading ? 'Оновлюємо...' : 'Оновити'}
           </button>
         </div>
@@ -492,12 +558,16 @@ export default function AdminPanel() {
 
       <nav className="mb-5 grid grid-cols-2 gap-2 md:grid-cols-5">
         {(['dashboard', 'bookings', 'tables', 'clients', 'settings'] as Tab[]).map((item) => (
-          <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-2xl px-4 py-4 text-sm font-semibold transition active:scale-[0.97] ${tab === item ? 'bg-amber-300 text-neutral-950 shadow-[0_0_26px_rgba(251,191,36,.18)]' : 'bg-neutral-900 text-white/80'}`}>
+          <button
+            key={item}
+            type="button"
+            onClick={() => setTab(item)}
+            className={`rounded-2xl px-4 py-4 text-sm font-semibold transition active:scale-[0.97] ${tab === item ? 'bg-amber-300 text-neutral-950 shadow-[0_0_26px_rgba(251,191,36,.18)]' : 'bg-neutral-900 text-white/80'}`}
+          >
             {label(item)}
           </button>
         ))}
       </nav>
-
 
       {pendingReminders.length > 0 && (
         <section className="mb-5 rounded-[28px] border border-amber-200/35 bg-amber-300/10 p-4 text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.08)]">
@@ -507,7 +577,14 @@ export default function AdminPanel() {
               <h2 className="mt-1 text-xl font-black">{pendingReminders.length} заявк(и) очікують понад {PENDING_REMINDER_MINUTES} хв</h2>
               <p className="mt-1 text-sm text-white/70">Потрібно підтвердити, відхилити або подзвонити гостю.</p>
             </div>
-            <button type="button" onClick={() => { setTab('bookings'); setBookingFilter('pending'); }} className="rounded-2xl border border-amber-200/55 bg-black/25 px-4 py-3 text-sm font-bold text-amber-100 transition active:scale-95">
+            <button
+              type="button"
+              onClick={() => {
+                setTab('bookings');
+                openBookingsView('long_pending');
+              }}
+              className="rounded-2xl border border-amber-200/55 bg-black/25 px-4 py-3 text-sm font-bold text-amber-100 transition active:scale-95"
+            >
               Відкрити заявки
             </button>
           </div>
@@ -524,7 +601,7 @@ export default function AdminPanel() {
             <Stat label="Чекають 15+ хв" value={stats.pendingLong} tone="yellow" />
             <Stat label="Підтверджені" value={stats.approved} tone="orange" />
             <Stat label="Завершені" value={stats.completed} tone="green" />
-            <Stat label="No-show" value={stats.noShow} tone="red" />
+            <Stat label="Гість не прийшов" value={stats.noShow} tone="red" />
             <Stat label="Довгі броні" value={stats.longBookings} tone="purple" />
           </div>
 
@@ -540,8 +617,8 @@ export default function AdminPanel() {
             </div>
 
             <div className="grid gap-3">
-              {bookings.slice(0, 5).map((booking) => <SmallBookingRow key={booking.id} booking={booking} />)}
-              {!bookings.length && <EmptyState text="Поки немає бронювань." />}
+              {todayBookings.slice(0, 5).map((booking) => <SmallBookingRow key={booking.id} booking={booking} />)}
+              {!todayBookings.length && <EmptyState text="Поки немає бронювань." />}
             </div>
           </div>
 
@@ -568,41 +645,115 @@ export default function AdminPanel() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-2xl font-black">Бронювання</h2>
-                <p className="mt-1 text-sm text-white/45">Підтвердження, відхилення, дзвінок, no-show, прихід гостя та стіл.</p>
+                <p className="mt-1 text-sm text-white/45">По локаціях, без каші. Підтвердження, відхилення, дзвінок, прихід гостя та статус столу.</p>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[520px]">
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Пошук: стіл, імʼя, телефон..." className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none" />
-                <input type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none" />
-              </div>
-            </div>
-
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-              {BOOKING_FILTERS.map((filter) => (
-                <button key={filter.key} type="button" onClick={() => setBookingFilter(filter.key)} className={`flex-none rounded-2xl border px-4 py-2 text-sm font-semibold transition active:scale-95 ${bookingFilter === filter.key ? 'border-amber-200 bg-amber-300/20 text-amber-100' : 'border-white/10 bg-white/[0.03] text-white/65'}`}>
-                  {filter.label}
-                </button>
-              ))}
-              {dateFilter && (
-                <button type="button" onClick={() => setDateFilter('')} className="flex-none rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-white/65 transition active:scale-95">
-                  Скинути дату
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => openBookingsView('all')}
+                className="rounded-[24px] border border-amber-200/55 bg-amber-300/15 px-5 py-4 text-sm font-black text-amber-100 shadow-[0_0_30px_rgba(251,191,36,.08)] transition active:scale-[0.99]"
+              >
+                Відкрити весь список броней на сьогодні
+              </button>
             </div>
           </div>
 
-          <div className="grid gap-4">
-            {filteredBookings.map((booking) => (
-              <BookingCard
-                key={booking.id}
-                booking={booking}
-                flash={flashId === booking.id}
-                busyAction={busyAction}
-                onAction={(action) => runBookingAction(booking, action)}
-              />
-            ))}
-            {!filteredBookings.length && <EmptyState text="За цим фільтром бронювань немає." />}
-          </div>
+          {bookingsView === 'locations' && (
+            <>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <QuickOpenCard
+                  title="Очікують підтвердження"
+                  description="Нові заявки на сьогодні"
+                  count={todayBookings.filter((booking) => booking.status === 'pending').length}
+                  tone="blue"
+                  onClick={() => openBookingsView('pending')}
+                />
+                <QuickOpenCard
+                  title="Завислі заявки"
+                  description={`Чекають понад ${PENDING_REMINDER_MINUTES} хв`}
+                  count={pendingReminders.length}
+                  tone="yellow"
+                  onClick={() => openBookingsView('long_pending')}
+                />
+                <QuickOpenCard
+                  title="Весь список"
+                  description="Усі броні на сьогодні"
+                  count={todayBookings.length}
+                  tone="amber"
+                  onClick={() => openBookingsView('all')}
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {LOCATIONS.map((location) => (
+                  <LocationCard
+                    key={location.key}
+                    location={location}
+                    count={locationCounts[location.key] || 0}
+                    onClick={() => openBookingsView(location.key)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {bookingsView !== 'locations' && (
+            <>
+              <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-white/40">
+                      {bookingsView === 'all'
+                        ? 'Всі броні на сьогодні'
+                        : bookingsView === 'pending'
+                          ? 'Нові заявки'
+                          : bookingsView === 'long_pending'
+                            ? `Очікують понад ${PENDING_REMINDER_MINUTES} хв`
+                            : selectedLocation?.description || 'Локація'}
+                    </p>
+                    <h3 className="mt-1 text-2xl font-black">
+                      {bookingsView === 'all'
+                        ? 'Список бронювань'
+                        : bookingsView === 'pending'
+                          ? 'Очікують підтвердження'
+                          : bookingsView === 'long_pending'
+                            ? 'Завислі заявки'
+                            : selectedLocation?.label}
+                    </h3>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Пошук: стіл, імʼя, телефон..."
+                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none sm:min-w-[280px]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => openBookingsView('locations')}
+                      className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white/80 transition active:scale-[0.98]"
+                    >
+                      Назад до локацій
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4">
+                {visibleBookings.map((booking) => (
+                  <BookingCard
+                    key={booking.id}
+                    booking={booking}
+                    flash={flashId === booking.id}
+                    busyAction={busyAction}
+                    onAction={(action) => runBookingAction(booking, action)}
+                  />
+                ))}
+                {!visibleBookings.length && <EmptyState text="У цьому списку бронювань немає." />}
+              </div>
+            </>
+          )}
         </section>
       )}
 
@@ -687,8 +838,6 @@ function BookingCard({
   const details = parseBookingDetails(booking);
   const phone = booking.client?.phone || '-';
   const tableStatus = booking.table?.status;
-  const busyPrefix = `${booking.id}:`;
-  const isBusy = Boolean(busyAction?.startsWith(busyPrefix));
   const viewStatus = bookingViewStatus(booking);
   const canApprove = booking.status === 'pending' || booking.status === 'rejected';
   const canReject = booking.status === 'pending' || booking.status === 'approved';
@@ -716,7 +865,7 @@ function BookingCard({
           </div>
 
           <p className="mt-2 text-sm text-white/50">{formatDate(booking.bookingDate)} · {details.period} · {booking.guestsCount} гостей</p>
-          <p className="mt-1 text-xs text-white/35">Зона: {booking.table?.zone?.name || 'без зони'}</p>
+          <p className="mt-1 text-xs text-white/35">Зона: {booking.table?.zone?.name || locationLabel(getBookingLocationKey(booking))}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:flex">
@@ -752,14 +901,13 @@ function BookingCard({
         )}
       </div>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
         <a href={`tel:${normalizePhone(phone)}`} className="rounded-2xl border border-amber-200/35 bg-amber-300/10 px-4 py-3 text-center text-sm font-semibold text-amber-100 transition active:scale-95">📞 Подзвонити</a>
         <ActionButton label="👋 Гість прийшов" busyLabel="Відмічаємо..." busy={busyAction === `${booking.id}:checkIn`} tone="blue" disabled={!canWork || Boolean(busyAction)} onClick={() => onAction('checkIn')} />
-        <ActionButton label="🧽 Готується" busyLabel="Ставимо..." busy={busyAction === `${booking.id}:prepareTable`} tone="cyan" disabled={!booking.table?.id || Boolean(busyAction)} onClick={() => onAction('prepareTable')} />
+        <ActionButton label="🧽 Стіл готується" busyLabel="Ставимо..." busy={busyAction === `${booking.id}:prepareTable`} tone="cyan" disabled={!booking.table?.id || Boolean(busyAction)} onClick={() => onAction('prepareTable')} />
         <ActionButton label="✅ Стіл вільний" busyLabel="Завершуємо..." busy={busyAction === `${booking.id}:complete`} tone="neutral" disabled={!canWork || Boolean(busyAction)} onClick={() => onAction('complete')} />
-        <ActionButton label="🚫 No-show" busyLabel="Знімаємо..." busy={busyAction === `${booking.id}:noShow`} tone="red" disabled={!canNoShow || Boolean(busyAction)} onClick={() => onAction('noShow')} />
+        <ActionButton label="Гість не прийшов" busyLabel="Знімаємо..." busy={busyAction === `${booking.id}:noShow`} tone="red" disabled={!canNoShow || Boolean(busyAction)} onClick={() => onAction('noShow')} />
         <ActionButton label="Скасувати" busyLabel="Скасовуємо..." busy={busyAction === `${booking.id}:cancel`} tone="neutral" disabled={!canCancel || Boolean(busyAction)} onClick={() => onAction('cancel')} />
-        {isBusy && <span className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-sm text-white/50">Дія виконується...</span>}
       </div>
     </article>
   );
@@ -902,8 +1050,67 @@ function Stat({ label, value, tone = 'default' }: { label: string; value: number
   );
 }
 
+function QuickOpenCard({
+  title,
+  description,
+  count,
+  tone,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  count: number;
+  tone: 'blue' | 'yellow' | 'amber';
+  onClick: () => void;
+}) {
+  const toneClass = {
+    blue: 'border-sky-300/30 bg-sky-400/10 text-sky-100',
+    yellow: 'border-amber-300/30 bg-amber-400/10 text-amber-100',
+    amber: 'border-orange-300/30 bg-orange-400/10 text-orange-100',
+  }[tone];
+
+  return (
+    <button type="button" onClick={onClick} className={`rounded-[28px] border p-5 text-left transition active:scale-[0.99] ${toneClass}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-black">{title}</h3>
+          <p className="mt-1 text-sm text-white/65">{description}</p>
+        </div>
+        <span className="min-w-12 rounded-2xl border border-white/15 bg-black/20 px-3 py-2 text-center text-xl font-black text-white">{count}</span>
+      </div>
+    </button>
+  );
+}
+
+function LocationCard({
+  location,
+  count,
+  onClick,
+}: {
+  location: LocationInfo;
+  count: number;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} className="rounded-[30px] border border-white/10 bg-neutral-950 p-5 text-left shadow-xl transition active:scale-[0.99]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-xl font-black text-white">{location.label}</h3>
+          <p className="mt-1 text-sm text-white/50">{location.description}</p>
+        </div>
+        <span className="min-w-12 rounded-2xl border border-amber-200/45 bg-amber-300/15 px-3 py-2 text-center text-xl font-black text-amber-100">{count}</span>
+      </div>
+      <p className="mt-4 text-sm font-semibold text-amber-100/85">Відкрити локацію</p>
+    </button>
+  );
+}
+
 function EmptyState({ text }: { text: string }) {
   return <div className="rounded-[24px] border border-dashed border-white/10 bg-white/[0.03] p-6 text-center text-white/45">{text}</div>;
+}
+
+function locationLabel(key: LocationKey) {
+  return LOCATIONS.find((location) => location.key === key)?.label || 'Інша локація';
 }
 
 function label(tab: Tab) {
