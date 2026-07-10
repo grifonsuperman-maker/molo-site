@@ -46,6 +46,8 @@ const BOOKING_STATUS_STYLES: Record<string, string> = {
   no_show: 'border-red-300/45 bg-red-500/15 text-red-100',
 };
 
+const PENDING_REMINDER_MINUTES = 15;
+
 const BOOKING_FILTERS = [
   { key: 'all', label: 'Всі' },
   { key: 'pending', label: 'Очікують' },
@@ -116,6 +118,17 @@ function durationLabel(minutes: number): string {
 
 function isNoShow(booking: Booking): boolean {
   return String(booking.wishes || '').includes('[NO_SHOW]');
+}
+
+function bookingAgeMinutes(booking: Booking): number {
+  if (!booking.createdAt) return 0;
+  const createdAt = new Date(booking.createdAt).getTime();
+  if (!Number.isFinite(createdAt)) return 0;
+  return Math.max(0, Math.floor((Date.now() - createdAt) / 60000));
+}
+
+function isPendingTooLong(booking: Booking): boolean {
+  return booking.status === 'pending' && bookingAgeMinutes(booking) >= PENDING_REMINDER_MINUTES;
 }
 
 function bookingViewStatus(booking: Booking): string {
@@ -251,16 +264,23 @@ export default function AdminPanel() {
     [bookings],
   );
 
+
+  const pendingReminders = useMemo(
+    () => bookings.filter(isPendingTooLong),
+    [bookings],
+  );
+
   const stats = useMemo(() => {
     const pending = bookings.filter((booking) => booking.status === 'pending').length;
     const approved = bookings.filter((booking) => booking.status === 'approved').length;
     const completed = bookings.filter((booking) => booking.status === 'completed').length;
     const noShow = bookings.filter(isNoShow).length;
     const longBookings = bookings.filter((booking) => parseBookingDetails(booking).isLong).length;
+    const pendingLong = pendingReminders.length;
     const guests = activeBookings.reduce((sum, booking) => sum + Number(booking.guestsCount || 0), 0);
 
-    return { bookings: bookings.length, active: activeBookings.length, pending, approved, completed, noShow, longBookings, guests };
-  }, [bookings, activeBookings]);
+    return { bookings: bookings.length, active: activeBookings.length, pending, pendingLong, approved, completed, noShow, longBookings, guests };
+  }, [bookings, activeBookings, pendingReminders]);
 
   const tables = useMemo<TableItem[]>(() => {
     return [...(fullMap?.tables || [])].sort((a, b) => {
@@ -478,6 +498,22 @@ export default function AdminPanel() {
         ))}
       </nav>
 
+
+      {pendingReminders.length > 0 && (
+        <section className="mb-5 rounded-[28px] border border-amber-200/35 bg-amber-300/10 p-4 text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.08)]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-amber-100/65">Завислі заявки</p>
+              <h2 className="mt-1 text-xl font-black">{pendingReminders.length} заявк(и) очікують понад {PENDING_REMINDER_MINUTES} хв</h2>
+              <p className="mt-1 text-sm text-white/70">Потрібно підтвердити, відхилити або подзвонити гостю.</p>
+            </div>
+            <button type="button" onClick={() => { setTab('bookings'); setBookingFilter('pending'); }} className="rounded-2xl border border-amber-200/55 bg-black/25 px-4 py-3 text-sm font-bold text-amber-100 transition active:scale-95">
+              Відкрити заявки
+            </button>
+          </div>
+        </section>
+      )}
+
       {tab === 'dashboard' && (
         <section className="space-y-5">
           <div className="grid gap-3 md:grid-cols-4">
@@ -485,6 +521,7 @@ export default function AdminPanel() {
             <Stat label="Активних" value={stats.active} />
             <Stat label="Гостей" value={stats.guests} />
             <Stat label="Очікують" value={stats.pending} tone="blue" />
+            <Stat label="Чекають 15+ хв" value={stats.pendingLong} tone="yellow" />
             <Stat label="Підтверджені" value={stats.approved} tone="orange" />
             <Stat label="Завершені" value={stats.completed} tone="green" />
             <Stat label="No-show" value={stats.noShow} tone="red" />
@@ -658,6 +695,8 @@ function BookingCard({
   const canWork = booking.status === 'approved' && viewStatus !== 'no_show';
   const canNoShow = (booking.status === 'pending' || booking.status === 'approved') && viewStatus !== 'no_show';
   const canCancel = booking.status !== 'cancelled' && booking.status !== 'completed' && booking.status !== 'rejected';
+  const pendingTooLong = isPendingTooLong(booking);
+  const pendingAge = bookingAgeMinutes(booking);
 
   return (
     <article className={`rounded-[28px] border p-4 shadow-2xl transition ${flash ? 'border-emerald-300/45 bg-emerald-400/10' : 'border-white/10 bg-neutral-950'}`}>
@@ -673,6 +712,7 @@ function BookingCard({
               </span>
             )}
             {details.isLong && <span className="rounded-full border border-purple-300/30 bg-purple-400/10 px-3 py-1 text-xs font-semibold text-purple-100">Довга бронь</span>}
+            {pendingTooLong && <span className="rounded-full border border-amber-200/40 bg-amber-300/15 px-3 py-1 text-xs font-semibold text-amber-100">Чекає {pendingAge} хв</span>}
           </div>
 
           <p className="mt-2 text-sm text-white/50">{formatDate(booking.bookingDate)} · {details.period} · {booking.guestsCount} гостей</p>
@@ -684,6 +724,13 @@ function BookingCard({
           <ActionButton label="❌ Відхилити" busyLabel="Відхиляємо..." busy={busyAction === `${booking.id}:reject`} tone="red" disabled={!canReject || Boolean(busyAction)} onClick={() => onAction('reject')} />
         </div>
       </div>
+
+      {pendingTooLong && (
+        <div className="mt-4 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-amber-100">
+          <p className="font-bold">Заявка очікує понад {PENDING_REMINDER_MINUTES} хв</p>
+          <p className="mt-1 text-sm text-white/70">Підтвердь, відхили або подзвони гостю, щоб заявка не висіла.</p>
+        </div>
+      )}
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <InfoBox label="Гість" value={booking.client?.fullName || '-'} />
@@ -770,6 +817,7 @@ function SmallBookingRow({ booking }: { booking: Booking }) {
         <div>
           <p className="font-semibold">№{booking.table?.tableNumber || '-'} · {booking.client?.fullName || '-'}</p>
           <p className="mt-1 text-sm text-white/45">{formatDate(booking.bookingDate)} · {details.period}</p>
+          {isPendingTooLong(booking) && <p className="mt-1 text-xs font-semibold text-amber-100">Чекає {bookingAgeMinutes(booking)} хв — треба дія</p>}
         </div>
         <span className={`rounded-full border px-3 py-1 text-xs ${bookingStatusClass(booking)}`}>{bookingStatusLabel(booking)}</span>
       </div>
@@ -835,10 +883,11 @@ function MiniStat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-function Stat({ label, value, tone = 'default' }: { label: string; value: number | string; tone?: 'default' | 'blue' | 'orange' | 'red' | 'green' | 'purple' }) {
+function Stat({ label, value, tone = 'default' }: { label: string; value: number | string; tone?: 'default' | 'blue' | 'yellow' | 'orange' | 'red' | 'green' | 'purple' }) {
   const toneClass = {
     default: 'border-white/10 bg-neutral-950',
     blue: 'border-sky-300/25 bg-sky-400/10',
+    yellow: 'border-amber-300/25 bg-amber-400/10',
     orange: 'border-orange-300/25 bg-orange-400/10',
     red: 'border-red-300/25 bg-red-400/10',
     green: 'border-emerald-300/25 bg-emerald-400/10',
