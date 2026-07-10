@@ -25,10 +25,13 @@ export class TablesService {
       if (!zone) throw new NotFoundException('Зону не знайдено');
     }
 
+    const existing = await this.tables.findOne({ where: { tableNumber: String(dto.tableNumber) }, relations: ['zone'] });
+    if (existing) return existing;
+
     return this.tables.save(
       this.tables.create({
         zone,
-        tableNumber: dto.tableNumber,
+        tableNumber: String(dto.tableNumber),
         seats: dto.seats,
         shape: dto.shape || 'rectangle',
         photoUrl: dto.photoUrl || null,
@@ -38,8 +41,34 @@ export class TablesService {
         height: dto.height ?? 80,
         rotation: dto.rotation ?? 0,
         status: 'free',
+        isVisible: true,
       }),
     );
+  }
+
+  async findOrCreateByNumber(tableNumber: string) {
+    const normalized = String(tableNumber || '').trim();
+    let table = await this.tables.findOne({ where: { tableNumber: normalized }, relations: ['zone'] });
+
+    if (table) return table;
+
+    table = await this.tables.save(
+      this.tables.create({
+        tableNumber: normalized,
+        seats: 4,
+        shape: 'rectangle',
+        photoUrl: null,
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 80,
+        rotation: 0,
+        status: 'free',
+        isVisible: true,
+      }),
+    );
+
+    return this.tables.findOne({ where: { id: table.id }, relations: ['zone'] });
   }
 
   async update(id: string, dto: UpdateTableDto) {
@@ -62,6 +91,14 @@ export class TablesService {
 
   async setStatus(id: string, status: TableStatus) {
     const table = await this.tables.findOne({ where: { id }, relations: ['zone'] });
+    if (!table) throw new NotFoundException('Стіл не знайдено');
+
+    table.status = status;
+    return this.tables.save(table);
+  }
+
+  async setStatusByNumber(tableNumber: string, status: TableStatus) {
+    const table = await this.findOrCreateByNumber(tableNumber);
     if (!table) throw new NotFoundException('Стіл не знайдено');
 
     table.status = status;
