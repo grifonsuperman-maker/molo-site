@@ -13,7 +13,7 @@ import {
 
 import type { FullMapResponse, Restaurant, TableItem } from '../api/types';
 import { bookingsApi } from '../api/bookings';
-import type { TableRuntimeStatus } from '../api/bookings';
+import type { TableRuntimeStatus, BookingPublicStatus } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { useAsyncAction } from '../hooks/useAsyncAction';
@@ -501,6 +501,8 @@ export default function GuestApp() {
   const [isCustomDuration, setIsCustomDuration] = useState(false);
   const [tableNotice, setTableNotice] = useState<TableAvailabilityNotice | null>(null);
   const [dateStatuses, setDateStatuses] = useState<Record<string, TableRuntimeStatus>>({});
+  const [lastBookingId, setLastBookingId] = useState<string | null>(null);
+  const [bookingStatus, setBookingStatus] = useState<BookingPublicStatus | null>(null);
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -524,6 +526,30 @@ export default function GuestApp() {
     setActiveTableNumber(null);
     refreshDateStatuses();
   }, [date, time, durationMinutes, selectedLocationKey]);
+
+
+  useEffect(() => {
+    if (step !== 'success' || !lastBookingId) return;
+
+    let stopped = false;
+
+    async function refreshBookingStatus() {
+      try {
+        const status = await bookingsApi.getPublicStatus(lastBookingId as string);
+        if (!stopped) setBookingStatus(status);
+      } catch {
+        // Якщо статус не вдалось отримати, не ламаємо екран успіху.
+      }
+    }
+
+    refreshBookingStatus();
+    const timer = window.setInterval(refreshBookingStatus, 30000);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [step, lastBookingId]);
 
   const visibleTables = useMemo(() => {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
@@ -745,6 +771,8 @@ export default function GuestApp() {
     );
 
     if (result) {
+      setLastBookingId(result.bookingId);
+      setBookingStatus(null);
       refreshMap();
       refreshDateStatuses();
       setStep('success');
@@ -1386,6 +1414,46 @@ export default function GuestApp() {
             <p className="mt-3 text-white/70">
               Адміністратор отримає заявку та підтвердить бронювання. У заявці буде ваш час {bookingPeriod}.
             </p>
+
+            <div className="mt-5 rounded-[26px] border border-white/10 bg-black/25 p-4 text-left">
+              <p className="text-xs uppercase tracking-[0.18em] text-white/45">Статус заявки</p>
+
+              {!bookingStatus && (
+                <p className="mt-2 text-sm text-white/65">Очікуємо відповідь адміністратора...</p>
+              )}
+
+              {bookingStatus?.status === 'pending' && !bookingStatus.isPendingTooLong && (
+                <p className="mt-2 text-sm text-sky-100">
+                  Заявка очікує підтвердження. Минуло приблизно {bookingStatus.pendingAgeMinutes} хв.
+                </p>
+              )}
+
+              {bookingStatus?.status === 'pending' && bookingStatus.isPendingTooLong && (
+                <div className="mt-3 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-center">
+                  <p className="text-lg font-semibold text-amber-100">
+                    Адміністратор ще не підтвердив бронювання
+                  </p>
+                  <p className="mt-2 text-sm text-white/70">
+                    Заявка очікує вже {bookingStatus.pendingAgeMinutes} хв. Можна подзвонити адміністратору ресторану.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={callAdmin}
+                    className="mt-4 rounded-2xl border border-amber-200/60 bg-amber-300/20 px-5 py-3 text-sm font-bold text-amber-100 transition active:scale-95"
+                  >
+                    Подзвонити адміністратору
+                  </button>
+                </div>
+              )}
+
+              {bookingStatus?.status === 'approved' && (
+                <p className="mt-2 text-sm text-emerald-100">Бронювання підтверджено ✅</p>
+              )}
+
+              {(bookingStatus?.status === 'rejected' || bookingStatus?.status === 'cancelled') && (
+                <p className="mt-2 text-sm text-red-100">На жаль, бронювання не підтверджено. Подзвоніть адміністратору.</p>
+              )}
+            </div>
 
             <div className="mt-6">
               <GoldButton onClick={() => setStep('home')}>
