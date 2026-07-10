@@ -10,6 +10,7 @@ import type { Booking, FullMapResponse, Restaurant, TableItem, TableStatus } fro
 type Tab = 'dashboard' | 'bookings' | 'tables' | 'clients' | 'settings';
 type BookingAction = 'approve' | 'reject' | 'cancel' | 'checkIn' | 'complete' | 'noShow' | 'prepareTable';
 type TableAction = 'free' | 'occupied' | 'cleaning' | 'close' | 'open';
+type AdminTable = TableItem & { isVirtual?: boolean };
 type LocationKey = 'hall' | 'canopy' | 'gazebo' | 'rotang' | 'embankment' | 'glass_gazebo' | 'water_gazebo' | 'other';
 type BookingView = 'locations' | 'all' | 'pending' | 'long_pending' | LocationKey;
 type TableView = 'locations' | 'all' | LocationKey;
@@ -29,6 +30,27 @@ const LOCATIONS: LocationInfo[] = [
   { key: 'glass_gazebo', label: 'Скляна альтанка', description: 'Столи 45–50' },
   { key: 'water_gazebo', label: 'Альтанка на воді', description: 'Столи 100–109' },
   { key: 'other', label: 'Інші столи', description: 'Столи без локації' },
+];
+
+const ALL_TABLE_NUMBERS = [
+  ...Array.from({ length: 14 }, (_, index) => index + 1),
+  ...Array.from({ length: 6 }, (_, index) => index + 15),
+  ...Array.from({ length: 16 }, (_, index) => index + 21),
+  37,
+  38,
+  39,
+  40,
+  41,
+  42,
+  43,
+  44,
+  45,
+  46,
+  47,
+  48,
+  49,
+  50,
+  ...Array.from({ length: 10 }, (_, index) => index + 100),
 ];
 
 const STATUS_LABELS: Record<string, string> = {
@@ -245,6 +267,25 @@ function getTableLocationKey(table: TableItem): LocationKey {
   return getLocationKeyByTableNumber(Number(table.tableNumber || 0));
 }
 
+function createVirtualAdminTable(tableNumber: number): AdminTable {
+  return {
+    id: `virtual-table-${tableNumber}`,
+    tableNumber: String(tableNumber),
+    seats: 4,
+    status: 'free',
+    isVisible: true,
+    shape: 'rectangle',
+    photoUrl: null,
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 80,
+    rotation: 0,
+    zone: null,
+    isVirtual: true,
+  } as AdminTable;
+}
+
 function sortBookings(a: Booking, b: Booking) {
   const timeCompare = String(a.bookingTime || '').localeCompare(String(b.bookingTime || ''));
   if (timeCompare !== 0) return timeCompare;
@@ -331,10 +372,26 @@ export default function AdminPanel() {
     };
   }, [todayBookings, activeBookings, pendingReminders]);
 
-  const tables = useMemo<TableItem[]>(() => {
-    return [...(fullMap?.tables || [])].sort((a, b) => {
-      const statusDiff = statusOrder(a.status) - statusOrder(b.status);
-      if (statusDiff !== 0) return statusDiff;
+  const tables = useMemo<AdminTable[]>(() => {
+    const byNumber = new Map<string, AdminTable>();
+
+    (fullMap?.tables || []).forEach((table) => {
+      byNumber.set(String(table.tableNumber), table as AdminTable);
+    });
+
+    ALL_TABLE_NUMBERS.forEach((tableNumber) => {
+      const key = String(tableNumber);
+      if (!byNumber.has(key)) {
+        byNumber.set(key, createVirtualAdminTable(tableNumber));
+      }
+    });
+
+    return Array.from(byNumber.values()).sort((a, b) => {
+      const locationDiff =
+        LOCATIONS.findIndex((location) => location.key === getTableLocationKey(a)) -
+        LOCATIONS.findIndex((location) => location.key === getTableLocationKey(b));
+
+      if (locationDiff !== 0) return locationDiff;
       return Number(a.tableNumber) - Number(b.tableNumber);
     });
   }, [fullMap]);
@@ -374,7 +431,7 @@ export default function AdminPanel() {
   );
 
   const visibleTables = useMemo(() => {
-    if (tableView === 'locations') return [] as TableItem[];
+    if (tableView === 'locations') return [] as AdminTable[];
     if (tableView === 'all') return tables;
     return tables.filter((table) => getTableLocationKey(table) === tableView);
   }, [tableView, tables]);
@@ -524,18 +581,23 @@ export default function AdminPanel() {
     }
   }
 
-  async function runTableAction(table: TableItem, action: TableAction) {
-    const key = `table:${table.id}:${action}`;
+  async function runTableAction(table: AdminTable, action: TableAction) {
+    const key = `table:${table.tableNumber}:${action}`;
     setBusyAction(key);
     setNotice(null);
     setError(null);
 
     try {
-      if (action === 'free') await tablesApi.free(table.id);
-      if (action === 'occupied') await tablesApi.occupied(table.id);
-      if (action === 'cleaning') await tablesApi.cleaning(table.id);
-      if (action === 'close') await tablesApi.close(table.id);
-      if (action === 'open') await tablesApi.open(table.id);
+      if (table.isVirtual) {
+        const nextStatus: TableStatus = action === 'open' ? 'free' : action === 'close' ? 'closed' : action;
+        await tablesApi.setStatusByNumber(String(table.tableNumber), nextStatus);
+      } else {
+        if (action === 'free') await tablesApi.free(table.id);
+        if (action === 'occupied') await tablesApi.occupied(table.id);
+        if (action === 'cleaning') await tablesApi.cleaning(table.id);
+        if (action === 'close') await tablesApi.close(table.id);
+        if (action === 'open') await tablesApi.open(table.id);
+      }
 
       const nextStatus: TableStatus = action === 'open' ? 'free' : action === 'close' ? 'closed' : action;
 
@@ -1010,11 +1072,11 @@ function TableCard({
   busyAction,
   onAction,
 }: {
-  table: TableItem;
+  table: AdminTable;
   busyAction: string | null;
   onAction: (action: TableAction) => void;
 }) {
-  const busyPrefix = `table:${table.id}:`;
+  const busyPrefix = `table:${table.tableNumber}:`;
   const isBusy = Boolean(busyAction?.startsWith(busyPrefix));
 
   return (
@@ -1023,6 +1085,9 @@ function TableCard({
         <div>
           <p className="text-2xl font-black">Стіл №{table.tableNumber}</p>
           <p className="mt-1 text-sm text-white/45">до {table.seats} гостей</p>
+          {table.isVirtual && (
+            <p className="mt-1 text-xs text-amber-100/70">Стіл буде створено в базі після першої зміни статусу</p>
+          )}
         </div>
         <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/70">
           <span className={`h-2.5 w-2.5 rounded-full ${TABLE_STATUS_DOT[table.status]}`} />
