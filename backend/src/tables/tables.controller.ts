@@ -22,6 +22,12 @@ export class TablesController {
   }
 
   @Public()
+  @Patch('number/:tableNumber/status')
+  statusByNumber(@Param('tableNumber') tableNumber: string, @Body() body: { status: TableStatus }) {
+    return this.service.setStatusByNumber(tableNumber, body.status);
+  }
+
+  @Public()
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateTableDto) {
     return this.service.update(id, dto);
