@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { bookingsApi } from '../api/bookings';
 import { tablesApi } from '../api/tables';
+import { waiterCallsApi } from '../api/waiterCalls';
+import type { WaiterAssignment, WaiterCall } from '../api/waiterCalls';
 import type { Booking } from '../api/types';
 
 type LocationKey =
@@ -105,6 +107,23 @@ function statusClass(status: string) {
   return 'border-white/15 bg-white/5 text-white/70';
 }
 
+function getSavedWaiter() {
+  const existingId = window.localStorage.getItem('molo_waiter_id');
+  const existingName = window.localStorage.getItem('molo_waiter_name');
+
+  if (existingId && existingName) {
+    return { waiterId: existingId, waiterName: existingName };
+  }
+
+  const waiterName = window.prompt('Введи імʼя офіціанта для цього телефону')?.trim() || 'Офіціант';
+  const waiterId = existingId || `waiter_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+  window.localStorage.setItem('molo_waiter_id', waiterId);
+  window.localStorage.setItem('molo_waiter_name', waiterName);
+
+  return { waiterId, waiterName };
+}
+
 function ActionButton({
   children,
   onClick,
@@ -114,7 +133,7 @@ function ActionButton({
   children: string;
   onClick: () => void;
   disabled?: boolean;
-  tone?: 'neutral' | 'amber' | 'cyan' | 'green';
+  tone?: 'neutral' | 'amber' | 'cyan' | 'green' | 'red';
 }) {
   const toneClass =
     tone === 'amber'
@@ -123,7 +142,9 @@ function ActionButton({
         ? 'border-cyan-200/50 bg-cyan-300/12 text-cyan-100 active:bg-cyan-300/20'
         : tone === 'green'
           ? 'border-emerald-200/50 bg-emerald-400/15 text-emerald-100 active:bg-emerald-400/25'
-          : 'border-white/15 bg-white/5 text-white/80 active:bg-white/10';
+          : tone === 'red'
+            ? 'border-red-200/50 bg-red-500/15 text-red-100 active:bg-red-500/25'
+            : 'border-white/15 bg-white/5 text-white/80 active:bg-white/10';
 
   return (
     <button
@@ -147,10 +168,13 @@ function EmptyState({ text }: { text: string }) {
 
 export default function WaiterApp() {
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [calls, setCalls] = useState<WaiterCall[]>([]);
+  const [assignments, setAssignments] = useState<WaiterAssignment[]>([]);
   const [view, setView] = useState<ViewMode>('locations');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [waiter, setWaiter] = useState(() => getSavedWaiter());
 
   const today = useMemo(() => todayInKyiv(), []);
 
@@ -170,6 +194,13 @@ export default function WaiterApp() {
     return activeTodayBookings.filter((booking) => getBookingLocationKey(booking) === view);
   }, [activeTodayBookings, todayBookings, view]);
 
+  const myTableNumbers = useMemo(() => {
+    return new Set(assignments.map((assignment) => String(assignment.tableNumber || '')).filter(Boolean));
+  }, [assignments]);
+
+  const myCalls = useMemo(() => calls.filter((call) => call.waiterId === waiter.waiterId), [calls, waiter.waiterId]);
+  const commonCalls = useMemo(() => calls.filter((call) => !call.waiterId), [calls]);
+
   const totalActiveCount = activeTodayBookings.length;
   const totalAllCount = todayBookings.length;
 
@@ -177,10 +208,18 @@ export default function WaiterApp() {
     try {
       setLoading(true);
       setError(null);
-      const result = await bookingsApi.getToday();
-      setBookings(result);
+
+      const [bookingsResult, callsResult, assignmentsResult] = await Promise.all([
+        bookingsApi.getToday(),
+        waiterCallsApi.list(waiter.waiterId),
+        waiterCallsApi.assignments(waiter.waiterId),
+      ]);
+
+      setBookings(bookingsResult);
+      setCalls(callsResult);
+      setAssignments(assignmentsResult);
     } catch (loadError: any) {
-      setError(loadError?.message || 'Не вдалося завантажити бронювання');
+      setError(loadError?.message || 'Не вдалося завантажити дані офіціанта');
     } finally {
       setLoading(false);
     }
@@ -188,9 +227,9 @@ export default function WaiterApp() {
 
   useEffect(() => {
     load();
-    const interval = window.setInterval(load, 30000);
+    const interval = window.setInterval(load, 15000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [waiter.waiterId]);
 
   async function runAction(actionKey: string, action: () => Promise<unknown>) {
     try {
@@ -205,8 +244,30 @@ export default function WaiterApp() {
     }
   }
 
+  function changeWaiter() {
+    const nextName = window.prompt('Імʼя офіціанта', waiter.waiterName)?.trim();
+    if (!nextName) return;
+
+    const nextWaiter = {
+      waiterId: waiter.waiterId,
+      waiterName: nextName,
+    };
+
+    window.localStorage.setItem('molo_waiter_name', nextName);
+    setWaiter(nextWaiter);
+  }
+
   function markGuestArrived(booking: Booking) {
-    runAction(`${booking.id}:arrived`, () => bookingsApi.checkIn(booking.id));
+    runAction(`${booking.id}:arrived`, async () => {
+      await bookingsApi.checkIn(booking.id);
+      await waiterCallsApi.assign({
+        bookingId: booking.id,
+        tableId: booking.table?.id || null,
+        tableNumber: booking.table?.tableNumber || null,
+        waiterId: waiter.waiterId,
+        waiterName: waiter.waiterName,
+      });
+    });
   }
 
   function markTableCleaning(booking: Booking) {
@@ -218,19 +279,78 @@ export default function WaiterApp() {
     runAction(`${booking.id}:free`, () => bookingsApi.complete(booking.id));
   }
 
+  function acceptCall(call: WaiterCall) {
+    runAction(`call:${call.id}:accept`, () =>
+      waiterCallsApi.accept(call.id, {
+        waiterId: waiter.waiterId,
+        waiterName: waiter.waiterName,
+      }),
+    );
+  }
+
+  function closeCall(call: WaiterCall) {
+    runAction(`call:${call.id}:close`, () => waiterCallsApi.close(call.id));
+  }
+
   function isBusy(booking: Booking, action: string) {
     return busyAction === `${booking.id}:${action}`;
+  }
+
+  function renderCallCard(call: WaiterCall) {
+    const assignedToMe = call.waiterId === waiter.waiterId;
+
+    return (
+      <article key={call.id} className="rounded-[28px] border border-amber-200/35 bg-amber-300/10 p-4 text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.08)]">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-amber-100/65">Виклик офіціанта</p>
+            <h2 className="mt-1 text-2xl font-black">Стіл №{call.tableNumber || '-'}</h2>
+            <p className="mt-1 text-sm text-white/70">
+              Гість: {call.clientName || '-'} · {new Date(call.createdAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}
+            </p>
+            <p className="mt-1 text-xs text-white/50">
+              {assignedToMe ? 'Це твій стіл' : call.waiterName ? `Закріплено: ${call.waiterName}` : 'Загальний виклик без офіціанта'}
+            </p>
+          </div>
+
+          <span className={`w-fit rounded-full border px-3 py-1 text-xs font-semibold ${call.status === 'accepted' ? 'border-emerald-200/35 bg-emerald-400/10 text-emerald-100' : 'border-amber-200/45 bg-black/20 text-amber-100'}`}>
+            {call.status === 'accepted' ? 'Прийнято' : 'Новий'}
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <ActionButton
+            tone="amber"
+            onClick={() => acceptCall(call)}
+            disabled={Boolean(busyAction) || call.status === 'accepted'}
+          >
+            {busyAction === `call:${call.id}:accept` ? 'Зачекайте...' : 'Прийняв'}
+          </ActionButton>
+
+          <ActionButton
+            tone="green"
+            onClick={() => closeCall(call)}
+            disabled={Boolean(busyAction)}
+          >
+            {busyAction === `call:${call.id}:close` ? 'Закриваємо...' : 'Закрити виклик'}
+          </ActionButton>
+        </div>
+      </article>
+    );
   }
 
   function renderBookingCard(booking: Booking) {
     const inactive = !isActiveBooking(booking);
     const hasTable = Boolean(booking.table?.id);
     const location = LOCATIONS.find((item) => item.key === getBookingLocationKey(booking));
+    const isMyTable = myTableNumbers.has(String(booking.table?.tableNumber || ''));
 
     return (
       <article
         key={booking.id}
-        className="rounded-[30px] border border-white/10 bg-neutral-900/90 p-4 shadow-[0_0_34px_rgba(0,0,0,.18)]"
+        className={`rounded-[30px] border p-4 shadow-[0_0_34px_rgba(0,0,0,.18)] ${
+          isMyTable ? 'border-emerald-300/35 bg-emerald-400/10' : 'border-white/10 bg-neutral-900/90'
+        }`}
       >
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -242,6 +362,12 @@ export default function WaiterApp() {
               <span className={`rounded-2xl border px-3 py-1 text-xs font-semibold ${statusClass(booking.status)}`}>
                 {STATUS_LABELS[booking.status] || booking.status}
               </span>
+
+              {isMyTable && (
+                <span className="rounded-2xl border border-emerald-200/40 bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-100">
+                  Мій стіл
+                </span>
+              )}
             </div>
 
             <h2 className="mt-3 text-xl font-semibold text-white">
@@ -298,8 +424,15 @@ export default function WaiterApp() {
               <p className="text-xs uppercase tracking-[0.28em] text-amber-300/75">MOLO Restaurant</p>
               <h1 className="mt-2 text-3xl font-black tracking-tight">Пульт офіціанта</h1>
               <p className="mt-2 text-sm text-neutral-400">
-                Локації, бронювання на сьогодні та швидкі дії по столах.
+                Локації, мої столи та виклики гостей.
               </p>
+              <button
+                type="button"
+                onClick={changeWaiter}
+                className="mt-3 rounded-2xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white/70"
+              >
+                Офіціант: {waiter.waiterName}
+              </button>
             </div>
 
             <button
@@ -322,6 +455,16 @@ export default function WaiterApp() {
               <p className="text-xs uppercase tracking-[0.16em] text-white/45">Всього сьогодні</p>
               <p className="mt-2 text-3xl font-black text-white">{totalAllCount}</p>
             </div>
+
+            <div className="rounded-3xl border border-emerald-300/25 bg-emerald-400/10 p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-white/45">Мої столи</p>
+              <p className="mt-2 text-3xl font-black text-emerald-100">{assignments.length}</p>
+            </div>
+
+            <div className="rounded-3xl border border-amber-300/25 bg-amber-400/10 p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-white/45">Виклики</p>
+              <p className="mt-2 text-3xl font-black text-amber-100">{calls.length}</p>
+            </div>
           </div>
 
           <button
@@ -337,6 +480,19 @@ export default function WaiterApp() {
           <div className="mb-4 rounded-3xl border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100">
             {error}
           </div>
+        )}
+
+        {calls.length > 0 && (
+          <section className="mb-5 space-y-3">
+            <div className="rounded-[28px] border border-amber-200/35 bg-amber-300/10 p-4">
+              <p className="text-xs uppercase tracking-[0.2em] text-amber-100/65">Виклики гостей</p>
+              <h2 className="mt-1 text-2xl font-black text-amber-100">Потрібна увага офіціанта</h2>
+              <p className="mt-1 text-sm text-white/65">Твої виклики показані зверху. Загальні може прийняти будь-який офіціант.</p>
+            </div>
+
+            {myCalls.map((call) => renderCallCard(call))}
+            {commonCalls.map((call) => renderCallCard(call))}
+          </section>
         )}
 
         {view === 'locations' && (
