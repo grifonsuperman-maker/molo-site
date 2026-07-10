@@ -12,6 +12,7 @@ type BookingAction = 'approve' | 'reject' | 'cancel' | 'checkIn' | 'complete' | 
 type TableAction = 'free' | 'occupied' | 'cleaning' | 'close' | 'open';
 type LocationKey = 'hall' | 'canopy' | 'gazebo' | 'rotang' | 'embankment' | 'glass_gazebo' | 'water_gazebo' | 'other';
 type BookingView = 'locations' | 'all' | 'pending' | 'long_pending' | LocationKey;
+type TableView = 'locations' | 'all' | LocationKey;
 
 type LocationInfo = {
   key: LocationKey;
@@ -240,6 +241,10 @@ function getBookingLocationKey(booking: Booking): LocationKey {
   return getLocationKeyByTableNumber(tableNumberValue(booking));
 }
 
+function getTableLocationKey(table: TableItem): LocationKey {
+  return getLocationKeyByTableNumber(Number(table.tableNumber || 0));
+}
+
 function sortBookings(a: Booking, b: Booking) {
   const timeCompare = String(a.bookingTime || '').localeCompare(String(b.bookingTime || ''));
   if (timeCompare !== 0) return timeCompare;
@@ -263,6 +268,7 @@ export default function AdminPanel() {
   const [flashId, setFlashId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [bookingsView, setBookingsView] = useState<BookingView>('locations');
+  const [tableView, setTableView] = useState<TableView>('locations');
 
   async function load() {
     setLoading(true);
@@ -340,6 +346,38 @@ export default function AdminPanel() {
     });
     return initial;
   }, [tables]);
+
+  const tableLocationStats = useMemo(() => {
+    const initial = Object.fromEntries(
+      LOCATIONS.map((location) => [
+        location.key,
+        { total: 0, occupied: 0, cleaning: 0, closed: 0, reserved: 0, pending: 0 },
+      ]),
+    ) as Record<LocationKey, { total: number; occupied: number; cleaning: number; closed: number; reserved: number; pending: number }>;
+
+    tables.forEach((table) => {
+      const key = getTableLocationKey(table);
+      initial[key].total += 1;
+      if (table.status === 'occupied') initial[key].occupied += 1;
+      if (table.status === 'cleaning') initial[key].cleaning += 1;
+      if (table.status === 'closed') initial[key].closed += 1;
+      if (table.status === 'reserved') initial[key].reserved += 1;
+      if (table.status === 'pending') initial[key].pending += 1;
+    });
+
+    return initial;
+  }, [tables]);
+
+  const selectedTableLocation = useMemo(
+    () => LOCATIONS.find((location) => location.key === tableView) || null,
+    [tableView],
+  );
+
+  const visibleTables = useMemo(() => {
+    if (tableView === 'locations') return [] as TableItem[];
+    if (tableView === 'all') return tables;
+    return tables.filter((table) => getTableLocationKey(table) === tableView);
+  }, [tableView, tables]);
 
   const clients = useMemo(() => {
     const map = new Map<string, { name: string; phone: string; bookings: number; guests: number; lastDate: string }>();
@@ -513,6 +551,10 @@ export default function AdminPanel() {
   function openBookingsView(view: BookingView) {
     setBookingsView(view);
     setSearch('');
+  }
+
+  function openTablesView(view: TableView) {
+    setTableView(view);
   }
 
   return (
@@ -760,16 +802,66 @@ export default function AdminPanel() {
       {tab === 'tables' && (
         <section className="space-y-4">
           <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
-            <h2 className="text-2xl font-black">Столи і статуси</h2>
-            <p className="mt-2 text-sm text-white/45">Тут адмін може вручну змінити стан столу на зміні.</p>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-2xl font-black">Столи і статуси</h2>
+                <p className="mt-2 text-sm text-white/45">Столи також розділені по локаціях, щоб не було каші.</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => openTablesView('all')}
+                className="rounded-[24px] border border-amber-200/55 bg-amber-300/15 px-5 py-4 text-sm font-black text-amber-100 shadow-[0_0_30px_rgba(251,191,36,.08)] transition active:scale-[0.99]"
+              >
+                Відкрити всі столи
+              </button>
+            </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {tables.map((table) => (
-              <TableCard key={table.id} table={table} busyAction={busyAction} onAction={(action) => runTableAction(table, action)} />
-            ))}
-            {!tables.length && <EmptyState text="Столи ще не завантажились або їх немає в базі." />}
-          </div>
+          {tableView === 'locations' && (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {LOCATIONS.map((location) => (
+                <TableLocationCard
+                  key={location.key}
+                  location={location}
+                  stats={tableLocationStats[location.key]}
+                  onClick={() => openTablesView(location.key)}
+                />
+              ))}
+            </div>
+          )}
+
+          {tableView !== 'locations' && (
+            <>
+              <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-white/40">
+                      {tableView === 'all' ? 'Усі столи' : selectedTableLocation?.description}
+                    </p>
+                    <h3 className="mt-1 text-2xl font-black">
+                      {tableView === 'all' ? 'Всі столи ресторану' : selectedTableLocation?.label}
+                    </h3>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => openTablesView('locations')}
+                    className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white/80 transition active:scale-[0.98]"
+                  >
+                    Назад до локацій
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {visibleTables.map((table) => (
+                  <TableCard key={table.id} table={table} busyAction={busyAction} onAction={(action) => runTableAction(table, action)} />
+                ))}
+                {!visibleTables.length && <EmptyState text="У цій локації столів немає або вони ще не завантажились." />}
+              </div>
+            </>
+          )}
         </section>
       )}
 
@@ -1101,6 +1193,41 @@ function LocationCard({
         <span className="min-w-12 rounded-2xl border border-amber-200/45 bg-amber-300/15 px-3 py-2 text-center text-xl font-black text-amber-100">{count}</span>
       </div>
       <p className="mt-4 text-sm font-semibold text-amber-100/85">Відкрити локацію</p>
+    </button>
+  );
+}
+
+function TableLocationCard({
+  location,
+  stats,
+  onClick,
+}: {
+  location: LocationInfo;
+  stats: { total: number; occupied: number; cleaning: number; closed: number; reserved: number; pending: number };
+  onClick: () => void;
+}) {
+  const busyCount = stats.occupied + stats.cleaning + stats.closed + stats.reserved + stats.pending;
+
+  return (
+    <button type="button" onClick={onClick} className="rounded-[30px] border border-white/10 bg-neutral-950 p-5 text-left shadow-xl transition active:scale-[0.99]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-xl font-black text-white">{location.label}</h3>
+          <p className="mt-1 text-sm text-white/50">{location.description}</p>
+        </div>
+        <span className="min-w-12 rounded-2xl border border-amber-200/45 bg-amber-300/15 px-3 py-2 text-center text-xl font-black text-amber-100">{stats.total}</span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+        <span className="rounded-2xl border border-red-300/25 bg-red-500/10 px-3 py-2 text-red-100">Зайняті: {stats.occupied}</span>
+        <span className="rounded-2xl border border-cyan-200/25 bg-cyan-300/10 px-3 py-2 text-cyan-100">Готуються: {stats.cleaning}</span>
+        <span className="rounded-2xl border border-orange-300/25 bg-orange-400/10 px-3 py-2 text-orange-100">Бронь: {stats.reserved + stats.pending}</span>
+        <span className="rounded-2xl border border-neutral-300/20 bg-neutral-400/10 px-3 py-2 text-neutral-200">Закриті: {stats.closed}</span>
+      </div>
+
+      <p className="mt-4 text-sm font-semibold text-amber-100/85">
+        {busyCount > 0 ? 'Відкрити столи локації' : 'Всі столи вільні'}
+      </p>
     </button>
   );
 }
