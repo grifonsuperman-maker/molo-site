@@ -28,6 +28,18 @@ export class BookingsController {
     return this.service.getTableStatuses(dto);
   }
 
+  @Public()
+  @Get('pending-reminders')
+  pendingRemindersList() {
+    return this.service.getPendingReminders();
+  }
+
+  @Public()
+  @Get(':id/status')
+  publicStatus(@Param('id') id: string) {
+    return this.service.getPublicStatus(id);
+  }
+
   // Тимчасово відкрито для тестового нижнього перемикача "Адмін".
   // Коли зробимо нормальні /admin /waiter /director з логіном — повернемо Roles.
   @Public()
