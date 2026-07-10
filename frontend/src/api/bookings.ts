@@ -67,6 +67,30 @@ export type TableStatusesResponse = {
   statuses: Record<string, TableRuntimeStatus>;
 };
 
+export type BookingPublicStatus = {
+  bookingId: string;
+  status: Booking['status'];
+  tableNumber: string | null;
+  bookingDate: string;
+  bookingTime: string;
+  bookedFrom: string;
+  bookedTo: string;
+  availableFrom: string;
+  bookedFromLabel: string;
+  bookedToLabel: string;
+  availableFromLabel: string;
+  guestsCount: number;
+  createdAt: string;
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
+  cancelledAt?: string | null;
+  completedAt?: string | null;
+  pendingAgeMinutes: number;
+  pendingReminderMinutes: number;
+  isPendingTooLong: boolean;
+  restaurantPhone: string | null;
+};
+
 type ActionResponse = { message: string };
 
 export const bookingsApi = {
@@ -101,6 +125,8 @@ export const bookingsApi = {
       `/bookings/table-statuses?bookingDate=${encodeURIComponent(params.bookingDate)}&bookingTime=${encodeURIComponent(params.bookingTime)}&durationMinutes=${encodeURIComponent(String(params.durationMinutes || 120))}`,
     ),
 
+  getPublicStatus: (id: string) => api.get<BookingPublicStatus>(`/bookings/${encodeURIComponent(id)}/status`),
+  getPendingReminders: () => api.get<Booking[]>('/bookings/pending-reminders'),
   getToday: () => api.get<Booking[]>('/bookings/today'),
   approve: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/approve`),
   reject: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/reject`),
