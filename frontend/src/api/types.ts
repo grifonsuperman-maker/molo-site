@@ -1,4 +1,5 @@
 export type RestaurantStatus = 'open' | 'booking_closed' | 'closed';
+export type SiteMode = 'day' | 'night' | 'holiday';
 export type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'cleaning' | 'closed';
 export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
 
@@ -6,8 +7,14 @@ export type Restaurant = {
   id: string;
   name: string;
   phone: string | null;
+  adminCanManageZones?: boolean;
+  adminCanManageOnlineBooking?: boolean;
+  adminCanManageRestaurant?: boolean;
+  adminCanChangeSiteMode?: boolean;
+  adminCanEditRestaurantSettings?: boolean;
   menuUrl: string | null;
   status: RestaurantStatus;
+  siteMode?: SiteMode;
   closeMessage: string;
   bookingClosedMessage: string;
   mapWidth?: number;
