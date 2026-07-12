@@ -1,10 +1,18 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+
 export type RestaurantStatus = 'open' | 'booking_closed' | 'closed';
+export type SiteMode = 'day' | 'night' | 'holiday';
+
 @Entity('restaurant')
 export class Restaurant {
   @PrimaryGeneratedColumn('uuid') id: string;
   @Column({ default: 'MOLO Restaurant' }) name: string;
   @Column({ nullable: true }) phone: string | null;
+  @Column({ name: 'admin_can_manage_zones', default: false }) adminCanManageZones: boolean;
+  @Column({ name: 'admin_can_manage_online_booking', default: false }) adminCanManageOnlineBooking: boolean;
+  @Column({ name: 'admin_can_manage_restaurant', default: false }) adminCanManageRestaurant: boolean;
+  @Column({ name: 'admin_can_change_site_mode', default: false }) adminCanChangeSiteMode: boolean;
+  @Column({ name: 'admin_can_edit_restaurant_settings', default: false }) adminCanEditRestaurantSettings: boolean;
   @Column({ type: 'text', nullable: true }) address: string | null;
   @Column({ name: 'menu_url', type: 'text', nullable: true }) menuUrl: string | null;
   @Column({ name: 'logo_url', type: 'text', nullable: true }) logoUrl: string | null;
@@ -13,6 +21,13 @@ export class Restaurant {
   @Column({ name: 'booking_close_time', type: 'time', default: '22:00' }) bookingCloseTime: string;
   @Column({ name: 'close_time', type: 'time', default: '23:00' }) closeTime: string;
   @Column({ type: 'enum', enum: ['open', 'booking_closed', 'closed'], default: 'open' }) status: RestaurantStatus;
+  @Column({
+    name: 'site_mode',
+    type: 'enum',
+    enum: ['day', 'night', 'holiday'],
+    default: 'night',
+  })
+  siteMode: SiteMode;
   @Column({ name: 'close_message', type: 'text', default: 'Ресторан зараз зачинений. Ми працюємо з 10:00 до 23:00.' }) closeMessage: string;
   @Column({ name: 'booking_closed_message', type: 'text', default: 'Онлайн-бронювання завершено. Для бронювання зателефонуйте адміністратору.' }) bookingClosedMessage: string;
   @Column({ name: 'map_width', type: 'numeric', default: 1600 }) mapWidth: number;
