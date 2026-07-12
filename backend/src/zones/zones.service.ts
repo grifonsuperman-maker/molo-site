@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -46,6 +46,12 @@ export class ZonesService {
       bookingCloseTime: '22:00',
       closeTime: '23:00',
       status: 'open',
+      siteMode: 'night',
+      adminCanManageZones: false,
+      adminCanManageOnlineBooking: false,
+      adminCanManageRestaurant: false,
+      adminCanChangeSiteMode: false,
+      adminCanEditRestaurantSettings: false,
       closeMessage: 'Ресторан зараз зачинений.\nМи працюємо з 10:00 до 23:00.',
       bookingClosedMessage:
         'Онлайн-бронювання завершено.\nДля бронювання зателефонуйте адміністратору.',
@@ -56,6 +62,16 @@ export class ZonesService {
     });
 
     return this.restaurants.save(restaurant);
+  }
+
+  private async assertAdminCanManageZones() {
+    const restaurant = await this.restaurant();
+
+    if (!restaurant.adminCanManageZones) {
+      throw new ForbiddenException('Директор не надав право керувати локаціями');
+    }
+
+    return restaurant;
   }
 
   async create(dto: CreateZoneDto) {
@@ -106,6 +122,16 @@ export class ZonesService {
     zone.isClosed = false;
 
     return this.zones.save(zone);
+  }
+
+  async adminClose(id: string) {
+    await this.assertAdminCanManageZones();
+    return this.close(id);
+  }
+
+  async adminOpen(id: string) {
+    await this.assertAdminCanManageZones();
+    return this.open(id);
   }
 
   async remove(id: string) {
