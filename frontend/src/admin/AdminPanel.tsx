@@ -5,7 +5,8 @@ import { bookingsApi } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { tablesApi } from '../api/tables';
-import type { Booking, FullMapResponse, Restaurant, TableItem, TableStatus } from '../api/types';
+import { zonesApi } from '../api/zones';
+import type { Booking, FullMapResponse, Restaurant, SiteMode, TableItem, TableStatus, Zone } from '../api/types';
 
 type Tab = 'dashboard' | 'bookings' | 'tables' | 'clients' | 'settings';
 type BookingAction = 'approve' | 'reject' | 'cancel' | 'checkIn' | 'complete' | 'noShow' | 'prepareTable';
@@ -267,6 +268,59 @@ function getTableLocationKey(table: TableItem): LocationKey {
   return getLocationKeyByTableNumber(Number(table.tableNumber || 0));
 }
 
+const LOCATION_ZONE_ALIASES: Record<LocationKey, string[]> = {
+  hall: ['зал ресторану', 'зал', 'hall'],
+  canopy: ['навіс', 'навес', 'canopy'],
+  gazebo: ['велика альтанка', 'велика бесідка', 'большая беседка', 'gazebo'],
+  rotang: ['ротанг', 'rotang'],
+  embankment: ['набережна', 'набережная', 'embankment'],
+  glass_gazebo: ['скляна альтанка', 'стеклянная беседка', 'glass gazebo'],
+  water_gazebo: ['альтанка на воді', 'беседка на воде', 'water gazebo'],
+  other: [],
+};
+
+function normalizeZoneName(value: string | null | undefined) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[’'`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function namedZoneForLocation(zones: Zone[], key: LocationKey) {
+  const aliases = LOCATION_ZONE_ALIASES[key] || [];
+
+  return (
+    zones.find((zone) => {
+      const normalized = normalizeZoneName(zone.name);
+      return aliases.some((alias) => normalized.includes(normalizeZoneName(alias)));
+    }) || null
+  );
+}
+
+function linkedZoneForLocation(tables: TableItem[], zones: Zone[], key: LocationKey) {
+  const counts = new Map<string, number>();
+
+  tables
+    .filter((table) => getTableLocationKey(table) === key)
+    .forEach((table) => {
+      const zoneId = table.zone?.id;
+      if (!zoneId) return;
+      counts.set(zoneId, (counts.get(zoneId) || 0) + 1);
+    });
+
+  const bestZoneId = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+
+  if (!bestZoneId) return null;
+  return zones.find((zone) => zone.id === bestZoneId) || null;
+}
+
+function siteModeLabel(mode: SiteMode | undefined) {
+  if (mode === 'day') return 'День';
+  if (mode === 'holiday') return 'Свято';
+  return 'Ніч';
+}
+
 function createVirtualAdminTable(tableNumber: number): AdminTable {
   return {
     id: `virtual-table-${tableNumber}`,
@@ -302,6 +356,9 @@ export default function AdminPanel() {
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [fullMap, setFullMap] = useState<FullMapResponse | null>(null);
   const [closeMessage, setCloseMessage] = useState('Ресторан зараз зачинений. Ми працюємо з 10:00 до 23:00.');
+  const [bookingClosedMessage, setBookingClosedMessage] = useState('');
+  const [menuUrl, setMenuUrl] = useState('');
+  const [siteMode, setSiteMode] = useState<SiteMode>('night');
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -331,6 +388,9 @@ export default function AdminPanel() {
       const value = unwrapData<Restaurant>(restaurantResult.value);
       setRestaurant(value);
       if (value?.closeMessage) setCloseMessage(value.closeMessage);
+      setBookingClosedMessage(value?.bookingClosedMessage || '');
+      setMenuUrl(value?.menuUrl || '');
+      setSiteMode(value?.siteMode || 'night');
     }
 
     if (mapResult.status === 'fulfilled') {
@@ -425,6 +485,21 @@ export default function AdminPanel() {
     return initial;
   }, [tables]);
 
+  const locationZones = useMemo(() => {
+    const zones = fullMap?.zones || [];
+    const result = Object.fromEntries(
+      LOCATIONS.map((location) => {
+        const zone =
+          linkedZoneForLocation(tables, zones, location.key) ||
+          namedZoneForLocation(zones, location.key);
+
+        return [location.key, zone];
+      }),
+    ) as Record<LocationKey, Zone | null>;
+
+    return result;
+  }, [fullMap, tables]);
+
   const selectedTableLocation = useMemo(
     () => LOCATIONS.find((location) => location.key === tableView) || null,
     [tableView],
@@ -505,7 +580,9 @@ export default function AdminPanel() {
     });
   }, [bookingSource, search]);
 
-  async function runRestaurantAction(action: 'open' | 'closeBooking' | 'close') {
+  async function runRestaurantAction(
+    action: 'open' | 'openBooking' | 'closeBooking' | 'close',
+  ) {
     const key = `restaurant:${action}`;
     setBusyAction(key);
     setNotice(null);
@@ -513,17 +590,22 @@ export default function AdminPanel() {
 
     try {
       if (action === 'open') {
-        await restaurantApi.open();
+        await restaurantApi.adminOpen();
         setNotice('Ресторан відкрито');
       }
 
+      if (action === 'openBooking') {
+        await restaurantApi.adminOpenBooking();
+        setNotice('Онлайн-бронювання відкрито');
+      }
+
       if (action === 'closeBooking') {
-        await restaurantApi.closeBooking();
+        await restaurantApi.adminCloseBooking();
         setNotice('Онлайн-бронювання закрито');
       }
 
       if (action === 'close') {
-        await restaurantApi.close(closeMessage);
+        await restaurantApi.adminClose(closeMessage);
         setNotice('Ресторан закрито');
       }
 
@@ -541,11 +623,58 @@ export default function AdminPanel() {
     setError(null);
 
     try {
-      await restaurantApi.update({ closeMessage });
-      setNotice('Налаштування збережено');
+      await restaurantApi.adminUpdateSettings({
+        menuUrl: menuUrl.trim() || null,
+        closeMessage: closeMessage.trim(),
+        bookingClosedMessage: bookingClosedMessage.trim(),
+      });
+      setNotice('Дозволені налаштування збережено');
       await load();
     } catch (err: any) {
       setError(err?.message || 'Не вдалося зберегти');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function changeSiteMode(nextMode: SiteMode) {
+    setBusyAction(`site-mode:${nextMode}`);
+    setNotice(null);
+    setError(null);
+
+    try {
+      await restaurantApi.adminSetSiteMode(nextMode);
+      setSiteMode(nextMode);
+      setRestaurant((current) => (current ? { ...current, siteMode: nextMode } : current));
+      setNotice(`Увімкнено режим: ${siteModeLabel(nextMode)}`);
+    } catch (err: any) {
+      setError(err?.message || 'Не вдалося змінити режим сайту');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function changeLocationState(zone: Zone | null, close: boolean, label: string) {
+    if (!zone) {
+      setError(`Локацію «${label}» ще не прив’язано до зони в базі`);
+      return;
+    }
+
+    setBusyAction(`zone:${zone.id}:${close ? 'close' : 'open'}`);
+    setNotice(null);
+    setError(null);
+
+    try {
+      if (close) {
+        await zonesApi.adminClose(zone.id);
+      } else {
+        await zonesApi.adminOpen(zone.id);
+      }
+
+      setNotice(close ? `Локацію «${label}» закрито` : `Локацію «${label}» відкрито`);
+      await load();
+    } catch (err: any) {
+      setError(err?.message || 'Не вдалося змінити стан локації');
     } finally {
       setBusyAction(null);
     }
@@ -630,9 +759,41 @@ export default function AdminPanel() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <RestaurantButton label="Відкрити" tone="green" busy={busyAction === 'restaurant:open'} onClick={() => runRestaurantAction('open')} />
-            <RestaurantButton label="Закрити бронь" tone="yellow" busy={busyAction === 'restaurant:closeBooking'} onClick={() => runRestaurantAction('closeBooking')} />
-            <RestaurantButton label="Закрити ресторан" tone="red" busy={busyAction === 'restaurant:close'} onClick={() => runRestaurantAction('close')} />
+            {restaurant?.adminCanManageRestaurant && (
+              <RestaurantButton
+                label="Відкрити ресторан"
+                tone="green"
+                busy={busyAction === 'restaurant:open'}
+                onClick={() => runRestaurantAction('open')}
+              />
+            )}
+
+            {restaurant?.adminCanManageOnlineBooking && restaurant.status === 'booking_closed' && (
+              <RestaurantButton
+                label="Відкрити бронювання"
+                tone="green"
+                busy={busyAction === 'restaurant:openBooking'}
+                onClick={() => runRestaurantAction('openBooking')}
+              />
+            )}
+
+            {restaurant?.adminCanManageOnlineBooking && restaurant.status !== 'closed' && restaurant.status !== 'booking_closed' && (
+              <RestaurantButton
+                label="Закрити бронювання"
+                tone="yellow"
+                busy={busyAction === 'restaurant:closeBooking'}
+                onClick={() => runRestaurantAction('closeBooking')}
+              />
+            )}
+
+            {restaurant?.adminCanManageRestaurant && (
+              <RestaurantButton
+                label="Закрити ресторан"
+                tone="red"
+                busy={busyAction === 'restaurant:close'}
+                onClick={() => runRestaurantAction('close')}
+              />
+            )}
           </div>
         </div>
 
@@ -887,7 +1048,13 @@ export default function AdminPanel() {
                   key={location.key}
                   location={location}
                   stats={tableLocationStats[location.key]}
+                  zone={locationZones[location.key]}
+                  canManageZone={Boolean(restaurant?.adminCanManageZones)}
+                  busyAction={busyAction}
                   onClick={() => openTablesView(location.key)}
+                  onZoneAction={(close) =>
+                    changeLocationState(locationZones[location.key], close, location.label)
+                  }
                 />
               ))}
             </div>
@@ -958,20 +1125,104 @@ export default function AdminPanel() {
       {tab === 'settings' && (
         <section className="space-y-4">
           <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
-            <h2 className="text-2xl font-black">Налаштування ресторану</h2>
-            <p className="mt-2 text-sm text-white/45">Тут поки основні перемикачі статусу. Повні правила буде змінювати директор.</p>
+            <h2 className="text-2xl font-black">Додаткові права адміністратора</h2>
+            <p className="mt-2 text-sm text-white/45">
+              Бронювання, гості та всі столи доступні за замовчуванням. Нижче показані тільки можливості, які додав Директор.
+            </p>
+
+            <div className="mt-4 flex flex-wrap gap-2 text-xs">
+              <PermissionBadge enabled={Boolean(restaurant?.adminCanManageZones)} label="Локації" />
+              <PermissionBadge enabled={Boolean(restaurant?.adminCanManageOnlineBooking)} label="Онлайн-бронювання" />
+              <PermissionBadge enabled={Boolean(restaurant?.adminCanManageRestaurant)} label="Ресторан" />
+              <PermissionBadge enabled={Boolean(restaurant?.adminCanChangeSiteMode)} label="День / Ніч / Свято" />
+              <PermissionBadge enabled={Boolean(restaurant?.adminCanEditRestaurantSettings)} label="Меню та повідомлення" />
+            </div>
           </div>
 
-          <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
-            <label>
-              <span className="text-sm uppercase tracking-[0.18em] text-white/45">Повідомлення при закритті</span>
-              <textarea value={closeMessage} onChange={(event) => setCloseMessage(event.target.value)} className="mt-3 min-h-32 w-full rounded-2xl border border-white/10 bg-black/30 p-4 outline-none" />
-            </label>
+          {restaurant?.adminCanChangeSiteMode && (
+            <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
+              <p className="text-xs uppercase tracking-[0.18em] text-white/40">Оформлення гостьового сайту</p>
+              <h3 className="mt-1 text-xl font-black">Режим: {siteModeLabel(siteMode)}</h3>
 
-            <button type="button" onClick={saveSettings} disabled={busyAction === 'settings:save'} className="mt-4 rounded-2xl bg-amber-300 px-5 py-4 font-bold text-neutral-950 transition active:scale-95 disabled:opacity-60">
-              {busyAction === 'settings:save' ? 'Зберігаємо...' : '💾 Зберегти'}
-            </button>
-          </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                {([
+                  ['day', 'День', 'Світле денне оформлення'],
+                  ['night', 'Ніч', 'Темне вечірнє оформлення'],
+                  ['holiday', 'Свято', 'Святкове оформлення'],
+                ] as Array<[SiteMode, string, string]>).map(([mode, labelText, description]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => changeSiteMode(mode)}
+                    disabled={busyAction === `site-mode:${mode}`}
+                    className={`rounded-2xl border p-4 text-left transition active:scale-[0.98] disabled:opacity-50 ${
+                      siteMode === mode
+                        ? 'border-amber-200/60 bg-amber-300/15 text-amber-100'
+                        : 'border-white/10 bg-white/[0.03] text-white/70'
+                    }`}
+                  >
+                    <p className="font-black">{labelText}</p>
+                    <p className="mt-1 text-xs opacity-65">{description}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {restaurant?.adminCanEditRestaurantSettings && (
+            <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
+              <p className="text-xs uppercase tracking-[0.18em] text-white/40">Дозволені налаштування</p>
+              <h3 className="mt-1 text-xl font-black">Меню та повідомлення гостям</h3>
+              <p className="mt-2 text-sm text-white/45">
+                Закріплений номер адміністратора змінює тільки Директор.
+              </p>
+
+              <div className="mt-5 grid gap-4">
+                <label>
+                  <span className="text-sm uppercase tracking-[0.18em] text-white/45">Посилання на меню</span>
+                  <input
+                    value={menuUrl}
+                    onChange={(event) => setMenuUrl(event.target.value)}
+                    placeholder="https://..."
+                    className="mt-3 w-full rounded-2xl border border-white/10 bg-black/30 p-4 outline-none"
+                  />
+                </label>
+
+                <label>
+                  <span className="text-sm uppercase tracking-[0.18em] text-white/45">Повідомлення при закритті ресторану</span>
+                  <textarea
+                    value={closeMessage}
+                    onChange={(event) => setCloseMessage(event.target.value)}
+                    className="mt-3 min-h-32 w-full rounded-2xl border border-white/10 bg-black/30 p-4 outline-none"
+                  />
+                </label>
+
+                <label>
+                  <span className="text-sm uppercase tracking-[0.18em] text-white/45">Повідомлення при закритому онлайн-бронюванні</span>
+                  <textarea
+                    value={bookingClosedMessage}
+                    onChange={(event) => setBookingClosedMessage(event.target.value)}
+                    className="mt-3 min-h-32 w-full rounded-2xl border border-white/10 bg-black/30 p-4 outline-none"
+                  />
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={saveSettings}
+                disabled={busyAction === 'settings:save'}
+                className="mt-4 rounded-2xl bg-amber-300 px-5 py-4 font-bold text-neutral-950 transition active:scale-95 disabled:opacity-60"
+              >
+                {busyAction === 'settings:save' ? 'Зберігаємо...' : 'Зберегти дозволені налаштування'}
+              </button>
+            </div>
+          )}
+
+          {!restaurant?.adminCanChangeSiteMode && !restaurant?.adminCanEditRestaurantSettings && (
+            <div className="rounded-[28px] border border-dashed border-white/10 bg-white/[0.02] p-6 text-center text-white/45">
+              Директор поки не додав права на режими сайту або налаштування ресторану.
+            </div>
+          )}
         </section>
       )}
     </div>
@@ -1265,35 +1516,92 @@ function LocationCard({
 function TableLocationCard({
   location,
   stats,
+  zone,
+  canManageZone,
+  busyAction,
   onClick,
+  onZoneAction,
 }: {
   location: LocationInfo;
   stats: { total: number; occupied: number; cleaning: number; closed: number; reserved: number; pending: number };
+  zone: Zone | null;
+  canManageZone: boolean;
+  busyAction: string | null;
   onClick: () => void;
+  onZoneAction: (close: boolean) => void;
 }) {
   const busyCount = stats.occupied + stats.cleaning + stats.closed + stats.reserved + stats.pending;
+  const isClosed = zone?.isClosed === true;
 
   return (
-    <button type="button" onClick={onClick} className="rounded-[30px] border border-white/10 bg-neutral-950 p-5 text-left shadow-xl transition active:scale-[0.99]">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-xl font-black text-white">{location.label}</h3>
-          <p className="mt-1 text-sm text-white/50">{location.description}</p>
+    <div className="rounded-[30px] border border-white/10 bg-neutral-950 p-5 text-left shadow-xl">
+      <button type="button" onClick={onClick} className="w-full text-left transition active:scale-[0.99]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-xl font-black text-white">{location.label}</h3>
+            <p className="mt-1 text-sm text-white/50">{location.description}</p>
+            <span
+              className={`mt-3 inline-flex rounded-full border px-3 py-1 text-xs font-bold ${
+                !zone
+                  ? 'border-white/10 bg-white/5 text-white/45'
+                  : isClosed
+                    ? 'border-red-300/30 bg-red-500/10 text-red-100'
+                    : 'border-emerald-300/30 bg-emerald-400/10 text-emerald-100'
+              }`}
+            >
+              {!zone ? 'Зона не прив’язана' : isClosed ? 'Локація закрита' : 'Локація відкрита'}
+            </span>
+          </div>
+          <span className="min-w-12 rounded-2xl border border-amber-200/45 bg-amber-300/15 px-3 py-2 text-center text-xl font-black text-amber-100">{stats.total}</span>
         </div>
-        <span className="min-w-12 rounded-2xl border border-amber-200/45 bg-amber-300/15 px-3 py-2 text-center text-xl font-black text-amber-100">{stats.total}</span>
-      </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-        <span className="rounded-2xl border border-red-300/25 bg-red-500/10 px-3 py-2 text-red-100">Зайняті: {stats.occupied}</span>
-        <span className="rounded-2xl border border-cyan-200/25 bg-cyan-300/10 px-3 py-2 text-cyan-100">Готуються: {stats.cleaning}</span>
-        <span className="rounded-2xl border border-orange-300/25 bg-orange-400/10 px-3 py-2 text-orange-100">Бронь: {stats.reserved + stats.pending}</span>
-        <span className="rounded-2xl border border-neutral-300/20 bg-neutral-400/10 px-3 py-2 text-neutral-200">Закриті: {stats.closed}</span>
-      </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+          <span className="rounded-2xl border border-red-300/25 bg-red-500/10 px-3 py-2 text-red-100">Зайняті: {stats.occupied}</span>
+          <span className="rounded-2xl border border-cyan-200/25 bg-cyan-300/10 px-3 py-2 text-cyan-100">Готуються: {stats.cleaning}</span>
+          <span className="rounded-2xl border border-orange-300/25 bg-orange-400/10 px-3 py-2 text-orange-100">Бронь: {stats.reserved + stats.pending}</span>
+          <span className="rounded-2xl border border-neutral-300/20 bg-neutral-400/10 px-3 py-2 text-neutral-200">Закриті: {stats.closed}</span>
+        </div>
 
-      <p className="mt-4 text-sm font-semibold text-amber-100/85">
-        {busyCount > 0 ? 'Відкрити столи локації' : 'Всі столи вільні'}
-      </p>
-    </button>
+        <p className="mt-4 text-sm font-semibold text-amber-100/85">
+          {busyCount > 0 ? 'Відкрити столи локації' : 'Всі столи вільні'}
+        </p>
+      </button>
+
+      {canManageZone && (
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-white/10 pt-4">
+          <button
+            type="button"
+            onClick={() => onZoneAction(false)}
+            disabled={!zone || !isClosed || busyAction === `zone:${zone?.id}:open`}
+            className="rounded-2xl border border-emerald-300/30 bg-emerald-400/10 px-4 py-3 text-sm font-black text-emerald-100 disabled:opacity-35"
+          >
+            Відкрити локацію
+          </button>
+          <button
+            type="button"
+            onClick={() => onZoneAction(true)}
+            disabled={!zone || isClosed || busyAction === `zone:${zone?.id}:close`}
+            className="rounded-2xl border border-red-300/30 bg-red-500/10 px-4 py-3 text-sm font-black text-red-100 disabled:opacity-35"
+          >
+            Закрити локацію
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PermissionBadge({ enabled, label }: { enabled: boolean; label: string }) {
+  return (
+    <span
+      className={`rounded-full border px-3 py-2 font-semibold ${
+        enabled
+          ? 'border-emerald-300/30 bg-emerald-400/10 text-emerald-100'
+          : 'border-white/10 bg-white/[0.03] text-white/35'
+      }`}
+    >
+      {enabled ? '✓' : '—'} {label}
+    </span>
   );
 }
 
