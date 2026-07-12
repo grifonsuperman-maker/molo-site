@@ -11,7 +11,7 @@ import {
   Users,
 } from 'lucide-react';
 
-import type { FullMapResponse, Restaurant, TableItem } from '../api/types';
+import type { FullMapResponse, Restaurant, TableItem, Zone } from '../api/types';
 import { bookingsApi } from '../api/bookings';
 import type { TableRuntimeStatus, BookingPublicStatus } from '../api/bookings';
 import { mapApi } from '../api/map';
@@ -78,6 +78,34 @@ type TableAvailabilityNotice = {
   bookedTo: string;
   availableFrom: string;
 };
+
+
+const LOCATION_ZONE_ALIASES: Record<string, string[]> = {
+  hall: ['зал ресторану', 'зал', 'hall'],
+  canopy: ['навіс', 'навес', 'canopy'],
+  gazebo: ['велика альтанка', 'велика бесідка', 'большая беседка', 'gazebo'],
+  rotang: ['ротанг', 'rotang'],
+  embankment: ['набережна', 'набережная', 'embankment'],
+  glass_gazebo: ['скляна альтанка', 'стеклянная беседка', 'glass gazebo'],
+  water_gazebo: ['альтанка на воді', 'беседка на воде', 'water gazebo'],
+};
+
+function normalizeZoneName(value: string | null | undefined) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[’'`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function findLocationZone(zones: Zone[], locationKey: string) {
+  const aliases = LOCATION_ZONE_ALIASES[locationKey] || [];
+
+  return zones.find((zone) => {
+    const normalized = normalizeZoneName(zone.name);
+    return aliases.some((alias) => normalized.includes(normalizeZoneName(alias)));
+  }) || null;
+}
 
 const STATUS_TEXT: Record<TableStatus, string> = {
   free: 'Вільний',
@@ -517,13 +545,29 @@ export default function GuestApp() {
 
   const { loading, error, run } = useAsyncAction();
 
-  useEffect(() => {
-    restaurantApi
-      .get()
-      .then((response) => setRestaurant(getRestaurantFromResponse(response)))
-      .catch(() => {});
+  const siteMode = restaurant?.siteMode || 'night';
 
-    refreshMap();
+  useEffect(() => {
+    let stopped = false;
+
+    function refreshPublicSettings() {
+      restaurantApi
+        .get()
+        .then((response) => {
+          if (!stopped) setRestaurant(getRestaurantFromResponse(response));
+        })
+        .catch(() => {});
+
+      refreshMap();
+    }
+
+    refreshPublicSettings();
+    const timer = window.setInterval(refreshPublicSettings, 15000);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -594,6 +638,10 @@ export default function GuestApp() {
       .catch(() => setDateStatuses({}));
   }
 
+  function isLocationClosed(locationKey: string) {
+    return findLocationZone(map?.zones || [], locationKey)?.isClosed === true;
+  }
+
   function findRealTableByNumber(tableNumber: number) {
     return visibleTables.find(
       (table) => Number(table.tableNumber) === Number(tableNumber),
@@ -608,6 +656,7 @@ export default function GuestApp() {
     const realTable = findRealTableByNumber(tableNumber);
     const runtime = getRuntimeStatus(tableNumber);
 
+    if (isLocationClosed(selectedLocationKey)) return 'closed';
     if (realTable?.zone?.isClosed) return 'closed';
     if (runtime?.status) return normalizeTableStatus(runtime.status);
 
@@ -624,6 +673,7 @@ export default function GuestApp() {
   function getSelectableTableStatus(table: TableItem): TableStatus {
     const runtime = getRuntimeStatus(table.tableNumber);
 
+    if (isLocationClosed(selectedLocationKey)) return 'closed';
     if (table.zone?.isClosed) return 'closed';
     if (runtime?.status) return normalizeTableStatus(runtime.status);
 
@@ -686,6 +736,12 @@ export default function GuestApp() {
   }
 
   function openLocation(locationKey: string) {
+    if (isLocationClosed(locationKey)) {
+      const location = LOCATIONS.find((item) => item.key === locationKey);
+      alert(`${location?.label || 'Локація'} зараз закрита для бронювання.`);
+      return;
+    }
+
     setSelectedLocationKey(locationKey);
     setSelectedTable(null);
     setActiveTableNumber(null);
@@ -743,7 +799,7 @@ export default function GuestApp() {
   function selectTable(table: TableItem) {
     const status = getSelectableTableStatus(table);
 
-    if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
+    if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed || isLocationClosed(selectedLocationKey)) {
       alert(`Стіл недоступний: ${STATUS_TEXT[status]}`);
       return;
     }
@@ -760,9 +816,9 @@ export default function GuestApp() {
 
     setActiveTableNumber(visualTable.number);
 
-    if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed) {
+    if (restaurant?.status === 'booking_closed' || status !== 'free' || table.zone?.isClosed || isLocationClosed(selectedLocationKey)) {
       window.setTimeout(() => {
-        setTableNotice(createTableNotice(table, table.zone?.isClosed ? 'closed' : status));
+        setTableNotice(createTableNotice(table, table.zone?.isClosed || isLocationClosed(selectedLocationKey) ? 'closed' : status));
       }, 220);
       return;
     }
@@ -813,7 +869,7 @@ export default function GuestApp() {
 
   if (restaurant?.status === 'closed') {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-black px-4 text-white">
+      <div className={`molo-mode-${siteMode} flex min-h-[100dvh] items-center justify-center bg-black px-4 text-white`}>
         <section className="molo-panel rounded-[34px] border border-white/10 bg-white/5 p-6 text-center shadow-2xl backdrop-blur-xl">
           <h1 className="text-2xl font-semibold">Ресторан зачинений</h1>
           <p className="mt-3 text-neutral-300">{restaurant.closeMessage}</p>
@@ -823,7 +879,7 @@ export default function GuestApp() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-black text-white">
+    <div className={`molo-mode-${siteMode} min-h-[100dvh] bg-black text-white`}>
       <style>
         {`
           @keyframes moloFadeIn {
@@ -881,8 +937,60 @@ export default function GuestApp() {
           .molo-duration-scroll::-webkit-scrollbar {
             display: none;
           }
+
+
+          .molo-mode-day .molo-bg {
+            filter: brightness(1.18) saturate(1.03) contrast(0.96);
+          }
+
+          .molo-mode-night .molo-bg {
+            filter: brightness(0.82) saturate(0.95) contrast(1.04);
+          }
+
+          .molo-mode-holiday .molo-bg {
+            filter: brightness(0.94) saturate(1.18) contrast(1.06);
+          }
+
+          .molo-mode-overlay {
+            background: linear-gradient(to bottom, rgba(0,0,0,.25), rgba(0,0,0,.25), rgba(0,0,0,.8));
+          }
+
+          .molo-mode-day .molo-mode-overlay {
+            background:
+              linear-gradient(to bottom, rgba(255,244,214,.08), rgba(65,35,10,.08), rgba(28,16,5,.72));
+          }
+
+          .molo-mode-holiday .molo-mode-overlay {
+            background:
+              radial-gradient(circle at 50% 8%, rgba(253,230,138,.18), transparent 34%),
+              linear-gradient(to bottom, rgba(88,12,25,.14), rgba(0,0,0,.22), rgba(38,8,13,.84));
+          }
+
+          .molo-holiday-lights {
+            position: fixed;
+            inset: 0 0 auto 0;
+            z-index: 75;
+            pointer-events: none;
+            height: 18px;
+            background:
+              radial-gradient(circle at 3% 50%, #fde68a 0 4px, transparent 5px),
+              radial-gradient(circle at 10% 50%, #fb7185 0 4px, transparent 5px),
+              radial-gradient(circle at 17% 50%, #86efac 0 4px, transparent 5px),
+              radial-gradient(circle at 24% 50%, #fde68a 0 4px, transparent 5px);
+            background-size: 28% 18px;
+            filter: drop-shadow(0 0 8px rgba(253,230,138,.85));
+            opacity: .95;
+          }
+
+          .molo-site-mode-badge {
+            border: 1px solid rgba(253,230,138,.45);
+            background: rgba(0,0,0,.28);
+            box-shadow: 0 0 28px rgba(251,191,36,.14);
+          }
         `}
       </style>
+
+      {siteMode === 'holiday' && <div className="molo-holiday-lights" aria-hidden="true" />}
 
       {step !== 'home' && (
         <div className="fixed left-4 top-4 z-[80]">
@@ -905,7 +1013,7 @@ export default function GuestApp() {
             draggable={false}
           />
 
-          <div className="absolute inset-0 bg-gradient-to-b from-black/25 via-black/25 to-black/80" />
+          <div className="molo-mode-overlay absolute inset-0" />
 
           <div className="relative flex h-[100dvh] w-full flex-col items-center justify-center px-4 pb-[112px] pt-6 text-center">
             <img
@@ -919,6 +1027,14 @@ export default function GuestApp() {
               <p className="mt-2 text-sm uppercase tracking-[0.55em] text-amber-100/75">
                 Restaurant
               </p>
+
+              <div className="molo-site-mode-badge mx-auto mt-3 w-fit rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-amber-100/90">
+                {siteMode === 'day'
+                  ? 'Денний режим'
+                  : siteMode === 'holiday'
+                    ? 'Святковий режим ✨'
+                    : 'Нічний режим'}
+              </div>
 
               <h1 className="mt-3 text-6xl font-light tracking-[0.24em] text-white sm:text-7xl">
                 MOLO
