@@ -39,6 +39,18 @@ export class ZonesController {
   }
 
   @Public()
+  @Patch(':id/admin/close')
+  adminClose(@Param('id') id: string) {
+    return this.service.adminClose(id);
+  }
+
+  @Public()
+  @Patch(':id/admin/open')
+  adminOpen(@Param('id') id: string) {
+    return this.service.adminOpen(id);
+  }
+
+  @Public()
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.service.remove(id);
