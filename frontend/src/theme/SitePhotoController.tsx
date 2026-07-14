@@ -4,7 +4,8 @@ import { restaurantApi } from '../api/restaurant';
 import type { Restaurant, SiteMode } from '../api/types';
 
 const TITLE_ROTATION_MS = 20 * 60 * 1000;
-const TITLE_STORAGE_KEY = 'molo_title_rotation_v1';
+const TITLE_SYNC_MS = 30 * 1000;
+const TITLE_STORAGE_KEY = 'molo_title_rotation_v2';
 
 const TITLE_IMAGES = [
   '/hero-bg.jpg',
@@ -31,6 +32,11 @@ const NIGHT_TO_DAY = Object.fromEntries(
   Object.entries(DAY_TO_NIGHT).map(([day, night]) => [night, day]),
 ) as Record<string, string>;
 
+type TitleRotationState = {
+  bucket: number;
+  index: number;
+};
+
 function unwrapRestaurant(value: unknown): Restaurant | null {
   if (!value || typeof value !== 'object') return null;
   const payload = value as Restaurant | { data?: Restaurant };
@@ -47,46 +53,116 @@ function imagePath(value: string | null) {
   }
 }
 
-function chooseTitleImage() {
-  const bucket = Math.floor(Date.now() / TITLE_ROTATION_MS);
-  let previousIndex: number | null = null;
+function titleBucket() {
+  return Math.floor(Date.now() / TITLE_ROTATION_MS);
+}
 
+function readTitleState(): TitleRotationState | null {
   try {
-    const saved = JSON.parse(localStorage.getItem(TITLE_STORAGE_KEY) || 'null') as {
-      bucket?: number;
-      index?: number;
-    } | null;
+    const saved = JSON.parse(
+      localStorage.getItem(TITLE_STORAGE_KEY) || 'null',
+    ) as Partial<TitleRotationState> | null;
 
     if (
-      saved &&
-      saved.bucket === bucket &&
-      Number.isInteger(saved.index) &&
-      Number(saved.index) >= 0 &&
-      Number(saved.index) < TITLE_IMAGES.length
+      !saved ||
+      !Number.isInteger(saved.bucket) ||
+      !Number.isInteger(saved.index) ||
+      Number(saved.index) < 0 ||
+      Number(saved.index) >= TITLE_IMAGES.length
     ) {
-      return TITLE_IMAGES[Number(saved.index)];
+      return null;
     }
 
-    if (saved && Number.isInteger(saved.index)) {
-      previousIndex = Number(saved.index);
-    }
+    return {
+      bucket: Number(saved.bucket),
+      index: Number(saved.index),
+    };
   } catch {
-    previousIndex = null;
+    return null;
+  }
+}
+
+function writeTitleState(state: TitleRotationState) {
+  try {
+    localStorage.setItem(TITLE_STORAGE_KEY, JSON.stringify(state));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function seededRandom(seed: number) {
+  let value = seed >>> 0;
+
+  return () => {
+    value = (value + 0x6d2b79f5) >>> 0;
+    let result = value;
+    result = Math.imul(result ^ (result >>> 15), result | 1);
+    result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
+    return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function fallbackTitleIndex(bucket: number) {
+  const count = TITLE_IMAGES.length;
+  const cycle = Math.floor(bucket / count);
+  const position = ((bucket % count) + count) % count;
+
+  const createPermutation = (cycleNumber: number) => {
+    const values = TITLE_IMAGES.map((_, index) => index);
+    const random = seededRandom(cycleNumber + 0x4d4f4c4f);
+
+    for (let index = values.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(random() * (index + 1));
+      [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
+    }
+
+    return values;
+  };
+
+  const current = createPermutation(cycle);
+
+  if (position === 0 && cycle > 0) {
+    const previous = createPermutation(cycle - 1);
+    const previousLast = previous[previous.length - 1];
+
+    if (current[0] === previousLast && current.length > 1) {
+      [current[0], current[1]] = [current[1], current[0]];
+    }
   }
 
+  return current[position] ?? 0;
+}
+
+function chooseTitleImage() {
+  const bucket = titleBucket();
+  const saved = readTitleState();
+
+  if (saved?.bucket === bucket) {
+    return TITLE_IMAGES[saved.index];
+  }
+
+  const previousIndex = saved?.index ?? fallbackTitleIndex(bucket - 1);
   const availableIndexes = TITLE_IMAGES.map((_, index) => index).filter(
     (index) => index !== previousIndex,
   );
-  const index =
+  const randomIndex =
     availableIndexes[Math.floor(Math.random() * availableIndexes.length)] ?? 0;
 
-  try {
-    localStorage.setItem(TITLE_STORAGE_KEY, JSON.stringify({ bucket, index }));
-  } catch {
-    // Сайт продовжить працювати навіть без localStorage.
+  if (writeTitleState({ bucket, index: randomIndex })) {
+    return TITLE_IMAGES[randomIndex];
   }
 
-  return TITLE_IMAGES[index];
+  return TITLE_IMAGES[fallbackTitleIndex(bucket)];
+}
+
+function preloadImages() {
+  const paths = [...TITLE_IMAGES, ...Object.values(DAY_TO_NIGHT)];
+
+  paths.forEach((path) => {
+    const image = new Image();
+    image.src = path;
+  });
 }
 
 function applyPhotos(siteMode: SiteMode, titleImage: string) {
@@ -138,6 +214,10 @@ export default function SitePhotoController() {
   const [titleImage, setTitleImage] = useState(() => chooseTitleImage());
 
   useEffect(() => {
+    preloadImages();
+  }, []);
+
+  useEffect(() => {
     let stopped = false;
 
     const refreshMode = () => {
@@ -160,19 +240,31 @@ export default function SitePhotoController() {
   }, []);
 
   useEffect(() => {
-    let intervalId: number | null = null;
-    const delay = TITLE_ROTATION_MS - (Date.now() % TITLE_ROTATION_MS) + 100;
+    const syncTitle = () => {
+      const nextTitleImage = chooseTitleImage();
+      setTitleImage((current) =>
+        current === nextTitleImage ? current : nextTitleImage,
+      );
+    };
 
-    const timeoutId = window.setTimeout(() => {
-      setTitleImage(chooseTitleImage());
-      intervalId = window.setInterval(() => {
-        setTitleImage(chooseTitleImage());
-      }, TITLE_ROTATION_MS);
-    }, delay);
+    const syncWhenVisible = () => {
+      if (!document.hidden) syncTitle();
+    };
+
+    syncTitle();
+
+    const timer = window.setInterval(syncTitle, TITLE_SYNC_MS);
+    window.addEventListener('focus', syncTitle);
+    window.addEventListener('pageshow', syncTitle);
+    window.addEventListener('storage', syncTitle);
+    document.addEventListener('visibilitychange', syncWhenVisible);
 
     return () => {
-      window.clearTimeout(timeoutId);
-      if (intervalId !== null) window.clearInterval(intervalId);
+      window.clearInterval(timer);
+      window.removeEventListener('focus', syncTitle);
+      window.removeEventListener('pageshow', syncTitle);
+      window.removeEventListener('storage', syncTitle);
+      document.removeEventListener('visibilitychange', syncWhenVisible);
     };
   }, []);
 
