@@ -1,7 +1,21 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 export type RestaurantStatus = 'open' | 'booking_closed' | 'closed';
 export type SiteMode = 'day' | 'night' | 'holiday';
+
+export type HolidayKey =
+  | 'new-year'
+  | 'christmas'
+  | 'valentines'
+  | 'easter'
+  | 'halloween'
+  | 'march-8';
 
 @Entity('restaurant')
 export class Restaurant {
@@ -13,9 +27,6 @@ export class Restaurant {
 
   @Column({ nullable: true })
   phone: string | null;
-
-  @Column({ name: 'admin_phone', nullable: true })
-  adminPhone: string | null;
 
   @Column({ name: 'admin_can_manage_zones', default: false })
   adminCanManageZones: boolean;
@@ -69,6 +80,14 @@ export class Restaurant {
   siteMode: SiteMode;
 
   @Column({
+    name: 'holiday_key',
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+  })
+  holidayKey: HolidayKey | null;
+
+  @Column({
     name: 'close_message',
     type: 'text',
     default: 'Ресторан зараз зачинений. Ми працюємо з 10:00 до 23:00.',
@@ -78,7 +97,8 @@ export class Restaurant {
   @Column({
     name: 'booking_closed_message',
     type: 'text',
-    default: 'Онлайн-бронювання завершено. Для бронювання зателефонуйте адміністратору.',
+    default:
+      'Онлайн-бронювання завершено. Для бронювання зателефонуйте адміністратору.',
   })
   bookingClosedMessage: string;
 
@@ -88,10 +108,18 @@ export class Restaurant {
   @Column({ name: 'map_height', type: 'numeric', default: 1000 })
   mapHeight: number;
 
-  @Column({ name: 'booking_close_notified_at', type: 'date', nullable: true })
+  @Column({
+    name: 'booking_close_notified_at',
+    type: 'date',
+    nullable: true,
+  })
   bookingCloseNotifiedAt: string | null;
 
-  @Column({ name: 'restaurant_close_notified_at', type: 'date', nullable: true })
+  @Column({
+    name: 'restaurant_close_notified_at',
+    type: 'date',
+    nullable: true,
+  })
   restaurantCloseNotifiedAt: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
