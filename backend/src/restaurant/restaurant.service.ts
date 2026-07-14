@@ -8,6 +8,7 @@ import {
   SiteMode,
 } from './entities/restaurant.entity';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
+import { UpdateThemeDto } from './dto/update-theme.dto';
 import { CloseRestaurantDto } from './dto/close-restaurant.dto';
 import { LogsService } from '../logs/logs.service';
 
@@ -72,6 +73,63 @@ export class RestaurantService {
 
   getSettings() {
     return this.getRestaurant();
+  }
+
+  async getTheme() {
+    const restaurant = await this.getRestaurant();
+
+    return {
+      siteMode: restaurant.siteMode,
+      holidayKey: restaurant.holidayKey,
+    };
+  }
+
+  private async applyTheme(
+    restaurant: Restaurant,
+    dto: UpdateThemeDto,
+    logMessage: string,
+  ) {
+    restaurant.siteMode = dto.siteMode;
+
+    if (dto.holidayKey !== undefined) {
+      restaurant.holidayKey = dto.holidayKey;
+    }
+
+    await this.repo.save(restaurant);
+
+    await this.logs.create(logMessage, null, {
+      siteMode: restaurant.siteMode,
+      holidayKey: restaurant.holidayKey,
+    });
+
+    return {
+      message: 'Оформлення сайту оновлено',
+      siteMode: restaurant.siteMode,
+      holidayKey: restaurant.holidayKey,
+    };
+  }
+
+  async updateTheme(dto: UpdateThemeDto) {
+    const restaurant = await this.getRestaurant();
+
+    return this.applyTheme(
+      restaurant,
+      dto,
+      'Директор змінив оформлення сайту',
+    );
+  }
+
+  async adminUpdateTheme(dto: UpdateThemeDto) {
+    const restaurant = await this.assertAdminPermission(
+      'adminCanChangeSiteMode',
+      'Директор не надав право змінювати оформлення сайту',
+    );
+
+    return this.applyTheme(
+      restaurant,
+      dto,
+      'Адміністратор змінив оформлення сайту',
+    );
   }
 
   private async assertAdminPermission(permission: AdminPermissionKey, message: string) {
