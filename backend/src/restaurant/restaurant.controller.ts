@@ -71,7 +71,10 @@ export class RestaurantController {
   @Public()
   @Patch('admin/site-mode')
   adminChangeSiteMode(@Body() dto: UpdateRestaurantDto) {
-    return this.service.adminChangeSiteMode(dto.siteMode || 'night');
+    return this.service.adminChangeSiteMode(
+      dto.siteMode || 'night',
+      dto.holidayKey,
+    );
   }
 
   @Public()
