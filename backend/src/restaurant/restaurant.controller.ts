@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Patch, Post } from '@nestjs/common';
 import { RestaurantService } from './restaurant.service';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
+import { UpdateThemeDto } from './dto/update-theme.dto';
 import { CloseRestaurantDto } from './dto/close-restaurant.dto';
 import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('restaurant')
 export class RestaurantController {
@@ -12,6 +14,24 @@ export class RestaurantController {
   @Get()
   getSettings() {
     return this.service.getSettings();
+  }
+
+  @Public()
+  @Get('theme')
+  getTheme() {
+    return this.service.getTheme();
+  }
+
+  @Roles('owner')
+  @Patch('theme')
+  updateTheme(@Body() dto: UpdateThemeDto) {
+    return this.service.updateTheme(dto);
+  }
+
+  @Roles('admin')
+  @Patch('admin/theme')
+  adminUpdateTheme(@Body() dto: UpdateThemeDto) {
+    return this.service.adminUpdateTheme(dto);
   }
 
   @Public()
