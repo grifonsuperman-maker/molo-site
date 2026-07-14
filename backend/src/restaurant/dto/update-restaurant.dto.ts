@@ -17,5 +17,26 @@ export class UpdateRestaurantDto {
   @IsOptional() @IsString() closeTime?: string;
   @IsOptional() @IsString() closeMessage?: string;
   @IsOptional() @IsString() bookingClosedMessage?: string;
-  @IsOptional() @IsIn(['day', 'night', 'holiday']) siteMode?: 'day' | 'night' | 'holiday';
+  @IsOptional()
+  @IsIn(['day', 'night', 'holiday'])
+  siteMode?: 'day' | 'night' | 'holiday';
+
+  @IsOptional()
+  @IsIn([
+    'new-year',
+    'christmas',
+    'valentines',
+    'easter',
+    'halloween',
+    'march-8',
+    null,
+  ])
+  holidayKey?:
+    | 'new-year'
+    | 'christmas'
+    | 'valentines'
+    | 'easter'
+    | 'halloween'
+    | 'march-8'
+    | null;
 }
