@@ -2,7 +2,11 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { Restaurant, SiteMode } from './entities/restaurant.entity';
+import {
+  HolidayKey,
+  Restaurant,
+  SiteMode,
+} from './entities/restaurant.entity';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { CloseRestaurantDto } from './dto/close-restaurant.dto';
 import { LogsService } from '../logs/logs.service';
@@ -49,6 +53,7 @@ export class RestaurantService {
       closeTime: '23:00',
       status: 'open',
       siteMode: 'night',
+      holidayKey: null,
       closeMessage: 'Ресторан зараз зачинений.\nМи працюємо з 10:00 до 23:00.',
       bookingClosedMessage:
         'Онлайн-бронювання завершено.\nДля бронювання зателефонуйте адміністратору.',
@@ -237,19 +242,28 @@ export class RestaurantService {
     };
   }
 
-  async adminChangeSiteMode(siteMode: SiteMode) {
+  async adminChangeSiteMode(siteMode: SiteMode, holidayKey?: HolidayKey | null) {
     const restaurant = await this.assertAdminPermission(
       'adminCanChangeSiteMode',
       'Директор не надав право змінювати режим сайту',
     );
 
     restaurant.siteMode = siteMode;
+
+    if (holidayKey !== undefined) {
+      restaurant.holidayKey = holidayKey;
+    }
+
     await this.repo.save(restaurant);
-    await this.logs.create('Адміністратор змінив режим сайту', null, { siteMode });
+    await this.logs.create('Адміністратор змінив режим сайту', null, {
+      siteMode: restaurant.siteMode,
+      holidayKey: restaurant.holidayKey,
+    });
 
     return {
       message: 'Режим сайту змінено',
       siteMode: restaurant.siteMode,
+      holidayKey: restaurant.holidayKey,
     };
   }
 
