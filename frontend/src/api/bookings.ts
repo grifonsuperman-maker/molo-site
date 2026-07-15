@@ -43,7 +43,6 @@ export type BookingAvailability = {
   };
 };
 
-
 export type TableRuntimeStatus = {
   tableId: string;
   tableNumber: string;
@@ -91,6 +90,18 @@ export type BookingPublicStatus = {
   restaurantPhone: string | null;
 };
 
+export type BookingStats = {
+  today: string;
+  total: number;
+  todayTotal: number;
+  pendingToday: number;
+  overduePendingToday: number;
+  archivedTotal: number;
+  occupiedTables: number;
+  cleaningTables: number;
+  pendingReminderMinutes: number;
+};
+
 type ActionResponse = { message: string };
 
 export const bookingsApi = {
@@ -125,13 +136,51 @@ export const bookingsApi = {
       `/bookings/table-statuses?bookingDate=${encodeURIComponent(params.bookingDate)}&bookingTime=${encodeURIComponent(params.bookingTime)}&durationMinutes=${encodeURIComponent(String(params.durationMinutes || 120))}`,
     ),
 
-  getPublicStatus: (id: string) => api.get<BookingPublicStatus>(`/bookings/${encodeURIComponent(id)}/status`),
-  getPendingReminders: () => api.get<Booking[]>('/bookings/pending-reminders'),
-  getToday: () => api.get<Booking[]>('/bookings/today'),
-  approve: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/approve`),
-  reject: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/reject`),
-  cancel: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/cancel`),
-  noShow: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/no-show`),
-  checkIn: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/check-in`),
-  complete: (id: string) => api.patch<ActionResponse>(`/bookings/${id}/complete`),
+  getPublicStatus: (id: string) =>
+    api.get<BookingPublicStatus>(`/bookings/${encodeURIComponent(id)}/status`),
+
+  getPendingReminders: () =>
+    api.get<Booking[]>('/bookings/pending-reminders'),
+
+  getToday: () =>
+    api.get<Booking[]>('/bookings/today'),
+
+  getByDate: (date: string) =>
+    api.get<Booking[]>(`/bookings/by-date?date=${encodeURIComponent(date)}`),
+
+  getArchive: (params?: { date?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+
+    if (params?.date) {
+      search.set('date', params.date);
+    }
+
+    if (params?.limit) {
+      search.set('limit', String(params.limit));
+    }
+
+    const query = search.toString();
+    return api.get<Booking[]>(`/bookings/archive${query ? `?${query}` : ''}`);
+  },
+
+  getStats: () =>
+    api.get<BookingStats>('/bookings/stats'),
+
+  approve: (id: string) =>
+    api.patch<ActionResponse>(`/bookings/${id}/approve`),
+
+  reject: (id: string) =>
+    api.patch<ActionResponse>(`/bookings/${id}/reject`),
+
+  cancel: (id: string) =>
+    api.patch<ActionResponse>(`/bookings/${id}/cancel`),
+
+  noShow: (id: string) =>
+    api.patch<ActionResponse>(`/bookings/${id}/no-show`),
+
+  checkIn: (id: string) =>
+    api.patch<ActionResponse>(`/bookings/${id}/check-in`),
+
+  complete: (id: string) =>
+    api.patch<ActionResponse>(`/bookings/${id}/complete`),
 };
