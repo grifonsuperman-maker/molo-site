@@ -19,6 +19,7 @@ import { restaurantApi } from '../api/restaurant';
 import { waiterCallsApi } from '../api/waiterCalls';
 import type { GuestWaiterCallStatus } from '../api/waiterCalls';
 import { useAsyncAction } from '../hooks/useAsyncAction';
+import { usePersistentState } from '../hooks/usePersistentState';
 
 const FALLBACK_MENU =
   'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
@@ -517,11 +518,17 @@ function ClickZone({ table, onPick }: { table: VisualTable; onPick: (table: Visu
 }
 
 export default function GuestApp() {
-  const [step, setStep] = useState<Step>('home');
+  const [step, setStep] = usePersistentState<Step>('molo:guest:step', 'home');
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [map, setMap] = useState<FullMapResponse | null>(null);
-  const [selectedLocationKey, setSelectedLocationKey] = useState('hall');
-  const [selectedTable, setSelectedTable] = useState<TableItem | null>(null);
+  const [selectedLocationKey, setSelectedLocationKey] = usePersistentState(
+    'molo:guest:selected-location',
+    'hall',
+  );
+  const [selectedTable, setSelectedTable] = usePersistentState<TableItem | null>(
+    'molo:guest:selected-table',
+    null,
+  );
   const [activeTableNumber, setActiveTableNumber] = useState<number | null>(null);
 
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -531,7 +538,10 @@ export default function GuestApp() {
   const [isCustomDuration, setIsCustomDuration] = useState(false);
   const [tableNotice, setTableNotice] = useState<TableAvailabilityNotice | null>(null);
   const [dateStatuses, setDateStatuses] = useState<Record<string, TableRuntimeStatus>>({});
-  const [lastBookingId, setLastBookingId] = useState<string | null>(null);
+  const [lastBookingId, setLastBookingId] = usePersistentState<string | null>(
+    'molo:guest:last-booking-id',
+    null,
+  );
   const [bookingStatus, setBookingStatus] = useState<BookingPublicStatus | null>(null);
   const [waiterCallStatus, setWaiterCallStatus] = useState<GuestWaiterCallStatus | null>(null);
   const [waiterCallBusy, setWaiterCallBusy] = useState(false);
