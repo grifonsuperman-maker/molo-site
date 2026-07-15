@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 
 import { restaurantApi } from '../api/restaurant';
 import type { Restaurant, SiteMode } from '../api/types';
@@ -21,6 +21,7 @@ function modeLabel(mode: SiteMode | undefined) {
 
 export default function SiteModeSwitch({ role }: Props) {
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,10 +33,17 @@ export default function SiteModeSwitch({ role }: Props) {
       restaurantApi
         .get()
         .then((response) => {
-          if (!stopped) setRestaurant(unwrapRestaurant(response));
+          if (stopped) return;
+          setRestaurant(unwrapRestaurant(response));
+          setError(null);
         })
         .catch((loadError: any) => {
-          if (!stopped) setError(loadError?.message || 'Не вдалося завантажити режим сайту');
+          if (!stopped) {
+            setError(loadError?.message || 'Не вдалося завантажити режим сайту');
+          }
+        })
+        .finally(() => {
+          if (!stopped) setLoaded(true);
         });
     };
 
@@ -48,7 +56,7 @@ export default function SiteModeSwitch({ role }: Props) {
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const hideOldModeButtons = () => {
       document.querySelectorAll<HTMLElement>('h2, h3').forEach((heading) => {
         const text = String(heading.textContent || '').trim();
@@ -66,31 +74,40 @@ export default function SiteModeSwitch({ role }: Props) {
     };
 
     hideOldModeButtons();
+
     const observer = new MutationObserver(hideOldModeButtons);
     observer.observe(document.body, { childList: true, subtree: true });
 
     return () => {
       observer.disconnect();
-      document.querySelectorAll<HTMLElement>('[data-molo-legacy-mode="true"]').forEach((block) => {
-        block.style.removeProperty('display');
-        delete block.dataset.moloLegacyMode;
-      });
+
+      document
+        .querySelectorAll<HTMLElement>('[data-molo-legacy-mode="true"]')
+        .forEach((block) => {
+          block.style.removeProperty('display');
+          delete block.dataset.moloLegacyMode;
+        });
     };
   }, [role]);
 
-  const adminAllowed = Boolean(restaurant?.adminCanChangeSiteMode);
-
-  if (role === 'admin' && restaurant && !adminAllowed) {
+  if (!loaded || !restaurant) {
     return null;
   }
 
-  const currentMode = restaurant?.siteMode || 'day';
+  const adminAllowed = Boolean(restaurant.adminCanChangeSiteMode);
+
+  if (role === 'admin' && !adminAllowed) {
+    return null;
+  }
+
+  const currentMode = restaurant.siteMode || 'day';
   const isNight = currentMode === 'night';
 
   async function toggleMode() {
     if (busy) return;
 
     const nextMode: SiteMode = isNight ? 'day' : 'night';
+
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -121,9 +138,11 @@ export default function SiteModeSwitch({ role }: Props) {
             <p className="text-xs uppercase tracking-[0.22em] text-amber-100/55">
               Оформлення гостьового сайту
             </p>
+
             <h2 className="mt-1 text-xl font-black text-white">
               Перемикач День / Ніч
             </h2>
+
             <p className="mt-1 text-sm text-white/45">
               Зараз увімкнено: {modeLabel(currentMode)}
             </p>
@@ -132,7 +151,7 @@ export default function SiteModeSwitch({ role }: Props) {
           <button
             type="button"
             onClick={toggleMode}
-            disabled={busy || !restaurant}
+            disabled={busy}
             aria-label="Перемкнути денний або нічний режим"
             className="relative grid h-14 w-full max-w-[260px] grid-cols-2 overflow-hidden rounded-full border border-amber-200/35 bg-black p-1 text-sm font-black text-white/55 transition active:scale-[0.98] disabled:opacity-50 sm:w-[260px]"
           >
@@ -141,10 +160,20 @@ export default function SiteModeSwitch({ role }: Props) {
                 isNight ? 'translate-x-full' : 'translate-x-0'
               }`}
             />
-            <span className={`relative z-10 flex items-center justify-center ${!isNight ? 'text-neutral-950' : ''}`}>
+
+            <span
+              className={`relative z-10 flex items-center justify-center ${
+                !isNight ? 'text-neutral-950' : ''
+              }`}
+            >
               День
             </span>
-            <span className={`relative z-10 flex items-center justify-center ${isNight ? 'text-neutral-950' : ''}`}>
+
+            <span
+              className={`relative z-10 flex items-center justify-center ${
+                isNight ? 'text-neutral-950' : ''
+              }`}
+            >
               Ніч
             </span>
           </button>
