@@ -5,6 +5,7 @@ import { tablesApi } from '../api/tables';
 import { waiterCallsApi } from '../api/waiterCalls';
 import type { WaiterAssignment, WaiterCall } from '../api/waiterCalls';
 import type { Booking } from '../api/types';
+import { usePersistentState } from '../hooks/usePersistentState';
 
 type LocationKey =
   | 'hall'
@@ -170,7 +171,7 @@ export default function WaiterApp() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [calls, setCalls] = useState<WaiterCall[]>([]);
   const [assignments, setAssignments] = useState<WaiterAssignment[]>([]);
-  const [view, setView] = useState<ViewMode>('locations');
+  const [view, setView] = usePersistentState<ViewMode>('molo_waiter_view', 'locations');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
