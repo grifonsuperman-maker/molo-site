@@ -81,6 +81,29 @@ type TableAvailabilityNotice = {
   availableFrom: string;
 };
 
+const ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:active-booking-id';
+const LEGACY_ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:last-booking-id';
+
+function readStoredBookingId(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_BOOKING_STORAGE_KEY);
+    if (stored) return stored;
+
+    const legacyStored = window.sessionStorage.getItem(LEGACY_ACTIVE_BOOKING_STORAGE_KEY);
+    if (!legacyStored) return null;
+
+    const parsed = JSON.parse(legacyStored);
+    if (typeof parsed !== 'string' || !parsed) return null;
+
+    window.localStorage.setItem(ACTIVE_BOOKING_STORAGE_KEY, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 
 const LOCATION_ZONE_ALIASES: Record<string, string[]> = {
   hall: ['зал ресторану', 'зал', 'hall'],
@@ -528,10 +551,7 @@ export default function GuestApp() {
   const [isCustomDuration, setIsCustomDuration] = useState(false);
   const [tableNotice, setTableNotice] = useState<TableAvailabilityNotice | null>(null);
   const [dateStatuses, setDateStatuses] = useState<Record<string, TableRuntimeStatus>>({});
-  const [lastBookingId, setLastBookingId] = usePersistentState<string | null>(
-    'molo:guest:last-booking-id',
-    null,
-  );
+  const [lastBookingId, setLastBookingId] = useState<string | null>(readStoredBookingId);
   const [bookingStatus, setBookingStatus] = useState<BookingPublicStatus | null>(null);
   const [waiterCallStatus, setWaiterCallStatus] = useState<GuestWaiterCallStatus | null>(null);
   const [waiterCallBusy, setWaiterCallBusy] = useState(false);
@@ -548,14 +568,28 @@ export default function GuestApp() {
   const siteMode = restaurant?.siteMode || 'night';
 
   useEffect(() => {
+    try {
+      if (lastBookingId) {
+        window.localStorage.setItem(ACTIVE_BOOKING_STORAGE_KEY, lastBookingId);
+      } else {
+        window.localStorage.removeItem(ACTIVE_BOOKING_STORAGE_KEY);
+      }
+
+      window.sessionStorage.removeItem(LEGACY_ACTIVE_BOOKING_STORAGE_KEY);
+    } catch {
+      // Бронювання продовжує працювати, навіть якщо сховище браузера недоступне.
+    }
+  }, [lastBookingId]);
+
+  useEffect(() => {
     if (step === 'form' && !selectedTable) {
       setStep('map');
     }
 
-    if (step === 'success' && !lastBookingId) {
+    if (step === 'success' && !lastBookingId && !bookingStatus) {
       setStep('home');
     }
-  }, [step, selectedTable, lastBookingId, setStep]);
+  }, [step, selectedTable, lastBookingId, bookingStatus, setStep]);
 
   useEffect(() => {
     let stopped = false;
@@ -588,16 +622,28 @@ export default function GuestApp() {
 
 
   useEffect(() => {
-    if (step !== 'success' || !lastBookingId) return;
+    if (!lastBookingId) return;
 
     let stopped = false;
 
     async function refreshBookingStatus() {
       try {
         const status = await bookingsApi.getPublicStatus(lastBookingId as string);
-        if (!stopped) setBookingStatus(status);
+        if (stopped) return;
+
+        setBookingStatus(status);
+
+        if (
+          status.status === 'completed' ||
+          status.status === 'cancelled' ||
+          status.status === 'rejected'
+        ) {
+          setWaiterCallStatus(null);
+          setLastBookingId(null);
+          return;
+        }
       } catch {
-        // Якщо статус не вдалось отримати, не ламаємо екран успіху.
+        // Тимчасова помилка перевірки не видаляє активну заявку гостя.
       }
 
       try {
@@ -615,7 +661,7 @@ export default function GuestApp() {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [step, lastBookingId]);
+  }, [lastBookingId]);
 
   const visibleTables = useMemo(() => {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
@@ -628,6 +674,23 @@ export default function GuestApp() {
   const bookingEndTime = useMemo(() => addMinutesToTime(time, durationMinutes), [time, durationMinutes]);
   const availableAfterCleanup = useMemo(() => addMinutesToTime(bookingEndTime, CLEANUP_MINUTES), [bookingEndTime]);
   const bookingPeriod = `${time} — ${bookingEndTime}`;
+  const activeBookingPeriod = bookingStatus
+    ? `${bookingStatus.bookedFromLabel} — ${bookingStatus.bookedToLabel}`
+    : bookingPeriod;
+  const activeBookingTableNumber =
+    bookingStatus?.tableNumber || selectedTable?.tableNumber || null;
+  const pendingTooLong =
+    bookingStatus?.status === 'pending' &&
+    (bookingStatus.isPendingTooLong || bookingStatus.pendingAgeMinutes >= 15);
+  const activeBookingStatusText = !bookingStatus
+    ? 'Перевіряємо статус...'
+    : bookingStatus.status === 'pending'
+      ? pendingTooLong
+        ? 'Очікує підтвердження понад 15 хвилин'
+        : 'Очікує підтвердження'
+      : bookingStatus.status === 'approved'
+        ? 'Бронювання підтверджено'
+        : 'Статус заявки оновлено';
 
   function refreshMap() {
     mapApi
@@ -715,8 +778,10 @@ export default function GuestApp() {
   }
 
   function callAdmin() {
-    if (restaurant?.phone) {
-      window.location.href = `tel:${restaurant.phone}`;
+    const phone = bookingStatus?.restaurantPhone || restaurant?.phone;
+
+    if (phone) {
+      window.location.href = `tel:${phone}`;
       return;
     }
 
@@ -1085,6 +1150,55 @@ export default function GuestApp() {
             Назад
           </button>
         </div>
+      )}
+
+      {lastBookingId && step !== 'success' && (
+        <aside
+          className={`fixed left-1/2 z-[95] w-[calc(100%-24px)] max-w-md -translate-x-1/2 ${
+            step === 'home' ? 'top-3' : 'top-16'
+          }`}
+          aria-live="polite"
+        >
+          <div className="rounded-[24px] border border-amber-200/45 bg-neutral-950/95 p-3 shadow-2xl backdrop-blur-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 text-left">
+                <p className="truncate text-sm font-black text-white">
+                  Ваша заявка
+                  {activeBookingTableNumber ? ` · Стіл №${activeBookingTableNumber}` : ''}
+                </p>
+                <p
+                  className={`mt-1 text-xs font-semibold ${
+                    pendingTooLong
+                      ? 'text-amber-100'
+                      : bookingStatus?.status === 'approved'
+                        ? 'text-emerald-200'
+                        : 'text-sky-200'
+                  }`}
+                >
+                  {activeBookingStatusText}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setStep('success')}
+                className="shrink-0 rounded-2xl border border-amber-200/55 bg-amber-300/15 px-3 py-2 text-xs font-black text-amber-100 transition active:scale-95"
+              >
+                Відкрити заявку
+              </button>
+            </div>
+
+            {pendingTooLong && (
+              <button
+                type="button"
+                onClick={callAdmin}
+                className="mt-3 w-full rounded-2xl border border-amber-200/60 bg-amber-300/20 px-4 py-3 text-sm font-black text-amber-100 transition active:scale-[0.98]"
+              >
+                Зателефонувати Адміністратору
+              </button>
+            )}
+          </div>
+        </aside>
       )}
 
       {step === 'home' && (
@@ -1589,7 +1703,7 @@ export default function GuestApp() {
             <h1 className="text-2xl font-semibold">Заявку надіслано</h1>
 
             <p className="mt-3 text-white/70">
-              Адміністратор отримає заявку та підтвердить бронювання. У заявці буде ваш час {bookingPeriod}.
+              Адміністратор отримає заявку та підтвердить бронювання. У заявці буде ваш час {activeBookingPeriod}.
             </p>
 
             <div className="mt-5 rounded-[26px] border border-white/10 bg-black/25 p-4 text-left">
@@ -1599,13 +1713,13 @@ export default function GuestApp() {
                 <p className="mt-2 text-sm text-white/65">Очікуємо відповідь адміністратора...</p>
               )}
 
-              {bookingStatus?.status === 'pending' && !bookingStatus.isPendingTooLong && (
+              {bookingStatus?.status === 'pending' && !pendingTooLong && (
                 <p className="mt-2 text-sm text-sky-100">
                   Заявка очікує підтвердження. Минуло приблизно {bookingStatus.pendingAgeMinutes} хв.
                 </p>
               )}
 
-              {bookingStatus?.status === 'pending' && bookingStatus.isPendingTooLong && (
+              {bookingStatus?.status === 'pending' && pendingTooLong && (
                 <div className="mt-3 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-center">
                   <p className="text-lg font-semibold text-amber-100">
                     Адміністратор ще не підтвердив бронювання
@@ -1618,7 +1732,7 @@ export default function GuestApp() {
                     onClick={callAdmin}
                     className="mt-4 rounded-2xl border border-amber-200/60 bg-amber-300/20 px-5 py-3 text-sm font-bold text-amber-100 transition active:scale-95"
                   >
-                    Подзвонити адміністратору
+                    Зателефонувати Адміністратору
                   </button>
                 </div>
               )}
