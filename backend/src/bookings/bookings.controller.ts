@@ -34,18 +34,45 @@ export class BookingsController {
     return this.service.getPendingReminders();
   }
 
-  @Public()
-  @Get(':id/status')
-  publicStatus(@Param('id') id: string) {
-    return this.service.getPublicStatus(id);
-  }
-
-  // Тимчасово відкрито для тестового нижнього перемикача "Адмін".
-  // Коли зробимо нормальні /admin /waiter /director з логіном — повернемо Roles.
+  // Тимчасово відкрито для тестових панелей.
+  // Після впровадження авторизації повернемо перевірку ролей.
   @Public()
   @Get('today')
   today() {
     return this.service.getToday();
+  }
+
+  @Public()
+  @Get('by-date')
+  byDate(@Query('date') date: string) {
+    return this.service.getByDate(date);
+  }
+
+  @Public()
+  @Get('archive')
+  archive(
+    @Query('date') date?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.getArchive(date, Number(limit));
+  }
+
+  @Public()
+  @Get('stats')
+  stats() {
+    return this.service.getStats();
+  }
+
+  @Public()
+  @Get('reschedule/pending')
+  pendingReschedules() {
+    return this.service.getPendingReschedules();
+  }
+
+  @Public()
+  @Get(':id/status')
+  publicStatus(@Param('id') id: string) {
+    return this.service.getPublicStatus(id);
   }
 
   @Public()
@@ -86,14 +113,11 @@ export class BookingsController {
 
   @Public()
   @Post(':id/reschedule')
-  requestReschedule(@Param('id') id: string, @Body() dto: RequestRescheduleDto) {
+  requestReschedule(
+    @Param('id') id: string,
+    @Body() dto: RequestRescheduleDto,
+  ) {
     return this.service.requestReschedule(id, dto);
-  }
-
-  @Public()
-  @Get('reschedule/pending')
-  pendingReschedules() {
-    return this.service.getPendingReschedules();
   }
 
   @Public()
@@ -104,7 +128,10 @@ export class BookingsController {
 
   @Public()
   @Patch('reschedule/:requestId/reject')
-  rejectReschedule(@Param('requestId') requestId: string, @Body() dto: RejectRescheduleDto) {
+  rejectReschedule(
+    @Param('requestId') requestId: string,
+    @Body() dto: RejectRescheduleDto,
+  ) {
     return this.service.rejectReschedule(requestId, dto);
   }
 }
