@@ -556,8 +556,103 @@ export class BookingsService {
       .getMany();
   }
 
+  private normalizeBookingDate(date?: string) {
+    const value = String(date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new BadRequestException('Невірний формат дати. Використовуйте YYYY-MM-DD');
+    }
+
+    const parsed = new Date(`${value}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+      throw new BadRequestException('Невірна дата бронювання');
+    }
+
+    return value;
+  }
+
+  async getByDate(date: string) {
+    const bookingDate = this.normalizeBookingDate(date);
+
+    return this.bookings.find({
+      where: { bookingDate },
+      relations: ['table', 'table.zone', 'client'],
+      order: { bookingTime: 'ASC', createdAt: 'DESC' },
+      take: 1000,
+    });
+  }
+
   async getToday() {
-    return this.bookings.find({ relations: ['table', 'client'], order: { createdAt: 'DESC' }, take: 300 });
+    return this.getByDate(this.restaurantDateToday());
+  }
+
+  async getArchive(date?: string, limit?: number) {
+    const normalizedLimit = Math.min(1000, Math.max(1, Number(limit) || 300));
+
+    const query = this.bookings
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.table', 'table')
+      .leftJoinAndSelect('table.zone', 'zone')
+      .leftJoinAndSelect('booking.client', 'client')
+      .where('booking.status IN (:...statuses)', {
+        statuses: ['completed', 'cancelled', 'rejected'] as BookingStatus[],
+      })
+      .orderBy('booking.bookingDate', 'DESC')
+      .addOrderBy('booking.bookingTime', 'DESC')
+      .addOrderBy('booking.updatedAt', 'DESC')
+      .take(normalizedLimit);
+
+    if (date) {
+      query.andWhere('booking.bookingDate = :bookingDate', {
+        bookingDate: this.normalizeBookingDate(date),
+      });
+    }
+
+    return query.getMany();
+  }
+
+  async getStats() {
+    const today = this.restaurantDateToday();
+    const overdueThreshold = new Date(Date.now() - PENDING_REMINDER_MINUTES * 60 * 1000);
+
+    const [
+      total,
+      todayTotal,
+      pendingToday,
+      overduePendingToday,
+      archivedTotal,
+      occupiedTables,
+      cleaningTables,
+    ] = await Promise.all([
+      this.bookings.count(),
+      this.bookings.count({ where: { bookingDate: today } }),
+      this.bookings.count({ where: { bookingDate: today, status: 'pending' } }),
+      this.bookings
+        .createQueryBuilder('booking')
+        .where('booking.bookingDate = :today', { today })
+        .andWhere('booking.status = :status', { status: 'pending' })
+        .andWhere('booking.createdAt <= :threshold', { threshold: overdueThreshold })
+        .getCount(),
+      this.bookings
+        .createQueryBuilder('booking')
+        .where('booking.status IN (:...statuses)', {
+          statuses: ['completed', 'cancelled', 'rejected'] as BookingStatus[],
+        })
+        .getCount(),
+      this.tables.count({ where: { status: 'occupied' } }),
+      this.tables.count({ where: { status: 'cleaning' } }),
+    ]);
+
+    return {
+      today,
+      total,
+      todayTotal,
+      pendingToday,
+      overduePendingToday,
+      archivedTotal,
+      occupiedTables,
+      cleaningTables,
+      pendingReminderMinutes: PENDING_REMINDER_MINUTES,
+    };
   }
 
   async approve(id: string) {
