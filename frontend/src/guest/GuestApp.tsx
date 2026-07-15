@@ -1,3 +1,4 @@
+// MOLO GUEST FIX: persistence + custom duration only
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode, KeyboardEvent } from 'react';
 
@@ -264,17 +265,6 @@ const WATERFRONT_LOCATION_KEYS = ['canopy', 'gazebo', 'rotang', 'embankment', 'g
 
 const CLEANUP_MINUTES = 15;
 
-const DURATION_OPTIONS = [
-  { label: '1 година', minutes: 60 },
-  { label: '1.5 години', minutes: 90 },
-  { label: '2 години', minutes: 120 },
-  { label: '2.5 години', minutes: 150 },
-  { label: '3 години', minutes: 180 },
-  { label: '4 години', minutes: 240 },
-  { label: '5 годин', minutes: 300 },
-  { label: '6 годин', minutes: 360 },
-];
-
 function normalizeTableStatus(status: unknown): TableStatus {
   if (status === 'pending' || status === 'awaiting_confirmation') return 'pending';
   if (status === 'reserved' || status === 'booked') return 'reserved';
@@ -534,7 +524,7 @@ export default function GuestApp() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState('19:00');
   const [durationMinutes, setDurationMinutes] = useState(120);
-  const [customDurationHours, setCustomDurationHours] = useState('3.5');
+  const [customDurationHours, setCustomDurationHours] = useState('3');
   const [isCustomDuration, setIsCustomDuration] = useState(false);
   const [tableNotice, setTableNotice] = useState<TableAvailabilityNotice | null>(null);
   const [dateStatuses, setDateStatuses] = useState<Record<string, TableRuntimeStatus>>({});
@@ -556,6 +546,16 @@ export default function GuestApp() {
   const { loading, error, run } = useAsyncAction();
 
   const siteMode = restaurant?.siteMode || 'night';
+
+  useEffect(() => {
+    if (step === 'form' && !selectedTable) {
+      setStep('map');
+    }
+
+    if (step === 'success' && !lastBookingId) {
+      setStep('home');
+    }
+  }, [step, selectedTable, lastBookingId, setStep]);
 
   useEffect(() => {
     let stopped = false;
@@ -789,21 +789,25 @@ export default function GuestApp() {
     setStep('home');
   }
 
-  function selectDuration(minutes: number) {
-    setDurationMinutes(minutes);
-    setIsCustomDuration(false);
+  function openCustomDuration() {
+    setIsCustomDuration(true);
+
+    const hours = Number(customDurationHours);
+
+    if (Number.isFinite(hours) && hours > 0) {
+      setDurationMinutes(Math.min(720, Math.max(60, hours * 60)));
+    }
   }
 
   function updateCustomDuration(value: string) {
-    setCustomDurationHours(value);
+    const digitsOnly = value.replace(/\D/g, '').slice(0, 2);
+    setCustomDurationHours(digitsOnly);
     setIsCustomDuration(true);
 
-    const parsed = Number(value.replace(',', '.'));
+    if (!digitsOnly) return;
 
-    if (Number.isFinite(parsed) && parsed > 0) {
-      const minutes = Math.round(parsed * 60);
-      setDurationMinutes(Math.min(720, Math.max(30, minutes)));
-    }
+    const hours = Math.min(12, Math.max(1, Number(digitsOnly)));
+    setDurationMinutes(hours * 60);
   }
 
   function selectTable(table: TableItem) {
@@ -840,8 +844,87 @@ export default function GuestApp() {
     }, 650);
   }
 
+  async function revalidateSelectedTableBeforeSubmit() {
+    if (!selectedTable) return false;
+
+    try {
+      const [statusesResponse, mapResponse, restaurantResponse] = await Promise.all([
+        bookingsApi.tableStatuses({
+          bookingDate: date,
+          bookingTime: time,
+          durationMinutes,
+        }),
+        mapApi.get(),
+        restaurantApi.get(),
+      ]);
+
+      const statusesPayload = (statusesResponse as any)?.data || statusesResponse;
+      const freshStatuses = statusesPayload?.statuses || {};
+      const freshMap = getMapFromResponse(mapResponse);
+      const freshRestaurant = getRestaurantFromResponse(restaurantResponse);
+      const tableNumber = String(selectedTable.tableNumber);
+      const runtime = freshStatuses[tableNumber] as TableRuntimeStatus | undefined;
+      const freshTable = (freshMap?.tables || []).find(
+        (table) => String(table.tableNumber) === tableNumber,
+      );
+      const locationClosed =
+        findLocationZone(freshMap?.zones || [], selectedLocationKey)?.isClosed === true;
+
+      setDateStatuses(freshStatuses);
+      if (freshMap) setMap(freshMap);
+      if (freshRestaurant) setRestaurant(freshRestaurant);
+
+      let freshStatus: TableStatus = 'free';
+
+      if (
+        freshRestaurant?.status === 'closed' ||
+        freshRestaurant?.status === 'booking_closed' ||
+        locationClosed ||
+        freshTable?.zone?.isClosed
+      ) {
+        freshStatus = 'closed';
+      } else if (runtime?.status) {
+        freshStatus = normalizeTableStatus(runtime.status);
+      } else {
+        const physicalStatus = normalizeTableStatus(freshTable?.status);
+
+        if (
+          physicalStatus === 'closed' ||
+          physicalStatus === 'occupied' ||
+          physicalStatus === 'cleaning'
+        ) {
+          freshStatus = physicalStatus;
+        }
+      }
+
+      if (freshStatus !== 'free') {
+        const conflict = runtime?.conflict;
+
+        setTableNotice({
+          tableNumber,
+          status: freshStatus,
+          bookedFrom: conflict?.bookedFromLabel || time,
+          bookedTo: conflict?.bookedToLabel || bookingEndTime,
+          availableFrom: conflict?.availableFromLabel || availableAfterCleanup,
+        });
+        setActiveTableNumber(Number(tableNumber));
+        setStep('map');
+        alert(`Стіл №${tableNumber} вже недоступний. Оберіть інший стіл або час.`);
+        return false;
+      }
+
+      return true;
+    } catch {
+      alert('Не вдалося повторно перевірити доступність столу. Спробуйте ще раз.');
+      return false;
+    }
+  }
+
   async function submit() {
     if (!selectedTable) return;
+
+    const tableIsStillAvailable = await revalidateSelectedTableBeforeSubmit();
+    if (!tableIsStillAvailable) return;
 
     const wishesWithTime = [
       `Час відпочинку: ${formatDuration(durationMinutes)} (${bookingPeriod})`,
@@ -938,16 +1021,6 @@ export default function GuestApp() {
           .molo-svg-hit {
             touch-action: manipulation;
           }
-
-          .molo-duration-scroll {
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-          }
-
-          .molo-duration-scroll::-webkit-scrollbar {
-            display: none;
-          }
-
 
           .molo-mode-day .molo-bg {
             filter: brightness(1.18) saturate(1.03) contrast(0.96);
@@ -1260,84 +1333,30 @@ export default function GuestApp() {
                 )}
               </div>
 
-              <div className="mt-3 block sm:hidden">
-                <p className="mb-2 text-[10px] uppercase tracking-[0.16em] text-white/45">Оберіть час</p>
-
-                <div className="molo-duration-scroll flex gap-2 overflow-x-auto pb-1">
-                  {DURATION_OPTIONS.map((option) => {
-                    const isLong = option.minutes > 180;
-                    const isSelected = !isCustomDuration && durationMinutes === option.minutes;
-
-                    return (
-                      <button
-                        key={`mobile-duration-${option.minutes}`}
-                        type="button"
-                        onClick={() => selectDuration(option.minutes)}
-                        className={`h-11 flex-none rounded-2xl border px-4 text-sm font-semibold transition ${isSelected ? (isLong ? 'border-sky-200 bg-sky-300/15 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,.16)]' : 'border-amber-200 bg-amber-300/20 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,.16)]') : 'border-white/15 bg-white/5 text-white/75'}`}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-
-                  <label className={`h-11 w-[116px] flex-none rounded-2xl border px-3 py-1.5 text-sm font-semibold transition ${isCustomDuration ? 'border-sky-200 bg-sky-300/15 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,.16)]' : 'border-white/15 bg-white/5 text-white/75'}`}>
-                    <span className="block text-[9px] uppercase tracking-[0.12em] text-white/45">Свій</span>
+              <div className="mt-4">
+                {!isCustomDuration ? (
+                  <button
+                    type="button"
+                    onClick={openCustomDuration}
+                    className="molo-button rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white/80"
+                  >
+                    Свій час
+                  </button>
+                ) : (
+                  <div className="inline-flex items-center gap-3 rounded-2xl border border-sky-200/70 bg-sky-300/15 px-4 py-3 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,.16)]">
+                    <span className="text-sm font-semibold">Свій час</span>
                     <input
                       value={customDurationHours}
                       onChange={(event) => updateCustomDuration(event.target.value)}
-                      onFocus={() => setIsCustomDuration(true)}
-                      inputMode="decimal"
-                      className="w-full bg-transparent text-sm leading-none outline-none"
-                      placeholder="3.5"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      aria-label="Кількість годин"
+                      className="w-12 rounded-xl border border-sky-100/30 bg-black/20 px-2 py-1 text-center text-base font-bold outline-none"
+                      placeholder="3"
                     />
-                  </label>
-                </div>
-              </div>
-
-              <div className="mt-4 hidden space-y-3 sm:block">
-                <div>
-                  <p className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">До 3 годин</p>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                    {DURATION_OPTIONS.filter((option) => option.minutes <= 180).map((option) => (
-                      <button
-                        key={option.minutes}
-                        type="button"
-                        onClick={() => selectDuration(option.minutes)}
-                        className={`rounded-2xl border px-3 py-3 text-sm font-semibold transition ${!isCustomDuration && durationMinutes === option.minutes ? 'border-amber-200 bg-amber-300/20 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,.16)]' : 'border-white/15 bg-white/5 text-white/75'}`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
+                    <span className="text-sm font-semibold">годин</span>
                   </div>
-                </div>
-
-                <div>
-                  <p className="mb-2 text-xs uppercase tracking-[0.18em] text-white/45">Більше 3 годин</p>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {DURATION_OPTIONS.filter((option) => option.minutes > 180).map((option) => (
-                      <button
-                        key={option.minutes}
-                        type="button"
-                        onClick={() => selectDuration(option.minutes)}
-                        className={`rounded-2xl border px-3 py-3 text-sm font-semibold transition ${!isCustomDuration && durationMinutes === option.minutes ? 'border-sky-200 bg-sky-300/15 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,.16)]' : 'border-white/15 bg-white/5 text-white/75'}`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-
-                    <label className={`rounded-2xl border px-3 py-3 text-sm font-semibold transition ${isCustomDuration ? 'border-sky-200 bg-sky-300/15 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,.16)]' : 'border-white/15 bg-white/5 text-white/75'}`}>
-                      <span className="block text-[11px] uppercase tracking-[0.14em] text-white/45">Свій час</span>
-                      <input
-                        value={customDurationHours}
-                        onChange={(event) => updateCustomDuration(event.target.value)}
-                        onFocus={() => setIsCustomDuration(true)}
-                        inputMode="decimal"
-                        className="mt-1 w-full bg-transparent text-base outline-none"
-                        placeholder="3.5"
-                      />
-                    </label>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
 
