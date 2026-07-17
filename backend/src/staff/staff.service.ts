@@ -235,19 +235,24 @@ export class StaffService {
   async getShiftHistory(id: string) {
     await this.getStaffOrThrow(id);
 
-    return this.shiftEventRepo.find({
+    const events = await this.shiftEventRepo.find({
       where: {
         staff: {
           id,
         },
       },
-      relations: {
-        staff: true,
-      },
       order: {
         createdAt: 'DESC',
       },
     });
+
+    return events.map((event) => ({
+      id: event.id,
+      eventType: event.eventType,
+      performedBy: event.performedBy,
+      comment: event.comment,
+      createdAt: event.createdAt,
+    }));
   }
 
   async setActive(id: string, active: boolean) {
