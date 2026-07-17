@@ -1,4 +1,9 @@
-export type AuthRole = 'guest' | 'waiter' | 'admin' | 'owner';
+export type AuthRole =
+  | 'guest'
+  | 'waiter'
+  | 'hookah'
+  | 'admin'
+  | 'owner';
 
 export type AuthUser = {
   sub: string;
