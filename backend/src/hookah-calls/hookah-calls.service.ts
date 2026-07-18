@@ -1,383 +1,167 @@
+import { useCallback, useEffect, useState } from 'react';
+
 import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
-import { Booking } from '../bookings/entities/booking.entity';
-import { Staff } from '../staff/entities/staff.entity';
-import { AcceptHookahCallDto } from './dto/accept-hookah-call.dto';
-import { CancelHookahCallDto } from './dto/cancel-hookah-call.dto';
-import { CreateHookahCallDto } from './dto/create-hookah-call.dto';
-import {
-  HookahCall,
-  HookahCallStatus,
-} from './entities/hookah-call.entity';
+  hookahCallsApi,
+  type GuestHookahStatus,
+} from '../api/hookah-calls';
 
-const ACTIVE_STATUSES: HookahCallStatus[] = ['new', 'accepted'];
+type GuestHookahCallPanelProps = {
+  bookingId: string;
+};
 
-@Injectable()
-export class HookahCallsService {
-  constructor(
-    @InjectRepository(HookahCall)
-    private readonly hookahCallsRepo: Repository<HookahCall>,
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : 'Сталася невідома помилка';
+}
 
-    @InjectRepository(Booking)
-    private readonly bookingsRepo: Repository<Booking>,
+export default function GuestHookahCallPanel({
+  bookingId,
+}: GuestHookahCallPanelProps) {
+  const [status, setStatus] = useState<GuestHookahStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [calling, setCalling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
-    @InjectRepository(Staff)
-    private readonly staffRepo: Repository<Staff>,
+  const loadStatus = useCallback(async (silent = false) => {
+    try {
+      if (!silent) setLoading(true);
 
-    private readonly dataSource: DataSource,
-  ) {}
-
-  async guestStatus(bookingId: string) {
-    const booking = await this.getBookingOrThrow(bookingId);
-
-    const activeCall = await this.hookahCallsRepo.findOne({
-      where: {
-        booking: {
-          id: booking.id,
-        },
-        status: In(ACTIVE_STATUSES),
-      },
-      relations: {
-        booking: true,
-        table: {
-          zone: true,
-        },
-        acceptedByStaff: true,
-      },
-      order: {
-        createdAt: 'DESC',
-      },
-    });
-
-    return {
-      bookingId: booking.id,
-      bookingStatus: booking.status,
-      tableStatus: booking.table?.status || null,
-      tableNumber: booking.table?.tableNumber || null,
-      zoneName: booking.table?.zone?.name || null,
-      canCall:
-        booking.status === 'approved' &&
-        booking.table?.status === 'occupied' &&
-        !activeCall,
-      activeCall: activeCall ? this.toPublicCall(activeCall) : null,
-    };
-  }
-
-  async createFromGuest(dto: CreateHookahCallDto) {
-    return this.dataSource.transaction(async (manager) => {
-      const bookingRepo = manager.getRepository(Booking);
-      const callRepo = manager.getRepository(HookahCall);
-      const staffRepo = manager.getRepository(Staff);
-
-      const booking = await bookingRepo.findOne({
-        where: {
-          id: dto.bookingId,
-        },
-        relations: {
-          table: {
-            zone: true,
-          },
-          client: true,
-        },
-      });
-
-      if (!booking) {
-        throw new NotFoundException('Бронювання не знайдено');
-      }
-
-      if (
-        booking.status !== 'approved' ||
-        booking.table?.status !== 'occupied'
-      ) {
-        throw new BadRequestException(
-          'Виклик кальянника доступний тільки після приходу гостя за стіл',
-        );
-      }
-
-      const activeHookahWorkers = await staffRepo.count({
-        where: {
-          role: 'hookah',
-          active: true,
-          isArchived: false,
-          isOnShift: true,
-        },
-      });
-
-      if (activeHookahWorkers === 0) {
-        throw new BadRequestException(
-          'Зараз немає кальянників на зміні',
-        );
-      }
-
-      const existing = await callRepo.findOne({
-        where: {
-          booking: {
-            id: booking.id,
-          },
-          status: In(ACTIVE_STATUSES),
-        },
-        relations: {
-          booking: true,
-          table: {
-            zone: true,
-          },
-          acceptedByStaff: true,
-        },
-        order: {
-          createdAt: 'DESC',
-        },
-      });
-
-      if (existing) {
-        return {
-          message: 'Виклик уже відправлено',
-          call: this.toPublicCall(existing),
-        };
-      }
-
-      const call = callRepo.create({
-        booking,
-        table: booking.table,
-        acceptedByStaff: null,
-        status: 'new',
-        etaMinutes: null,
-        acceptedAt: null,
-        completedAt: null,
-        cancelledAt: null,
-        cancelReason: null,
-      });
-
-      const saved = await callRepo.save(call);
-      const hydrated = await this.getCallOrThrow(saved.id, callRepo);
-
-      return {
-        message: 'Виклик кальянника відправлено',
-        call: this.toPublicCall(hydrated),
-      };
-    });
-  }
-
-  async listActive() {
-    const calls = await this.hookahCallsRepo.find({
-      where: {
-        status: In(ACTIVE_STATUSES),
-      },
-      relations: {
-        booking: {
-          client: true,
-        },
-        table: {
-          zone: true,
-        },
-        acceptedByStaff: true,
-      },
-      order: {
-        createdAt: 'ASC',
-      },
-    });
-
-    return calls.map((call) => this.toPublicCall(call));
-  }
-
-  async listMine(staffId: string) {
-    const calls = await this.hookahCallsRepo.find({
-      where: {
-        acceptedByStaff: {
-          id: staffId,
-        },
-        status: 'accepted',
-      },
-      relations: {
-        booking: {
-          client: true,
-        },
-        table: {
-          zone: true,
-        },
-        acceptedByStaff: true,
-      },
-      order: {
-        acceptedAt: 'ASC',
-      },
-    });
-
-    return calls.map((call) => this.toPublicCall(call));
-  }
-
-  async accept(
-    callId: string,
-    staffId: string,
-    dto: AcceptHookahCallDto,
-  ) {
-    return this.dataSource.transaction(async (manager) => {
-      const callRepo = manager.getRepository(HookahCall);
-      const staffRepo = manager.getRepository(Staff);
-
-      const worker = await staffRepo.findOne({
-        where: {
-          id: staffId,
-          role: 'hookah',
-          active: true,
-          isArchived: false,
-          isOnShift: true,
-        },
-      });
-
-      if (!worker) {
-        throw new BadRequestException(
-          'Прийняти виклик може лише активний кальянник на зміні',
-        );
-      }
-
-      const call = await callRepo.findOne({
-        where: {
-          id: callId,
-        },
-        relations: {
-          booking: {
-            client: true,
-          },
-          table: {
-            zone: true,
-          },
-          acceptedByStaff: true,
-        },
-      });
-
-      if (!call) {
-        throw new NotFoundException('Виклик не знайдено');
-      }
-
-      if (call.status !== 'new') {
-        throw new BadRequestException(
-          call.status === 'accepted'
-            ? 'Цей виклик уже прийняв інший кальянник'
-            : 'Цей виклик уже закрито',
-        );
-      }
-
-      call.status = 'accepted';
-      call.acceptedByStaff = worker;
-      call.etaMinutes = dto.etaMinutes;
-      call.acceptedAt = new Date();
-
-      const saved = await callRepo.save(call);
-      const hydrated = await this.getCallOrThrow(saved.id, callRepo);
-
-      return {
-        message: 'Виклик прийнято',
-        call: this.toPublicCall(hydrated),
-      };
-    });
-  }
-
-  async complete(callId: string, staffId: string) {
-    const call = await this.getCallOrThrow(callId);
-
-    if (call.status !== 'accepted') {
-      throw new BadRequestException(
-        'Завершити можна лише прийнятий виклик',
-      );
+      const result = await hookahCallsApi.getGuestStatus(bookingId);
+      setStatus(result);
+      setError(null);
+    } catch (loadError) {
+      setError(errorText(loadError));
+    } finally {
+      if (!silent) setLoading(false);
     }
+  }, [bookingId]);
 
-    if (call.acceptedByStaff?.id !== staffId) {
-      throw new BadRequestException(
-        'Завершити виклик може лише кальянник, який його прийняв',
-      );
+  useEffect(() => {
+    void loadStatus();
+
+    const interval = window.setInterval(() => {
+      void loadStatus(true);
+    }, 15_000);
+
+    return () => window.clearInterval(interval);
+  }, [loadStatus]);
+
+  async function callHookahWorker() {
+    try {
+      setCalling(true);
+      setError(null);
+      setMessage(null);
+
+      const result = await hookahCallsApi.createFromGuest(bookingId);
+
+      setStatus((current) => ({
+        bookingId,
+        bookingStatus: current?.bookingStatus || 'approved',
+        tableStatus: current?.tableStatus || 'occupied',
+        tableNumber: result.call.tableNumber || current?.tableNumber || null,
+        zoneName: result.call.zoneName || current?.zoneName || null,
+        canCall: false,
+        activeCall: result.call,
+      }));
+
+      setMessage(result.message);
+    } catch (callError) {
+      setError(errorText(callError));
+    } finally {
+      setCalling(false);
     }
-
-    call.status = 'completed';
-    call.completedAt = new Date();
-
-    const saved = await this.hookahCallsRepo.save(call);
-    return {
-      message: 'Виклик виконано',
-      call: this.toPublicCall(saved),
-    };
   }
 
-  async cancel(callId: string, dto: CancelHookahCallDto) {
-    const call = await this.getCallOrThrow(callId);
-
-    if (!ACTIVE_STATUSES.includes(call.status)) {
-      throw new BadRequestException('Цей виклик уже закрито');
-    }
-
-    call.status = 'cancelled';
-    call.cancelledAt = new Date();
-    call.cancelReason = dto.reason.trim();
-
-    const saved = await this.hookahCallsRepo.save(call);
-    return {
-      message: 'Виклик скасовано',
-      call: this.toPublicCall(saved),
-    };
+  if (loading) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center text-sm text-white/55">
+        Перевіряємо доступність кальянника…
+      </div>
+    );
   }
 
-  private async getBookingOrThrow(id: string) {
-    const booking = await this.bookingsRepo.findOne({
-      where: { id },
-      relations: {
-        table: {
-          zone: true,
-        },
-        client: true,
-      },
-    });
-
-    if (!booking) {
-      throw new NotFoundException('Бронювання не знайдено');
-    }
-
-    return booking;
+  if (error && !status) {
+    return (
+      <div className="rounded-2xl border border-red-300/30 bg-red-400/10 px-4 py-3 text-sm text-red-100">
+        {error}
+      </div>
+    );
   }
 
-  private async getCallOrThrow(
-    id: string,
-    repository: Repository<HookahCall> = this.hookahCallsRepo,
-  ) {
-    const call = await repository.findOne({
-      where: { id },
-      relations: {
-        booking: {
-          client: true,
-        },
-        table: {
-          zone: true,
-        },
-        acceptedByStaff: true,
-      },
-    });
+  if (!status) return null;
 
-    if (!call) {
-      throw new NotFoundException('Виклик не знайдено');
-    }
+  const call = status.activeCall;
 
-    return call;
-  }
+  return (
+    <section className="rounded-[24px] border border-amber-200/30 bg-black/35 p-4 backdrop-blur">
+      <div>
+        <p className="text-sm font-black text-white">
+          Бажаєте кальян?
+        </p>
 
-  private toPublicCall(call: HookahCall) {
-    return {
-      id: call.id,
-      bookingId: call.booking?.id || null,
-      tableId: call.table?.id || null,
-      tableNumber: call.table?.tableNumber || null,
-      zoneName: call.table?.zone?.name || null,
-      clientName: call.booking?.client?.fullName || null,
-      status: call.status,
-      acceptedByStaffId: call.acceptedByStaff?.id || null,
-      acceptedByStaffName: call.acceptedByStaff?.fullName || null,
-      etaMinutes: call.etaMinutes,
-      createdAt: call.createdAt,
-      acceptedAt: call.acceptedAt,
-      completedAt: call.completedAt,
-      cancelledAt: call.cancelledAt,
-      cancelReason: call.cancelReason,
-    };
-  }
+        <p className="mt-1 text-xs leading-5 text-white/55">
+          {status.tableNumber
+            ? `Стіл №${status.tableNumber}${status.zoneName ? ` · ${status.zoneName}` : ''}`
+            : 'Ваш стіл'}
+        </p>
+      </div>
+
+      {error && (
+        <div className="mt-3 rounded-2xl border border-red-300/30 bg-red-400/10 px-3 py-2 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      {message && (
+        <div className="mt-3 rounded-2xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-sm font-semibold text-emerald-100">
+          {message}
+        </div>
+      )}
+
+      {call?.status === 'new' && (
+        <div className="mt-3 rounded-2xl border border-amber-200/30 bg-amber-300/10 px-4 py-3">
+          <p className="text-sm font-black text-amber-100">
+            Кальянника викликано
+          </p>
+          <p className="mt-1 text-xs text-amber-100/70">
+            Очікуємо, поки працівник прийме виклик.
+          </p>
+        </div>
+      )}
+
+      {call?.status === 'accepted' && (
+        <div className="mt-3 rounded-2xl border border-emerald-200/30 bg-emerald-300/10 px-4 py-3">
+          <p className="text-sm font-black text-emerald-100">
+            Кальянник уже прямує до вас
+          </p>
+
+          <p className="mt-1 text-xs text-emerald-100/75">
+            {call.acceptedByStaffName
+              ? `${call.acceptedByStaffName} прийняв виклик.`
+              : 'Виклик прийнято.'}
+            {call.etaMinutes
+              ? ` Орієнтовний час очікування — ${call.etaMinutes} хв.`
+              : ''}
+          </p>
+        </div>
+      )}
+
+      {!call && status.canCall && (
+        <button
+          type="button"
+          onClick={callHookahWorker}
+          disabled={calling}
+          className="mt-3 w-full rounded-2xl border border-amber-200/60 bg-amber-300/20 px-4 py-3 text-sm font-black text-amber-100 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {calling ? 'Викликаємо…' : 'Викликати кальянника'}
+        </button>
+      )}
+
+      {!call && !status.canCall && (
+        <p className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-5 text-white/50">
+          Виклик кальянника стане доступним після підтвердження бронювання та вашого приходу за стіл.
+        </p>
+      )}
+    </section>
+  );
 }
