@@ -99,7 +99,7 @@ export default function GuestHookahCallPanel({
     <section className="rounded-[24px] border border-amber-200/30 bg-black/35 p-4 backdrop-blur">
       <div>
         <p className="text-sm font-black text-white">
-          Кальянна служба
+           Бажаєте кальян?
         </p>
 
         <p className="mt-1 text-xs leading-5 text-white/55">
