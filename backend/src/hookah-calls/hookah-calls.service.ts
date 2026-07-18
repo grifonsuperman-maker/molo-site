@@ -74,16 +74,17 @@ export class HookahCallsService {
       const callRepo = manager.getRepository(HookahCall);
       const staffRepo = manager.getRepository(Staff);
 
-      const booking = await bookingRepo
-        .createQueryBuilder('booking')
-        .leftJoinAndSelect('booking.table', 'table')
-        .leftJoinAndSelect('table.zone', 'zone')
-        .leftJoinAndSelect('booking.client', 'client')
-        .where('booking.id = :bookingId', {
-          bookingId: dto.bookingId,
-        })
-        .setLock('pessimistic_write')
-        .getOne();
+      const booking = await bookingRepo.findOne({
+        where: {
+          id: dto.bookingId,
+        },
+        relations: {
+          table: {
+            zone: true,
+          },
+          client: true,
+        },
+      });
 
       if (!booking) {
         throw new NotFoundException('Бронювання не знайдено');
@@ -233,16 +234,20 @@ export class HookahCallsService {
         );
       }
 
-      const call = await callRepo
-        .createQueryBuilder('call')
-        .leftJoinAndSelect('call.booking', 'booking')
-        .leftJoinAndSelect('booking.client', 'client')
-        .leftJoinAndSelect('call.table', 'table')
-        .leftJoinAndSelect('table.zone', 'zone')
-        .leftJoinAndSelect('call.acceptedByStaff', 'acceptedByStaff')
-        .where('call.id = :callId', { callId })
-        .setLock('pessimistic_write')
-        .getOne();
+      const call = await callRepo.findOne({
+        where: {
+          id: callId,
+        },
+        relations: {
+          booking: {
+            client: true,
+          },
+          table: {
+            zone: true,
+          },
+          acceptedByStaff: true,
+        },
+      });
 
       if (!call) {
         throw new NotFoundException('Виклик не знайдено');
