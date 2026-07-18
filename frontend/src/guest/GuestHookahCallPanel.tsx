@@ -25,10 +25,10 @@ export default function GuestHookahCallPanel({
   const loadStatus = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      setError(null);
 
       const result = await hookahCallsApi.getGuestStatus(bookingId);
       setStatus(result);
+      setError(null);
     } catch (loadError) {
       setError(errorText(loadError));
     } finally {
@@ -46,13 +46,6 @@ export default function GuestHookahCallPanel({
     return () => window.clearInterval(interval);
   }, [loadStatus]);
 
-  useEffect(() => {
-    if (!message) return;
-
-    const timeout = window.setTimeout(() => setMessage(null), 3500);
-    return () => window.clearTimeout(timeout);
-  }, [message]);
-
   async function callHookahWorker() {
     const confirmed = window.confirm(
       'Викликати кальянника до вашого столу?',
@@ -63,13 +56,26 @@ export default function GuestHookahCallPanel({
     try {
       setCalling(true);
       setError(null);
+      setMessage(null);
 
       const result = await hookahCallsApi.createFromGuest(bookingId);
+
+      setStatus((current) => ({
+        bookingId,
+        bookingStatus: current?.bookingStatus || 'approved',
+        tableStatus: current?.tableStatus || 'occupied',
+        tableNumber: result.call.tableNumber || current?.tableNumber || null,
+        zoneName: result.call.zoneName || current?.zoneName || null,
+        canCall: false,
+        activeCall: result.call,
+      }));
+
       setMessage(result.message);
-      await loadStatus(true);
+      window.alert(result.message);
     } catch (callError) {
-      setError(errorText(callError));
-      await loadStatus(true);
+      const text = errorText(callError);
+      setError(text);
+      window.alert(text);
     } finally {
       setCalling(false);
     }
@@ -99,7 +105,7 @@ export default function GuestHookahCallPanel({
     <section className="rounded-[24px] border border-amber-200/30 bg-black/35 p-4 backdrop-blur">
       <div>
         <p className="text-sm font-black text-white">
-           Бажаєте кальян?
+          Бажаєте кальян?
         </p>
 
         <p className="mt-1 text-xs leading-5 text-white/55">
@@ -116,7 +122,7 @@ export default function GuestHookahCallPanel({
       )}
 
       {message && (
-        <div className="mt-3 rounded-2xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
+        <div className="mt-3 rounded-2xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-sm font-semibold text-emerald-100">
           {message}
         </div>
       )}
