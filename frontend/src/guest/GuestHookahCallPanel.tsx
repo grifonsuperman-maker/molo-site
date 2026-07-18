@@ -47,12 +47,6 @@ export default function GuestHookahCallPanel({
   }, [loadStatus]);
 
   async function callHookahWorker() {
-    const confirmed = window.confirm(
-      'Викликати кальянника до вашого столу?',
-    );
-
-    if (!confirmed) return;
-
     try {
       setCalling(true);
       setError(null);
@@ -71,11 +65,8 @@ export default function GuestHookahCallPanel({
       }));
 
       setMessage(result.message);
-      window.alert(result.message);
     } catch (callError) {
-      const text = errorText(callError);
-      setError(text);
-      window.alert(text);
+      setError(errorText(callError));
     } finally {
       setCalling(false);
     }
