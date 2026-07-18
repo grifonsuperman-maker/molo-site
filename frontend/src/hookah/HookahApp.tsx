@@ -417,12 +417,6 @@ export default function HookahApp() {
   }
 
   async function completeCall(call: HookahCall) {
-    const confirmed = window.confirm(
-      `Позначити виклик для ${callLocation(call)} як виконаний?`,
-    );
-
-    if (!confirmed) return;
-
     try {
       setBusyId(call.id);
       setError(null);
