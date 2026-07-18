@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
 import WaiterApp from "./waiter/WaiterApp";
 import HookahApp from "./hookah/HookahApp";
@@ -8,6 +9,8 @@ import SitePhotoController from "./theme/SitePhotoController";
 import SiteModeSwitch from "./theme/SiteModeSwitch";
 
 type Mode = "guest" | "waiter" | "hookah" | "admin" | "director";
+
+const HOOKAH_STAFF_STORAGE_KEY = "molo_hookah_staff";
 
 function getModeFromHash(): Mode {
   const value = window.location.hash.replace("#", "");
@@ -38,6 +41,11 @@ export default function App() {
   }, []);
 
   function changeMode(nextMode: Mode) {
+    if (nextMode !== mode) {
+      clearAccessToken();
+      window.localStorage.removeItem(HOOKAH_STAFF_STORAGE_KEY);
+    }
+
     window.location.hash = nextMode;
     setMode(nextMode);
   }
