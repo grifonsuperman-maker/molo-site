@@ -1776,13 +1776,15 @@ export default function GuestApp() {
                   {waiterCallMessage && (
                     <p className="mt-3 text-xs text-amber-100">{waiterCallMessage}</p>
                   )}
-                </div>
-              )}
-{lastBookingId && (
+             {lastBookingId && (
   <div className="mt-4">
     <GuestHookahCallPanel bookingId={lastBookingId} />
   </div>
 )}
+              
+                </div>
+              )}
+
               {(bookingStatus?.status === 'rejected' || bookingStatus?.status === 'cancelled') && (
                 <p className="mt-2 text-sm text-red-100">На жаль, бронювання не підтверджено. Подзвоніть адміністратору.</p>
               )}
