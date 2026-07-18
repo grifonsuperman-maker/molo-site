@@ -18,6 +18,7 @@ import { BroadcastsModule } from './broadcasts/broadcasts.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { WaiterCallsModule } from './waiter-calls/waiter-calls.module';
+import { HookahCallsModule } from './hookah-calls/hookah-calls.module';
 
 import { RolesGuard } from './auth/guards/roles.guard';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
@@ -72,6 +73,7 @@ import { AuthModule } from './auth/auth.module';
     TelegramModule,
     SchedulesModule,
     WaiterCallsModule,
+    HookahCallsModule,
   ],
 
   providers: [
