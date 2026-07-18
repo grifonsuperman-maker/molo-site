@@ -21,7 +21,7 @@ import { waiterCallsApi } from '../api/waiterCalls';
 import type { GuestWaiterCallStatus } from '../api/waiterCalls';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { usePersistentState } from '../hooks/usePersistentState';
-
+import GuestHookahCallPanel from './GuestHookahCallPanel';
 const FALLBACK_MENU =
   'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
 
@@ -1778,7 +1778,11 @@ export default function GuestApp() {
                   )}
                 </div>
               )}
-
+{lastBookingId && (
+  <div className="mt-4">
+    <GuestHookahCallPanel bookingId={lastBookingId} />
+  </div>
+)}
               {(bookingStatus?.status === 'rejected' || bookingStatus?.status === 'cancelled') && (
                 <p className="mt-2 text-sm text-red-100">На жаль, бронювання не підтверджено. Подзвоніть адміністратору.</p>
               )}
