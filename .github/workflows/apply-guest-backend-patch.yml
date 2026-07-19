@@ -1,0 +1,109 @@
+name: Apply MOLO guest backend patch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'molo-guest-backend-patch.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-build-and-apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate patch contents
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f molo-guest-backend-patch.zip
+
+          python3 - <<'PY'
+          import stat
+          import zipfile
+
+          allowed = {
+              "backend/package-lock.json",
+              "backend/src/bookings/bookings.controller.ts",
+              "backend/src/bookings/bookings.module.ts",
+              "backend/src/bookings/bookings.service.ts",
+              "backend/src/bookings/guest-bookings.service.ts",
+              "backend/src/bookings/dto/guest-booking-list.dto.ts",
+              "backend/src/bookings/dto/guest-cancel-booking.dto.ts",
+              "backend/src/bookings/dto/guest-change-table.dto.ts",
+              "backend/src/bookings/dto/guest-lateness.dto.ts",
+              "backend/src/bookings/dto/guest-review.dto.ts",
+              "backend/src/bookings/entities/booking-history.entity.ts",
+              "backend/src/bookings/entities/booking.entity.ts",
+              "backend/src/bookings/entities/guest-review.entity.ts",
+          }
+
+          with zipfile.ZipFile("molo-guest-backend-patch.zip") as archive:
+              names = set(archive.namelist())
+
+              if names != allowed:
+                  missing = sorted(allowed - names)
+                  unexpected = sorted(names - allowed)
+                  raise SystemExit(
+                      f"Patch file list mismatch. Missing={missing}; unexpected={unexpected}"
+                  )
+
+              for info in archive.infolist():
+                  mode = info.external_attr >> 16
+                  if stat.S_ISLNK(mode):
+                      raise SystemExit(f"Symlink is not allowed: {info.filename}")
+
+          print("Patch contains only the approved backend files.")
+          PY
+
+      - name: Test patch in a temporary copy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf /tmp/molo-guest-test
+          mkdir -p /tmp/molo-guest-test
+
+          rsync -a \
+            --exclude='.git' \
+            --exclude='molo-guest-backend-patch.zip' \
+            ./ /tmp/molo-guest-test/
+
+          unzip -o molo-guest-backend-patch.zip -d /tmp/molo-guest-test
+
+          cd /tmp/molo-guest-test/backend
+          npm ci
+          npm run build
+
+      - name: Apply approved backend files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          unzip -o molo-guest-backend-patch.zip -d .
+          rm -f molo-guest-backend-patch.zip
+
+      - name: Commit applied patch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add backend molo-guest-backend-patch.zip
+          git commit -m "Add secure guest booking backend foundation" || {
+            echo "No changes to commit"
+            exit 0
+          }
+
+          git push
