@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'molo-guest-backend-patch.zip'
+      - '.github/workflows/apply-guest-backend-patch.yml'
   workflow_dispatch:
 
 permissions:
@@ -15,10 +16,24 @@ jobs:
   validate-build-and-apply:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up stable Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+
+      - name: Use stable npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@10.9.2
+          node --version
+          npm --version
 
       - name: Validate patch contents
         shell: bash
@@ -67,6 +82,10 @@ jobs:
 
       - name: Test patch in a temporary copy
         shell: bash
+        env:
+          npm_config_audit: 'false'
+          npm_config_fund: 'false'
+          npm_config_jobs: '2'
         run: |
           set -euo pipefail
 
@@ -81,7 +100,26 @@ jobs:
           unzip -o molo-guest-backend-patch.zip -d /tmp/molo-guest-test
 
           cd /tmp/molo-guest-test/backend
-          npm ci
+
+          installed=false
+          for attempt in 1 2 3; do
+            echo "npm ci attempt ${attempt}/3"
+            rm -rf node_modules
+
+            if npm ci --no-audit --no-fund; then
+              installed=true
+              break
+            fi
+
+            npm cache clean --force || true
+            sleep 10
+          done
+
+          if [ "$installed" != "true" ]; then
+            echo "npm ci failed after 3 attempts"
+            exit 1
+          fi
+
           npm run build
 
       - name: Apply approved backend files
