@@ -46,7 +46,13 @@ export type BookingAvailability = {
 export type TableRuntimeStatus = {
   tableId: string;
   tableNumber: string;
-  status: 'free' | 'pending' | 'reserved' | 'occupied' | 'cleaning' | 'closed';
+  status:
+    | 'free'
+    | 'pending'
+    | 'reserved'
+    | 'occupied'
+    | 'cleaning'
+    | 'closed';
   reason: string | null;
   conflict: BookingAvailability['conflict'];
 };
@@ -102,46 +108,46 @@ export type BookingStats = {
   pendingReminderMinutes: number;
 };
 
-type ActionResponse = { message: string };
+type ActionResponse = {
+  message: string;
+};
 
-function getKyivDate() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Kyiv',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-
-  const year = parts.find((part) => part.type === 'year')?.value;
-  const month = parts.find((part) => part.type === 'month')?.value;
-  const day = parts.find((part) => part.type === 'day')?.value;
-
-  return year && month && day ? `${year}-${month}-${day}` : '';
+function encode(value: string): string {
+  return encodeURIComponent(value);
 }
 
-function normalizePublicStatus(status: BookingPublicStatus): BookingPublicStatus {
-  const today = getKyivDate();
-  const isPastBooking =
-    Boolean(today) &&
-    Boolean(status.bookingDate) &&
-    status.bookingDate < today;
+function buildAvailabilityQuery(params: {
+  tableId: string;
+  bookingDate: string;
+  bookingTime: string;
+  durationMinutes?: number;
+}): string {
+  const search = new URLSearchParams({
+    tableId: params.tableId,
+    bookingDate: params.bookingDate,
+    bookingTime: params.bookingTime,
+    durationMinutes: String(params.durationMinutes ?? 120),
+  });
 
-  if (
-    isPastBooking &&
-    (status.status === 'pending' || status.status === 'approved')
-  ) {
-    return {
-      ...status,
-      status: 'completed',
-      completedAt: status.completedAt || new Date().toISOString(),
-    };
-  }
+  return search.toString();
+}
 
-  return status;
+function buildTableStatusesQuery(params: {
+  bookingDate: string;
+  bookingTime: string;
+  durationMinutes?: number;
+}): string {
+  const search = new URLSearchParams({
+    bookingDate: params.bookingDate,
+    bookingTime: params.bookingTime,
+    durationMinutes: String(params.durationMinutes ?? 120),
+  });
+
+  return search.toString();
 }
 
 export const bookingsApi = {
-  create: (b: CreateBookingPayload) =>
+  create: (payload: CreateBookingPayload) =>
     api.post<{
       message: string;
       bookingId: string;
@@ -151,7 +157,7 @@ export const bookingsApi = {
       availableFrom: string | null;
       durationMinutes: number;
       cleanupMinutes: number;
-    }>('/bookings', b),
+    }>('/bookings', payload),
 
   availability: (params: {
     tableId: string;
@@ -160,7 +166,7 @@ export const bookingsApi = {
     durationMinutes?: number;
   }) =>
     api.get<BookingAvailability>(
-      `/bookings/availability?tableId=${encodeURIComponent(params.tableId)}&bookingDate=${encodeURIComponent(params.bookingDate)}&bookingTime=${encodeURIComponent(params.bookingTime)}&durationMinutes=${encodeURIComponent(String(params.durationMinutes || 120))}`,
+      `/bookings/availability?${buildAvailabilityQuery(params)}`,
     ),
 
   tableStatuses: (params: {
@@ -169,59 +175,62 @@ export const bookingsApi = {
     durationMinutes?: number;
   }) =>
     api.get<TableStatusesResponse>(
-      `/bookings/table-statuses?bookingDate=${encodeURIComponent(params.bookingDate)}&bookingTime=${encodeURIComponent(params.bookingTime)}&durationMinutes=${encodeURIComponent(String(params.durationMinutes || 120))}`,
+      `/bookings/table-statuses?${buildTableStatusesQuery(params)}`,
     ),
 
-  getPublicStatus: async (id: string) => {
-    const status = await api.get<BookingPublicStatus>(
-      `/bookings/${encodeURIComponent(id)}/status`,
-    );
-
-    return normalizePublicStatus(status);
-  },
+  getPublicStatus: (id: string) =>
+    api.get<BookingPublicStatus>(`/bookings/${encode(id)}/status`),
 
   getPendingReminders: () =>
     api.get<Booking[]>('/bookings/pending-reminders'),
 
-  getToday: () =>
-    api.get<Booking[]>('/bookings/today'),
+  getToday: () => api.get<Booking[]>('/bookings/today'),
 
   getByDate: (date: string) =>
-    api.get<Booking[]>(`/bookings/by-date?date=${encodeURIComponent(date)}`),
+    api.get<Booking[]>(`/bookings/by-date?date=${encode(date)}`),
 
-  getArchive: (params?: { date?: string; limit?: number }) => {
+  getArchive: (params?: {
+    date?: string;
+    limit?: number;
+  }) => {
     const search = new URLSearchParams();
 
     if (params?.date) {
       search.set('date', params.date);
     }
 
-    if (params?.limit) {
-      search.set('limit', String(params.limit));
+    if (
+      typeof params?.limit === 'number' &&
+      Number.isFinite(params.limit) &&
+      params.limit > 0
+    ) {
+      search.set('limit', String(Math.floor(params.limit)));
     }
 
     const query = search.toString();
-    return api.get<Booking[]>(`/bookings/archive${query ? `?${query}` : ''}`);
+
+    return api.get<Booking[]>(
+      `/bookings/archive${query ? `?${query}` : ''}`,
+    );
   },
 
-  getStats: () =>
-    api.get<BookingStats>('/bookings/stats'),
+  getStats: () => api.get<BookingStats>('/bookings/stats'),
 
   approve: (id: string) =>
-    api.patch<ActionResponse>(`/bookings/${id}/approve`),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/approve`),
 
   reject: (id: string) =>
-    api.patch<ActionResponse>(`/bookings/${id}/reject`),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/reject`),
 
   cancel: (id: string) =>
-    api.patch<ActionResponse>(`/bookings/${id}/cancel`),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/cancel`),
 
   noShow: (id: string) =>
-    api.patch<ActionResponse>(`/bookings/${id}/no-show`),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/no-show`),
 
   checkIn: (id: string) =>
-    api.patch<ActionResponse>(`/bookings/${id}/check-in`),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/check-in`),
 
   complete: (id: string) =>
-    api.patch<ActionResponse>(`/bookings/${id}/complete`),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/complete`),
 };
