@@ -104,6 +104,42 @@ export type BookingStats = {
 
 type ActionResponse = { message: string };
 
+function getKyivDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+
+  return year && month && day ? `${year}-${month}-${day}` : '';
+}
+
+function normalizePublicStatus(status: BookingPublicStatus): BookingPublicStatus {
+  const today = getKyivDate();
+  const isPastBooking =
+    Boolean(today) &&
+    Boolean(status.bookingDate) &&
+    status.bookingDate < today;
+
+  if (
+    isPastBooking &&
+    (status.status === 'pending' || status.status === 'approved')
+  ) {
+    return {
+      ...status,
+      status: 'completed',
+      completedAt: status.completedAt || new Date().toISOString(),
+    };
+  }
+
+  return status;
+}
+
 export const bookingsApi = {
   create: (b: CreateBookingPayload) =>
     api.post<{
@@ -136,8 +172,13 @@ export const bookingsApi = {
       `/bookings/table-statuses?bookingDate=${encodeURIComponent(params.bookingDate)}&bookingTime=${encodeURIComponent(params.bookingTime)}&durationMinutes=${encodeURIComponent(String(params.durationMinutes || 120))}`,
     ),
 
-  getPublicStatus: (id: string) =>
-    api.get<BookingPublicStatus>(`/bookings/${encodeURIComponent(id)}/status`),
+  getPublicStatus: async (id: string) => {
+    const status = await api.get<BookingPublicStatus>(
+      `/bookings/${encodeURIComponent(id)}/status`,
+    );
+
+    return normalizePublicStatus(status);
+  },
 
   getPendingReminders: () =>
     api.get<Booking[]>('/bookings/pending-reminders'),
