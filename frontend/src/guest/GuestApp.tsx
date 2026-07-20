@@ -776,9 +776,16 @@ export default function GuestApp() {
   const activeBookingTableNumber =
     bookingStatus?.tableNumber || selectedTable?.tableNumber || null;
   const activeGuestBooking = guestBookings.find((booking) => booking.bookingId === lastBookingId) || null;
+  const kyivToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv' }).format(new Date());
   const activeMyBookings = myBookings.filter((booking) =>
-    booking.status === 'pending' || booking.status === 'approved',
+    (booking.status === 'pending' || booking.status === 'approved') && booking.bookingDate >= kyivToday,
   );
+  const completedReviewBooking = myBookings.find((booking) =>
+    booking.status === 'completed' && booking.canLeaveReview,
+  ) || null;
+  const completedReviewAccess = completedReviewBooking
+    ? guestBookings.find((booking) => booking.bookingId === completedReviewBooking.bookingId) || null
+    : null;
   const myBookingCards = activeMyBookings.map((booking) => ({
     booking,
     access: guestBookings.find((item) => item.bookingId === booking.bookingId) || null,
@@ -1305,7 +1312,7 @@ export default function GuestApp() {
         </div>
       )}
 
-      {activeMyBookings.length > 0 && (
+      {(activeMyBookings.length > 0 || completedReviewAccess) && (
         <aside
           className={`fixed left-1/2 z-[95] w-[calc(100%-24px)] max-w-md -translate-x-1/2 ${
             step === 'home' ? 'top-3' : 'top-16'
@@ -1857,9 +1864,9 @@ export default function GuestApp() {
               <div>
                 <h2 className="text-xl font-black text-amber-100">Мої бронювання</h2>
                 <p className="mt-1 text-sm text-white/75">
-                  {activeMyBookings.length === 1
+                  {activeMyBookings.length > 0 && (activeMyBookings.length === 1
                     ? 'У вас 1 активне бронювання'
-                    : `У вас ${activeMyBookings.length} активних бронювань`}
+                    : `У вас ${activeMyBookings.length} активних бронювань`)}
                 </p>
               </div>
               <button type="button" onClick={() => setShowMyBookings(false)} className="rounded-xl border border-amber-200/45 px-3 py-2 text-sm font-bold text-amber-100">Закрити</button>
@@ -1888,23 +1895,48 @@ export default function GuestApp() {
                         if (text?.trim()) void runGuestAction(booking.bookingId, access.token, (token) => bookingsApi.guestReview(booking.bookingId, token, { text: text.trim() })).then((result) => {
                           if (result?.askExternalReview) {
                             setLastBookingId(booking.bookingId);
-                            setShowExternalReviewOffer(true);
+                            try {
+                              setShowExternalReviewOffer(
+                                window.sessionStorage.getItem(`${EXTERNAL_REVIEW_SESSION_KEY_PREFIX}${booking.bookingId}`) !== 'true',
+                              );
+                            } catch {
+                              setShowExternalReviewOffer(true);
+                            }
                           }
                         });
                       }} className="rounded-xl border border-emerald-200/35 bg-emerald-300/10 px-3 py-2 text-sm font-bold text-emerald-100 disabled:opacity-50">Залишити відгук</button>}
                     </div>
                   )}
                   {booking.status === 'approved' && <div className="mt-4"><GuestHookahCallPanel bookingId={booking.bookingId} /></div>}
-                  {showExternalReviewOffer && booking.bookingId === lastBookingId && access && (
-                    <div className="mt-4 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-sm text-amber-50">
-                      <p className="font-semibold">Сподобався візит?</p>
-                      <p className="mt-1 text-white/70">Залиште публічний відгук про MOLO — це допоможе нам стати кращими.</p>
-                      <a href={MOLO_PUBLIC_REVIEW_URL} target="_blank" rel="noreferrer" onClick={openExternalReview} className="mt-3 inline-flex rounded-xl border border-amber-200/55 px-3 py-2 text-xs font-bold text-amber-100">Залишити публічний відгук</a>
-                    </div>
-                  )}
                 </article>
               ))}
             </div>
+            {completedReviewBooking && completedReviewAccess && (
+              <section className="mt-5 rounded-2xl border border-amber-200/45 bg-amber-300/10 p-4 text-left shadow-[0_0_22px_rgba(251,191,36,.24)]">
+                <p className="font-bold text-amber-100">Залиште відгук про ваш відпочинок у MOLO</p>
+                <button type="button" disabled={guestActionBusy} onClick={() => {
+                  const text = window.prompt('Поділіться враженнями від візиту');
+                  if (text?.trim()) void runGuestAction(completedReviewBooking.bookingId, completedReviewAccess.token, (token) => bookingsApi.guestReview(completedReviewBooking.bookingId, token, { text: text.trim() })).then((result) => {
+                    if (!result?.askExternalReview) return;
+                    setLastBookingId(completedReviewBooking.bookingId);
+                    try {
+                      setShowExternalReviewOffer(
+                        window.sessionStorage.getItem(`${EXTERNAL_REVIEW_SESSION_KEY_PREFIX}${completedReviewBooking.bookingId}`) !== 'true',
+                      );
+                    } catch {
+                      setShowExternalReviewOffer(true);
+                    }
+                  });
+                }} className="mt-3 rounded-xl border border-emerald-200/35 bg-emerald-300/10 px-3 py-2 text-sm font-bold text-emerald-100 disabled:opacity-50">Залишити відгук</button>
+              </section>
+            )}
+            {showExternalReviewOffer && activeGuestBooking && (
+              <section className="mt-4 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-left text-sm text-amber-50">
+                <p className="font-semibold">Сподобався візит?</p>
+                <p className="mt-1 text-white/70">Залиште публічний відгук про MOLO — це допоможе нам стати кращими.</p>
+                <a href={MOLO_PUBLIC_REVIEW_URL} target="_blank" rel="noreferrer" onClick={openExternalReview} className="mt-3 inline-flex rounded-xl border border-amber-200/55 px-3 py-2 text-xs font-bold text-amber-100">Залишити публічний відгук</a>
+              </section>
+            )}
             {guestActionMessage && <p className="mt-3 text-xs text-white/70">{guestActionMessage}</p>}
           </section>
         </div>
