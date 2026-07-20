@@ -46,19 +46,29 @@ export class GuestBookingsService {
       .leftJoinAndSelect('booking.table', 'table')
       .leftJoinAndSelect('table.zone', 'zone');
 
-    if (guestDeviceId) {
-      query
-        .addSelect('booking.guestDeviceIdHash')
-        .where('booking.guestDeviceIdHash = :guestDeviceIdHash', {
+    query.andWhere((where) => {
+      const conditions: string[] = [];
+
+      if (guestDeviceId) {
+        conditions.push(`(
+          booking.guestDeviceIdHash = :guestDeviceIdHash
+          AND booking.bookingDate >= :today
+          AND booking.status IN (:...statuses)
+        )`);
+        where.setParameters({
           guestDeviceIdHash: this.hashDeviceId(guestDeviceId),
-        })
-        .andWhere('booking.bookingDate >= :today', { today: this.kyivDate() })
-        .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES });
-    } else {
-      query.where('booking.guestAccessTokenHash IN (:...hashes)', {
-        hashes: tokens.map((token) => this.hashToken(token)),
-      });
-    }
+          today: this.kyivDate(),
+          statuses: ACTIVE_BOOKING_STATUSES,
+        });
+      }
+
+      if (tokens.length > 0) {
+        conditions.push('booking.guestAccessTokenHash IN (:...hashes)');
+        where.setParameter('hashes', tokens.map((token) => this.hashToken(token)));
+      }
+
+      return conditions.join(' OR ');
+    });
 
     const bookings = await query.getMany();
 
