@@ -84,9 +84,26 @@ type TableAvailabilityNotice = {
 const ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:active-booking-id';
 const LEGACY_ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:last-booking-id';
 const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
+const GUEST_DEVICE_ID_STORAGE_KEY = 'molo:guest:device-id:v1';
 const EXTERNAL_REVIEW_SESSION_KEY_PREFIX = 'molo:guest:external-review-opened:';
 const MOLO_PUBLIC_REVIEW_URL = 'https://www.google.com/search?q=MOLO+Restaurant';
 const MAX_STORED_GUEST_BOOKINGS = 100;
+
+function getGuestDeviceId(): string {
+  if (typeof window === 'undefined') return '';
+
+  try {
+    const stored = window.localStorage.getItem(GUEST_DEVICE_ID_STORAGE_KEY);
+    if (stored) return stored;
+
+    const deviceId = window.crypto?.randomUUID?.() ||
+      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    window.localStorage.setItem(GUEST_DEVICE_ID_STORAGE_KEY, deviceId);
+    return deviceId;
+  } catch {
+    return '';
+  }
+}
 
 function readStoredBookingId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -608,6 +625,8 @@ export default function GuestApp() {
   const [legacyBookingId] = useState<string | null>(readStoredBookingId);
   const [lastBookingId, setLastBookingId] = useState<string | null>(legacyBookingId);
   const [guestBookings, setGuestBookings] = useState<GuestBookingToken[]>(readStoredGuestBookings);
+  const [guestDeviceId] = useState(getGuestDeviceId);
+  const [myBookings, setMyBookings] = useState<GuestBooking[]>([]);
   const [bookingStatus, setBookingStatus] = useState<BookingPublicStatus | null>(null);
   const [waiterCallStatus, setWaiterCallStatus] = useState<GuestWaiterCallStatus | null>(null);
   const [waiterCallBusy, setWaiterCallBusy] = useState(false);
@@ -681,7 +700,7 @@ export default function GuestApp() {
 
 
   useEffect(() => {
-    if (!lastBookingId && !legacyBookingId && guestBookings.length === 0) return;
+    if (!guestDeviceId && !lastBookingId && !legacyBookingId && guestBookings.length === 0) return;
 
     let stopped = false;
 
@@ -691,9 +710,10 @@ export default function GuestApp() {
 
       try {
         let hasGuestBooking = false;
-        if (tokens.length > 0) {
-          const bookings = await bookingsApi.guestList(tokens);
+        if (guestDeviceId || tokens.length > 0) {
+          const bookings = await bookingsApi.guestList(guestDeviceId, tokens);
           if (stopped) return;
+          setMyBookings(bookings);
 
           const booking =
             bookings.find((item) => item.bookingId === lastBookingId) ||
@@ -736,7 +756,7 @@ export default function GuestApp() {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [lastBookingId, legacyBookingId, guestBookings]);
+  }, [lastBookingId, legacyBookingId, guestBookings, guestDeviceId]);
 
   const visibleTables = useMemo(() => {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
@@ -755,6 +775,10 @@ export default function GuestApp() {
   const activeBookingTableNumber =
     bookingStatus?.tableNumber || selectedTable?.tableNumber || null;
   const activeGuestBooking = guestBookings.find((booking) => booking.bookingId === lastBookingId) || null;
+  const myBookingCards = myBookings.map((booking) => ({
+    booking,
+    access: guestBookings.find((item) => item.bookingId === booking.bookingId) || null,
+  }));
   const pendingTooLong =
     bookingStatus?.status === 'pending' &&
     (bookingStatus.isPendingTooLong || bookingStatus.pendingAgeMinutes >= 15);
@@ -864,17 +888,24 @@ export default function GuestApp() {
     alert('Телефон адміністратора ще не додано.');
   }
 
-  async function runGuestAction(action: (token: string) => Promise<{ message: string; booking?: GuestBooking; askExternalReview?: boolean }>) {
-    if (!lastBookingId || !activeGuestBooking || guestActionBusy) return null;
+  async function runGuestAction(bookingId: string, token: string, action: (token: string) => Promise<{ message: string; booking?: GuestBooking; askExternalReview?: boolean }>) {
+    if (!bookingId || !token || guestActionBusy) return null;
 
     setGuestActionBusy(true);
     setGuestActionMessage(null);
 
     try {
-      const result = await action(activeGuestBooking.token);
-      const booking = await bookingsApi.getGuest(lastBookingId, activeGuestBooking.token)
+      const result = await action(token);
+      const booking = await bookingsApi.getGuest(bookingId, token)
         .catch(() => result.booking || null);
-      if (booking) setBookingStatus(guestBookingToStatus(booking));
+      if (booking) {
+        setBookingStatus(guestBookingToStatus(booking));
+        setMyBookings((current) =>
+          booking.status === 'pending' || booking.status === 'approved'
+            ? current.map((item) => item.bookingId === booking.bookingId ? booking : item)
+            : current.filter((item) => item.bookingId !== booking.bookingId),
+        );
+      }
       setGuestActionMessage(result.message);
       return result;
     } catch (actionError: any) {
@@ -888,7 +919,7 @@ export default function GuestApp() {
 
   function cancelGuestBooking() {
     if (!lastBookingId || !window.confirm('Скасувати це бронювання?')) return;
-    void runGuestAction((token) => bookingsApi.guestCancel(lastBookingId, token));
+    void runGuestAction(lastBookingId, activeGuestBooking?.token || '', (token) => bookingsApi.guestCancel(lastBookingId, token));
   }
 
   function reportGuestLateness() {
@@ -900,7 +931,7 @@ export default function GuestApp() {
       setGuestActionMessage('Вкажіть запізнення від 1 до 720 хвилин.');
       return;
     }
-    void runGuestAction((token) =>
+    void runGuestAction(lastBookingId, activeGuestBooking?.token || '', (token) =>
       bookingsApi.guestLateness(lastBookingId, token, Math.floor(totalMinutes / 60), totalMinutes % 60),
     );
   }
@@ -909,21 +940,21 @@ export default function GuestApp() {
     if (!lastBookingId) return;
     const tableNumber = window.prompt('Вкажіть номер нового столу');
     if (tableNumber === null || !tableNumber.trim()) return;
-    void runGuestAction((token) =>
+    void runGuestAction(lastBookingId, activeGuestBooking?.token || '', (token) =>
       bookingsApi.guestChangeTable(lastBookingId, token, { tableNumber: tableNumber.trim() }),
     );
   }
 
   function acknowledgeGuestNotification() {
     if (!lastBookingId) return;
-    void runGuestAction((token) => bookingsApi.guestAcknowledgeNotification(lastBookingId, token));
+    void runGuestAction(lastBookingId, activeGuestBooking?.token || '', (token) => bookingsApi.guestAcknowledgeNotification(lastBookingId, token));
   }
 
   function submitGuestReview() {
     if (!lastBookingId) return;
     const text = window.prompt('Поділіться враженнями від візиту');
     if (text === null || !text.trim()) return;
-    void runGuestAction((token) => bookingsApi.guestReview(lastBookingId, token, { text: text.trim() }))
+    void runGuestAction(lastBookingId, activeGuestBooking?.token || '', (token) => bookingsApi.guestReview(lastBookingId, token, { text: text.trim() }))
       .then((result) => {
         if (!result?.askExternalReview) return;
         try {
@@ -1166,6 +1197,7 @@ export default function GuestApp() {
         seats: selectedTable.seats,
         fullName: form.fullName,
         phone: form.phone,
+        guestDeviceId,
         bookingDate: date,
         bookingTime: time,
         guestsCount: Number(form.guestsCount),
@@ -1955,6 +1987,41 @@ export default function GuestApp() {
 
               {(bookingStatus?.status === 'rejected' || bookingStatus?.status === 'cancelled') && (
                 <p className="mt-2 text-sm text-red-100">На жаль, бронювання не підтверджено. Подзвоніть адміністратору.</p>
+              )}
+
+              {myBookingCards.length > 0 && (
+                <div className="mt-4 space-y-3 text-left">
+                  <h2 className="text-lg font-black text-amber-100">Мої бронювання</h2>
+                  {myBookingCards.map(({ booking, access }) => (
+                    <article key={booking.bookingId} className="rounded-2xl border border-amber-200/30 bg-black/25 p-4">
+                      <p className="font-bold text-white">{booking.bookingDate} · {booking.bookingTime} · Стіл №{booking.tableNumber || '—'}</p>
+                      <p className="mt-1 text-xs text-white/65">{booking.status === 'approved' ? 'Бронювання підтверджено' : 'Очікує підтвердження'}</p>
+                      {access && (
+                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                          {booking.isLatenessPromptDue && (
+                            <button type="button" disabled={guestActionBusy} onClick={() => {
+                              const minutes = Number(window.prompt('На скільки хвилин ви запізнюєтеся?', '15'));
+                              if (Number.isInteger(minutes) && minutes > 0 && minutes <= 720) {
+                                void runGuestAction(booking.bookingId, access.token, (token) => bookingsApi.guestLateness(booking.bookingId, token, Math.floor(minutes / 60), minutes % 60));
+                              }
+                            }} className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50">Повідомити про запізнення</button>
+                          )}
+                          {booking.canGuestCancel && (
+                            <button type="button" disabled={guestActionBusy} onClick={() => {
+                              if (window.confirm('Скасувати це бронювання?')) void runGuestAction(booking.bookingId, access.token, (token) => bookingsApi.guestCancel(booking.bookingId, token));
+                            }} className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50">Скасувати бронювання</button>
+                          )}
+                          {booking.canGuestChangeTable && (
+                            <button type="button" disabled={guestActionBusy} onClick={() => {
+                              const tableNumber = window.prompt('Вкажіть номер нового столу');
+                              if (tableNumber?.trim()) void runGuestAction(booking.bookingId, access.token, (token) => bookingsApi.guestChangeTable(booking.bookingId, token, { tableNumber: tableNumber.trim() }));
+                            }} className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50">Змінити стіл</button>
+                          )}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
               )}
 
               {activeGuestBooking && bookingStatus && (

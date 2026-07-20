@@ -46,6 +46,33 @@ export class BookingsService {
     if (restaurant.status === 'booking_closed') throw new BadRequestException(restaurant.bookingClosedMessage);
   }
 
+  private normalizePhone(phone: string | null | undefined) {
+    return String(phone || '').replace(/\D/g, '');
+  }
+
+  private hashGuestDeviceId(guestDeviceId: string) {
+    return createHash('sha256').update(String(guestDeviceId).trim()).digest('hex');
+  }
+
+  private async assertNoActiveGuestBooking(bookingDate: string, phone: string, guestDeviceIdHash: string) {
+    const activeBookings = await this.bookings
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.client', 'client')
+      .addSelect('booking.guestDeviceIdHash')
+      .where('booking.bookingDate = :bookingDate', { bookingDate })
+      .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
+      .getMany();
+    const normalizedPhone = this.normalizePhone(phone);
+    const duplicate = activeBookings.some((booking) =>
+      booking.guestDeviceIdHash === guestDeviceIdHash ||
+      this.normalizePhone(booking.client?.phone) === normalizedPhone,
+    );
+
+    if (duplicate) {
+      throw new BadRequestException('На цю дату вже є активне бронювання з цього пристрою або номера телефону');
+    }
+  }
+
   private normalizeDuration(durationMinutes?: number) {
     const value = Number(durationMinutes || DEFAULT_DURATION_MINUTES);
     if (!Number.isFinite(value)) return DEFAULT_DURATION_MINUTES;
@@ -538,6 +565,9 @@ export class BookingsService {
     try {
       await this.validateRestaurant();
 
+      const guestDeviceIdHash = this.hashGuestDeviceId(dto.guestDeviceId);
+      await this.assertNoActiveGuestBooking(dto.bookingDate, dto.phone, guestDeviceIdHash);
+
       const table = await this.resolveTableForBooking(dto);
       await this.assertTableCanBeBooked(table);
 
@@ -562,6 +592,7 @@ export class BookingsService {
           table,
           client,
           guestAccessTokenHash,
+          guestDeviceIdHash,
           bookingDate: dto.bookingDate,
           bookingTime: timeInfo.bookingTime,
           durationMinutes: timeInfo.durationMinutes,

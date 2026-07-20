@@ -37,16 +37,30 @@ export class GuestBookingsService {
   ) {}
 
   async list(dto: GuestBookingListDto) {
+    const guestDeviceId = String(dto.guestDeviceId || '').trim();
     const tokens = [...new Set((dto.tokens || []).map((token) => String(token || '').trim()).filter(Boolean))].slice(0, 100);
-    if (tokens.length === 0) return [];
+    if (!guestDeviceId && tokens.length === 0) return [];
 
-    const hashes = tokens.map((token) => this.hashToken(token));
-    const bookings = await this.bookings
+    const query = this.bookings
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.table', 'table')
-      .leftJoinAndSelect('table.zone', 'zone')
-      .where('booking.guestAccessTokenHash IN (:...hashes)', { hashes })
-      .getMany();
+      .leftJoinAndSelect('table.zone', 'zone');
+
+    if (guestDeviceId) {
+      query
+        .addSelect('booking.guestDeviceIdHash')
+        .where('booking.guestDeviceIdHash = :guestDeviceIdHash', {
+          guestDeviceIdHash: this.hashDeviceId(guestDeviceId),
+        })
+        .andWhere('booking.bookingDate >= :today', { today: this.kyivDate() })
+        .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES });
+    } else {
+      query.where('booking.guestAccessTokenHash IN (:...hashes)', {
+        hashes: tokens.map((token) => this.hashToken(token)),
+      });
+    }
+
+    const bookings = await query.getMany();
 
     if (bookings.length === 0) return [];
 
@@ -329,6 +343,10 @@ export class GuestBookingsService {
       throw new UnauthorizedException('Недійсний доступ до бронювання');
     }
     return createHash('sha256').update(normalized).digest('hex');
+  }
+
+  private hashDeviceId(deviceId: string) {
+    return createHash('sha256').update(deviceId).digest('hex');
   }
 
   private assertGuestCanManageActiveBooking(booking: Booking, message: string) {
