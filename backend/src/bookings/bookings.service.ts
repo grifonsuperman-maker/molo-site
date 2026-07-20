@@ -566,6 +566,7 @@ export class BookingsService {
       await this.validateRestaurant();
 
       const guestDeviceIdHash = this.hashGuestDeviceId(dto.guestDeviceId);
+      const guestPhoneNormalized = this.normalizePhone(dto.phone) || null;
       await this.assertNoActiveGuestBooking(dto.bookingDate, dto.phone, guestDeviceIdHash);
 
       const table = await this.resolveTableForBooking(dto);
@@ -593,6 +594,7 @@ export class BookingsService {
           client,
           guestAccessTokenHash,
           guestDeviceIdHash,
+          guestPhoneNormalized,
           bookingDate: dto.bookingDate,
           bookingTime: timeInfo.bookingTime,
           durationMinutes: timeInfo.durationMinutes,
@@ -632,6 +634,15 @@ export class BookingsService {
       };
     } catch (error: any) {
       if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
+      if (
+        (error?.code || error?.driverError?.code) === '23505' &&
+        [
+          'UQ_bookings_active_guest_device_date',
+          'UQ_bookings_active_guest_phone_date',
+        ].includes(error?.constraint || error?.driverError?.constraint)
+      ) {
+        throw new BadRequestException('На цю дату вже є активне бронювання з цього пристрою або номера телефону');
+      }
       console.error('Booking create failed:', error);
       throw new BadRequestException(`Booking error: ${error?.message || 'unknown error'}`);
     }

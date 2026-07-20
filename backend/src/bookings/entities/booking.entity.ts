@@ -65,6 +65,15 @@ export class Booking {
   })
   guestDeviceIdHash: string | null;
 
+  @Column({
+    name: 'guest_phone_normalized',
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+    select: false,
+  })
+  guestPhoneNormalized: string | null;
+
   @Column({ name: 'booking_date', type: 'date' })
   bookingDate: string;
 

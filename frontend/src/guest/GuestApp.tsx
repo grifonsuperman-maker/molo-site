@@ -92,17 +92,19 @@ const MAX_STORED_GUEST_BOOKINGS = 100;
 function getGuestDeviceId(): string {
   if (typeof window === 'undefined') return '';
 
+  const deviceId = window.crypto?.randomUUID?.() ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
   try {
     const stored = window.localStorage.getItem(GUEST_DEVICE_ID_STORAGE_KEY);
     if (stored) return stored;
 
-    const deviceId = window.crypto?.randomUUID?.() ||
-      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     window.localStorage.setItem(GUEST_DEVICE_ID_STORAGE_KEY, deviceId);
-    return deviceId;
   } catch {
-    return '';
+    // Бронювання працює і без доступу до localStorage у цьому сеансі.
   }
+
+  return deviceId;
 }
 
 function readStoredBookingId(): string | null {
@@ -1140,6 +1142,12 @@ export default function GuestApp() {
   async function submit() {
     if (!selectedTable) return;
 
+    const bookingGuestDeviceId = guestDeviceId || getGuestDeviceId();
+    if (!bookingGuestDeviceId) {
+      alert('Не вдалося створити ідентифікатор пристрою. Спробуйте ще раз.');
+      return;
+    }
+
     const tableIsStillAvailable = await revalidateSelectedTableBeforeSubmit();
     if (!tableIsStillAvailable) return;
 
@@ -1158,7 +1166,7 @@ export default function GuestApp() {
         seats: selectedTable.seats,
         fullName: form.fullName,
         phone: form.phone,
-        guestDeviceId,
+        guestDeviceId: bookingGuestDeviceId,
         bookingDate: date,
         bookingTime: time,
         guestsCount: Number(form.guestsCount),
