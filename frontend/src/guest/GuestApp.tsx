@@ -84,6 +84,8 @@ type TableAvailabilityNotice = {
 const ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:active-booking-id';
 const LEGACY_ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:last-booking-id';
 const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
+const EXTERNAL_REVIEW_SESSION_KEY_PREFIX = 'molo:guest:external-review-opened:';
+const MOLO_PUBLIC_REVIEW_URL = 'https://www.google.com/search?q=MOLO+Restaurant';
 const MAX_STORED_GUEST_BOOKINGS = 100;
 
 function readStoredBookingId(): string | null {
@@ -610,6 +612,9 @@ export default function GuestApp() {
   const [waiterCallStatus, setWaiterCallStatus] = useState<GuestWaiterCallStatus | null>(null);
   const [waiterCallBusy, setWaiterCallBusy] = useState(false);
   const [waiterCallMessage, setWaiterCallMessage] = useState<string | null>(null);
+  const [guestActionBusy, setGuestActionBusy] = useState(false);
+  const [guestActionMessage, setGuestActionMessage] = useState<string | null>(null);
+  const [showExternalReviewOffer, setShowExternalReviewOffer] = useState(false);
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -749,6 +754,7 @@ export default function GuestApp() {
     : bookingPeriod;
   const activeBookingTableNumber =
     bookingStatus?.tableNumber || selectedTable?.tableNumber || null;
+  const activeGuestBooking = guestBookings.find((booking) => booking.bookingId === lastBookingId) || null;
   const pendingTooLong =
     bookingStatus?.status === 'pending' &&
     (bookingStatus.isPendingTooLong || bookingStatus.pendingAgeMinutes >= 15);
@@ -856,6 +862,90 @@ export default function GuestApp() {
     }
 
     alert('Телефон адміністратора ще не додано.');
+  }
+
+  async function runGuestAction(action: (token: string) => Promise<{ message: string; booking?: GuestBooking; askExternalReview?: boolean }>) {
+    if (!lastBookingId || !activeGuestBooking || guestActionBusy) return null;
+
+    setGuestActionBusy(true);
+    setGuestActionMessage(null);
+
+    try {
+      const result = await action(activeGuestBooking.token);
+      const booking = await bookingsApi.getGuest(lastBookingId, activeGuestBooking.token)
+        .catch(() => result.booking || null);
+      if (booking) setBookingStatus(guestBookingToStatus(booking));
+      setGuestActionMessage(result.message);
+      return result;
+    } catch (actionError: any) {
+      setGuestActionMessage(actionError?.message || 'Не вдалося оновити бронювання');
+    } finally {
+      setGuestActionBusy(false);
+    }
+
+    return null;
+  }
+
+  function cancelGuestBooking() {
+    if (!lastBookingId || !window.confirm('Скасувати це бронювання?')) return;
+    void runGuestAction((token) => bookingsApi.guestCancel(lastBookingId, token));
+  }
+
+  function reportGuestLateness() {
+    if (!lastBookingId) return;
+    const value = window.prompt('На скільки хвилин ви запізнюєтеся?', '15');
+    if (value === null) return;
+    const totalMinutes = Number(value);
+    if (!Number.isInteger(totalMinutes) || totalMinutes < 1 || totalMinutes > 720) {
+      setGuestActionMessage('Вкажіть запізнення від 1 до 720 хвилин.');
+      return;
+    }
+    void runGuestAction((token) =>
+      bookingsApi.guestLateness(lastBookingId, token, Math.floor(totalMinutes / 60), totalMinutes % 60),
+    );
+  }
+
+  function changeGuestTable() {
+    if (!lastBookingId) return;
+    const tableNumber = window.prompt('Вкажіть номер нового столу');
+    if (tableNumber === null || !tableNumber.trim()) return;
+    void runGuestAction((token) =>
+      bookingsApi.guestChangeTable(lastBookingId, token, { tableNumber: tableNumber.trim() }),
+    );
+  }
+
+  function acknowledgeGuestNotification() {
+    if (!lastBookingId) return;
+    void runGuestAction((token) => bookingsApi.guestAcknowledgeNotification(lastBookingId, token));
+  }
+
+  function submitGuestReview() {
+    if (!lastBookingId) return;
+    const text = window.prompt('Поділіться враженнями від візиту');
+    if (text === null || !text.trim()) return;
+    void runGuestAction((token) => bookingsApi.guestReview(lastBookingId, token, { text: text.trim() }))
+      .then((result) => {
+        if (!result?.askExternalReview) return;
+        try {
+          setShowExternalReviewOffer(
+            window.sessionStorage.getItem(`${EXTERNAL_REVIEW_SESSION_KEY_PREFIX}${lastBookingId}`) !== 'true',
+          );
+        } catch {
+          setShowExternalReviewOffer(true);
+        }
+      });
+  }
+
+  function openExternalReview() {
+    if (!lastBookingId || !activeGuestBooking) return;
+
+    try {
+      window.sessionStorage.setItem(`${EXTERNAL_REVIEW_SESSION_KEY_PREFIX}${lastBookingId}`, 'true');
+    } catch {
+      // The offer is still hidden for the current mounted session.
+    }
+    setShowExternalReviewOffer(false);
+    void bookingsApi.guestExternalReviewOpened(lastBookingId, activeGuestBooking.token);
   }
 
   async function callWaiter() {
@@ -1853,17 +1943,104 @@ export default function GuestApp() {
                   {waiterCallMessage && (
                     <p className="mt-3 text-xs text-amber-100">{waiterCallMessage}</p>
                   )}
-             {lastBookingId && (
-  <div className="mt-4">
-    <GuestHookahCallPanel bookingId={lastBookingId} />
-  </div>
-)}
+
+                  {lastBookingId && (
+                    <div className="mt-4">
+                      <GuestHookahCallPanel bookingId={lastBookingId} />
+                    </div>
+                  )}
               
                 </div>
               )}
 
               {(bookingStatus?.status === 'rejected' || bookingStatus?.status === 'cancelled') && (
                 <p className="mt-2 text-sm text-red-100">На жаль, бронювання не підтверджено. Подзвоніть адміністратору.</p>
+              )}
+
+              {activeGuestBooking && bookingStatus && (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-sm font-semibold text-white">Керування бронюванням</p>
+
+                  {bookingStatus.guestNotification?.message && !bookingStatus.guestNotification.acknowledgedAt && (
+                    <div className="mt-3 rounded-2xl border border-sky-200/25 bg-sky-300/10 p-3 text-sm text-sky-50">
+                      {bookingStatus.guestNotification.title && (
+                        <p className="font-semibold">{bookingStatus.guestNotification.title}</p>
+                      )}
+                      <p className="mt-1">{bookingStatus.guestNotification.message}</p>
+                      <button
+                        type="button"
+                        onClick={acknowledgeGuestNotification}
+                        disabled={guestActionBusy}
+                        className="mt-3 rounded-xl border border-sky-200/45 px-3 py-2 text-xs font-bold text-sky-100 disabled:opacity-50"
+                      >
+                        Прочитано
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {bookingStatus.isLatenessPromptDue && (
+                      <button
+                        type="button"
+                        onClick={reportGuestLateness}
+                        disabled={guestActionBusy}
+                        className="rounded-xl border border-amber-200/45 px-3 py-2 text-sm font-bold text-amber-100 disabled:opacity-50"
+                      >
+                        Повідомити про запізнення
+                      </button>
+                    )}
+                    {bookingStatus.canGuestCancel && (
+                      <button
+                        type="button"
+                        onClick={cancelGuestBooking}
+                        disabled={guestActionBusy}
+                        className="rounded-xl border border-red-200/35 px-3 py-2 text-sm font-bold text-red-100 disabled:opacity-50"
+                      >
+                        Скасувати бронювання
+                      </button>
+                    )}
+                    {bookingStatus.canGuestChangeTable && (
+                      <button
+                        type="button"
+                        onClick={changeGuestTable}
+                        disabled={guestActionBusy}
+                        className="rounded-xl border border-amber-200/45 px-3 py-2 text-sm font-bold text-amber-100 disabled:opacity-50"
+                      >
+                        Змінити стіл
+                      </button>
+                    )}
+                    {bookingStatus.canLeaveReview && (
+                      <button
+                        type="button"
+                        onClick={submitGuestReview}
+                        disabled={guestActionBusy}
+                        className="rounded-xl border border-emerald-200/35 px-3 py-2 text-sm font-bold text-emerald-100 disabled:opacity-50"
+                      >
+                        Залишити відгук
+                      </button>
+                    )}
+                  </div>
+
+                  {guestActionMessage && (
+                    <p className="mt-3 text-xs text-white/70">{guestActionMessage}</p>
+                  )}
+
+                  {showExternalReviewOffer && (
+                    <div className="mt-4 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-sm text-amber-50">
+                      <p className="font-semibold">Сподобався візит?</p>
+                      <p className="mt-1 text-white/70">Залиште публічний відгук про MOLO — це допоможе нам стати кращими.</p>
+                      <a
+                        href={MOLO_PUBLIC_REVIEW_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={openExternalReview}
+                        className="mt-3 inline-flex rounded-xl border border-amber-200/55 px-3 py-2 text-xs font-bold text-amber-100"
+                      >
+                        Залишити публічний відгук
+                      </a>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
