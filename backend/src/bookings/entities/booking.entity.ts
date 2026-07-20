@@ -55,6 +55,11 @@ export class Booking {
   })
   guestAccessTokenHash: string | null;
 
+  /** Ідентифікатор браузера гостя зберігається лише як SHA-256 hash. */
+  @Index()
+  @Column({ name: 'guest_device_id_hash', type: 'varchar', length: 64, nullable: true, select: false })
+  guestDeviceIdHash: string | null;
+
   @Column({ name: 'booking_date', type: 'date' })
   bookingDate: string;
 

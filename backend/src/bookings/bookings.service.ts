@@ -538,6 +538,8 @@ export class BookingsService {
     try {
       await this.validateRestaurant();
 
+      await this.assertGuestHasNoActiveBookingForDate(dto);
+
       const table = await this.resolveTableForBooking(dto);
       await this.assertTableCanBeBooked(table);
 
@@ -556,12 +558,14 @@ export class BookingsService {
 
       const guestAccessToken = randomBytes(32).toString('hex');
       const guestAccessTokenHash = createHash('sha256').update(guestAccessToken).digest('hex');
+      const guestDeviceIdHash = createHash('sha256').update(dto.guestDeviceId.trim()).digest('hex');
 
       const booking = await this.bookings.save(
         this.bookings.create({
           table,
           client,
           guestAccessTokenHash,
+          guestDeviceIdHash,
           bookingDate: dto.bookingDate,
           bookingTime: timeInfo.bookingTime,
           durationMinutes: timeInfo.durationMinutes,
@@ -604,6 +608,33 @@ export class BookingsService {
       console.error('Booking create failed:', error);
       throw new BadRequestException(`Booking error: ${error?.message || 'unknown error'}`);
     }
+  }
+
+  private async assertGuestHasNoActiveBookingForDate(dto: CreateBookingDto) {
+    const deviceHash = createHash('sha256').update(dto.guestDeviceId.trim()).digest('hex');
+    const normalizedPhone = this.normalizePhone(dto.phone);
+    const activeBookings = await this.bookings
+      .createQueryBuilder('booking')
+      .addSelect('booking.guestDeviceIdHash')
+      .leftJoinAndSelect('booking.client', 'client')
+      .where('booking.bookingDate = :bookingDate', { bookingDate: dto.bookingDate })
+      .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
+      .getMany();
+
+    const hasConflict = activeBookings.some((booking) =>
+      booking.guestDeviceIdHash === deviceHash ||
+      this.normalizePhone(booking.client?.phone || '') === normalizedPhone,
+    );
+
+    if (hasConflict) {
+      throw new BadRequestException(
+        'У вас уже є активне бронювання на цю дату. Відкрийте “Мої бронювання”, щоб змінити або скасувати його.',
+      );
+    }
+  }
+
+  private normalizePhone(phone: string) {
+    return String(phone || '').replace(/\D/g, '');
   }
 
   async getPublicStatus(id: string) {
