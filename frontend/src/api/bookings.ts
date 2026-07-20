@@ -94,6 +94,12 @@ export type BookingPublicStatus = {
   pendingReminderMinutes: number;
   isPendingTooLong: boolean;
   restaurantPhone: string | null;
+  lateNotifiedAt?: string | null;
+  isLatenessPromptDue?: boolean;
+  canGuestCancel?: boolean;
+  canGuestChangeTable?: boolean;
+  canLeaveReview?: boolean;
+  guestNotification?: GuestBooking['guestNotification'];
 };
 
 export type GuestBooking = {
@@ -111,6 +117,20 @@ export type GuestBooking = {
   cancelledAt?: string | null;
   completedAt?: string | null;
   restaurantPhone: string | null;
+  checkedInAt?: string | null;
+  lateNotifiedAt?: string | null;
+  latenessHours?: number | null;
+  latenessMinutes?: number | null;
+  expectedArrivalAt?: string | null;
+  isLatenessPromptDue?: boolean;
+  canGuestCancel?: boolean;
+  canGuestChangeTable?: boolean;
+  canLeaveReview?: boolean;
+  guestNotification?: {
+    title?: string;
+    message?: string;
+    acknowledgedAt?: string | null;
+  } | null;
 };
 
 export type GuestBookingToken = {
@@ -133,6 +153,8 @@ export type BookingStats = {
 
 type ActionResponse = {
   message: string;
+  booking?: GuestBooking;
+  askExternalReview?: boolean;
 };
 
 function encode(value: string): string {
