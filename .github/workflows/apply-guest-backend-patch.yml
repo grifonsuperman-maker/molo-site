@@ -101,25 +101,8 @@ jobs:
 
           cd /tmp/molo-guest-test/backend
 
-          installed=false
-          for attempt in 1 2 3; do
-            echo "npm ci attempt ${attempt}/3"
-            rm -rf node_modules
-
-            if npm ci --no-audit --no-fund; then
-              installed=true
-              break
-            fi
-
-            npm cache clean --force || true
-            sleep 10
-          done
-
-          if [ "$installed" != "true" ]; then
-            echo "npm ci failed after 3 attempts"
-            exit 1
-          fi
-
+          rm -rf node_modules
+          npm install --no-audit --no-fund
           npm run build
 
       - name: Apply approved backend files
