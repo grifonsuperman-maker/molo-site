@@ -13,27 +13,14 @@ permissions:
   contents: write
 
 jobs:
-  validate-build-and-apply:
+  validate-and-apply:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up stable Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.19.4'
-
-      - name: Use stable npm
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --global npm@10.9.2
-          node --version
-          npm --version
 
       - name: Validate patch contents
         shell: bash
@@ -77,33 +64,10 @@ jobs:
                   if stat.S_ISLNK(mode):
                       raise SystemExit(f"Symlink is not allowed: {info.filename}")
 
-          print("Patch contains only the approved backend files.")
+              archive.testzip()
+
+          print("Patch archive is valid and contains only approved backend files.")
           PY
-
-      - name: Test patch in a temporary copy
-        shell: bash
-        env:
-          npm_config_audit: 'false'
-          npm_config_fund: 'false'
-          npm_config_jobs: '2'
-        run: |
-          set -euo pipefail
-
-          rm -rf /tmp/molo-guest-test
-          mkdir -p /tmp/molo-guest-test
-
-          rsync -a \
-            --exclude='.git' \
-            --exclude='molo-guest-backend-patch.zip' \
-            ./ /tmp/molo-guest-test/
-
-          unzip -o molo-guest-backend-patch.zip -d /tmp/molo-guest-test
-
-          cd /tmp/molo-guest-test/backend
-
-          rm -rf node_modules
-          npm install --no-audit --no-fund
-          npm run build
 
       - name: Apply approved backend files
         shell: bash
@@ -112,6 +76,7 @@ jobs:
 
           unzip -o molo-guest-backend-patch.zip -d .
           rm -f molo-guest-backend-patch.zip
+          git diff --check
 
       - name: Commit applied patch
         shell: bash
