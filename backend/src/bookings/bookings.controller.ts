@@ -1,14 +1,24 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { BookingsService } from './bookings.service';
-import { CreateBookingDto } from './dto/create-booking.dto';
-import { CheckAvailabilityDto } from './dto/check-availability.dto';
-import { RequestRescheduleDto } from './dto/request-reschedule.dto';
-import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
+
 import { Public } from '../common/decorators/public.decorator';
+import { BookingsService } from './bookings.service';
+import { GuestBookingsService } from './guest-bookings.service';
+import { CheckAvailabilityDto } from './dto/check-availability.dto';
+import { CreateBookingDto } from './dto/create-booking.dto';
+import { GuestBookingListDto } from './dto/guest-booking-list.dto';
+import { GuestCancelBookingDto } from './dto/guest-cancel-booking.dto';
+import { GuestChangeTableDto } from './dto/guest-change-table.dto';
+import { GuestLatenessDto } from './dto/guest-lateness.dto';
+import { GuestReviewDto } from './dto/guest-review.dto';
+import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
+import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 
 @Controller('bookings')
 export class BookingsController {
-  constructor(private readonly service: BookingsService) {}
+  constructor(
+    private readonly service: BookingsService,
+    private readonly guestService: GuestBookingsService,
+  ) {}
 
   @Public()
   @Post()
@@ -26,6 +36,12 @@ export class BookingsController {
   @Get('table-statuses')
   tableStatuses(@Query() dto: any) {
     return this.service.getTableStatuses(dto);
+  }
+
+  @Public()
+  @Post('guest/list')
+  guestList(@Body() dto: GuestBookingListDto) {
+    return this.guestService.list(dto);
   }
 
   @Public()
@@ -50,10 +66,7 @@ export class BookingsController {
 
   @Public()
   @Get('archive')
-  archive(
-    @Query('date') date?: string,
-    @Query('limit') limit?: string,
-  ) {
+  archive(@Query('date') date?: string, @Query('limit') limit?: string) {
     return this.service.getArchive(date, Number(limit));
   }
 
@@ -67,6 +80,73 @@ export class BookingsController {
   @Get('reschedule/pending')
   pendingReschedules() {
     return this.service.getPendingReschedules();
+  }
+
+  @Public()
+  @Get(':id/guest')
+  guestBooking(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+  ) {
+    return this.guestService.get(id, token);
+  }
+
+  @Public()
+  @Patch(':id/guest/cancel')
+  guestCancel(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+    @Body() dto: GuestCancelBookingDto,
+  ) {
+    return this.guestService.cancel(id, token, dto);
+  }
+
+  @Public()
+  @Patch(':id/guest/lateness')
+  guestLateness(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+    @Body() dto: GuestLatenessDto,
+  ) {
+    return this.guestService.reportLateness(id, token, dto);
+  }
+
+  @Public()
+  @Patch(':id/guest/change-table')
+  guestChangeTable(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+    @Body() dto: GuestChangeTableDto,
+  ) {
+    return this.guestService.changeTable(id, token, dto);
+  }
+
+  @Public()
+  @Patch(':id/guest/notification/ack')
+  guestAcknowledgeNotification(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+  ) {
+    return this.guestService.acknowledgeNotification(id, token);
+  }
+
+  @Public()
+  @Post(':id/guest/review')
+  guestReview(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+    @Body() dto: GuestReviewDto,
+  ) {
+    return this.guestService.submitReview(id, token, dto);
+  }
+
+  @Public()
+  @Patch(':id/guest/review/external-opened')
+  guestExternalReviewOpened(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+  ) {
+    return this.guestService.markExternalReviewOpened(id, token);
   }
 
   @Public()
@@ -113,10 +193,7 @@ export class BookingsController {
 
   @Public()
   @Post(':id/reschedule')
-  requestReschedule(
-    @Param('id') id: string,
-    @Body() dto: RequestRescheduleDto,
-  ) {
+  requestReschedule(@Param('id') id: string, @Body() dto: RequestRescheduleDto) {
     return this.service.requestReschedule(id, dto);
   }
 

@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createHash, randomBytes } from 'crypto';
 import { Repository } from 'typeorm';
 import { Booking, BookingStatus } from './entities/booking.entity';
+import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { Client } from '../clients/entities/client.entity';
 import { TableEntity } from '../tables/entities/table.entity';
@@ -22,6 +24,7 @@ const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 export class BookingsService {
   constructor(
     @InjectRepository(Booking) private readonly bookings: Repository<Booking>,
+    @InjectRepository(BookingHistory) private readonly histories: Repository<BookingHistory>,
     @InjectRepository(BookingRescheduleRequest) private readonly reschedules: Repository<BookingRescheduleRequest>,
     @InjectRepository(Client) private readonly clients: Repository<Client>,
     @InjectRepository(TableEntity) private readonly tables: Repository<TableEntity>,
@@ -103,6 +106,11 @@ export class BookingsService {
   }
 
   private durationFromWishes(booking: Booking) {
+    const storedDuration = Number(booking.durationMinutes);
+    if (Number.isFinite(storedDuration) && storedDuration >= 30) {
+      return this.normalizeDuration(storedDuration);
+    }
+
     const wishes = booking.wishes || '';
     const match = wishes.match(/\((\d{2}:\d{2})\s*[—-]\s*(\d{2}:\d{2})\)/);
 
@@ -267,12 +275,17 @@ export class BookingsService {
     table: TableEntity | null,
     status: TableEntity['status'],
     bookingDate: string,
+    force = false,
   ) {
     if (!table) return;
 
-    // Важливо: майбутня бронь не повинна фарбувати стіл сьогодні.
-    // Статус table.status — це фізичний статус столу зараз, а не всі майбутні броні.
+    // Майбутня бронь не повинна фарбувати фізичний стіл сьогодні.
     if (!this.isBookingToday(bookingDate)) return;
+
+    // Закритий стіл автоматично не відкриваємо. Фізичні occupied/cleaning
+    // мають пріоритет над pending/reserved та звичайним скасуванням броні.
+    if (table.status === 'closed') return;
+    if (!force && (table.status === 'occupied' || table.status === 'cleaning')) return;
 
     await this.setTableStatus(table, status);
   }
@@ -291,6 +304,45 @@ export class BookingsService {
     } catch (error) {
       console.error('Booking notification failed:', error);
     }
+  }
+
+  private async saveHistory(
+    booking: Booking,
+    action: string,
+    actorRole: string,
+    previousData?: Record<string, unknown> | null,
+    newData?: Record<string, unknown> | null,
+    reason?: string | null,
+  ) {
+    await this.histories.save(
+      this.histories.create({
+        booking,
+        action,
+        actorRole,
+        actorStaffId: null,
+        actorName: null,
+        previousData: previousData || null,
+        newData: newData || null,
+        reason: reason || null,
+        isManualMode: false,
+      }),
+    );
+  }
+
+  private bookingSnapshot(booking: Booking) {
+    return {
+      status: booking.status,
+      tableId: booking.table?.id || null,
+      tableNumber: booking.table?.tableNumber || null,
+      bookingDate: booking.bookingDate,
+      bookingTime: booking.bookingTime,
+      durationMinutes: this.durationFromWishes(booking),
+      checkedInAt: booking.checkedInAt,
+      cancelledAt: booking.cancelledAt,
+      cancellationReason: booking.cancellationReason,
+      completedAt: booking.completedAt,
+      expectedArrivalAt: booking.expectedArrivalAt,
+    };
   }
 
   private markNoShowInWishes(booking: Booking) {
@@ -341,6 +393,14 @@ export class BookingsService {
       bookedToLabel: timeInfo.bookedToLabel,
       availableFromLabel: timeInfo.availableFromLabel,
       guestsCount: booking.guestsCount,
+      durationMinutes: this.durationFromWishes(booking),
+      checkedInAt: booking.checkedInAt,
+      cancellationReason: booking.cancellationReason,
+      lateNotifiedAt: booking.lateNotifiedAt,
+      latenessHours: booking.latenessHours,
+      latenessMinutes: booking.latenessMinutes,
+      expectedArrivalAt: booking.expectedArrivalAt,
+      guestNotification: booking.guestNotification,
       createdAt: booking.createdAt,
       approvedAt: booking.approvedAt,
       rejectedAt: booking.rejectedAt,
@@ -438,12 +498,15 @@ export class BookingsService {
       } else if (table.status === 'closed' || table.zone?.isClosed) {
         status = 'closed';
         reason = 'closed';
+      } else if (bookingDate === today && table.status === 'occupied') {
+        status = 'occupied';
+        reason = 'physical_status_today';
+      } else if (bookingDate === today && table.status === 'cleaning') {
+        status = 'cleaning';
+        reason = 'physical_status_today';
       } else if (conflict) {
         status = conflict.status === 'pending' ? 'pending' : 'reserved';
         reason = 'booking_conflict';
-      } else if (bookingDate === today && (table.status === 'occupied' || table.status === 'cleaning')) {
-        status = table.status;
-        reason = 'physical_status_today';
       }
 
       result[tableNumber] = {
@@ -491,18 +554,25 @@ export class BookingsService {
         originalWishes,
       ].filter(Boolean).join('\n');
 
+      const guestAccessToken = randomBytes(32).toString('hex');
+      const guestAccessTokenHash = createHash('sha256').update(guestAccessToken).digest('hex');
+
       const booking = await this.bookings.save(
         this.bookings.create({
           table,
           client,
+          guestAccessTokenHash,
           bookingDate: dto.bookingDate,
           bookingTime: timeInfo.bookingTime,
+          durationMinutes: timeInfo.durationMinutes,
           guestsCount: dto.guestsCount,
           wishes: wishesWithSystemTime,
           status: 'pending',
           source: 'mini_app',
         }),
       );
+
+      await this.saveHistory(booking, 'booking_created', 'guest', null, this.bookingSnapshot(booking));
 
       await this.setTableStatusOnlyForToday(table, 'pending', dto.bookingDate);
       await this.safeLog('Створено заявку на бронювання', {
@@ -521,6 +591,7 @@ export class BookingsService {
       return {
         message: 'Заявку на бронювання надіслано адміністратору',
         bookingId: booking.id,
+        guestAccessToken,
         status: booking.status,
         bookingTime: timeInfo.bookingTime,
         departureTime: timeInfo.departureTime,
@@ -659,9 +730,11 @@ export class BookingsService {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
+    const previousData = this.bookingSnapshot(booking);
     booking.status = 'approved';
     booking.approvedAt = new Date();
     await this.bookings.save(booking);
+    await this.saveHistory(booking, 'booking_approved', 'admin', previousData, this.bookingSnapshot(booking));
     await this.setTableStatusOnlyForToday(booking.table, 'reserved', booking.bookingDate);
     await this.safeLog('Підтверджено бронювання', { bookingId: id });
     await this.safeNotify(() => this.notifications.notifyBookingApproved(booking));
@@ -672,9 +745,12 @@ export class BookingsService {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
+    const previousData = this.bookingSnapshot(booking);
     booking.status = 'rejected';
     booking.rejectedAt = new Date();
+    booking.cancellationReason = 'admin_rejected';
     await this.bookings.save(booking);
+    await this.saveHistory(booking, 'booking_rejected', 'admin', previousData, this.bookingSnapshot(booking));
     await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
     await this.safeLog('Відхилено бронювання', { bookingId: id });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
@@ -685,9 +761,12 @@ export class BookingsService {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
+    const previousData = this.bookingSnapshot(booking);
     booking.status = 'cancelled';
     booking.cancelledAt = new Date();
+    booking.cancellationReason = 'admin_cancelled';
     await this.bookings.save(booking);
+    await this.saveHistory(booking, 'booking_cancelled', 'admin', previousData, this.bookingSnapshot(booking));
     await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
     await this.safeLog('Скасовано бронювання', { bookingId: id });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
@@ -698,10 +777,22 @@ export class BookingsService {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
+    if (booking.checkedInAt) {
+      throw new BadRequestException('Гість уже відмічений як присутній');
+    }
+
+    const previousData = this.bookingSnapshot(booking);
     booking.status = 'cancelled';
     booking.cancelledAt = new Date();
+    booking.cancellationReason = 'no_show';
     booking.wishes = this.markNoShowInWishes(booking);
+    booking.guestNotification = {
+      type: 'no_show',
+      title: 'Бронювання завершено через неявку',
+      createdAt: new Date().toISOString(),
+    };
     await this.bookings.save(booking);
+    await this.saveHistory(booking, 'booking_no_show', 'admin', previousData, this.bookingSnapshot(booking), 'no_show');
     await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
     await this.safeLog('No-show: гість не прийшов', { bookingId: id, tableNumber: booking.table?.tableNumber || null });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
@@ -712,10 +803,13 @@ export class BookingsService {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
+    const previousData = this.bookingSnapshot(booking);
     booking.status = 'approved';
     if (!booking.approvedAt) booking.approvedAt = new Date();
+    if (!booking.checkedInAt) booking.checkedInAt = new Date();
     await this.bookings.save(booking);
-    await this.setTableStatusOnlyForToday(booking.table, 'occupied', booking.bookingDate);
+    await this.saveHistory(booking, 'booking_checked_in', 'admin', previousData, this.bookingSnapshot(booking));
+    await this.setTableStatusOnlyForToday(booking.table, 'occupied', booking.bookingDate, true);
     await this.safeLog('Гості прийшли', { bookingId: id });
     return { message: 'Гості відмічені як присутні' };
   }
@@ -724,10 +818,12 @@ export class BookingsService {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
+    const previousData = this.bookingSnapshot(booking);
     booking.status = 'completed';
     booking.completedAt = new Date();
     await this.bookings.save(booking);
-    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    await this.saveHistory(booking, 'booking_completed', 'admin', previousData, this.bookingSnapshot(booking));
+    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate, true);
     await this.safeLog('Стіл звільнено', { bookingId: id });
     return { message: 'Стіл звільнено' };
   }
