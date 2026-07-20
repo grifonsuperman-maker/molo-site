@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   Req,
@@ -10,6 +11,7 @@ import type { Request } from 'express';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { GuestBookingsService } from '../bookings/guest-bookings.service';
 import { AcceptHookahCallDto } from './dto/accept-hookah-call.dto';
 import { CancelHookahCallDto } from './dto/cancel-hookah-call.dto';
 import { CreateHookahCallDto } from './dto/create-hookah-call.dto';
@@ -21,17 +23,19 @@ type AuthenticatedRequest = Request & {
 
 @Controller('hookah-calls')
 export class HookahCallsController {
-  constructor(private readonly service: HookahCallsService) {}
+  constructor(private readonly service: HookahCallsService, private readonly guestBookings: GuestBookingsService) {}
 
   @Public()
   @Get('guest/:bookingId/status')
-  guestStatus(@Param('bookingId') bookingId: string) {
+  async guestStatus(@Param('bookingId') bookingId: string, @Headers('x-guest-booking-token') token: string) {
+    await this.guestBookings.get(bookingId, token);
     return this.service.guestStatus(bookingId);
   }
 
   @Public()
   @Post('guest')
-  createFromGuest(@Body() dto: CreateHookahCallDto) {
+  async createFromGuest(@Body() dto: CreateHookahCallDto, @Headers('x-guest-booking-token') token: string) {
+    await this.guestBookings.get(dto.bookingId, token);
     return this.service.createFromGuest(dto);
   }
 

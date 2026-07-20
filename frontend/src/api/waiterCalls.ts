@@ -38,11 +38,11 @@ export type GuestWaiterCallStatus = {
 };
 
 export const waiterCallsApi = {
-  guestStatus: (bookingId: string) =>
-    api.get<GuestWaiterCallStatus>(`/waiter-calls/guest-status/${encodeURIComponent(bookingId)}`),
+  guestStatus: (bookingId: string, guestToken: string) =>
+    api.get<GuestWaiterCallStatus>(`/waiter-calls/guest-status/${encodeURIComponent(bookingId)}`, { headers: { 'x-guest-booking-token': guestToken } }),
 
-  createFromGuest: (bookingId: string) =>
-    api.post<{ message: string; call: WaiterCall }>('/waiter-calls', { bookingId }),
+  createFromGuest: (bookingId: string, guestToken: string) =>
+    api.post<{ message: string; call: WaiterCall }>('/waiter-calls', { bookingId }, { headers: { 'x-guest-booking-token': guestToken } }),
 
   list: (waiterId: string) =>
     api.get<WaiterCall[]>(`/waiter-calls?waiterId=${encodeURIComponent(waiterId)}`),

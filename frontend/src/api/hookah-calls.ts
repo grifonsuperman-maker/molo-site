@@ -40,15 +40,17 @@ export type HookahCallActionResponse = {
 };
 
 export const hookahCallsApi = {
-  getGuestStatus: (bookingId: string) =>
+  getGuestStatus: (bookingId: string, guestToken: string) =>
     api.get<GuestHookahStatus>(
       `/hookah-calls/guest/${bookingId}/status`,
+      { headers: { 'x-guest-booking-token': guestToken } },
     ),
 
-  createFromGuest: (bookingId: string) =>
+  createFromGuest: (bookingId: string, guestToken: string) =>
     api.post<HookahCallActionResponse>(
       '/hookah-calls/guest',
       { bookingId },
+      { headers: { 'x-guest-booking-token': guestToken } },
     ),
 
   getActive: () =>

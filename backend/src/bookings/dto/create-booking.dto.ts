@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 
@@ -34,6 +35,11 @@ export class CreateBookingDto {
   @IsString()
   @IsNotEmpty()
   phone: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  guestDeviceId?: string;
 
   @IsDateString()
   bookingDate: string;

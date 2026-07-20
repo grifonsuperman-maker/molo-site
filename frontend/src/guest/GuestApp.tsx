@@ -14,7 +14,7 @@ import {
 
 import type { FullMapResponse, Restaurant, TableItem, Zone } from '../api/types';
 import { bookingsApi } from '../api/bookings';
-import type { TableRuntimeStatus, BookingPublicStatus } from '../api/bookings';
+import type { TableRuntimeStatus, BookingPublicStatus, GuestBooking, GuestBookingToken } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { waiterCallsApi } from '../api/waiterCalls';
@@ -83,6 +83,9 @@ type TableAvailabilityNotice = {
 
 const ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:active-booking-id';
 const LEGACY_ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:last-booking-id';
+const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
+const GUEST_DEVICE_STORAGE_KEY = 'molo:guest:device-id:v1';
+const MAX_STORED_GUEST_BOOKINGS = 100;
 
 function readStoredBookingId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -102,6 +105,67 @@ function readStoredBookingId(): string | null {
   } catch {
     return null;
   }
+}
+
+function getGuestDeviceId(): string {
+  const stored = window.localStorage.getItem(GUEST_DEVICE_STORAGE_KEY);
+  if (stored) return stored;
+
+  const deviceId = typeof crypto?.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  window.localStorage.setItem(GUEST_DEVICE_STORAGE_KEY, deviceId);
+  return deviceId;
+}
+
+function readStoredGuestBookings(): GuestBookingToken[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const value = JSON.parse(window.localStorage.getItem(GUEST_BOOKINGS_STORAGE_KEY) || '[]');
+    if (!Array.isArray(value)) return [];
+
+    return value
+      .filter((item): item is GuestBookingToken =>
+        typeof item?.bookingId === 'string' && Boolean(item.bookingId) &&
+        typeof item?.token === 'string' && Boolean(item.token) &&
+        typeof item?.createdAt === 'string' && Boolean(item.createdAt),
+      )
+      .slice(0, MAX_STORED_GUEST_BOOKINGS);
+  } catch {
+    return [];
+  }
+}
+
+function saveGuestBooking(booking: GuestBookingToken) {
+  try {
+    const bookings = readStoredGuestBookings().filter((item) => item.bookingId !== booking.bookingId);
+    window.localStorage.setItem(
+      GUEST_BOOKINGS_STORAGE_KEY,
+      JSON.stringify([booking, ...bookings].slice(0, MAX_STORED_GUEST_BOOKINGS)),
+    );
+  } catch {
+    // Бронювання продовжує працювати, навіть якщо сховище браузера недоступне.
+  }
+}
+
+function guestBookingToStatus(booking: GuestBooking): BookingPublicStatus {
+  const bookedTo = addMinutesToTime(booking.bookingTime, booking.durationMinutes);
+  const availableFrom = addMinutesToTime(bookedTo, CLEANUP_MINUTES);
+  const pendingAgeMinutes = Math.max(0, Math.floor((Date.now() - new Date(booking.createdAt).getTime()) / 60_000));
+
+  return {
+    ...booking,
+    bookedFrom: booking.bookingTime,
+    bookedTo,
+    availableFrom,
+    bookedFromLabel: booking.bookingTime,
+    bookedToLabel: bookedTo,
+    availableFromLabel: availableFrom,
+    pendingAgeMinutes,
+    pendingReminderMinutes: 15,
+    isPendingTooLong: pendingAgeMinutes >= 15,
+  };
 }
 
 
@@ -551,7 +615,20 @@ export default function GuestApp() {
   const [isCustomDuration, setIsCustomDuration] = useState(false);
   const [tableNotice, setTableNotice] = useState<TableAvailabilityNotice | null>(null);
   const [dateStatuses, setDateStatuses] = useState<Record<string, TableRuntimeStatus>>({});
-  const [lastBookingId, setLastBookingId] = useState<string | null>(readStoredBookingId);
+  const [legacyBookingId] = useState<string | null>(readStoredBookingId);
+  const [lastBookingId, setLastBookingId] = useState<string | null>(legacyBookingId);
+  const [guestBookings, setGuestBookings] = useState<GuestBookingToken[]>(readStoredGuestBookings);
+  const [activeGuestBookings, setActiveGuestBookings] = useState<GuestBooking[]>([]);
+  const [isBookingsSheetOpen, setIsBookingsSheetOpen] = useState(false);
+  const [changingBookingId, setChangingBookingId] = useState<string | null>(null);
+  const [changeTableBusy, setChangeTableBusy] = useState(false);
+  const [guestActionBusy, setGuestActionBusy] = useState(false);
+  const [showCancelPrompt, setShowCancelPrompt] = useState(false);
+  const [latenessHours, setLatenessHours] = useState('0');
+  const [latenessMinutes, setLatenessMinutes] = useState('10');
+  const [guestActionMessage, setGuestActionMessage] = useState<string | null>(null);
+  const [reviewText, setReviewText] = useState('');
+  const [reviewDismissed, setReviewDismissed] = useState(false);
   const [bookingStatus, setBookingStatus] = useState<BookingPublicStatus | null>(null);
   const [waiterCallStatus, setWaiterCallStatus] = useState<GuestWaiterCallStatus | null>(null);
   const [waiterCallBusy, setWaiterCallBusy] = useState(false);
@@ -566,6 +643,21 @@ export default function GuestApp() {
   const { loading, error, run } = useAsyncAction();
 
   const siteMode = restaurant?.siteMode || 'night';
+  const selectedGuestBooking = useMemo(
+    () => activeGuestBookings.find((booking) => booking.bookingId === lastBookingId) || null,
+    [activeGuestBookings, lastBookingId],
+  );
+  const bookingsByDate = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const tomorrowDate = new Date();
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrow = tomorrowDate.toISOString().slice(0, 10);
+    return {
+      today: activeGuestBookings.filter((booking) => booking.bookingDate === today),
+      tomorrow: activeGuestBookings.filter((booking) => booking.bookingDate === tomorrow),
+      future: activeGuestBookings.filter((booking) => booking.bookingDate > tomorrow),
+    };
+  }, [activeGuestBookings]);
 
   useEffect(() => {
     try {
@@ -622,32 +714,64 @@ export default function GuestApp() {
 
 
   useEffect(() => {
-    if (!lastBookingId) return;
+    if (!lastBookingId && !legacyBookingId && guestBookings.length === 0) return;
 
     let stopped = false;
 
     async function refreshBookingStatus() {
+      const tokens = guestBookings.map((booking) => booking.token);
+      let selectedBookingId = lastBookingId;
+
       try {
-        const status = await bookingsApi.getPublicStatus(lastBookingId as string);
-        if (stopped) return;
+        let hasGuestBooking = false;
+        if (tokens.length > 0) {
+          const bookings = await bookingsApi.guestList(tokens);
+          if (stopped) return;
 
-        setBookingStatus(status);
+          const activeBookings = bookings.filter((item) =>
+            item.status === 'pending' || item.status === 'approved',
+          );
+          setActiveGuestBookings(activeBookings);
 
-        if (
-          status.status === 'completed' ||
-          status.status === 'cancelled' ||
-          status.status === 'rejected'
-        ) {
-          setWaiterCallStatus(null);
-          setLastBookingId(null);
-          return;
+          const booking =
+            activeBookings.find((item) => item.bookingId === lastBookingId) ||
+            activeBookings[0];
+          if (booking) {
+            hasGuestBooking = true;
+            selectedBookingId = booking.bookingId;
+            if (booking.bookingId !== lastBookingId) setLastBookingId(booking.bookingId);
+            setBookingStatus(guestBookingToStatus(booking));
+          } else if (!legacyBookingId) {
+            selectedBookingId = null;
+            setLastBookingId(null);
+            setBookingStatus(null);
+            setWaiterCallStatus(null);
+            if (step === 'success') setStep('home');
+          }
+        }
+
+        if (legacyBookingId) {
+          // Старі бронювання не мають токена і залишаються на публічній перевірці статусу.
+          const status = await bookingsApi.getPublicStatus(legacyBookingId);
+          if (stopped) return;
+
+          if (!hasGuestBooking) {
+            selectedBookingId = legacyBookingId;
+            setBookingStatus(status);
+          }
         }
       } catch {
-        // Тимчасова помилка перевірки не видаляє активну заявку гостя.
+        // Тимчасова помилка перевірки не видаляє збережені заявки гостя.
       }
 
       try {
-        const callStatus = await waiterCallsApi.guestStatus(lastBookingId as string);
+        if (!selectedBookingId) return;
+        const token = guestBookings.find((booking) => booking.bookingId === selectedBookingId)?.token;
+        if (!token) {
+          if (!stopped) setWaiterCallStatus(null);
+          return;
+        }
+        const callStatus = await waiterCallsApi.guestStatus(selectedBookingId, token);
         if (!stopped) setWaiterCallStatus(callStatus);
       } catch {
         if (!stopped) setWaiterCallStatus(null);
@@ -661,7 +785,7 @@ export default function GuestApp() {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [lastBookingId]);
+  }, [lastBookingId, legacyBookingId, guestBookings, step, setStep]);
 
   const visibleTables = useMemo(() => {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
@@ -788,16 +912,81 @@ export default function GuestApp() {
     alert('Телефон адміністратора ще не додано.');
   }
 
+  function selectedBookingToken() {
+    return guestBookings.find((item) => item.bookingId === lastBookingId)?.token || null;
+  }
+
+  async function cancelSelectedBooking() {
+    const token = selectedBookingToken();
+    if (!lastBookingId || !token || guestActionBusy) return;
+    setGuestActionBusy(true);
+    try {
+      const result = await bookingsApi.guestCancel(lastBookingId, token);
+      setGuestActionMessage(result.message || 'Бронювання скасовано');
+      setActiveGuestBookings((items) => items.filter((item) => item.bookingId !== lastBookingId));
+      setBookingStatus(guestBookingToStatus(result.booking));
+      setShowCancelPrompt(false);
+    } catch (actionError) {
+      setGuestActionMessage(actionError instanceof Error ? actionError.message : 'Не вдалося скасувати бронювання');
+    } finally {
+      setGuestActionBusy(false);
+    }
+  }
+
+  async function reportLateness() {
+    const token = selectedBookingToken();
+    if (!lastBookingId || !token || guestActionBusy) return;
+    setGuestActionBusy(true);
+    try {
+      const result = await bookingsApi.guestLateness(lastBookingId, token, Number(latenessHours), Number(latenessMinutes));
+      setGuestActionMessage(result.message || 'Дякуємо. Адміністратор отримав інформацію про ваше запізнення');
+    } catch (actionError) {
+      setGuestActionMessage(actionError instanceof Error ? actionError.message : 'Не вдалося повідомити про запізнення');
+    } finally {
+      setGuestActionBusy(false);
+    }
+  }
+
+  async function acknowledgeNotification() {
+    const token = selectedBookingToken();
+    if (!lastBookingId || !token || guestActionBusy) return;
+    setGuestActionBusy(true);
+    try {
+      await bookingsApi.guestAcknowledgeNotification(lastBookingId, token);
+    } catch (actionError) {
+      setGuestActionMessage(actionError instanceof Error ? actionError.message : 'Не вдалося підтвердити повідомлення');
+    } finally {
+      setGuestActionBusy(false);
+    }
+  }
+
+  async function submitReview() {
+    const token = selectedBookingToken();
+    if (!lastBookingId || !token || guestActionBusy || !reviewText.trim()) return;
+    setGuestActionBusy(true);
+    try {
+      await bookingsApi.guestReview(lastBookingId, token, { text: reviewText.trim() });
+      window.sessionStorage.setItem(`molo:guest:review:${lastBookingId}`, 'done');
+      setGuestActionMessage('Дякуємо за ваш відгук');
+      setReviewDismissed(true);
+    } catch (actionError) {
+      setGuestActionMessage(actionError instanceof Error ? actionError.message : 'Не вдалося надіслати відгук');
+    } finally {
+      setGuestActionBusy(false);
+    }
+  }
+
   async function callWaiter() {
-    if (!lastBookingId || waiterCallBusy) return;
+    const token = selectedBookingToken();
+    if (!lastBookingId || !token || waiterCallBusy) return;
 
     setWaiterCallBusy(true);
     setWaiterCallMessage(null);
 
     try {
-      const result = await waiterCallsApi.createFromGuest(lastBookingId);
+      const result = await waiterCallsApi.createFromGuest(lastBookingId, token);
       setWaiterCallMessage(result.message || 'Виклик офіціанта відправлено');
-      const status = await waiterCallsApi.guestStatus(lastBookingId);
+      const status = await waiterCallsApi.guestStatus(lastBookingId, token);
       setWaiterCallStatus(status);
     } catch (callError: any) {
       setWaiterCallMessage(callError?.message || 'Не вдалося викликати офіціанта');
@@ -826,6 +1015,13 @@ export default function GuestApp() {
 
   function goBack() {
     setActiveTableNumber(null);
+
+    if (step === 'map' && changingBookingId) {
+      setChangingBookingId(null);
+      setTableNotice(null);
+      setStep('success');
+      return;
+    }
 
     if (step === 'form') {
       setStep('map');
@@ -883,9 +1079,55 @@ export default function GuestApp() {
       return;
     }
 
+    if (changingBookingId) {
+      void changeBookingTable(changingBookingId, table);
+      return;
+    }
+
     setTableNotice(null);
     setSelectedTable(table);
     setStep('form');
+  }
+
+  function startChangingTable() {
+    if (!selectedGuestBooking?.canGuestChangeTable) return;
+
+    setChangingBookingId(selectedGuestBooking.bookingId);
+    setDate(selectedGuestBooking.bookingDate);
+    setTime(selectedGuestBooking.bookingTime.slice(0, 5));
+    setDurationMinutes(selectedGuestBooking.durationMinutes);
+    setTableNotice(null);
+    setActiveTableNumber(null);
+    setStep('map');
+  }
+
+  async function changeBookingTable(bookingId: string, table: TableItem) {
+    const token = guestBookings.find((item) => item.bookingId === bookingId)?.token;
+    if (!token || changeTableBusy) return;
+
+    setChangeTableBusy(true);
+    try {
+      const response = await bookingsApi.guestChangeTable(
+        bookingId,
+        token,
+        table.id.startsWith('visual-')
+          ? { tableNumber: String(table.tableNumber) }
+          : { tableId: table.id },
+      );
+      const booking = (response as { booking?: GuestBooking }).booking;
+      if (booking) {
+        setActiveGuestBookings((items) => items.map((item) => item.bookingId === bookingId ? booking : item));
+        setBookingStatus(guestBookingToStatus(booking));
+      }
+      setChangingBookingId(null);
+      setTableNotice(null);
+      setStep('success');
+    } catch (changeError: unknown) {
+      const message = changeError instanceof Error ? changeError.message : '';
+      alert(message.includes('недоступний') ? 'Цей стіл уже недоступний. Оберіть інший.' : 'Не вдалося змінити стіл. Спробуйте ще раз.');
+    } finally {
+      setChangeTableBusy(false);
+    }
   }
 
   function selectVisualTable(visualTable: VisualTable) {
@@ -1006,6 +1248,7 @@ export default function GuestApp() {
         seats: selectedTable.seats,
         fullName: form.fullName,
         phone: form.phone,
+        guestDeviceId: getGuestDeviceId(),
         bookingDate: date,
         bookingTime: time,
         guestsCount: Number(form.guestsCount),
@@ -1015,6 +1258,13 @@ export default function GuestApp() {
     );
 
     if (result) {
+      const booking = {
+        bookingId: result.bookingId,
+        token: result.guestAccessToken,
+        createdAt: new Date().toISOString(),
+      };
+      saveGuestBooking(booking);
+      setGuestBookings(readStoredGuestBookings());
       setLastBookingId(result.bookingId);
       setBookingStatus(null);
       setWaiterCallStatus(null);
@@ -1139,6 +1389,55 @@ export default function GuestApp() {
       </style>
 
       {siteMode === 'holiday' && <div className="molo-holiday-lights" aria-hidden="true" />}
+
+      <button
+        type="button"
+        onClick={() => setIsBookingsSheetOpen(true)}
+        className="fixed right-4 top-4 z-[90] rounded-full border border-amber-100/70 bg-amber-300/20 px-4 py-2 text-sm font-black text-amber-100 shadow-xl backdrop-blur-md"
+      >
+        Мої бронювання
+      </button>
+
+      {isBookingsSheetOpen && (
+        <div className="fixed inset-0 z-[120] flex items-end bg-black/60" onClick={() => setIsBookingsSheetOpen(false)}>
+          <section
+            className="molo-panel max-h-[78dvh] w-full overflow-y-auto rounded-t-[32px] border border-amber-200/30 bg-neutral-950 p-5"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="text-xl font-black text-white">Мої бронювання</h2>
+              <button type="button" onClick={() => setIsBookingsSheetOpen(false)} className="text-sm font-bold text-amber-100">Закрити</button>
+            </div>
+            {(['today', 'tomorrow', 'future'] as const).map((section) => {
+              const titles = { today: 'Сьогодні', tomorrow: 'Завтра', future: 'Майбутні' };
+              const bookings = bookingsByDate[section];
+              if (bookings.length === 0) return null;
+              return <div key={section} className="mt-5">
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-amber-100/70">{titles[section]}</p>
+                <div className="mt-2 space-y-2">
+                  {bookings.map((booking) => (
+                    <button
+                      key={booking.bookingId}
+                      type="button"
+                      onClick={() => {
+                        setLastBookingId(booking.bookingId);
+                        setBookingStatus(guestBookingToStatus(booking));
+                        setIsBookingsSheetOpen(false);
+                        setStep('success');
+                      }}
+                      className="w-full rounded-2xl border border-white/10 bg-white/5 p-4 text-left"
+                    >
+                      <p className="font-bold text-white">{booking.bookingDate} · {booking.bookingTime.slice(0, 5)} · Стіл №{booking.tableNumber || '—'}</p>
+                      <p className="mt-1 text-sm text-amber-100">{booking.status === 'approved' ? 'Підтверджено' : 'Очікує підтвердження'}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>;
+            })}
+            {activeGuestBookings.length === 0 && <p className="mt-5 text-sm text-white/60">Активних бронювань немає.</p>}
+          </section>
+        </div>
+      )}
 
       {step !== 'home' && (
         <div className="fixed left-4 top-4 z-[80]">
@@ -1375,11 +1674,13 @@ export default function GuestApp() {
                 </p>
 
                 <h1 className="mt-1 text-2xl font-black tracking-tight sm:mt-2 sm:text-4xl">
-                  Оберіть стіл
+                  {changingBookingId ? 'Оберіть новий стіл' : 'Оберіть стіл'}
                 </h1>
 
                 <p className="mt-1 text-sm text-white/70 sm:mt-2 sm:text-base">
-                  Оберіть дату, час і натисніть на стіл прямо на фото.
+                  {changingBookingId
+                    ? 'Натисніть на вільний стіл на існуючій карті. Бронювання зміниться лише після підтвердження.'
+                    : 'Оберіть дату, час і натисніть на стіл прямо на фото.'}
                 </p>
               </div>
 
@@ -1713,6 +2014,30 @@ export default function GuestApp() {
                 <p className="mt-2 text-sm text-white/65">Очікуємо відповідь адміністратора...</p>
               )}
 
+              {guestActionMessage && (
+                <p className="mt-3 rounded-2xl border border-emerald-200/30 bg-emerald-300/10 p-3 text-sm text-emerald-100">{guestActionMessage}</p>
+              )}
+
+              {selectedGuestBooking?.guestNotification && !selectedGuestBooking.guestNotification.acknowledgedAt && (
+                <div className="mt-3 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-center">
+                  <p className="font-semibold text-amber-100">{selectedGuestBooking.guestNotification.title}</p>
+                  {selectedGuestBooking.guestNotification.message && <p className="mt-2 text-sm text-white/70">{selectedGuestBooking.guestNotification.message}</p>}
+                  <button type="button" disabled={guestActionBusy} onClick={acknowledgeNotification} className="mt-3 rounded-2xl border border-amber-200/60 px-4 py-2 text-sm font-bold text-amber-100 disabled:opacity-50">Зрозуміло</button>
+                </div>
+              )}
+
+              {selectedGuestBooking?.isLatenessPromptDue && !selectedGuestBooking.lateNotifiedAt && (
+                <div className="mt-3 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-center">
+                  <p className="font-semibold text-amber-100">Ви затримуєтесь?</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-left">
+                    <label className="text-xs text-white/70">Години<input value={latenessHours} onChange={(event) => setLatenessHours(event.target.value)} inputMode="numeric" className="mt-1 w-full rounded-xl bg-black/30 p-2 text-white" /></label>
+                    <label className="text-xs text-white/70">Хвилини<input value={latenessMinutes} onChange={(event) => setLatenessMinutes(event.target.value)} inputMode="numeric" className="mt-1 w-full rounded-xl bg-black/30 p-2 text-white" /></label>
+                  </div>
+                  <button type="button" disabled={guestActionBusy} onClick={reportLateness} className="mt-3 w-full rounded-2xl border border-amber-200/60 px-4 py-3 text-sm font-bold text-amber-100 disabled:opacity-50">Повідомити про запізнення</button>
+                  <button type="button" onClick={callAdmin} className="mt-2 text-sm font-bold text-amber-100">Зателефонувати адміністратору</button>
+                </div>
+              )}
+
               {bookingStatus?.status === 'pending' && !pendingTooLong && (
                 <p className="mt-2 text-sm text-sky-100">
                   Заявка очікує підтвердження. Минуло приблизно {bookingStatus.pendingAgeMinutes} хв.
@@ -1740,6 +2065,16 @@ export default function GuestApp() {
               {bookingStatus?.status === 'approved' && (
                 <div className="mt-3 rounded-2xl border border-emerald-300/25 bg-emerald-400/10 p-4 text-center">
                   <p className="text-sm font-semibold text-emerald-100">Бронювання підтверджено ✅</p>
+
+                  {selectedGuestBooking?.canGuestChangeTable && (
+                    <button
+                      type="button"
+                      onClick={startChangingTable}
+                      className="mt-4 w-full rounded-2xl border border-amber-200/60 bg-amber-300/20 px-5 py-3 text-sm font-black text-amber-100 transition active:scale-95"
+                    >
+                      Обрати інший стіл
+                    </button>
+                  )}
 
                   {!waiterCallStatus?.canCall && (
                     <p className="mt-2 text-xs text-white/55">
@@ -1776,9 +2111,9 @@ export default function GuestApp() {
                   {waiterCallMessage && (
                     <p className="mt-3 text-xs text-amber-100">{waiterCallMessage}</p>
                   )}
-             {lastBookingId && (
+             {lastBookingId && selectedBookingToken() && (
   <div className="mt-4">
-    <GuestHookahCallPanel bookingId={lastBookingId} />
+    <GuestHookahCallPanel bookingId={lastBookingId} guestToken={selectedBookingToken() as string} />
   </div>
 )}
               
@@ -1786,9 +2121,35 @@ export default function GuestApp() {
               )}
 
               {(bookingStatus?.status === 'rejected' || bookingStatus?.status === 'cancelled') && (
-                <p className="mt-2 text-sm text-red-100">На жаль, бронювання не підтверджено. Подзвоніть адміністратору.</p>
+                <div className="mt-2 text-sm text-red-100">
+                  <p>{selectedGuestBooking?.guestNotification?.title === 'Бронювання завершено через неявку' ? 'Бронювання завершено через неявку' : 'На жаль, бронювання не підтверджено. Подзвоніть адміністратору.'}</p>
+                  <button type="button" onClick={callAdmin} className="mt-3 font-bold text-amber-100">Зателефонувати адміністратору</button>
+                </div>
+              )}
+
+              {selectedGuestBooking?.canGuestCancel && (
+                <button type="button" onClick={() => setShowCancelPrompt(true)} className="mt-4 w-full rounded-2xl border border-red-200/40 bg-red-400/10 px-4 py-3 text-sm font-bold text-red-100">Скасувати бронювання</button>
+              )}
+
+              {selectedGuestBooking?.canLeaveReview && !reviewDismissed && window.sessionStorage.getItem(`molo:guest:review:${selectedGuestBooking.bookingId}`) !== 'done' && (
+                <div className="mt-4 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4">
+                  <p className="font-semibold text-amber-100">Залиште відгук про ваш відпочинок у MOLO</p>
+                  <textarea value={reviewText} onChange={(event) => setReviewText(event.target.value)} className="mt-3 min-h-24 w-full rounded-2xl bg-black/30 p-3 text-white" />
+                  <button type="button" disabled={guestActionBusy || !reviewText.trim()} onClick={submitReview} className="mt-3 w-full rounded-2xl border border-amber-200/60 px-4 py-3 font-bold text-amber-100 disabled:opacity-50">Надіслати відгук</button>
+                  <button type="button" onClick={() => setReviewDismissed(true)} className="mt-3 w-full text-sm text-white/65">Не зараз</button>
+                </div>
               )}
             </div>
+
+            {showCancelPrompt && (
+              <div className="mt-4 rounded-2xl border border-red-200/40 bg-red-400/10 p-4">
+                <p className="font-semibold text-red-100">Ви дійсно бажаєте скасувати бронювання?</p>
+                <div className="mt-3 flex gap-2">
+                  <button type="button" disabled={guestActionBusy} onClick={cancelSelectedBooking} className="rounded-xl bg-red-500/30 px-4 py-2 text-sm font-bold text-red-100 disabled:opacity-50">Скасувати бронювання</button>
+                  <button type="button" onClick={() => setShowCancelPrompt(false)} className="rounded-xl border border-white/20 px-4 py-2 text-sm font-bold text-white">Залишити бронювання</button>
+                </div>
+              </div>
+            )}
 
             <div className="mt-6">
               <GoldButton onClick={() => setStep('home')}>

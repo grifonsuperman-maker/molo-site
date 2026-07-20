@@ -7,6 +7,7 @@ import {
 
 type GuestHookahCallPanelProps = {
   bookingId: string;
+  guestToken: string;
 };
 
 function errorText(error: unknown) {
@@ -15,6 +16,7 @@ function errorText(error: unknown) {
 
 export default function GuestHookahCallPanel({
   bookingId,
+  guestToken,
 }: GuestHookahCallPanelProps) {
   const [status, setStatus] = useState<GuestHookahStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -26,7 +28,7 @@ export default function GuestHookahCallPanel({
     try {
       if (!silent) setLoading(true);
 
-      const result = await hookahCallsApi.getGuestStatus(bookingId);
+      const result = await hookahCallsApi.getGuestStatus(bookingId, guestToken);
       setStatus(result);
       setError(null);
     } catch (loadError) {
@@ -34,7 +36,7 @@ export default function GuestHookahCallPanel({
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [bookingId]);
+  }, [bookingId, guestToken]);
 
   useEffect(() => {
     void loadStatus();
@@ -52,7 +54,7 @@ export default function GuestHookahCallPanel({
       setError(null);
       setMessage(null);
 
-      const result = await hookahCallsApi.createFromGuest(bookingId);
+      const result = await hookahCallsApi.createFromGuest(bookingId, guestToken);
 
       setStatus((current) => ({
         bookingId,

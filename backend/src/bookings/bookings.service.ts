@@ -541,6 +541,10 @@ export class BookingsService {
       const table = await this.resolveTableForBooking(dto);
       await this.assertTableCanBeBooked(table);
 
+      const normalizedPhone = this.normalizePhone(dto.phone);
+      const guestDeviceIdHash = this.hashGuestDeviceId(dto.guestDeviceId);
+      await this.assertNoActiveGuestBooking(dto.bookingDate, normalizedPhone, guestDeviceIdHash);
+
       let client = await this.clients.findOne({ where: { phone: dto.phone } });
       if (!client) client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
       if (client.isBlacklisted) throw new BadRequestException('Бронювання з цього номера недоступне');
@@ -562,6 +566,7 @@ export class BookingsService {
           table,
           client,
           guestAccessTokenHash,
+          guestDeviceIdHash,
           bookingDate: dto.bookingDate,
           bookingTime: timeInfo.bookingTime,
           durationMinutes: timeInfo.durationMinutes,
@@ -603,6 +608,47 @@ export class BookingsService {
       if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
       console.error('Booking create failed:', error);
       throw new BadRequestException(`Booking error: ${error?.message || 'unknown error'}`);
+    }
+  }
+
+  private normalizePhone(phone: string) {
+    return String(phone || '').replace(/\D/g, '');
+  }
+
+  private hashGuestDeviceId(deviceId?: string) {
+    const normalized = String(deviceId || '').trim();
+    return normalized ? createHash('sha256').update(normalized).digest('hex') : null;
+  }
+
+  private async assertNoActiveGuestBooking(
+    bookingDate: string,
+    normalizedPhone: string,
+    guestDeviceIdHash: string | null,
+  ) {
+    const query = this.bookings
+      .createQueryBuilder('booking')
+      .leftJoin('booking.client', 'client')
+      .where('booking.bookingDate = :bookingDate', { bookingDate })
+      .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES });
+
+    if (guestDeviceIdHash) {
+      const deviceBooking = await query
+        .clone()
+        .andWhere('booking.guestDeviceIdHash = :guestDeviceIdHash', { guestDeviceIdHash })
+        .getExists();
+      if (deviceBooking) {
+        throw new BadRequestException('На цьому пристрої вже є активне бронювання на цю дату');
+      }
+    }
+
+    if (normalizedPhone) {
+      const phoneBooking = await query
+        .clone()
+        .andWhere("regexp_replace(client.phone, '\\D', '', 'g') = :normalizedPhone", { normalizedPhone })
+        .getExists();
+      if (phoneBooking) {
+        throw new BadRequestException('На цей номер уже є активне бронювання на цю дату');
+      }
     }
   }
 

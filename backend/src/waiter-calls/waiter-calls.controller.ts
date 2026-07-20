@@ -1,15 +1,17 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
+import { GuestBookingsService } from '../bookings/guest-bookings.service';
 import { WaiterCallsService } from './waiter-calls.service';
 
 @Public()
 @Controller('waiter-calls')
 export class WaiterCallsController {
-  constructor(private readonly service: WaiterCallsService) {}
+  constructor(private readonly service: WaiterCallsService, private readonly guestBookings: GuestBookingsService) {}
 
   @Post()
-  createFromGuest(@Body() dto: { bookingId: string }) {
+  async createFromGuest(@Body() dto: { bookingId: string }, @Headers('x-guest-booking-token') token: string) {
+    await this.guestBookings.get(dto.bookingId, token);
     return this.service.createFromGuest(dto);
   }
 
@@ -19,7 +21,8 @@ export class WaiterCallsController {
   }
 
   @Get('guest-status/:bookingId')
-  guestStatus(@Param('bookingId') bookingId: string) {
+  async guestStatus(@Param('bookingId') bookingId: string, @Headers('x-guest-booking-token') token: string) {
+    await this.guestBookings.get(bookingId, token);
     return this.service.guestStatus(bookingId);
   }
 
