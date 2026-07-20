@@ -14,7 +14,7 @@ import {
 
 import type { FullMapResponse, Restaurant, TableItem, Zone } from '../api/types';
 import { bookingsApi } from '../api/bookings';
-import type { TableRuntimeStatus, BookingPublicStatus } from '../api/bookings';
+import type { TableRuntimeStatus, BookingPublicStatus, GuestBooking, GuestBookingToken } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { waiterCallsApi } from '../api/waiterCalls';
@@ -83,6 +83,8 @@ type TableAvailabilityNotice = {
 
 const ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:active-booking-id';
 const LEGACY_ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:last-booking-id';
+const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
+const MAX_STORED_GUEST_BOOKINGS = 100;
 
 function readStoredBookingId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -102,6 +104,56 @@ function readStoredBookingId(): string | null {
   } catch {
     return null;
   }
+}
+
+function readStoredGuestBookings(): GuestBookingToken[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const value = JSON.parse(window.localStorage.getItem(GUEST_BOOKINGS_STORAGE_KEY) || '[]');
+    if (!Array.isArray(value)) return [];
+
+    return value
+      .filter((item): item is GuestBookingToken =>
+        typeof item?.bookingId === 'string' && Boolean(item.bookingId) &&
+        typeof item?.token === 'string' && Boolean(item.token) &&
+        typeof item?.createdAt === 'string' && Boolean(item.createdAt),
+      )
+      .slice(0, MAX_STORED_GUEST_BOOKINGS);
+  } catch {
+    return [];
+  }
+}
+
+function saveGuestBooking(booking: GuestBookingToken) {
+  try {
+    const bookings = readStoredGuestBookings().filter((item) => item.bookingId !== booking.bookingId);
+    window.localStorage.setItem(
+      GUEST_BOOKINGS_STORAGE_KEY,
+      JSON.stringify([booking, ...bookings].slice(0, MAX_STORED_GUEST_BOOKINGS)),
+    );
+  } catch {
+    // Бронювання продовжує працювати, навіть якщо сховище браузера недоступне.
+  }
+}
+
+function guestBookingToStatus(booking: GuestBooking): BookingPublicStatus {
+  const bookedTo = addMinutesToTime(booking.bookingTime, booking.durationMinutes);
+  const availableFrom = addMinutesToTime(bookedTo, CLEANUP_MINUTES);
+  const pendingAgeMinutes = Math.max(0, Math.floor((Date.now() - new Date(booking.createdAt).getTime()) / 60_000));
+
+  return {
+    ...booking,
+    bookedFrom: booking.bookingTime,
+    bookedTo,
+    availableFrom,
+    bookedFromLabel: booking.bookingTime,
+    bookedToLabel: bookedTo,
+    availableFromLabel: availableFrom,
+    pendingAgeMinutes,
+    pendingReminderMinutes: 15,
+    isPendingTooLong: pendingAgeMinutes >= 15,
+  };
 }
 
 
@@ -551,7 +603,9 @@ export default function GuestApp() {
   const [isCustomDuration, setIsCustomDuration] = useState(false);
   const [tableNotice, setTableNotice] = useState<TableAvailabilityNotice | null>(null);
   const [dateStatuses, setDateStatuses] = useState<Record<string, TableRuntimeStatus>>({});
-  const [lastBookingId, setLastBookingId] = useState<string | null>(readStoredBookingId);
+  const [legacyBookingId] = useState<string | null>(readStoredBookingId);
+  const [lastBookingId, setLastBookingId] = useState<string | null>(legacyBookingId);
+  const [guestBookings, setGuestBookings] = useState<GuestBookingToken[]>(readStoredGuestBookings);
   const [bookingStatus, setBookingStatus] = useState<BookingPublicStatus | null>(null);
   const [waiterCallStatus, setWaiterCallStatus] = useState<GuestWaiterCallStatus | null>(null);
   const [waiterCallBusy, setWaiterCallBusy] = useState(false);
@@ -622,32 +676,41 @@ export default function GuestApp() {
 
 
   useEffect(() => {
-    if (!lastBookingId) return;
+    if (!lastBookingId && !legacyBookingId && guestBookings.length === 0) return;
 
     let stopped = false;
 
     async function refreshBookingStatus() {
+      const tokens = guestBookings.map((booking) => booking.token);
+
       try {
-        const status = await bookingsApi.getPublicStatus(lastBookingId as string);
-        if (stopped) return;
+        let hasGuestBooking = false;
+        if (tokens.length > 0) {
+          const bookings = await bookingsApi.guestList(tokens);
+          if (stopped) return;
 
-        setBookingStatus(status);
+          const booking = bookings[0];
+          if (booking) {
+            hasGuestBooking = true;
+            setLastBookingId(booking.bookingId);
+            setBookingStatus(guestBookingToStatus(booking));
+          }
+        }
 
-        if (
-          status.status === 'completed' ||
-          status.status === 'cancelled' ||
-          status.status === 'rejected'
-        ) {
-          setWaiterCallStatus(null);
-          setLastBookingId(null);
-          return;
+        if (legacyBookingId) {
+          // Старі бронювання не мають токена і залишаються на публічній перевірці статусу.
+          const status = await bookingsApi.getPublicStatus(legacyBookingId);
+          if (stopped) return;
+
+          if (!hasGuestBooking) setBookingStatus(status);
         }
       } catch {
-        // Тимчасова помилка перевірки не видаляє активну заявку гостя.
+        // Тимчасова помилка перевірки не видаляє збережені заявки гостя.
       }
 
       try {
-        const callStatus = await waiterCallsApi.guestStatus(lastBookingId as string);
+        if (!lastBookingId) return;
+        const callStatus = await waiterCallsApi.guestStatus(lastBookingId);
         if (!stopped) setWaiterCallStatus(callStatus);
       } catch {
         if (!stopped) setWaiterCallStatus(null);
@@ -661,7 +724,7 @@ export default function GuestApp() {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [lastBookingId]);
+  }, [lastBookingId, legacyBookingId, guestBookings]);
 
   const visibleTables = useMemo(() => {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
@@ -1015,6 +1078,13 @@ export default function GuestApp() {
     );
 
     if (result) {
+      const booking = {
+        bookingId: result.bookingId,
+        token: result.guestAccessToken,
+        createdAt: new Date().toISOString(),
+      };
+      saveGuestBooking(booking);
+      setGuestBookings(readStoredGuestBookings());
       setLastBookingId(result.bookingId);
       setBookingStatus(null);
       setWaiterCallStatus(null);

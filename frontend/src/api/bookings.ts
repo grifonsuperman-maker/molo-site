@@ -96,6 +96,29 @@ export type BookingPublicStatus = {
   restaurantPhone: string | null;
 };
 
+export type GuestBooking = {
+  bookingId: string;
+  status: Booking['status'];
+  tableId: string | null;
+  tableNumber: string | null;
+  bookingDate: string;
+  bookingTime: string;
+  durationMinutes: number;
+  guestsCount: number;
+  createdAt: string;
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
+  cancelledAt?: string | null;
+  completedAt?: string | null;
+  restaurantPhone: string | null;
+};
+
+export type GuestBookingToken = {
+  bookingId: string;
+  token: string;
+  createdAt: string;
+};
+
 export type BookingStats = {
   today: string;
   total: number;
@@ -114,6 +137,10 @@ type ActionResponse = {
 
 function encode(value: string): string {
   return encodeURIComponent(value);
+}
+
+function guestHeaders(token: string): HeadersInit {
+  return { 'x-guest-booking-token': token };
 }
 
 function buildAvailabilityQuery(params: {
@@ -151,6 +178,7 @@ export const bookingsApi = {
     api.post<{
       message: string;
       bookingId: string;
+      guestAccessToken: string;
       status: string;
       bookingTime: string;
       departureTime: string | null;
@@ -180,6 +208,27 @@ export const bookingsApi = {
 
   getPublicStatus: (id: string) =>
     api.get<BookingPublicStatus>(`/bookings/${encode(id)}/status`),
+
+  guestList: (tokens: string[]) =>
+    api.post<GuestBooking[]>('/bookings/guest/list', { tokens }),
+
+  getGuest: (id: string, token: string) =>
+    api.get<GuestBooking>(`/bookings/${encode(id)}/guest`, { headers: guestHeaders(token) }),
+
+  guestCancel: (id: string, token: string, reason?: string) =>
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/cancel`, { reason }, { headers: guestHeaders(token) }),
+
+  guestLateness: (id: string, token: string, hours: number, minutes: number) =>
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/lateness`, { hours, minutes }, { headers: guestHeaders(token) }),
+
+  guestChangeTable: (id: string, token: string, table: { tableId?: string; tableNumber?: string }) =>
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/change-table`, table, { headers: guestHeaders(token) }),
+
+  guestAcknowledgeNotification: (id: string, token: string) =>
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/notification/ack`, undefined, { headers: guestHeaders(token) }),
+
+  guestReview: (id: string, token: string, payload: { text: string }) =>
+    api.post<ActionResponse>(`/bookings/${encode(id)}/guest/review`, payload, { headers: guestHeaders(token) }),
 
   getPendingReminders: () =>
     api.get<Booking[]>('/bookings/pending-reminders'),
