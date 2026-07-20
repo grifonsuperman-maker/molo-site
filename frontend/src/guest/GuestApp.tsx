@@ -682,6 +682,7 @@ export default function GuestApp() {
 
     async function refreshBookingStatus() {
       const tokens = guestBookings.map((booking) => booking.token);
+      let selectedBookingId = lastBookingId;
 
       try {
         let hasGuestBooking = false;
@@ -689,10 +690,13 @@ export default function GuestApp() {
           const bookings = await bookingsApi.guestList(tokens);
           if (stopped) return;
 
-          const booking = bookings[0];
+          const booking =
+            bookings.find((item) => item.bookingId === lastBookingId) ||
+            bookings.find((item) => item.status === 'pending' || item.status === 'approved');
           if (booking) {
             hasGuestBooking = true;
-            setLastBookingId(booking.bookingId);
+            selectedBookingId = booking.bookingId;
+            if (booking.bookingId !== lastBookingId) setLastBookingId(booking.bookingId);
             setBookingStatus(guestBookingToStatus(booking));
           }
         }
@@ -702,15 +706,18 @@ export default function GuestApp() {
           const status = await bookingsApi.getPublicStatus(legacyBookingId);
           if (stopped) return;
 
-          if (!hasGuestBooking) setBookingStatus(status);
+          if (!hasGuestBooking) {
+            selectedBookingId = legacyBookingId;
+            setBookingStatus(status);
+          }
         }
       } catch {
         // Тимчасова помилка перевірки не видаляє збережені заявки гостя.
       }
 
       try {
-        if (!lastBookingId) return;
-        const callStatus = await waiterCallsApi.guestStatus(lastBookingId);
+        if (!selectedBookingId) return;
+        const callStatus = await waiterCallsApi.guestStatus(selectedBookingId);
         if (!stopped) setWaiterCallStatus(callStatus);
       } catch {
         if (!stopped) setWaiterCallStatus(null);
