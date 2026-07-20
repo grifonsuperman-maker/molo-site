@@ -45,8 +45,6 @@ import { ZonesModule } from './zones/zones.module';
               },
             },
             autoLoadEntities: true,
-
-            // ВРЕМЕННО: создаёт таблицы в базе автоматически
             synchronize: true,
           }
         : {
@@ -57,8 +55,6 @@ import { ZonesModule } from './zones/zones.module';
             password: process.env.DB_PASSWORD || 'postgres',
             database: process.env.DB_NAME || 'molo_restaurant',
             autoLoadEntities: true,
-
-            // ВРЕМЕННО: создаёт таблицы в базе автоматически
             synchronize: true,
           },
     ),
