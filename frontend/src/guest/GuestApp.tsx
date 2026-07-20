@@ -84,6 +84,8 @@ type TableAvailabilityNotice = {
 const ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:active-booking-id';
 const LEGACY_ACTIVE_BOOKING_STORAGE_KEY = 'molo:guest:last-booking-id';
 const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
+const EXTERNAL_REVIEW_SESSION_KEY_PREFIX = 'molo:guest:external-review-opened:';
+const MOLO_PUBLIC_REVIEW_URL = 'https://www.google.com/search?q=MOLO+Restaurant';
 const MAX_STORED_GUEST_BOOKINGS = 100;
 
 function readStoredBookingId(): string | null {
@@ -612,6 +614,7 @@ export default function GuestApp() {
   const [waiterCallMessage, setWaiterCallMessage] = useState<string | null>(null);
   const [guestActionBusy, setGuestActionBusy] = useState(false);
   const [guestActionMessage, setGuestActionMessage] = useState<string | null>(null);
+  const [showExternalReviewOffer, setShowExternalReviewOffer] = useState(false);
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -861,21 +864,26 @@ export default function GuestApp() {
     alert('Телефон адміністратора ще не додано.');
   }
 
-  async function runGuestAction(action: (token: string) => Promise<{ message: string; booking?: GuestBooking }>) {
-    if (!lastBookingId || !activeGuestBooking || guestActionBusy) return;
+  async function runGuestAction(action: (token: string) => Promise<{ message: string; booking?: GuestBooking; askExternalReview?: boolean }>) {
+    if (!lastBookingId || !activeGuestBooking || guestActionBusy) return null;
 
     setGuestActionBusy(true);
     setGuestActionMessage(null);
 
     try {
       const result = await action(activeGuestBooking.token);
-      if (result.booking) setBookingStatus(guestBookingToStatus(result.booking));
+      const booking = await bookingsApi.getGuest(lastBookingId, activeGuestBooking.token)
+        .catch(() => result.booking || null);
+      if (booking) setBookingStatus(guestBookingToStatus(booking));
       setGuestActionMessage(result.message);
+      return result;
     } catch (actionError: any) {
       setGuestActionMessage(actionError?.message || 'Не вдалося оновити бронювання');
     } finally {
       setGuestActionBusy(false);
     }
+
+    return null;
   }
 
   function cancelGuestBooking() {
@@ -915,7 +923,29 @@ export default function GuestApp() {
     if (!lastBookingId) return;
     const text = window.prompt('Поділіться враженнями від візиту');
     if (text === null || !text.trim()) return;
-    void runGuestAction((token) => bookingsApi.guestReview(lastBookingId, token, { text: text.trim() }));
+    void runGuestAction((token) => bookingsApi.guestReview(lastBookingId, token, { text: text.trim() }))
+      .then((result) => {
+        if (!result?.askExternalReview) return;
+        try {
+          setShowExternalReviewOffer(
+            window.sessionStorage.getItem(`${EXTERNAL_REVIEW_SESSION_KEY_PREFIX}${lastBookingId}`) !== 'true',
+          );
+        } catch {
+          setShowExternalReviewOffer(true);
+        }
+      });
+  }
+
+  function openExternalReview() {
+    if (!lastBookingId || !activeGuestBooking) return;
+
+    try {
+      window.sessionStorage.setItem(`${EXTERNAL_REVIEW_SESSION_KEY_PREFIX}${lastBookingId}`, 'true');
+    } catch {
+      // The offer is still hidden for the current mounted session.
+    }
+    setShowExternalReviewOffer(false);
+    void bookingsApi.guestExternalReviewOpened(lastBookingId, activeGuestBooking.token);
   }
 
   async function callWaiter() {
@@ -1993,6 +2023,22 @@ export default function GuestApp() {
 
                   {guestActionMessage && (
                     <p className="mt-3 text-xs text-white/70">{guestActionMessage}</p>
+                  )}
+
+                  {showExternalReviewOffer && (
+                    <div className="mt-4 rounded-2xl border border-amber-200/35 bg-amber-300/10 p-4 text-sm text-amber-50">
+                      <p className="font-semibold">Сподобався візит?</p>
+                      <p className="mt-1 text-white/70">Залиште публічний відгук про MOLO — це допоможе нам стати кращими.</p>
+                      <a
+                        href={MOLO_PUBLIC_REVIEW_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={openExternalReview}
+                        className="mt-3 inline-flex rounded-xl border border-amber-200/55 px-3 py-2 text-xs font-bold text-amber-100"
+                      >
+                        Залишити публічний відгук
+                      </a>
+                    </div>
                   )}
                 </div>
               )}

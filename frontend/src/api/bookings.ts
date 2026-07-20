@@ -252,6 +252,9 @@ export const bookingsApi = {
   guestReview: (id: string, token: string, payload: { text: string }) =>
     api.post<ActionResponse>(`/bookings/${encode(id)}/guest/review`, payload, { headers: guestHeaders(token) }),
 
+  guestExternalReviewOpened: (id: string, token: string) =>
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/review/external-opened`, undefined, { headers: guestHeaders(token) }),
+
   getPendingReminders: () =>
     api.get<Booking[]>('/bookings/pending-reminders'),
 
