@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { join } from 'path';
 
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AuthModule } from './auth/auth.module';
@@ -45,9 +46,9 @@ import { ZonesModule } from './zones/zones.module';
               },
             },
             autoLoadEntities: true,
-
-            // ВРЕМЕННО: создаёт таблицы в базе автоматически
-            synchronize: true,
+            synchronize: false,
+            migrations: [join(__dirname, 'migrations', '*.{js,ts}')],
+            migrationsRun: true,
           }
         : {
             type: 'postgres',
@@ -57,9 +58,9 @@ import { ZonesModule } from './zones/zones.module';
             password: process.env.DB_PASSWORD || 'postgres',
             database: process.env.DB_NAME || 'molo_restaurant',
             autoLoadEntities: true,
-
-            // ВРЕМЕННО: создаёт таблицы в базе автоматически
-            synchronize: true,
+            synchronize: false,
+            migrations: [join(__dirname, 'migrations', '*.{js,ts}')],
+            migrationsRun: true,
           },
     ),
 
