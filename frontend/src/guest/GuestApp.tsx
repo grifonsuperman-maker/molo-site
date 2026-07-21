@@ -782,13 +782,18 @@ export default function GuestApp() {
   const activeMyBookings = myBookings.filter((booking) =>
     (booking.status === 'pending' || booking.status === 'approved') && booking.bookingDate >= kyivToday,
   );
+  const unreadNotificationBookings = myBookings.filter((booking) =>
+    booking.status === 'cancelled' &&
+    Boolean(booking.guestNotification) &&
+    !booking.guestNotification?.acknowledgedAt,
+  );
   const completedReviewBooking = myBookings.find((booking) =>
     booking.status === 'completed' && booking.canLeaveReview,
   ) || null;
   const completedReviewAccess = completedReviewBooking
     ? guestBookings.find((booking) => booking.bookingId === completedReviewBooking.bookingId) || null
     : null;
-  const myBookingCards = activeMyBookings.map((booking) => ({
+  const myBookingCards = [...activeMyBookings, ...unreadNotificationBookings].map((booking) => ({
     booking,
     access: guestBookings.find((item) => item.bookingId === booking.bookingId) || null,
   }));
@@ -1320,7 +1325,7 @@ export default function GuestApp() {
         </div>
       )}
 
-      {(activeMyBookings.length > 0 || completedReviewAccess) && (
+      {(activeMyBookings.length > 0 || unreadNotificationBookings.length > 0 || completedReviewAccess) && (
         <aside
           className={`fixed left-1/2 z-[95] w-[calc(100%-24px)] max-w-md -translate-x-1/2 ${
             step === 'home' ? 'top-3' : 'top-16'
@@ -1872,9 +1877,11 @@ export default function GuestApp() {
               <div>
                 <h2 className="text-xl font-black text-amber-100">Мої бронювання</h2>
                 <p className="mt-1 text-sm text-white/75">
-                  {activeMyBookings.length > 0 && (activeMyBookings.length === 1
-                    ? 'У вас 1 активне бронювання'
-                    : `У вас ${activeMyBookings.length} активних бронювань`)}
+                  {activeMyBookings.length === 0
+                    ? 'У вас немає активних бронювань'
+                    : activeMyBookings.length === 1
+                      ? 'У вас 1 активне бронювання'
+                      : `У вас ${activeMyBookings.length} активних бронювань`}
                 </p>
               </div>
               <button type="button" onClick={() => setShowMyBookings(false)} className="rounded-xl border border-amber-200/45 px-3 py-2 text-sm font-bold text-amber-100">Закрити</button>
@@ -1884,8 +1891,48 @@ export default function GuestApp() {
               {myBookingCards.map(({ booking, access }) => (
                 <article key={booking.bookingId} className="rounded-2xl border border-amber-200/45 bg-amber-300/10 p-4 shadow-[0_0_22px_rgba(251,191,36,.24)]">
                   <p className="font-bold text-white">{booking.bookingDate} · {booking.bookingTime} · Стіл №{booking.tableNumber || '—'}</p>
-                  <p className="mt-1 text-xs text-white/70">{booking.status === 'approved' ? 'Бронювання підтверджено' : 'Очікує підтвердження'}</p>
-                  {access && (
+                  <p className="mt-1 text-xs text-white/70">
+                    {booking.status === 'approved'
+                      ? 'Бронювання підтверджено'
+                      : booking.status === 'cancelled'
+                        ? 'Бронювання скасовано'
+                        : 'Очікує підтвердження'}
+                  </p>
+                  {booking.status === 'cancelled' &&
+                    booking.guestNotification &&
+                    !booking.guestNotification.acknowledgedAt && (
+                      <div className="mt-3 rounded-2xl border border-red-200/35 bg-red-300/10 p-3 text-left">
+                        <p className="font-bold text-red-100">
+                          {booking.guestNotification.title || 'Повідомлення про бронювання'}
+                        </p>
+                        {booking.guestNotification.message && (
+                          <p className="mt-1 text-sm text-white/75">
+                            {booking.guestNotification.message}
+                          </p>
+                        )}
+                        {access && (
+                          <button
+                            type="button"
+                            disabled={guestActionBusy}
+                            onClick={() => {
+                              void runGuestAction(
+                                booking.bookingId,
+                                access.token,
+                                (token) =>
+                                  bookingsApi.guestAcknowledgeNotification(
+                                    booking.bookingId,
+                                    token,
+                                  ),
+                              );
+                            }}
+                            className="mt-3 rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50"
+                          >
+                            Ознайомився
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  {access && booking.status !== 'cancelled' && (
                     <div className="mt-3 grid gap-2 sm:grid-cols-3">
                       {booking.isLatenessPromptDue && <button type="button" disabled={guestActionBusy} onClick={() => {
                         const minutes = Number(window.prompt('На скільки хвилин ви запізнюєтеся?', '15'));
