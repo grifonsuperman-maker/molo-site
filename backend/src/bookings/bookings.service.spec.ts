@@ -92,3 +92,57 @@ test('waiterTransfer preserves an occupied table used by an earlier booking', as
   assert.deepEqual(savedTables, [[oldTable, nextTable]]);
   assert.equal(callsClosedAfterTransaction, true);
 });
+
+test('waiterTransfer preserves a closed source table', async () => {
+  const oldTable = {
+    id: 'old-table',
+    tableNumber: '1',
+    status: 'closed',
+    isVisible: true,
+  } as TableEntity;
+  const nextTable = {
+    id: 'next-table',
+    tableNumber: '2',
+    status: 'free',
+    isVisible: true,
+  } as TableEntity;
+  const booking = {
+    id: 'approved-booking',
+    status: 'approved',
+    bookingDate: '2026-07-21',
+    bookingTime: '20:00:00',
+    durationMinutes: 120,
+    checkedInAt: null,
+    table: oldTable,
+    client: null,
+  } as Booking;
+  const savedTables: TableEntity[][] = [];
+  const manager = {
+    getRepository: (entity: unknown) => {
+      if (entity === Booking) return { findOne: async () => booking, save: async () => booking };
+      if (entity === TableEntity) {
+        return {
+          findOne: async ({ where }: { where: { id: string } }) => where.id === oldTable.id ? oldTable : nextTable,
+          save: async (tables: TableEntity[]) => savedTables.push(tables),
+        };
+      }
+      if (entity === BookingHistory) return { create: (history: unknown) => history, save: async () => undefined };
+      throw new Error('Unexpected repository');
+    },
+  };
+  const service = new BookingsService(
+    { manager: { transaction: async (work: (value: typeof manager) => Promise<unknown>) => work(manager) } } as any,
+    {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+    { closeActiveCallsAndDetachBooking: () => undefined } as any,
+  );
+
+  (service as any).restaurantDateToday = () => '2026-07-21';
+  (service as any).checkAvailability = async () => ({ isAvailable: true });
+  (service as any).safeLog = async () => undefined;
+
+  await service.waiterTransfer(booking.id, nextTable.id, { sub: 'waiter-user', telegramId: null, role: 'waiter' });
+
+  assert.equal(oldTable.status, 'closed');
+  assert.equal(nextTable.status, 'reserved');
+  assert.deepEqual(savedTables, [[oldTable, nextTable]]);
+});

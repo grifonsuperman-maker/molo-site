@@ -916,7 +916,10 @@ export class BookingsService {
         // Фізичний occupied/cleaning може належати попередньому візиту за
         // послідовним бронюванням. Звільняємо його лише разом із гостями,
         // яких фактично пересаджують.
-        if (transferredBookingOwnsPhysicalStatus || !['occupied', 'cleaning'].includes(oldTable.status)) {
+        if (
+          oldTable.status !== 'closed' &&
+          (transferredBookingOwnsPhysicalStatus || !['occupied', 'cleaning'].includes(oldTable.status))
+        ) {
           oldTable.status = 'free';
         }
         nextTable.status = 'reserved';
