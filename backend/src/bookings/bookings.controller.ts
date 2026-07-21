@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
 import { BookingsService } from './bookings.service';
@@ -11,6 +11,7 @@ import { GuestChangeTableDto } from './dto/guest-change-table.dto';
 import { GuestLatenessDto } from './dto/guest-lateness.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
 import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
+import { Roles } from '../common/decorators/roles.decorator';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 
 @Controller('bookings')
@@ -52,8 +53,8 @@ export class BookingsController {
 
   // Тимчасово відкрито для тестових панелей.
   // Після впровадження авторизації повернемо перевірку ролей.
-  @Public()
   @Get('today')
+  @Roles('waiter', 'admin', 'owner')
   today() {
     return this.service.getToday();
   }
@@ -179,16 +180,22 @@ export class BookingsController {
     return this.service.noShow(id);
   }
 
-  @Public()
   @Patch(':id/check-in')
+  @Roles('waiter', 'admin', 'owner')
   checkIn(@Param('id') id: string) {
     return this.service.checkIn(id);
   }
 
-  @Public()
   @Patch(':id/complete')
+  @Roles('waiter', 'admin', 'owner')
   complete(@Param('id') id: string) {
     return this.service.complete(id);
+  }
+
+  @Patch(':id/waiter-transfer')
+  @Roles('waiter', 'admin', 'owner')
+  waiterTransfer(@Param('id') id: string, @Body('tableId') tableId: string, @Req() request: any) {
+    return this.service.waiterTransfer(id, tableId, request.user);
   }
 
   @Public()

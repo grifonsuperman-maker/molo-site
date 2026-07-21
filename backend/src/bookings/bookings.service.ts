@@ -14,6 +14,8 @@ import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
 import { LogsService } from '../logs/logs.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
+import type { AuthUser } from '../auth/types/auth-user.type';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
@@ -31,6 +33,7 @@ export class BookingsService {
     @InjectRepository(Restaurant) private readonly restaurants: Repository<Restaurant>,
     private readonly logs: LogsService,
     private readonly notifications: NotificationsService,
+    private readonly waiterCalls: WaiterCallsService,
   ) {}
 
   async restaurant() {
@@ -868,6 +871,58 @@ export class BookingsService {
     await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate, true);
     await this.safeLog('Стіл звільнено', { bookingId: id });
     return { message: 'Стіл звільнено' };
+  }
+
+  /** Moves an approved booking without carrying its check-in or waiter assignment state. */
+  async waiterTransfer(id: string, tableId: string, actor: AuthUser) {
+    if (!tableId) throw new BadRequestException('Оберіть новий стіл');
+
+    return this.bookings.manager.transaction(async (manager) => {
+      const booking = await manager.getRepository(Booking).findOne({
+        where: { id }, relations: ['table', 'client'], lock: { mode: 'pessimistic_write' },
+      });
+      if (!booking || booking.status !== 'approved' || !booking.table) {
+        throw new BadRequestException('Пересадка доступна лише для підтвердженого бронювання');
+      }
+      const nextTable = await manager.getRepository(TableEntity).findOne({
+        where: { id: tableId }, lock: { mode: 'pessimistic_write' },
+      });
+      if (!nextTable || !nextTable.isVisible || nextTable.status !== 'free') {
+        throw new BadRequestException('Обраний стіл закритий або зайнятий');
+      }
+      if (nextTable.id === booking.table.id) throw new BadRequestException('Оберіть інший стіл');
+
+      const availability = await this.checkAvailability({
+        tableId: nextTable.id,
+        bookingDate: booking.bookingDate,
+        bookingTime: booking.bookingTime,
+        durationMinutes: booking.durationMinutes,
+      } as CheckAvailabilityDto);
+      if (!availability.isAvailable) throw new BadRequestException('Цей стіл має конфлікт у часі бронювання');
+
+      const oldTable = booking.table;
+      const previousData = this.bookingSnapshot(booking);
+      booking.table = nextTable;
+      booking.checkedInAt = null;
+      await manager.getRepository(Booking).save(booking);
+      oldTable.status = 'free';
+      nextTable.status = 'reserved';
+      await manager.getRepository(TableEntity).save([oldTable, nextTable]);
+      await manager.getRepository(BookingHistory).save(manager.getRepository(BookingHistory).create({
+        booking,
+        action: 'waiter_table_transfer',
+        actorRole: actor.role,
+        actorStaffId: actor.staffId || null,
+        actorName: actor.name || null,
+        previousData,
+        newData: this.bookingSnapshot(booking),
+        reason: `Стіл №${oldTable.tableNumber} → №${nextTable.tableNumber}`,
+        isManualMode: true,
+      }));
+      this.waiterCalls.detachBooking(booking.id);
+      await this.safeLog('Пересадка гостей', { bookingId: booking.id, oldTable: oldTable.tableNumber, newTable: nextTable.tableNumber, author: actor.name || actor.staffId || null });
+      return { message: 'Гостей пересаджено на новий стіл' };
+    });
   }
 
   async requestReschedule(id: string, dto: RequestRescheduleDto) {

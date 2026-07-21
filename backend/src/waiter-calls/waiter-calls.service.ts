@@ -12,7 +12,6 @@ export type WaiterCall = {
   tableId: string | null;
   tableNumber: string | null;
   clientName: string | null;
-  clientPhone: string | null;
   waiterId: string | null;
   waiterName: string | null;
   status: WaiterCallStatus;
@@ -163,7 +162,6 @@ export class WaiterCallsService {
       tableId: booking.table?.id || null,
       tableNumber: booking.table?.tableNumber || null,
       clientName: booking.client?.fullName || null,
-      clientPhone: booking.client?.phone || null,
       waiterId: assignment?.waiterId || null,
       waiterName: assignment?.waiterName || null,
       status: 'new',
@@ -196,6 +194,10 @@ export class WaiterCallsService {
       .filter((assignment) => assignment.waiterId === waiterId)
       .reverse()
       .slice(0, 50);
+  }
+
+  detachBooking(bookingId: string) {
+    this.assignments = this.assignments.filter((assignment) => assignment.bookingId !== bookingId);
   }
 
   accept(id: string, dto: { waiterId: string; waiterName: string }) {

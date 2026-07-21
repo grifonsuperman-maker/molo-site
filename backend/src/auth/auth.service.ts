@@ -20,10 +20,7 @@ export class AuthService {
     const telegramUser = this.resolveTelegramUser(dto);
 
     const staff = await this.staffRepo.findOne({
-      where: {
-        telegramId: telegramUser.telegramId,
-        active: true,
-      },
+      where: { telegramId: telegramUser.telegramId, active: true, isArchived: false },
     });
 
     const role: AuthRole = staff?.role || 'guest';
@@ -46,9 +43,19 @@ export class AuthService {
 
   async verifyToken(token: string): Promise<AuthUser> {
     try {
-      return await this.jwtService.verifyAsync<AuthUser>(token, {
+      const payload = await this.jwtService.verifyAsync<AuthUser>(token, {
         secret: process.env.JWT_SECRET || 'dev-secret-change-me',
       });
+      if (!payload.staffId) return payload;
+
+      const staff = await this.staffRepo.findOne({ where: { id: payload.staffId } });
+      if (!staff || !staff.active || staff.isArchived) {
+        throw new UnauthorizedException('Працівник заблокований або архівований');
+      }
+      if ((staff.role === 'waiter' || staff.role === 'hookah') && !staff.isOnShift) {
+        throw new UnauthorizedException('Зміну працівника завершено');
+      }
+      return payload;
     } catch {
       throw new UnauthorizedException('Недійсний токен авторизації');
     }
