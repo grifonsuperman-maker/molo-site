@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { bookingsApi } from '../api/bookings';
 import { tablesApi } from '../api/tables';
@@ -6,6 +6,8 @@ import { waiterCallsApi } from '../api/waiterCalls';
 import type { WaiterAssignment, WaiterCall } from '../api/waiterCalls';
 import type { Booking } from '../api/types';
 import { usePersistentState } from '../hooks/usePersistentState';
+import { clearAccessToken } from '../api/client';
+import { staffApi, type StaffLoginOption } from '../api/staff';
 
 type LocationKey =
   | 'hall'
@@ -128,23 +130,29 @@ function statusClass(status: string) {
   return 'border-white/15 bg-white/5 text-white/70';
 }
 
-function getSavedWaiter() {
-  const existingId = window.localStorage.getItem('molo_waiter_id');
-  const existingName = window.localStorage.getItem('molo_waiter_name');
+type WaiterSession = { waiterId: string; waiterName: string };
+const WAITER_SESSION_KEY = 'molo_waiter_staff_session';
 
-  if (existingId && existingName) {
-    return { waiterId: existingId, waiterName: existingName };
+function readWaiterSession(): WaiterSession | null {
+  try {
+    const value = window.localStorage.getItem(WAITER_SESSION_KEY);
+    return value ? JSON.parse(value) : null;
+  } catch { return null; }
+}
+
+function LoginScreen({ onLogin }: { onLogin: (session: WaiterSession) => void }) {
+  const [options, setOptions] = useState<StaffLoginOption[]>([]);
+  const [staffId, setStaffId] = useState('');
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { staffApi.getLoginOptions().then((items) => setOptions(items.filter((item) => item.role === 'waiter'))).catch((e) => setError(e.message || 'Не вдалося завантажити список офіціантів')); }, []);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!/^\d{4,6}$/.test(pin)) { setError('PIN має містити від 4 до 6 цифр'); return; }
+    try { setBusy(true); setError(null); const result = await staffApi.loginWithPin(staffId, pin); const session = { waiterId: result.staff.id, waiterName: result.staff.fullName }; window.localStorage.setItem(WAITER_SESSION_KEY, JSON.stringify(session)); onLogin(session); } catch (e: any) { setError(e.message || 'Не вдалося увійти'); } finally { setBusy(false); }
   }
-
-  const waiterName =
-    window.prompt('Введи імʼя офіціанта для цього телефону')?.trim() || 'Офіціант';
-  const waiterId =
-    existingId || `waiter_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-  window.localStorage.setItem('molo_waiter_id', waiterId);
-  window.localStorage.setItem('molo_waiter_name', waiterName);
-
-  return { waiterId, waiterName };
+  return <main className="min-h-screen bg-[#10100f] px-4 py-8 text-white"><form onSubmit={submit} className="mx-auto max-w-md rounded-[30px] border border-amber-200/30 bg-neutral-900/90 p-6 shadow-[0_0_36px_rgba(251,191,36,.08)]"><p className="text-xs uppercase tracking-[.28em] text-amber-200/70">MOLO Restaurant</p><h1 className="mt-3 text-3xl font-black">Вхід офіціанта</h1><p className="mt-2 text-sm text-white/60">Оберіть себе та введіть PIN. Вхід доступний лише під час відкритої зміни.</p>{error && <p className="mt-4 rounded-2xl border border-red-300/35 p-3 text-sm text-red-100">{error}</p>}<label className="mt-5 block text-sm font-semibold">Офіціант<select required value={staffId} onChange={(e) => setStaffId(e.target.value)} className="mt-2 w-full rounded-2xl border border-white/15 bg-black/30 p-3 text-white"><option value="">Оберіть офіціанта</option>{options.map((item) => <option key={item.id} value={item.id} disabled={!item.isOnShift}>{item.fullName}{item.isOnShift ? '' : ' — не на зміні'}</option>)}</select></label><label className="mt-4 block text-sm font-semibold">PIN<input required inputMode="numeric" pattern="[0-9]{4,6}" maxLength={6} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} className="mt-2 w-full rounded-2xl border border-white/15 bg-black/30 p-3 text-xl tracking-[.45em] text-white" /></label><button disabled={busy || !staffId} className="mt-6 w-full rounded-2xl border border-amber-200/60 bg-amber-300/10 p-3 font-black text-amber-100 transition duration-150 active:scale-[.98] disabled:opacity-40">{busy ? 'Входимо...' : 'Увійти'}</button></form></main>;
 }
 
 function isValidView(value: WaiterView) {
@@ -215,7 +223,18 @@ export default function WaiterApp() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [waiter, setWaiter] = useState(() => getSavedWaiter());
+  const [waiter, setWaiter] = useState<WaiterSession | null>(() => readWaiterSession());
+  const [shiftEnded, setShiftEnded] = useState<string | null>(null);
+  const [transferBooking, setTransferBooking] = useState<Booking | null>(null);
+  const [transferTables, setTransferTables] = useState<Record<string, { tableId: string; tableNumber: string; status: string }>>({});
+  const currentWaiter = waiter || { waiterId: '', waiterName: '' };
+
+  function endSession(name: string) {
+    window.localStorage.removeItem(WAITER_SESSION_KEY);
+    clearAccessToken();
+    setWaiter(null);
+    setShiftEnded(name);
+  }
 
   useEffect(() => {
     if (!isValidView(view)) {
@@ -254,8 +273,8 @@ export default function WaiterApp() {
   }, [activeTodayBookings, myTableNumbers]);
 
   const myCalls = useMemo(
-    () => calls.filter((call) => call.waiterId === waiter.waiterId),
-    [calls, waiter.waiterId],
+    () => calls.filter((call) => call.waiterId === currentWaiter.waiterId),
+    [calls, currentWaiter.waiterId],
   );
 
   const commonCalls = useMemo(
@@ -277,6 +296,7 @@ export default function WaiterApp() {
   }, [activeTodayBookings, view]);
 
   async function load() {
+    if (!waiter) return;
     try {
       setLoading(true);
       setError(null);
@@ -284,11 +304,14 @@ export default function WaiterApp() {
       const kyivToday = todayInKyiv();
       setToday(kyivToday);
 
-      const [bookingsResult, callsResult, assignmentsResult] = await Promise.all([
+      const [staff, bookingsResult, callsResult, assignmentsResult] = await Promise.all([
+        staffApi.getOne(currentWaiter.waiterId),
         bookingsApi.getToday(),
-        waiterCallsApi.list(waiter.waiterId),
-        waiterCallsApi.assignments(waiter.waiterId),
+        waiterCallsApi.list(currentWaiter.waiterId),
+        waiterCallsApi.assignments(currentWaiter.waiterId),
       ]);
+
+      if (!staff.active || staff.isArchived || !staff.isOnShift) { endSession(currentWaiter.waiterName); return; }
 
       setBookings(bookingsResult);
       setCalls(callsResult);
@@ -304,7 +327,7 @@ export default function WaiterApp() {
     load();
     const interval = window.setInterval(load, 15000);
     return () => window.clearInterval(interval);
-  }, [waiter.waiterId]);
+  }, [waiter?.waiterId]);
 
   async function runAction(
     actionKey: string,
@@ -330,17 +353,20 @@ export default function WaiterApp() {
     }
   }
 
-  function changeWaiter() {
-    const nextName = window.prompt('Імʼя офіціанта', waiter.waiterName)?.trim();
-    if (!nextName) return;
+  async function openTransfer(booking: Booking) {
+    try {
+      setTransferBooking(booking); setError(null);
+      const result = await bookingsApi.tableStatuses({ bookingDate: booking.bookingDate, bookingTime: booking.bookingTime, durationMinutes: booking.durationMinutes });
+      setTransferTables(result.statuses);
+    } catch (e: any) { setTransferBooking(null); setError(e.message || 'Не вдалося завантажити столи'); }
+  }
 
-    const nextWaiter = {
-      waiterId: waiter.waiterId,
-      waiterName: nextName,
-    };
-
-    window.localStorage.setItem('molo_waiter_name', nextName);
-    setWaiter(nextWaiter);
+  function transferTo(tableId: string) {
+    if (!transferBooking) return;
+    const oldNumber = transferBooking.table?.tableNumber || '-';
+    const newNumber = transferTables[tableId]?.tableNumber || '-';
+    if (!window.confirm(`Пересадити гостей зі столу №${oldNumber} на стіл №${newNumber}?`)) return;
+    runAction(`${transferBooking.id}:transfer`, `Гостей пересаджено за стіл №${newNumber}`, async () => { await bookingsApi.waiterChangeTable(transferBooking.id, tableId); setTransferBooking(null); });
   }
 
   function getBookingAction(booking: Booking): BookingAction | null {
@@ -391,8 +417,8 @@ export default function WaiterApp() {
           bookingId: booking.id,
           tableId: booking.table?.id || null,
           tableNumber: booking.table?.tableNumber || null,
-          waiterId: waiter.waiterId,
-          waiterName: waiter.waiterName,
+          waiterId: currentWaiter.waiterId,
+          waiterName: currentWaiter.waiterName,
         });
       });
       return;
@@ -420,8 +446,8 @@ export default function WaiterApp() {
       `Виклик столу №${call.tableNumber || '-'} прийнято`,
       () =>
         waiterCallsApi.accept(call.id, {
-          waiterId: waiter.waiterId,
-          waiterName: waiter.waiterName,
+          waiterId: currentWaiter.waiterId,
+          waiterName: currentWaiter.waiterName,
         }),
     );
   }
@@ -435,7 +461,7 @@ export default function WaiterApp() {
   }
 
   function renderCallCard(call: WaiterCall) {
-    const assignedToMe = call.waiterId === waiter.waiterId;
+    const assignedToMe = call.waiterId === currentWaiter.waiterId;
 
     return (
       <article
@@ -560,14 +586,6 @@ export default function WaiterApp() {
               гостей
             </p>
 
-            {booking.client?.phone && (
-              <a
-                href={`tel:${booking.client.phone}`}
-                className="mt-2 inline-block text-sm font-semibold text-amber-100 underline decoration-amber-200/40 underline-offset-4"
-              >
-                {booking.client.phone}
-              </a>
-            )}
           </div>
         </div>
 
@@ -587,6 +605,10 @@ export default function WaiterApp() {
               {busyAction === actionKey ? 'Зачекайте...' : action.label}
             </ActionButton>
           </div>
+        )}
+
+        {booking.status === 'approved' && (
+          <button type="button" onClick={() => openTransfer(booking)} disabled={Boolean(busyAction)} className="mt-3 w-full rounded-2xl border border-amber-100/65 bg-white/[.03] px-4 py-3 text-sm font-black text-amber-50 shadow-[0_0_20px_rgba(251,191,36,.12)] transition duration-150 active:scale-[.98] disabled:opacity-40">Змінити стіл</button>
         )}
 
         {!action && ACTIVE_BOOKING_STATUSES.has(booking.status) && (
@@ -630,6 +652,11 @@ export default function WaiterApp() {
     );
   }
 
+  if (!waiter) {
+    if (shiftEnded) return <main className="min-h-screen bg-[#10100f] px-4 py-8 text-white"><section className="mx-auto max-w-md rounded-[30px] border border-white/15 bg-neutral-900/90 p-6 text-center shadow-[0_0_34px_rgba(255,255,255,.06)]"><h1 className="text-2xl font-black">Дякуємо за сьогоднішню зміну, {shiftEnded} 🤍</h1><p className="mt-4 text-white/75">Гарного вечора та приємного відпочинку.</p><p className="mt-3 text-sm text-white/55">Наступний вхід буде доступний після відкриття нової зміни Адміністратором.</p><button onClick={() => setShiftEnded(null)} className="mt-6 rounded-2xl border border-white/20 px-4 py-3 text-sm font-bold">До входу</button></section></main>;
+    return <LoginScreen onLogin={setWaiter} />;
+  }
+
   return (
     <div className="min-h-screen bg-[#10100f] px-4 py-5 pb-28 text-white lg:px-8">
       <div className="mx-auto max-w-5xl">
@@ -644,13 +671,9 @@ export default function WaiterApp() {
                 Пульт офіціанта
               </h1>
 
-              <button
-                type="button"
-                onClick={changeWaiter}
-                className="mt-3 rounded-2xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white/70"
-              >
-                Офіціант: {waiter.waiterName}
-              </button>
+              <p className="mt-3 rounded-2xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white/70">
+                Офіціант: {currentWaiter.waiterName}
+              </p>
             </div>
 
             <button
@@ -701,6 +724,16 @@ export default function WaiterApp() {
         {success && (
           <div className="mb-4 rounded-3xl border border-emerald-300/30 bg-emerald-500/10 p-4 text-sm font-semibold text-emerald-100">
             {success}
+          </div>
+        )}
+
+        {transferBooking && (
+          <div className="fixed inset-0 z-50 flex items-end bg-black/70 p-3 sm:items-center sm:justify-center">
+            <section className="max-h-[82vh] w-full max-w-lg overflow-auto rounded-[30px] border border-amber-100/35 bg-[#151515] p-5 shadow-[0_0_42px_rgba(251,191,36,.14)]">
+              <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[.2em] text-amber-200/65">Пересадка гостей</p><h2 className="mt-1 text-2xl font-black">Оберіть вільний стіл</h2><p className="mt-1 text-sm text-white/60">Для бронювання зі столу №{transferBooking.table?.tableNumber || '-'}</p></div><button onClick={() => setTransferBooking(null)} className="rounded-2xl border border-white/15 px-3 py-2 text-sm">Закрити</button></div>
+              <div className="mt-5 grid grid-cols-2 gap-3">{Object.values(transferTables).filter((table) => table.status === 'free' && table.tableId !== transferBooking.table?.id).map((table) => <button key={table.tableId} onClick={() => transferTo(table.tableId)} className="rounded-[24px] border border-white/15 bg-white/[.03] p-4 text-left transition duration-150 active:scale-[.98]"><p className="text-lg font-black">Стіл №{table.tableNumber}</p><p className="mt-1 text-xs text-emerald-200">Вільний</p></button>)}</div>
+              {Object.values(transferTables).filter((table) => table.status === 'free' && table.tableId !== transferBooking.table?.id).length === 0 && <EmptyState text="Немає вільних столів без конфлікту часу." />}
+            </section>
           </div>
         )}
 

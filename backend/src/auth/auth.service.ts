@@ -46,9 +46,18 @@ export class AuthService {
 
   async verifyToken(token: string): Promise<AuthUser> {
     try {
-      return await this.jwtService.verifyAsync<AuthUser>(token, {
+      const user = await this.jwtService.verifyAsync<AuthUser>(token, {
         secret: process.env.JWT_SECRET || 'dev-secret-change-me',
       });
+      // A PIN token is only valid while the staff account remains eligible.
+      // Administrators and directors deliberately do not depend on a shift.
+      if (user.staffId && (user.role === 'waiter' || user.role === 'hookah')) {
+        const staff = await this.staffRepo.findOne({ where: { id: user.staffId } });
+        if (!staff || !staff.active || staff.isArchived || !staff.isOnShift) {
+          throw new UnauthorizedException('Зміна завершена або профіль працівника недоступний');
+        }
+      }
+      return user;
     } catch {
       throw new UnauthorizedException('Недійсний токен авторизації');
     }

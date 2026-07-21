@@ -1,6 +1,10 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthUser } from '../auth/types/auth-user.type';
+import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
 import { BookingsService } from './bookings.service';
 import { GuestBookingsService } from './guest-bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
@@ -18,6 +22,7 @@ export class BookingsController {
   constructor(
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
+    private readonly waiterCalls: WaiterCallsService,
   ) {}
 
   @Public()
@@ -50,10 +55,8 @@ export class BookingsController {
     return this.service.getPendingReminders();
   }
 
-  // Тимчасово відкрито для тестових панелей.
-  // Після впровадження авторизації повернемо перевірку ролей.
-  @Public()
   @Get('today')
+  @Roles('waiter', 'admin', 'owner')
   today() {
     return this.service.getToday();
   }
@@ -179,16 +182,24 @@ export class BookingsController {
     return this.service.noShow(id);
   }
 
-  @Public()
   @Patch(':id/check-in')
+  @Roles('waiter', 'admin', 'owner')
   checkIn(@Param('id') id: string) {
     return this.service.checkIn(id);
   }
 
-  @Public()
   @Patch(':id/complete')
+  @Roles('waiter', 'admin', 'owner')
   complete(@Param('id') id: string) {
     return this.service.complete(id);
+  }
+
+  @Patch(':id/waiter/change-table')
+  @Roles('waiter', 'admin', 'owner')
+  async waiterChangeTable(@Param('id') id: string, @Body() dto: GuestChangeTableDto, @CurrentUser() user: AuthUser) {
+    const result = await this.guestService.changeTableByStaff(id, dto, user);
+    this.waiterCalls.removeAssignment(id);
+    return result;
   }
 
   @Public()

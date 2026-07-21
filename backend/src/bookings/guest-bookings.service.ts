@@ -18,6 +18,7 @@ import { GuestReviewDto } from './dto/guest-review.dto';
 import { BookingHistory } from './entities/booking-history.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
+import type { AuthUser } from '../auth/types/auth-user.type';
 
 const KYIV_TIME_ZONE = 'Europe/Kyiv';
 const DEFAULT_DURATION_MINUTES = 120;
@@ -254,6 +255,72 @@ export class GuestBookingsService {
     };
   }
 
+  /** Staff transfer deliberately resets arrival and waiter ownership. */
+  async changeTableByStaff(id: string, dto: GuestChangeTableDto, actor: AuthUser) {
+    const tableId = String(dto.tableId || '').trim();
+    if (!tableId) throw new BadRequestException('Оберіть новий стіл');
+
+    await this.dataSource.transaction(async (manager) => {
+      const booking = await manager.getRepository(Booking).createQueryBuilder('booking')
+        .leftJoinAndSelect('booking.table', 'table')
+        .where('booking.id = :id', { id })
+        .setLock('pessimistic_write')
+        .getOne();
+      if (!booking) throw new BadRequestException('Бронювання не знайдено');
+      if (booking.status !== 'approved') throw new BadRequestException('Пересадити можна лише підтверджене бронювання');
+
+      const newTable = await manager.getRepository(TableEntity).createQueryBuilder('table')
+        .leftJoinAndSelect('table.zone', 'zone')
+        .where('table.id = :tableId', { tableId })
+        .setLock('pessimistic_write')
+        .getOne();
+      if (!newTable) throw new BadRequestException('Стіл не знайдено');
+      if (newTable.id === booking.table?.id) return;
+      if (!newTable.isVisible || newTable.status !== 'free' || newTable.zone?.isClosed || newTable.zone?.isVisible === false) {
+        throw new BadRequestException('Цей стіл зараз недоступний');
+      }
+      if (Number(newTable.seats) < Number(booking.guestsCount)) {
+        throw new BadRequestException('Для вашої кількості гостей потрібен більший стіл');
+      }
+      const conflicts = await manager.getRepository(Booking).createQueryBuilder('candidate')
+        .leftJoinAndSelect('candidate.table', 'table')
+        .where('table.id = :tableId', { tableId: newTable.id })
+        .andWhere('candidate.bookingDate = :bookingDate', { bookingDate: booking.bookingDate })
+        .andWhere('candidate.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
+        .andWhere('candidate.id != :id', { id: booking.id })
+        .getMany();
+      const starts = this.timeToMinutes(booking.bookingTime);
+      const ends = starts + this.duration(booking) + CLEANUP_MINUTES;
+      if (conflicts.some((candidate) => starts < this.timeToMinutes(candidate.bookingTime) + this.duration(candidate) + CLEANUP_MINUTES && ends > this.timeToMinutes(candidate.bookingTime))) {
+        throw new ConflictException('Цей стіл уже недоступний. Оберіть інший.');
+      }
+
+      const oldTable = booking.table;
+      const previousData = this.snapshot(booking);
+      booking.table = newTable;
+      booking.checkedInAt = null;
+      booking.guestNotification = null;
+      await manager.getRepository(Booking).save(booking);
+      await this.saveHistory(manager, booking, 'waiter_changed_table', {
+        actorRole: actor.role,
+        actorStaffId: actor.staffId || null,
+        actorName: actor.name || null,
+        previousData,
+        newData: this.snapshot(booking),
+        reason: `Пересадка зі столу №${oldTable?.tableNumber || '-'} на стіл №${newTable.tableNumber}; bookingId: ${booking.id}`,
+      });
+      if (oldTable?.id && this.isToday(booking.bookingDate)) {
+        const lockedOldTable = await manager.getRepository(TableEntity).findOne({ where: { id: oldTable.id } });
+        if (lockedOldTable && lockedOldTable.status !== 'closed') {
+          lockedOldTable.status = 'free';
+          await manager.getRepository(TableEntity).save(lockedOldTable);
+        }
+      }
+      await this.applyBookingStatusToTable(manager, newTable.id, booking.bookingDate, 'approved');
+    });
+    return { message: 'Гостей пересаджено. Новий стіл очікує на прихід гостей.' };
+  }
+
   async acknowledgeNotification(id: string, token: string) {
     await this.dataSource.transaction(async (manager) => {
       const booking = await this.findOwnedBooking(id, token, manager, true);
@@ -418,6 +485,9 @@ export class GuestBookingsService {
     booking: Booking,
     action: string,
     data: {
+      actorRole?: string | null;
+      actorStaffId?: string | null;
+      actorName?: string | null;
       previousData?: Record<string, unknown> | null;
       newData?: Record<string, unknown> | null;
       reason?: string | null;
@@ -428,9 +498,9 @@ export class GuestBookingsService {
       repository.create({
         booking,
         action,
-        actorRole: 'guest',
-        actorStaffId: null,
-        actorName: null,
+        actorRole: data.actorRole || 'guest',
+        actorStaffId: data.actorStaffId || null,
+        actorName: data.actorName || null,
         previousData: data.previousData || null,
         newData: data.newData || null,
         reason: data.reason || null,
