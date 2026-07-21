@@ -200,6 +200,20 @@ export class WaiterCallsService {
     this.assignments = this.assignments.filter((assignment) => assignment.bookingId !== bookingId);
   }
 
+  /** Invalidates active guest calls after the booking has been moved to another table. */
+  closeActiveCallsAndDetachBooking(bookingId: string) {
+    const closedAt = this.now();
+
+    for (const call of this.calls) {
+      if (call.bookingId === bookingId && (call.status === 'new' || call.status === 'accepted')) {
+        call.status = 'closed';
+        call.closedAt = closedAt;
+      }
+    }
+
+    this.detachBooking(bookingId);
+  }
+
   accept(id: string, dto: { waiterId: string; waiterName: string }) {
     const call = this.calls.find((item) => item.id === id);
     if (!call) throw new NotFoundException('Виклик не знайдено');

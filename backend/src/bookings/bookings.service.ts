@@ -877,7 +877,7 @@ export class BookingsService {
   async waiterTransfer(id: string, tableId: string, actor: AuthUser) {
     if (!tableId) throw new BadRequestException('Оберіть новий стіл');
 
-    return this.bookings.manager.transaction(async (manager) => {
+    const result = await this.bookings.manager.transaction(async (manager) => {
       const booking = await manager.getRepository(Booking).findOne({
         where: { id }, relations: ['table', 'client'], lock: { mode: 'pessimistic_write' },
       });
@@ -933,10 +933,14 @@ export class BookingsService {
         reason: `Стіл №${oldTable.tableNumber} → №${nextTable.tableNumber}`,
         isManualMode: true,
       }));
-      this.waiterCalls.detachBooking(booking.id);
       await this.safeLog('Пересадка гостей', { bookingId: booking.id, oldTable: oldTable.tableNumber, newTable: nextTable.tableNumber, author: actor.name || actor.staffId || null });
       return { message: 'Гостей пересаджено на новий стіл' };
     });
+
+    // Waiter calls are in-memory, so invalidate them only after the database
+    // transaction has committed the new table and booking state.
+    this.waiterCalls.closeActiveCallsAndDetachBooking(id);
+    return result;
   }
 
   async requestReschedule(id: string, dto: RequestRescheduleDto) {

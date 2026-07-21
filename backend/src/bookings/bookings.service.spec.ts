@@ -29,6 +29,8 @@ test('waiterTransfer preserves an occupied table used by an earlier booking', as
     client: null,
   } as Booking;
   const savedTables: TableEntity[][] = [];
+  let transactionCompleted = false;
+  let callsClosedAfterTransaction = false;
 
   const manager = {
     getRepository: (entity: unknown) => {
@@ -48,7 +50,15 @@ test('waiterTransfer preserves an occupied table used by an earlier booking', as
       throw new Error('Unexpected repository');
     },
   };
-  const bookings = { manager: { transaction: async (work: (value: typeof manager) => unknown) => work(manager) } };
+  const bookings = {
+    manager: {
+      transaction: async (work: (value: typeof manager) => Promise<unknown>) => {
+        const result = await work(manager);
+        transactionCompleted = true;
+        return result;
+      },
+    },
+  };
   const service = new BookingsService(
     bookings as any,
     {} as any,
@@ -58,7 +68,13 @@ test('waiterTransfer preserves an occupied table used by an earlier booking', as
     {} as any,
     {} as any,
     {} as any,
-    { detachBooking: () => undefined } as any,
+    {
+      closeActiveCallsAndDetachBooking: (bookingId: string) => {
+        assert.equal(bookingId, followingBooking.id);
+        assert.equal(transactionCompleted, true);
+        callsClosedAfterTransaction = true;
+      },
+    } as any,
   );
 
   (service as any).restaurantDateToday = () => '2026-07-21';
@@ -74,4 +90,5 @@ test('waiterTransfer preserves an occupied table used by an earlier booking', as
   assert.equal(oldTable.status, 'occupied');
   assert.equal(nextTable.status, 'reserved');
   assert.deepEqual(savedTables, [[oldTable, nextTable]]);
+  assert.equal(callsClosedAfterTransaction, true);
 });
