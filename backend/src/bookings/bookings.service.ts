@@ -900,13 +900,25 @@ export class BookingsService {
       } as CheckAvailabilityDto);
       if (!availability.isAvailable) throw new BadRequestException('Цей стіл має конфлікт у часі бронювання');
 
-      const oldTable = booking.table;
+      const oldTable = await manager.getRepository(TableEntity).findOne({
+        where: { id: booking.table.id }, lock: { mode: 'pessimistic_write' },
+      });
+      if (!oldTable) throw new BadRequestException('Попередній стіл не знайдено');
+
       const previousData = this.bookingSnapshot(booking);
+      const transferredBookingOwnsPhysicalStatus =
+        Boolean(booking.checkedInAt) &&
+        (oldTable.status === 'occupied' || oldTable.status === 'cleaning');
       booking.table = nextTable;
       booking.checkedInAt = null;
       await manager.getRepository(Booking).save(booking);
       if (booking.bookingDate === this.restaurantDateToday()) {
-        oldTable.status = 'free';
+        // Фізичний occupied/cleaning може належати попередньому візиту за
+        // послідовним бронюванням. Звільняємо його лише разом із гостями,
+        // яких фактично пересаджують.
+        if (transferredBookingOwnsPhysicalStatus || !['occupied', 'cleaning'].includes(oldTable.status)) {
+          oldTable.status = 'free';
+        }
         nextTable.status = 'reserved';
         await manager.getRepository(TableEntity).save([oldTable, nextTable]);
       }
