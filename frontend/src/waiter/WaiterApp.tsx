@@ -318,7 +318,7 @@ export default function WaiterApp() {
           </section>
         ) : (
           <section className="mt-4 grid gap-3">
-            {cards.map((b) => {
+            {cards.length ? cards.map((b) => {
               const action: [string, () => Promise<unknown>, string] | null =
                 b.status !== "approved"
                   ? null
@@ -396,7 +396,7 @@ export default function WaiterApp() {
                   )}
                 </article>
               );
-            }) || <p className="text-white/60">Бронювань немає.</p>}
+            }) : <p className="text-white/60">Бронювань немає.</p>}
           </section>
         )}
         {transfer && (
