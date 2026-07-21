@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -247,9 +247,15 @@ export class WaiterCallsService {
     };
   }
 
-  close(id: string) {
+  close(id: string, waiterId: string) {
     const call = this.calls.find((item) => item.id === id);
     if (!call) throw new NotFoundException('Виклик не знайдено');
+    if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
+    if (call.status !== 'accepted') throw new BadRequestException('Спочатку прийміть виклик');
+    if (!waiterId) throw new BadRequestException('waiterId обовʼязковий');
+    if (call.waiterId !== waiterId) {
+      throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+    }
 
     call.status = 'closed';
     call.closedAt = this.now();
