@@ -50,7 +50,7 @@ export class WaiterCallsController {
 
   @Patch(':id/close')
   @Roles('waiter')
-  close(@Param('id') id: string) {
-    return this.service.close(id);
+  close(@Param('id') id: string, @Req() request: any) {
+    return this.service.close(id, request.user.staffId);
   }
 }
