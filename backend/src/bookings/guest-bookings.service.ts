@@ -37,16 +37,40 @@ export class GuestBookingsService {
   ) {}
 
   async list(dto: GuestBookingListDto) {
+    const guestDeviceId = String(dto.guestDeviceId || '').trim();
     const tokens = [...new Set((dto.tokens || []).map((token) => String(token || '').trim()).filter(Boolean))].slice(0, 100);
-    if (tokens.length === 0) return [];
+    if (!guestDeviceId && tokens.length === 0) return [];
 
-    const hashes = tokens.map((token) => this.hashToken(token));
-    const bookings = await this.bookings
+    const query = this.bookings
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.table', 'table')
-      .leftJoinAndSelect('table.zone', 'zone')
-      .where('booking.guestAccessTokenHash IN (:...hashes)', { hashes })
-      .getMany();
+      .leftJoinAndSelect('table.zone', 'zone');
+
+    query.andWhere((where) => {
+      const conditions: string[] = [];
+
+      if (guestDeviceId) {
+        conditions.push(`(
+          booking.guestDeviceIdHash = :guestDeviceIdHash
+          AND booking.bookingDate >= :today
+          AND booking.status IN (:...statuses)
+        )`);
+        where.setParameters({
+          guestDeviceIdHash: this.hashDeviceId(guestDeviceId),
+          today: this.kyivDate(),
+          statuses: ACTIVE_BOOKING_STATUSES,
+        });
+      }
+
+      if (tokens.length > 0) {
+        conditions.push('booking.guestAccessTokenHash IN (:...hashes)');
+        where.setParameter('hashes', tokens.map((token) => this.hashToken(token)));
+      }
+
+      return conditions.join(' OR ');
+    });
+
+    const bookings = await query.getMany();
 
     if (bookings.length === 0) return [];
 
@@ -329,6 +353,10 @@ export class GuestBookingsService {
       throw new UnauthorizedException('Недійсний доступ до бронювання');
     }
     return createHash('sha256').update(normalized).digest('hex');
+  }
+
+  private hashDeviceId(deviceId: string) {
+    return createHash('sha256').update(deviceId).digest('hex');
   }
 
   private assertGuestCanManageActiveBooking(booking: Booking, message: string) {

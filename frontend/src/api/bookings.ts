@@ -7,6 +7,7 @@ export type CreateBookingPayload = {
   seats?: number;
   fullName: string;
   phone: string;
+  guestDeviceId: string;
   bookingDate: string;
   bookingTime: string;
   guestsCount: number;
@@ -231,8 +232,8 @@ export const bookingsApi = {
   getPublicStatus: (id: string) =>
     api.get<BookingPublicStatus>(`/bookings/${encode(id)}/status`),
 
-  guestList: (tokens: string[]) =>
-    api.post<GuestBooking[]>('/bookings/guest/list', { tokens }),
+  guestList: (guestDeviceId: string, tokens: string[] = []) =>
+    api.post<GuestBooking[]>('/bookings/guest/list', { guestDeviceId, tokens }),
 
   getGuest: (id: string, token: string) =>
     api.get<GuestBooking>(`/bookings/${encode(id)}/guest`, { headers: guestHeaders(token) }),
