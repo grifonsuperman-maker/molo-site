@@ -320,7 +320,9 @@ export default function WaiterApp() {
           <section className="mt-4 grid gap-3">
             {cards.map((b) => {
               const action: [string, () => Promise<unknown>, string] | null =
-                b.table?.status === "occupied"
+                b.status !== "approved"
+                  ? null
+                  : b.table?.status === "occupied"
                   ? [
                       "Гості пішли, почати прибирання",
                       () => tablesApi.cleaning(b.table!.id),
@@ -332,22 +334,20 @@ export default function WaiterApp() {
                         () => bookingsApi.complete(b.id),
                         "green",
                       ]
-                    : b.status === "approved"
-                      ? [
-                          "Гість прийшов",
-                          () =>
-                            bookingsApi
-                              .checkIn(b.id)
-                              .then(() =>
-                                waiterCallsApi.assign({
-                                  bookingId: b.id,
-                                  tableId: b.table?.id,
-                                  tableNumber: b.table?.tableNumber,
-                                }),
-                              ),
-                          "gold",
-                        ]
-                      : null;
+                    : [
+                        "Гість прийшов",
+                        () =>
+                          bookingsApi
+                            .checkIn(b.id)
+                            .then(() =>
+                              waiterCallsApi.assign({
+                                bookingId: b.id,
+                                tableId: b.table?.id,
+                                tableNumber: b.table?.tableNumber,
+                              }),
+                            ),
+                        "gold",
+                      ];
               return (
                 <article
                   key={b.id}
