@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
+import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
 import { GuestBookingsService } from './guest-bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
@@ -19,12 +20,13 @@ export class BookingsController {
   constructor(
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
+    private readonly tableLock: BookingTableLockService,
   ) {}
 
   @Public()
   @Post()
   create(@Body() dto: CreateBookingDto) {
-    return this.service.create(dto);
+    return this.tableLock.withCreateLock(dto, () => this.service.create(dto));
   }
 
   @Public()
@@ -195,7 +197,9 @@ export class BookingsController {
   @Patch(':id/waiter-transfer')
   @Roles('waiter', 'admin', 'owner')
   waiterTransfer(@Param('id') id: string, @Body('tableId') tableId: string, @Req() request: any) {
-    return this.service.waiterTransfer(id, tableId, request.user);
+    return this.tableLock.withTransferLock(id, tableId, () =>
+      this.service.waiterTransfer(id, tableId, request.user),
+    );
   }
 
   @Public()
