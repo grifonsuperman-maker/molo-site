@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
@@ -14,6 +15,8 @@ import { StaffPinLoginDto } from './dto/staff-pin-login.dto';
 import { StaffShiftActionDto } from './dto/staff-shift-action.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { StaffService } from './staff.service';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthUser } from '../auth/types/auth-user.type';
 
 @Controller('staff')
 export class StaffController {
@@ -49,9 +52,12 @@ export class StaffController {
     return this.service.getShiftHistory(id);
   }
 
-  @Roles('owner', 'admin')
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  @Roles('owner', 'admin', 'waiter', 'hookah')
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    if ((user.role === 'waiter' || user.role === 'hookah') && user.staffId !== id) {
+      throw new ForbiddenException('Недостатньо прав доступу');
+    }
     return this.service.findOne(id);
   }
 

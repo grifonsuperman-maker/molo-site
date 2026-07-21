@@ -198,6 +198,10 @@ export class WaiterCallsService {
       .slice(0, 50);
   }
 
+  removeAssignment(bookingId: string) {
+    this.assignments = this.assignments.filter((item) => item.bookingId !== bookingId);
+  }
+
   accept(id: string, dto: { waiterId: string; waiterName: string }) {
     const call = this.calls.find((item) => item.id === id);
     if (!call) throw new NotFoundException('Виклик не знайдено');

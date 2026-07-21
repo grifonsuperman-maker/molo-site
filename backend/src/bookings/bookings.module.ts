@@ -15,6 +15,7 @@ import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { Booking } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
+import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { GuestReview } from './entities/guest-review.entity';
     ]),
     LogsModule,
     NotificationsModule,
+    WaiterCallsModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService, GuestBookingsService, BookingExpirationService],
