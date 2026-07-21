@@ -905,9 +905,11 @@ export class BookingsService {
       booking.table = nextTable;
       booking.checkedInAt = null;
       await manager.getRepository(Booking).save(booking);
-      oldTable.status = 'free';
-      nextTable.status = 'reserved';
-      await manager.getRepository(TableEntity).save([oldTable, nextTable]);
+      if (booking.bookingDate === this.restaurantDateToday()) {
+        oldTable.status = 'free';
+        nextTable.status = 'reserved';
+        await manager.getRepository(TableEntity).save([oldTable, nextTable]);
+      }
       await manager.getRepository(BookingHistory).save(manager.getRepository(BookingHistory).create({
         booking,
         action: 'waiter_table_transfer',

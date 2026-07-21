@@ -55,7 +55,11 @@ export class AuthService {
       if ((staff.role === 'waiter' || staff.role === 'hookah') && !staff.isOnShift) {
         throw new UnauthorizedException('Зміну працівника завершено');
       }
-      return payload;
+      return {
+        ...payload,
+        role: staff.role,
+        name: staff.fullName,
+      };
     } catch {
       throw new UnauthorizedException('Недійсний токен авторизації');
     }
