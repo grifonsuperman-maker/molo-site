@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, QueryRunner, Repository } from 'typeorm';
 
 import { TableEntity } from '../tables/entities/table.entity';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { Booking } from './entities/booking.entity';
+
+type AdvisoryLock = readonly [key: string, scope: string];
 
 @Injectable()
 export class BookingTableLockService {
@@ -18,15 +20,44 @@ export class BookingTableLockService {
 
   async withCreateLock<T>(dto: CreateBookingDto, work: () => Promise<T>) {
     const tableKey = await this.resolveTableKey(dto.tableId, dto.tableNumber);
-    return this.withLock(tableKey, dto.bookingDate, work);
+    return this.withLocks([[tableKey, dto.bookingDate]], work);
   }
 
   async withTransferLock<T>(bookingId: string, tableId: string, work: () => Promise<T>) {
-    const booking = await this.bookings.findOne({ where: { id: bookingId } });
-    if (!booking) return work();
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    const acquired: AdvisoryLock[] = [];
 
-    const tableKey = await this.resolveTableKey(tableId, null);
-    return this.withLock(tableKey, booking.bookingDate, work);
+    try {
+      await this.acquireLock(runner, [`booking:${bookingId}`, 'waiter-transfer'], acquired);
+
+      const booking = await this.bookings.findOne({
+        where: { id: bookingId },
+        relations: ['table'],
+      });
+      if (!booking) return await work();
+
+      const destinationTableKey = await this.resolveTableKey(tableId, null);
+      const tableKeys = Array.from(
+        new Set(
+          [booking.table?.id, destinationTableKey].filter(
+            (value): value is string => Boolean(value),
+          ),
+        ),
+      ).sort();
+
+      for (const tableKey of tableKeys) {
+        await this.acquireLock(runner, [tableKey, booking.bookingDate], acquired);
+      }
+
+      return await work();
+    } finally {
+      try {
+        await this.releaseLocks(runner, acquired);
+      } finally {
+        await runner.release();
+      }
+    }
   }
 
   private async resolveTableKey(tableId?: string | null, tableNumber?: string | null) {
@@ -49,29 +80,43 @@ export class BookingTableLockService {
     throw new BadRequestException('Оберіть стіл');
   }
 
-  private async withLock<T>(tableKey: string, bookingDate: string, work: () => Promise<T>) {
+  private async withLocks<T>(locks: AdvisoryLock[], work: () => Promise<T>) {
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
-    let locked = false;
+    const acquired: AdvisoryLock[] = [];
 
     try {
-      await runner.query(
-        'SELECT pg_advisory_lock(hashtext($1::text), hashtext($2::text))',
-        [tableKey, bookingDate],
-      );
-      locked = true;
+      for (const lock of locks) {
+        await this.acquireLock(runner, lock, acquired);
+      }
       return await work();
     } finally {
       try {
-        if (locked) {
-          await runner.query(
-            'SELECT pg_advisory_unlock(hashtext($1::text), hashtext($2::text))',
-            [tableKey, bookingDate],
-          );
-        }
+        await this.releaseLocks(runner, acquired);
       } finally {
         await runner.release();
       }
+    }
+  }
+
+  private async acquireLock(
+    runner: QueryRunner,
+    lock: AdvisoryLock,
+    acquired: AdvisoryLock[],
+  ) {
+    await runner.query(
+      'SELECT pg_advisory_lock(hashtext($1::text), hashtext($2::text))',
+      [lock[0], lock[1]],
+    );
+    acquired.push(lock);
+  }
+
+  private async releaseLocks(runner: QueryRunner, acquired: AdvisoryLock[]) {
+    for (const lock of [...acquired].reverse()) {
+      await runner.query(
+        'SELECT pg_advisory_unlock(hashtext($1::text), hashtext($2::text))',
+        [lock[0], lock[1]],
+      );
     }
   }
 }
