@@ -219,6 +219,15 @@ export class WaiterCallsService {
     if (!call) throw new NotFoundException('Виклик не знайдено');
     if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
     if (!dto.waiterId) throw new BadRequestException('waiterId обовʼязковий');
+    if (call.waiterId && call.waiterId !== dto.waiterId) {
+      throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+    }
+    if (call.status === 'accepted') {
+      return {
+        message: 'Виклик вже прийнято',
+        call,
+      };
+    }
 
     call.status = 'accepted';
     call.waiterId = dto.waiterId;
