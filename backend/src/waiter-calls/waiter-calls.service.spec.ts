@@ -40,6 +40,47 @@ test('closeActiveCallsAndDetachBooking hides transferred booking calls and assig
   assert.equal((await service.guestStatus(booking.id)).activeCall, null);
 });
 
+test('accept rejects a waiter when a new call is already assigned to another waiter', () => {
+  const service = new WaiterCallsService({} as any);
+  (service as any).calls = [
+    {
+      id: 'assigned-new-call', bookingId: 'booking-1', tableId: 'table-1', tableNumber: '1',
+      clientName: null, waiterId: 'waiter-1', waiterName: 'Офіціант 1', status: 'new',
+      createdAt: '2026-07-21T12:00:00.000Z', acceptedAt: null, closedAt: null,
+    },
+  ];
+
+  assert.throws(
+    () => service.accept('assigned-new-call', { waiterId: 'waiter-2', waiterName: 'Офіціант 2' }),
+    (error: unknown) => {
+      assert.equal((error as { getStatus: () => number }).getStatus(), 403);
+      return true;
+    },
+  );
+  assert.equal((service as any).calls[0].status, 'new');
+  assert.equal((service as any).calls[0].waiterId, 'waiter-1');
+});
+
+test('accept allows the waiter already assigned to a new call', () => {
+  const service = new WaiterCallsService({} as any);
+  (service as any).calls = [
+    {
+      id: 'assigned-new-call', bookingId: 'booking-1', tableId: 'table-1', tableNumber: '1',
+      clientName: null, waiterId: 'waiter-1', waiterName: 'Офіціант 1', status: 'new',
+      createdAt: '2026-07-21T12:00:00.000Z', acceptedAt: null, closedAt: null,
+    },
+  ];
+
+  const result = service.accept('assigned-new-call', {
+    waiterId: 'waiter-1',
+    waiterName: 'Офіціант 1',
+  });
+
+  assert.equal(result.call.status, 'accepted');
+  assert.equal(result.call.waiterId, 'waiter-1');
+  assert.ok(result.call.acceptedAt);
+});
+
 test('close rejects a waiter who is not assigned to the call', () => {
   const service = new WaiterCallsService({} as any);
   (service as any).calls = [
