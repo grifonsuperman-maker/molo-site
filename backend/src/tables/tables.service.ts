@@ -1,10 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TableEntity, TableStatus } from './entities/table.entity';
 import { Zone } from '../zones/entities/zone.entity';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
+
+const CLEANING_TIMEOUT_MINUTES = 15;
 
 @Injectable()
 export class TablesService {
@@ -123,6 +126,19 @@ export class TablesService {
 
   open(id: string) {
     return this.setStatus(id, 'free');
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async releaseTablesAfterCleaningTimeout() {
+    const cutoff = new Date(Date.now() - CLEANING_TIMEOUT_MINUTES * 60_000);
+
+    await this.tables
+      .createQueryBuilder()
+      .update(TableEntity)
+      .set({ status: 'free' })
+      .where('status = :status', { status: 'cleaning' })
+      .andWhere('updated_at <= :cutoff', { cutoff })
+      .execute();
   }
 
   async remove(id: string) {
