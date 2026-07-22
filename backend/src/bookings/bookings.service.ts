@@ -884,6 +884,10 @@ export class BookingsService {
       if (!booking || booking.status !== 'approved' || !booking.table) {
         throw new BadRequestException('Пересадка доступна лише для підтвердженого бронювання');
       }
+      if (booking.bookingDate !== this.restaurantDateToday()) {
+        throw new BadRequestException('Пересадка через пульт офіціанта доступна лише для бронювання на сьогодні');
+      }
+
       const nextTable = await manager.getRepository(TableEntity).findOne({
         where: { id: tableId }, lock: { mode: 'pessimistic_write' },
       });
@@ -891,6 +895,9 @@ export class BookingsService {
         throw new BadRequestException('Обраний стіл закритий або зайнятий');
       }
       if (nextTable.id === booking.table.id) throw new BadRequestException('Оберіть інший стіл');
+      if (Number(nextTable.seats) < Number(booking.guestsCount)) {
+        throw new BadRequestException('Обраний стіл не вміщує всіх гостей');
+      }
 
       const availability = await this.checkAvailability({
         tableId: nextTable.id,
