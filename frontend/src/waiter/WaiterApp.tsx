@@ -13,6 +13,18 @@ import type { Booking, TableItem } from "../api/types";
 const SESSION_KEY = "molo_waiter_staff";
 const SHIFT_ENDED_KEY = "molo_waiter_shift_ended_name";
 const ACTIVE = new Set(["pending", "approved"]);
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Очікує",
+  approved: "Підтверджено",
+  rejected: "Відхилено",
+  cancelled: "Скасовано",
+  completed: "Завершено",
+  free: "Вільний",
+  reserved: "Підтверджено",
+  occupied: "Зайнятий",
+  cleaning: "Готується",
+  closed: "Закритий",
+};
 const loc = (n: number) =>
   n <= 14
     ? "Зал ресторану"
@@ -319,35 +331,49 @@ export default function WaiterApp() {
         ) : (
           <section className="mt-4 grid gap-3">
             {cards.length ? cards.map((b) => {
+              const tableStatus = b.table?.status;
+              const checkedIn = Boolean(b.checkedInAt);
               const action: [string, () => Promise<unknown>, string] | null =
-                b.status !== "approved"
+                b.status !== "approved" || !b.table
                   ? null
-                  : b.table?.status === "occupied"
-                  ? [
-                      "Гості пішли, почати прибирання",
-                      () => tablesApi.cleaning(b.table!.id),
-                      "cyan",
-                    ]
-                  : b.table?.status === "cleaning"
+                  : checkedIn && tableStatus === "occupied"
                     ? [
-                        "Стіл готовий",
-                        () => bookingsApi.complete(b.id),
-                        "green",
+                        "Гості пішли, почати прибирання",
+                        () => tablesApi.cleaning(b.table!.id),
+                        "cyan",
                       ]
-                    : [
-                        "Гість прийшов",
-                        () =>
-                          bookingsApi
-                            .checkIn(b.id)
-                            .then(() =>
-                              waiterCallsApi.assign({
-                                bookingId: b.id,
-                                tableId: b.table?.id,
-                                tableNumber: b.table?.tableNumber,
-                              }),
-                            ),
-                        "gold",
-                      ];
+                    : checkedIn && tableStatus === "cleaning"
+                      ? [
+                          "Стіл готовий",
+                          () => bookingsApi.complete(b.id),
+                          "green",
+                        ]
+                      : !checkedIn &&
+                          tableStatus !== "occupied" &&
+                          tableStatus !== "cleaning" &&
+                          tableStatus !== "closed"
+                        ? [
+                            "Гість прийшов",
+                            () =>
+                              bookingsApi
+                                .checkIn(b.id)
+                                .then(() =>
+                                  waiterCallsApi.assign({
+                                    bookingId: b.id,
+                                    tableId: b.table?.id,
+                                    tableNumber: b.table?.tableNumber,
+                                  }),
+                                ),
+                            "gold",
+                          ]
+                        : null;
+              const displayStatus =
+                b.status === "approved" &&
+                checkedIn &&
+                (tableStatus === "occupied" || tableStatus === "cleaning")
+                  ? tableStatus
+                  : b.status;
+              const showControls = Boolean(action) || b.status === "approved";
               return (
                 <article
                   key={b.id}
@@ -367,25 +393,28 @@ export default function WaiterApp() {
                       </p>
                     </div>
                     <span className="h-fit rounded-full border border-white/20 px-3 py-1 text-sm text-white/70">
-                      {b.table?.status || b.status}
+                      {STATUS_LABELS[displayStatus] || displayStatus}
                     </span>
                   </div>
                   {b.wishes && (
                     <p className="mt-3 text-sm text-white/65">{b.wishes}</p>
                   )}
-                  {action && (
+                  {showControls && (
                     <div className="mt-4 grid gap-2">
-                      <button
-                        disabled={!!busy}
-                        onClick={() => {
-                          if (confirm(action[0] + "?")) act(b.id, action[1]);
-                        }}
-                        className={`rounded-2xl border bg-white/[.03] p-3 font-bold active:scale-95 ${action[2] === "gold" ? "border-amber-200/75 text-amber-100" : action[2] === "cyan" ? "border-cyan-200/70 text-cyan-100" : "border-emerald-200/70 text-emerald-100"}`}
-                      >
-                        {action[0]}
-                      </button>
+                      {action && (
+                        <button
+                          disabled={!!busy}
+                          onClick={() => {
+                            if (confirm(action[0] + "?")) act(b.id, action[1]);
+                          }}
+                          className={`rounded-2xl border bg-white/[.03] p-3 font-bold active:scale-95 ${action[2] === "gold" ? "border-amber-200/75 text-amber-100" : action[2] === "cyan" ? "border-cyan-200/70 text-cyan-100" : "border-emerald-200/70 text-emerald-100"}`}
+                        >
+                          {action[0]}
+                        </button>
+                      )}
                       {b.status === "approved" && (
                         <button
+                          disabled={!!busy}
                           onClick={() => openTransfer(b)}
                           className="rounded-2xl border border-amber-100/70 bg-white/[.03] p-3 font-bold text-amber-50 active:scale-95"
                         >
