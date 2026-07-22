@@ -55,6 +55,7 @@ export class BookingsController {
 
   // Тимчасово відкрито для тестових панелей.
   // Після впровадження авторизації повернемо перевірку ролей.
+  @Public()
   @Get('today')
   @Roles('waiter', 'admin', 'owner')
   today() {
