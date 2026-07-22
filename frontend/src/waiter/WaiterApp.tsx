@@ -301,7 +301,7 @@ export default function WaiterApp() {
                       Прийняв
                     </button>
                     <button
-                      disabled={!!busy}
+                      disabled={!!busy || c.status !== "accepted"}
                       onClick={() =>
                         act(`c${c.id}`, () => waiterCallsApi.close(c.id))
                       }
