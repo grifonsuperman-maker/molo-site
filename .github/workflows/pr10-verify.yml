@@ -1,6 +1,9 @@
 name: PR 10 Verify
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - codex/-molo-2026-07-21-12-21-49
