@@ -9,6 +9,7 @@ import { TableEntity } from '../tables/entities/table.entity';
 
 import { AdminBookingsController } from './admin-bookings.controller';
 import { AdminBookingsService } from './admin-bookings.service';
+import { BookingCreationLockService } from './booking-creation-lock.service';
 import { BookingExpirationService } from './booking-expiration.service';
 import { BookingsController } from './bookings.controller';
 import { BookingsService } from './bookings.service';
@@ -38,6 +39,7 @@ import { GuestReview } from './entities/guest-review.entity';
     GuestBookingsService,
     BookingExpirationService,
     AdminBookingsService,
+    BookingCreationLockService,
   ],
   exports: [BookingsService, GuestBookingsService, AdminBookingsService],
 })
