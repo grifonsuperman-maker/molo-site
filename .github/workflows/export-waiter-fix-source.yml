@@ -1,6 +1,9 @@
 name: Export waiter fix sources
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - fix/waiter-table-state-sync
