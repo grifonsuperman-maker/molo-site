@@ -42,6 +42,10 @@ import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
     BookingRescheduleApprovalService,
     BookingTableLockService,
   ],
-  exports: [BookingsService, GuestBookingsService],
+  exports: [
+    BookingsService,
+    GuestBookingsService,
+    BookingRescheduleApprovalService,
+  ],
 })
 export class BookingsModule {}
