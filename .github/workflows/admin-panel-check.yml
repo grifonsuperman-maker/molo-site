@@ -4,18 +4,23 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: admin-panel-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Install backend dependencies
-        run: npm --prefix backend install
+        run: npm --prefix backend install --no-audit --no-fund
       - name: Install frontend dependencies
-        run: npm --prefix frontend install
+        run: npm --prefix frontend install --no-audit --no-fund
       - name: Build backend
         run: npm --prefix backend run build
       - name: Build frontend
