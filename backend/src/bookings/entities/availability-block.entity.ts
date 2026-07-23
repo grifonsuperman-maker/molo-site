@@ -18,6 +18,10 @@ import { Zone } from '../../zones/entities/zone.entity';
   'CHK_availability_blocks_single_target',
   '((table_id IS NOT NULL AND zone_id IS NULL) OR (table_id IS NULL AND zone_id IS NOT NULL))',
 )
+@Check(
+  'CHK_availability_blocks_time_pair',
+  '((start_time IS NULL AND end_time IS NULL) OR (start_time IS NOT NULL AND end_time IS NOT NULL AND start_time < end_time))',
+)
 export class AvailabilityBlock {
   @PrimaryGeneratedColumn('uuid')
   id: string;
