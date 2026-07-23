@@ -4,7 +4,7 @@ import GuestApp from "./guest/GuestApp";
 import WaiterApp from "./waiter/WaiterApp";
 import HookahApp from "./hookah/HookahApp";
 import AdminWorkspace from "./admin/AdminWorkspace";
-import DirectorPanel from "./director/DirectorPanel";
+import DirectorWorkspace from "./director/DirectorWorkspace";
 import SitePhotoController from "./theme/SitePhotoController";
 import SiteModeSwitch from "./theme/SiteModeSwitch";
 
@@ -120,12 +120,7 @@ export default function App() {
           <AdminWorkspace />
         </>
       )}
-      {mode === "director" && (
-        <>
-          <SiteModeSwitch role="director" />
-          <DirectorPanel />
-        </>
-      )}
+      {mode === "director" && <DirectorWorkspace />}
     </main>
   );
 }
