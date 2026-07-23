@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
+import { NotificationsService } from '../notifications/notifications.service';
 import { BookingsService } from './bookings.service';
 import { GuestBookingsService } from './guest-bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
@@ -18,6 +19,7 @@ export class BookingsController {
   constructor(
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @Public()
@@ -93,32 +95,45 @@ export class BookingsController {
 
   @Public()
   @Patch(':id/guest/cancel')
-  guestCancel(
+  async guestCancel(
     @Param('id') id: string,
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestCancelBookingDto,
   ) {
-    return this.guestService.cancel(id, token, dto);
+    const result = await this.guestService.cancel(id, token, dto);
+    await this.safeNotify(() => this.notifications.notifyGuestCancelledBooking(id));
+    return result;
   }
 
   @Public()
   @Patch(':id/guest/lateness')
-  guestLateness(
+  async guestLateness(
     @Param('id') id: string,
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestLatenessDto,
   ) {
-    return this.guestService.reportLateness(id, token, dto);
+    const result = await this.guestService.reportLateness(id, token, dto);
+    await this.safeNotify(() => this.notifications.notifyGuestReportedLateness(id));
+    return result;
   }
 
   @Public()
   @Patch(':id/guest/change-table')
-  guestChangeTable(
+  async guestChangeTable(
     @Param('id') id: string,
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestChangeTableDto,
   ) {
-    return this.guestService.changeTable(id, token, dto);
+    const previous = await this.guestService.get(id, token);
+    const result = await this.guestService.changeTable(id, token, dto);
+    await this.safeNotify(() =>
+      this.notifications.notifyGuestChangedTable(
+        id,
+        previous.tableNumber,
+        result.booking?.tableNumber,
+      ),
+    );
+    return result;
   }
 
   @Public()
@@ -210,5 +225,13 @@ export class BookingsController {
     @Body() dto: RejectRescheduleDto,
   ) {
     return this.service.rejectReschedule(requestId, dto);
+  }
+
+  private async safeNotify(action: () => Promise<void>) {
+    try {
+      await action();
+    } catch (error) {
+      console.error('Guest action notification failed:', error);
+    }
   }
 }
