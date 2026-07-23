@@ -7,6 +7,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 
+import { AdminBookingEventsController } from './admin-booking-events.controller';
+import { AdminBookingEventsService } from './admin-booking-events.service';
 import { BookingExpirationService } from './booking-expiration.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsController } from './bookings.controller';
@@ -33,12 +35,13 @@ import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
     NotificationsModule,
     WaiterCallsModule,
   ],
-  controllers: [BookingsController],
+  controllers: [BookingsController, AdminBookingEventsController],
   providers: [
     BookingsService,
     GuestBookingsService,
     BookingExpirationService,
     BookingTableLockService,
+    AdminBookingEventsService,
   ],
   exports: [BookingsService, GuestBookingsService],
 })
