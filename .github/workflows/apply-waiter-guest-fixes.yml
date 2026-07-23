@@ -19,6 +19,7 @@ jobs:
         with:
           ref: fix/waiter-transfer-guest-actions-final2
           fetch-depth: 0
+          show-progress: false
 
       - uses: actions/setup-node@v4
         with:
@@ -39,7 +40,26 @@ jobs:
           npm --prefix backend install --no-save @nestjs/cli@10.4.9 --no-audit --no-fund --package-lock=false
 
       - name: Build backend
-        run: npm --prefix backend run build
+        id: backend_build
+        continue-on-error: true
+        run: |
+          set +e
+          npm --prefix backend run build > backend-build.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 40 backend-build.log
+          exit $status
+
+      - name: Upload backend build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build-log
+          path: backend-build.log
+
+      - name: Stop after backend failure
+        if: steps.backend_build.outcome == 'failure'
+        run: exit 1
 
       - name: Check diff
         run: git diff --check
