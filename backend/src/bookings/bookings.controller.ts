@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 
 import { Public } from '../common/decorators/public.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
 import { GuestBookingsService } from './guest-bookings.service';
@@ -24,6 +25,7 @@ export class BookingsController {
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
     private readonly tableLock: BookingTableLockService,
+    private readonly rescheduleApproval: BookingRescheduleApprovalService,
     private readonly dataSource: DataSource,
     private readonly notifications: NotificationsService,
   ) {}
@@ -248,7 +250,7 @@ export class BookingsController {
   @Public()
   @Patch('reschedule/:requestId/approve')
   approveReschedule(@Param('requestId') requestId: string) {
-    return this.service.approveReschedule(requestId);
+    return this.rescheduleApproval.approve(requestId);
   }
 
   @Public()
