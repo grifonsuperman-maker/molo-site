@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 20
     env:
       NODE_ENV: development
+      NPM_CONFIG_PRODUCTION: "false"
+      NPM_CONFIG_OMIT: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,7 +26,19 @@ jobs:
           node-version: 20
 
       - name: Install backend dependencies including Nest CLI
-        run: npm --prefix backend install --include=dev --package-lock=false --no-audit --no-fund
+        shell: bash
+        run: |
+          npm --prefix backend install --include=dev --package-lock=false --no-audit --no-fund
+          {
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            echo "NODE_ENV=${NODE_ENV:-}"
+            echo "NPM_CONFIG_PRODUCTION=${NPM_CONFIG_PRODUCTION:-}"
+            echo "NPM_CONFIG_OMIT=${NPM_CONFIG_OMIT:-}"
+            npm --prefix backend ls @nestjs/cli --depth=0 || true
+            echo "--- backend/node_modules/.bin ---"
+            ls -la backend/node_modules/.bin || true
+          } > backend-install.log 2>&1
 
       - name: Build backend and capture log
         id: build
@@ -37,12 +51,13 @@ jobs:
           echo "$status" > backend-build.status
           exit 0
 
-      - name: Upload backend build log
+      - name: Upload backend diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-build-log
           path: |
+            backend-install.log
             backend-build.log
             backend-build.status
 
