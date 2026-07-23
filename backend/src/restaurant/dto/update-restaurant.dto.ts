@@ -8,6 +8,10 @@ export class UpdateRestaurantDto {
   @IsOptional() @IsBoolean() adminCanManageRestaurant?: boolean;
   @IsOptional() @IsBoolean() adminCanChangeSiteMode?: boolean;
   @IsOptional() @IsBoolean() adminCanEditRestaurantSettings?: boolean;
+  @IsOptional() @IsBoolean() adminCanManageBlacklist?: boolean;
+  @IsOptional() @IsBoolean() adminCanRespondReviews?: boolean;
+  @IsOptional() @IsBoolean() adminCanManageStaffShifts?: boolean;
+  @IsOptional() @IsBoolean() adminCanSendBroadcasts?: boolean;
   @IsOptional() @IsString() address?: string | null;
   @IsOptional() @IsString() menuUrl?: string | null;
   @IsOptional() @IsString() logoUrl?: string | null;
