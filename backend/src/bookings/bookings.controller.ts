@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 
 import { Public } from '../common/decorators/public.decorator';
+import { NotificationsService } from '../notifications/notifications.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
 import { GuestBookingsService } from './guest-bookings.service';
@@ -14,6 +16,7 @@ import { GuestReviewDto } from './dto/guest-review.dto';
 import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
+import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 
 @Controller('bookings')
 export class BookingsController {
@@ -21,6 +24,8 @@ export class BookingsController {
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
     private readonly tableLock: BookingTableLockService,
+    private readonly dataSource: DataSource,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @Public()
@@ -117,12 +122,33 @@ export class BookingsController {
 
   @Public()
   @Patch(':id/guest/change-time')
-  guestChangeTime(
+  async guestChangeTime(
     @Param('id') id: string,
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: RequestRescheduleDto,
   ) {
-    return this.guestService.requestTimeChange(id, token, dto);
+    const result = await this.guestService.requestTimeChange(id, token, dto);
+
+    try {
+      const request = await this.dataSource
+        .getRepository(BookingRescheduleRequest)
+        .findOne({
+          where: {
+            booking: { id },
+            status: 'pending',
+          } as any,
+          relations: ['booking', 'booking.table', 'booking.client'],
+          order: { createdAt: 'DESC' },
+        });
+
+      if (request) {
+        await this.notifications.notifyRescheduleRequest(request);
+      }
+    } catch (notificationError) {
+      console.error('Guest reschedule notification failed', notificationError);
+    }
+
+    return result;
   }
 
   @Public()
