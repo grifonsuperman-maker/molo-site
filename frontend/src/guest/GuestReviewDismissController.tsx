@@ -79,6 +79,10 @@ function filterGuestHistory(bookings: GuestBooking[]) {
 function publish(bookings: GuestBooking[]) {
   latestVisibleBookings = bookings;
   listeners.forEach((listener) => listener(bookings));
+
+  if (typeof window !== 'undefined') {
+    window.setTimeout(() => hideDismissedUi(bookings), 0);
+  }
 }
 
 function subscribe(listener: Listener) {
@@ -124,9 +128,10 @@ function hideDismissedUi(bookings: GuestBooking[]) {
       ) || null
     : null;
 
-  if (reviewSection) reviewSection.style.display = 'none';
+  const reviewCandidate = latestReviewCandidate(bookings);
+  if (reviewSection) reviewSection.style.display = reviewCandidate ? '' : 'none';
 
-  const hasVisibleBooking = bookings.some(
+  const hasVisibleBooking = Boolean(reviewCandidate) || bookings.some(
     (booking) =>
       booking.status === 'pending' ||
       booking.status === 'approved' ||
@@ -135,15 +140,13 @@ function hideDismissedUi(bookings: GuestBooking[]) {
         !booking.guestNotification?.acknowledgedAt),
   );
 
-  if (!hasVisibleBooking) {
-    if (dialog) dialog.style.display = 'none';
+  if (dialog) dialog.style.display = hasVisibleBooking ? '' : 'none';
 
-    document.querySelectorAll<HTMLElement>('aside').forEach((aside) => {
-      if (aside.textContent?.includes('Мої бронювання')) {
-        aside.style.display = 'none';
-      }
-    });
-  }
+  document.querySelectorAll<HTMLElement>('aside').forEach((aside) => {
+    if (aside.textContent?.includes('Мої бронювання')) {
+      aside.style.display = hasVisibleBooking ? '' : 'none';
+    }
+  });
 }
 
 function dismissReview(bookingId?: string | null) {
@@ -166,7 +169,6 @@ function dismissReview(bookingId?: string | null) {
 
   const visible = filterGuestHistory(latestRawBookings);
   publish(visible);
-  window.setTimeout(() => hideDismissedUi(visible), 0);
 }
 
 bookingsApi.guestList = async (guestDeviceId: string, tokens: string[] = []) => {
@@ -217,10 +219,7 @@ export default function GuestReviewDismissController() {
           ) || null
         : null;
       setReviewTarget(target);
-
-      if (dismissedIds.size > 0) {
-        hideDismissedUi(latestVisibleBookings);
-      }
+      hideDismissedUi(latestVisibleBookings);
     }
 
     function handleDialogClose(event: MouseEvent) {
