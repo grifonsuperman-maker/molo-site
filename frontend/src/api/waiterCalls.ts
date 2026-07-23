@@ -37,12 +37,33 @@ export type GuestWaiterCallStatus = {
   activeCall: WaiterCall | null;
 };
 
-export const waiterCallsApi = {
-  guestStatus: (bookingId: string) =>
-    api.get<GuestWaiterCallStatus>(`/waiter-calls/guest-status/${encodeURIComponent(bookingId)}`),
+const guestStatusCache = new Map<string, GuestWaiterCallStatus>();
 
-  createFromGuest: (bookingId: string) =>
-    api.post<{ message: string; call: WaiterCall }>('/waiter-calls', { bookingId }),
+async function getGuestStatus(bookingId: string) {
+  try {
+    const status = await api.get<GuestWaiterCallStatus>(
+      `/waiter-calls/guest-status/${encodeURIComponent(bookingId)}`,
+    );
+    guestStatusCache.set(bookingId, status);
+    return status;
+  } catch (error) {
+    const cached = guestStatusCache.get(bookingId);
+    if (cached) return cached;
+    throw error;
+  }
+}
+
+export const waiterCallsApi = {
+  guestStatus: getGuestStatus,
+
+  createFromGuest: async (bookingId: string) => {
+    const result = await api.post<{ message: string; call: WaiterCall }>('/waiter-calls', { bookingId });
+    const cached = guestStatusCache.get(bookingId);
+    if (cached) {
+      guestStatusCache.set(bookingId, { ...cached, activeCall: result.call });
+    }
+    return result;
+  },
 
   list: (waiterId: string) =>
     api.get<WaiterCall[]>(`/waiter-calls?waiterId=${encodeURIComponent(waiterId)}`),
