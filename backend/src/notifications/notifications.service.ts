@@ -1,15 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { TelegramService } from './telegram.service';
-import { Staff } from '../staff/entities/staff.entity';
+
 import { Booking } from '../bookings/entities/booking.entity';
 import { BookingRescheduleRequest } from '../bookings/entities/booking-reschedule-request.entity';
+import { Staff } from '../staff/entities/staff.entity';
+import { TelegramService } from './telegram.service';
 
 @Injectable()
 export class NotificationsService {
   constructor(
     @InjectRepository(Staff) private readonly staffRepo: Repository<Staff>,
+    @InjectRepository(Booking) private readonly bookingRepo: Repository<Booking>,
     private readonly telegramService: TelegramService,
   ) {}
 
@@ -36,9 +38,7 @@ export class NotificationsService {
     }
 
     await Promise.allSettled(
-      chatIds.map((chatId) =>
-        this.telegramService.sendMessage(chatId, text, replyMarkup),
-      ),
+      chatIds.map((chatId) => this.telegramService.sendMessage(chatId, text, replyMarkup)),
     );
   }
 
@@ -57,24 +57,17 @@ export class NotificationsService {
 
     const wishes = booking.wishes || '';
     const match = wishes.match(/\((\d{2}:\d{2})\s*[—-]\s*(\d{2}:\d{2})\)/);
-
-    if (match) {
-      return `${match[1]} — ${match[2]}`;
-    }
+    if (match) return `${match[1]} — ${match[2]}`;
 
     return this.timeLabel(booking.bookingTime);
   }
 
   private availableFromLabel(booking: Booking) {
     const anyBooking = booking as any;
-
-    if (anyBooking.availableFrom) {
-      return this.timeLabel(anyBooking.availableFrom);
-    }
+    if (anyBooking.availableFrom) return this.timeLabel(anyBooking.availableFrom);
 
     const wishes = booking.wishes || '';
     const match = wishes.match(/наступний гість з\s+(\d{2}:\d{2})/i);
-
     return match?.[1] || '-';
   }
 
@@ -85,7 +78,6 @@ export class NotificationsService {
       const minutes = Number(anyBooking.durationMinutes);
       const hours = Math.floor(minutes / 60);
       const rest = minutes % 60;
-
       if (hours > 0 && rest > 0) return `${hours} год ${rest} хв`;
       if (hours > 0) return `${hours} год`;
       return `${minutes} хв`;
@@ -93,26 +85,45 @@ export class NotificationsService {
 
     const wishes = booking.wishes || '';
     const match = wishes.match(/Час відпочинку:\s*([^\n]+)/i);
-
     return match?.[1] || '-';
   }
 
   private isLongBooking(booking: Booking) {
     const anyBooking = booking as any;
-
-    if (Number(anyBooking.durationMinutes || 0) > 180) {
-      return true;
-    }
+    if (Number(anyBooking.durationMinutes || 0) > 180) return true;
 
     const wishes = booking.wishes || '';
     const match = wishes.match(/Час відпочинку:\s*(\d+)\s*хв/i);
-
     return match ? Number(match[1]) > 180 : false;
+  }
+
+  private latenessLabel(booking: Booking) {
+    const hours = Number(booking.latenessHours || 0);
+    const minutes = Number(booking.latenessMinutes || 0);
+    return [hours > 0 ? `${hours} год` : null, minutes > 0 ? `${minutes} хв` : null]
+      .filter(Boolean)
+      .join(' ') || '-';
+  }
+
+  private expectedArrivalLabel(booking: Booking) {
+    if (!booking.expectedArrivalAt) return '-';
+    return new Intl.DateTimeFormat('uk-UA', {
+      timeZone: 'Europe/Kyiv',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(new Date(booking.expectedArrivalAt));
+  }
+
+  private async bookingForNotification(id: string) {
+    return this.bookingRepo.findOne({
+      where: { id },
+      relations: ['table', 'table.zone', 'client'],
+    });
   }
 
   async notifyNewBooking(booking: Booking) {
     const longBookingLine = this.isLongBooking(booking) ? '⚠️ <b>Довге бронювання</b>' : null;
-
     const text = [
       '🟠 <b>Нове бронювання</b>',
       '',
@@ -162,6 +173,66 @@ export class NotificationsService {
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
       `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
+    ].join('\n');
+
+    await this.sendToRoles(['owner', 'admin', 'waiter'], text);
+  }
+
+  async notifyGuestCancelledBooking(bookingId: string) {
+    const booking = await this.bookingForNotification(bookingId);
+    if (!booking) return;
+
+    const text = [
+      '❌ <b>Гість скасував бронювання</b>',
+      '',
+      `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
+      `📍 Локація: <b>${booking.table?.zone?.name || '-'}</b>`,
+      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
+      `📅 Дата: <b>${booking.bookingDate}</b>`,
+      `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
+      `📝 Причина: ${booking.cancellationReason || 'не вказана'}`,
+    ].join('\n');
+
+    await this.sendToRoles(['owner', 'admin', 'waiter'], text);
+  }
+
+  async notifyGuestChangedTable(
+    bookingId: string,
+    previousTableNumber: string | number | null,
+    nextTableNumber: string | number | null,
+  ) {
+    const booking = await this.bookingForNotification(bookingId);
+    if (!booking) return;
+
+    const text = [
+      '🔁 <b>Гість змінив стіл</b>',
+      '',
+      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
+      `📅 Дата: <b>${booking.bookingDate}</b>`,
+      `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
+      `🪑 Було: <b>№${previousTableNumber || '-'}</b>`,
+      `🪑 Стало: <b>№${nextTableNumber || booking.table?.tableNumber || '-'}</b>`,
+      `📍 Нова локація: <b>${booking.table?.zone?.name || '-'}</b>`,
+    ].join('\n');
+
+    await this.sendToRoles(['owner', 'admin', 'waiter'], text);
+  }
+
+  async notifyGuestReportedLateness(bookingId: string) {
+    const booking = await this.bookingForNotification(bookingId);
+    if (!booking) return;
+
+    const text = [
+      '⏰ <b>Гість повідомив про запізнення</b>',
+      '',
+      `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
+      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
+      `🕒 Час бронювання: <b>${this.timeLabel(booking.bookingTime)}</b>`,
+      `⌛ Запізнення: <b>${this.latenessLabel(booking)}</b>`,
+      `✅ Очікуваний приїзд: <b>${this.expectedArrivalLabel(booking)}</b>`,
     ].join('\n');
 
     await this.sendToRoles(['owner', 'admin', 'waiter'], text);
