@@ -1,14 +1,41 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { KeyRound, LoaderCircle, ShieldCheck } from 'lucide-react';
 
-import { clearAccessToken } from '../api/client';
+import { clearAccessToken, getAccessToken } from '../api/client';
 import { staffApi } from '../api/staff';
 import type { StaffLoginOption } from '../api/staff';
 
 type Props = {
   children: ReactNode;
 };
+
+type TokenPayload = {
+  role?: string;
+  exp?: number;
+};
+
+function readTokenPayload(): TokenPayload | null {
+  const token = getAccessToken();
+  if (!token) return null;
+
+  try {
+    const encoded = token.split('.')[1];
+    if (!encoded) return null;
+    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    return JSON.parse(atob(padded)) as TokenPayload;
+  } catch {
+    return null;
+  }
+}
+
+function hasValidOwnerToken(): boolean {
+  const payload = readTokenPayload();
+  if (!payload || payload.role !== 'owner') return false;
+  if (payload.exp && payload.exp * 1000 <= Date.now()) return false;
+  return true;
+}
 
 export default function DirectorAuthGate({ children }: Props) {
   const [options, setOptions] = useState<StaffLoginOption[]>([]);
@@ -28,15 +55,18 @@ export default function DirectorAuthGate({ children }: Props) {
     let active = true;
 
     async function initialize() {
-      try {
-        const members = await staffApi.getAll();
-        const hasOwnerAccess = members.some((member) => member.role === 'owner');
-        if (active && hasOwnerAccess) {
-          setAuthenticated(true);
-          setChecking(false);
+      if (hasValidOwnerToken()) {
+        try {
+          await staffApi.getAll();
+          if (active) {
+            setAuthenticated(true);
+            setChecking(false);
+          }
           return;
+        } catch {
+          clearAccessToken();
         }
-      } catch {
+      } else {
         clearAccessToken();
       }
 
@@ -59,7 +89,7 @@ export default function DirectorAuthGate({ children }: Props) {
     };
   }, []);
 
-  async function submit(event: React.FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
     if (!selectedId || !pin.trim()) {
       setError('Оберіть Директора та введіть PIN');
