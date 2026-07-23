@@ -79,7 +79,14 @@ export default function AdminBookingCard({
           <p className="mt-2 truncate text-sm font-bold text-white/85">{client?.fullName || 'Гість без імені'}</p>
           <p className="mt-1 text-xs text-white/45">{formatTime(booking.bookingTime)} · {booking.guestsCount} гостей · {locationLabel(tableNumber(booking))}</p>
         </div>
-        {tableStatus && <span className="shrink-0 rounded-full border border-white/10 bg-black/30 px-2.5 py-1 text-[10px] font-bold" style={{ color: TABLE_STATUS_COLOR[tableStatus] }}>{TABLE_STATUS_LABEL[tableStatus]}</span>}
+        {tableStatus && (
+          <span
+            className={`shrink-0 rounded-full border border-white/10 bg-black/30 px-2.5 py-1 text-[10px] font-bold ${tableStatus === 'free' ? 'text-white/45' : ''}`}
+            style={tableStatus === 'free' ? undefined : { color: TABLE_STATUS_COLOR[tableStatus] }}
+          >
+            {TABLE_STATUS_LABEL[tableStatus]}
+          </span>
+        )}
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
