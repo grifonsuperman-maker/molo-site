@@ -12,7 +12,25 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend install --no-audit --no-fund
+
+      - name: Build frontend
+        run: npm --prefix frontend run build
+
+  backend:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -29,11 +47,5 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
-      - name: Install frontend dependencies
-        run: npm --prefix frontend install --no-audit --no-fund
-
       - name: Build backend
         run: npm --prefix backend run build
-
-      - name: Build frontend
-        run: npm --prefix frontend run build
