@@ -1,12 +1,17 @@
-import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Req } from '@nestjs/common';
+
+import { Roles } from '../common/decorators/roles.decorator';
+import { RestaurantService } from '../restaurant/restaurant.service';
 import { ClientsService } from './clients.service';
 import { UpdateClientDto } from './dto/update-client.dto';
-import { Roles } from '../common/decorators/roles.decorator';
 
 @Roles('owner', 'admin')
 @Controller('clients')
 export class ClientsController {
-  constructor(private readonly service: ClientsService) {}
+  constructor(
+    private readonly service: ClientsService,
+    private readonly restaurant: RestaurantService,
+  ) {}
 
   @Get()
   findAll() {
@@ -24,12 +29,24 @@ export class ClientsController {
   }
 
   @Patch(':id/blacklist')
-  blacklist(@Param('id') id: string) {
+  async blacklist(@Param('id') id: string, @Req() request: any) {
+    if (request.user?.role === 'admin') {
+      await this.restaurant.assertAdminPermission(
+        'adminCanManageBlacklist',
+        'Директор не надав право керувати чорним списком',
+      );
+    }
     return this.service.blacklist(id);
   }
 
   @Patch(':id/unblacklist')
-  unblacklist(@Param('id') id: string) {
+  async unblacklist(@Param('id') id: string, @Req() request: any) {
+    if (request.user?.role === 'admin') {
+      await this.restaurant.assertAdminPermission(
+        'adminCanManageBlacklist',
+        'Директор не надав право керувати чорним списком',
+      );
+    }
     return this.service.unblacklist(id);
   }
 }
