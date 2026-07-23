@@ -40,6 +40,30 @@ type Tab = 'overview' | 'bookings' | 'locations' | 'guests' | 'team' | 'site' | 
 type BookingFilter = 'all' | 'pending' | 'approved' | 'completed' | 'cancelled' | 'no_show';
 type LocationKey = 'hall' | 'canopy' | 'gazebo' | 'rotang' | 'embankment' | 'glass' | 'water';
 
+type AdminRights = {
+  zones: boolean;
+  onlineBooking: boolean;
+  restaurant: boolean;
+  siteMode: boolean;
+  settings: boolean;
+  blacklist: boolean;
+  reviews: boolean;
+  shifts: boolean;
+  broadcasts: boolean;
+};
+
+const EMPTY_RIGHTS: AdminRights = {
+  zones: false,
+  onlineBooking: false,
+  restaurant: false,
+  siteMode: false,
+  settings: false,
+  blacklist: false,
+  reviews: false,
+  shifts: false,
+  broadcasts: false,
+};
+
 const LOCATIONS: Array<{ key: LocationKey; label: string; from: number; to: number }> = [
   { key: 'hall', label: 'Зал ресторану', from: 1, to: 14 },
   { key: 'canopy', label: 'Навіс', from: 15, to: 20 },
@@ -119,6 +143,20 @@ function statusText(status: Restaurant['status'] | undefined): string {
   return 'Ресторан закритий';
 }
 
+function rightsFromRestaurant(restaurant: Restaurant): AdminRights {
+  return {
+    zones: Boolean(restaurant.adminCanManageZones),
+    onlineBooking: Boolean(restaurant.adminCanManageOnlineBooking),
+    restaurant: Boolean(restaurant.adminCanManageRestaurant),
+    siteMode: Boolean(restaurant.adminCanChangeSiteMode),
+    settings: Boolean(restaurant.adminCanEditRestaurantSettings),
+    blacklist: Boolean(restaurant.adminCanManageBlacklist),
+    reviews: Boolean(restaurant.adminCanRespondReviews),
+    shifts: Boolean(restaurant.adminCanManageStaffShifts),
+    broadcasts: Boolean(restaurant.adminCanSendBroadcasts),
+  };
+}
+
 export default function CompactDirectorPanel() {
   const today = useMemo(() => kyivDate(), []);
   const [tab, setTab] = useState<Tab>('overview');
@@ -141,13 +179,8 @@ export default function CompactDirectorPanel() {
   const [broadcastText, setBroadcastText] = useState('');
   const [selectedClients, setSelectedClients] = useState<Set<string>>(new Set());
   const [sendToAll, setSendToAll] = useState(false);
-  const [adminRights, setAdminRights] = useState({
-    zones: false,
-    onlineBooking: false,
-    restaurant: false,
-    siteMode: false,
-    settings: false,
-  });
+  const [adminRights, setAdminRights] = useState<AdminRights>(EMPTY_RIGHTS);
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
 
   async function load(silent = false) {
     if (!silent) setLoading(true);
@@ -165,13 +198,7 @@ export default function CompactDirectorPanel() {
     if (restaurantResult.status === 'fulfilled') {
       const value = unwrap<Restaurant>(restaurantResult.value);
       setRestaurant(value);
-      setAdminRights({
-        zones: Boolean(value.adminCanManageZones),
-        onlineBooking: Boolean(value.adminCanManageOnlineBooking),
-        restaurant: Boolean(value.adminCanManageRestaurant),
-        siteMode: Boolean(value.adminCanChangeSiteMode),
-        settings: Boolean(value.adminCanEditRestaurantSettings),
-      });
+      setAdminRights(rightsFromRestaurant(value));
     }
     if (bookingsResult.status === 'fulfilled') setBookings(unwrap<Booking[]>(bookingsResult.value));
     if (mapResult.status === 'fulfilled') setMap(unwrap<FullMapResponse>(mapResult.value));
@@ -242,10 +269,11 @@ export default function CompactDirectorPanel() {
   const attention = useMemo(() => {
     const items: Array<{ title: string; text: string; tone: 'amber' | 'red' | 'cyan' }> = [];
     const pending = bookings.filter((booking) => booking.status === 'pending');
-    if (pending.length) items.push({ title: `${pending.length} бронювань очікують`, text: 'Потрібне рішення адміністратора', tone: 'amber' });
+    const unansweredReviews = reviews.filter((review) => !review.responseText);
+    if (pending.length) items.push({ title: `${pending.length} бронювань очікують`, text: 'Потрібне рішення Адміністратора', tone: 'amber' });
     if (stats.cleaning) items.push({ title: `${stats.cleaning} столів готуються`, text: 'Перевірте тривалість підготовки', tone: 'cyan' });
     if (stats.closedLocations) items.push({ title: `${stats.closedLocations} локацій закрито`, text: 'Перевірте план роботи', tone: 'red' });
-    if (reviews.length) items.push({ title: `${reviews.length} письмових відгуків`, text: 'Нові відгуки гостей без оцінок і зірок', tone: 'amber' });
+    if (unansweredReviews.length) items.push({ title: `${unansweredReviews.length} відгуків без відповіді`, text: 'Письмові відгуки гостей без оцінок і зірок', tone: 'amber' });
     return items.slice(0, 4);
   }, [bookings, stats, reviews]);
 
@@ -289,6 +317,10 @@ export default function CompactDirectorPanel() {
         adminCanManageRestaurant: adminRights.restaurant,
         adminCanChangeSiteMode: adminRights.siteMode,
         adminCanEditRestaurantSettings: adminRights.settings,
+        adminCanManageBlacklist: adminRights.blacklist,
+        adminCanRespondReviews: adminRights.reviews,
+        adminCanManageStaffShifts: adminRights.shifts,
+        adminCanSendBroadcasts: adminRights.broadcasts,
       });
       setNotice('Права Адміністратора збережено');
       await load(true);
@@ -347,6 +379,23 @@ export default function CompactDirectorPanel() {
       setSendToAll(false);
     } catch (cause: any) {
       setError(cause?.message || 'Не вдалося надіслати розсилку');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function respondToReview(review: GuestReviewRecord) {
+    const text = String(reviewDrafts[review.id] || '').trim();
+    if (!text) return setError('Напишіть відповідь гостю');
+    setBusy(`review:${review.id}`);
+    setError(null);
+    try {
+      await reviewsApi.respond(review.id, text);
+      setReviewDrafts((current) => ({ ...current, [review.id]: '' }));
+      setNotice('Відповідь на відгук збережено');
+      await load(true);
+    } catch (cause: any) {
+      setError(cause?.message || 'Не вдалося відповісти на відгук');
     } finally {
       setBusy(null);
     }
@@ -483,6 +532,10 @@ export default function CompactDirectorPanel() {
                 <RightToggle label="Відкривати та закривати ресторан" value={adminRights.restaurant} onChange={(value) => setAdminRights((current) => ({ ...current, restaurant: value }))} />
                 <RightToggle label="Перемикати День / Ніч / Свято" value={adminRights.siteMode} onChange={(value) => setAdminRights((current) => ({ ...current, siteMode: value }))} />
                 <RightToggle label="Змінювати меню та повідомлення" value={adminRights.settings} onChange={(value) => setAdminRights((current) => ({ ...current, settings: value }))} />
+                <RightToggle label="Керувати чорним списком" value={adminRights.blacklist} onChange={(value) => setAdminRights((current) => ({ ...current, blacklist: value }))} />
+                <RightToggle label="Відповідати на відгуки" value={adminRights.reviews} onChange={(value) => setAdminRights((current) => ({ ...current, reviews: value }))} />
+                <RightToggle label="Керувати змінами персоналу" value={adminRights.shifts} onChange={(value) => setAdminRights((current) => ({ ...current, shifts: value }))} />
+                <RightToggle label="Створювати ручні розсилки" value={adminRights.broadcasts} onChange={(value) => setAdminRights((current) => ({ ...current, broadcasts: value }))} />
               </div>
               <button type="button" onClick={() => void saveRights()} disabled={busy === 'rights'} className="mt-3 w-full rounded-2xl border border-amber-200/45 bg-amber-300/15 px-4 py-3 text-sm font-black text-amber-100 disabled:opacity-40">Зберегти права</button>
             </GlassCard>
@@ -501,9 +554,9 @@ export default function CompactDirectorPanel() {
           <section className="space-y-3">
             <Heading title="Ще" subtitle="Відгуки, історія дій і стан системи." />
             <GlassCard title="Письмові відгуки гостей" eyebrow={`${reviews.length} відгуків`}>
-              <div className="space-y-2">{reviews.slice(0, 10).map((review) => <article key={review.id} className="rounded-2xl border border-white/10 bg-black/25 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{review.booking?.client?.fullName || 'Гість'}</p><p className="mt-1 text-xs text-white/40">{dateLabel(review.booking?.bookingDate)} · Стіл №{review.booking?.table?.tableNumber || '-'}</p></div><MessageSquareText size={18} className="text-violet-200" /></div><p className="mt-3 whitespace-pre-wrap text-sm text-white/70">{review.text}</p></article>)}{!reviews.length && <Empty text="Письмових відгуків ще немає" />}</div>
+              <div className="space-y-2">{reviews.slice(0, 30).map((review) => <article key={review.id} className="rounded-2xl border border-white/10 bg-black/25 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{review.booking?.client?.fullName || 'Гість'}</p><p className="mt-1 text-xs text-white/40">{dateLabel(review.booking?.bookingDate)} · Стіл №{review.booking?.table?.tableNumber || '-'}</p></div><MessageSquareText size={18} className="text-violet-200" /></div><p className="mt-3 whitespace-pre-wrap text-sm text-white/70">{review.text}</p>{review.responseText ? <div className="mt-3 rounded-2xl border border-emerald-300/25 bg-emerald-400/[0.07] p-3"><p className="text-[10px] font-black uppercase tracking-[0.16em] text-emerald-100/55">Відповідь</p><p className="mt-2 whitespace-pre-wrap text-sm text-emerald-50">{review.responseText}</p><p className="mt-2 text-[10px] text-white/35">{review.respondedByRole === 'owner' ? 'Директор' : review.respondedByName || 'Адміністратор'}</p></div> : <div className="mt-3"><textarea value={reviewDrafts[review.id] || ''} onChange={(event) => setReviewDrafts((current) => ({ ...current, [review.id]: event.target.value }))} placeholder="Напишіть відповідь гостю" className="min-h-24 w-full resize-none rounded-2xl border border-white/10 bg-black/40 p-3 text-sm outline-none focus:border-violet-200/40" /><button type="button" disabled={busy === `review:${review.id}` || !String(reviewDrafts[review.id] || '').trim()} onClick={() => void respondToReview(review)} className="mt-2 w-full rounded-2xl border border-violet-200/35 bg-violet-400/10 px-3 py-2.5 text-xs font-black text-violet-100 disabled:opacity-40">Відповісти</button></div>}</article>)}{!reviews.length && <Empty text="Письмових відгуків ще немає" />}</div>
             </GlassCard>
-            <GlassCard title="Історія дій" eyebrow="Останні записи"><div className="space-y-2">{logs.slice(0, 12).map((log) => <div key={log.id} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-black/25 p-3"><History size={16} className="mt-0.5 shrink-0 text-cyan-200" /><div><p className="text-sm font-bold">{log.action}</p><p className="mt-1 text-xs text-white/40">{new Date(log.createdAt).toLocaleString('uk-UA')}</p></div></div>)}{!logs.length && <Empty text="Історія поки порожня" />}</div></GlassCard>
+            <GlassCard title="Історія дій" eyebrow="Останні записи"><div className="space-y-2">{logs.slice(0, 30).map((log) => <div key={log.id} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-black/25 p-3"><History size={16} className="mt-0.5 shrink-0 text-cyan-200" /><div><p className="text-sm font-bold">{log.action}</p><p className="mt-1 text-xs text-white/40">{log.staff?.role === 'owner' ? 'Директор' : log.staff?.fullName || ''}{log.staff ? ' · ' : ''}{new Date(log.createdAt).toLocaleString('uk-UA')}</p></div></div>)}{!logs.length && <Empty text="Історія поки порожня" />}</div></GlassCard>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"><SystemCard title="Telegram Bot" status="Не перевірено" text="Підключення не підтверджено цим екраном." tone="neutral" /><SystemCard title="Журнал дій" status="Частково працює" text="Показуються записи, які вже пише backend." tone="amber" /><SystemCard title="Безпека" status="Потребує аудиту" text="Частина write-endpoints ще тестово відкрита." tone="red" /></div>
           </section>
         )}
