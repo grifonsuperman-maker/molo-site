@@ -1,0 +1,24 @@
+name: Admin panel check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install backend dependencies
+        run: npm --prefix backend install
+      - name: Install frontend dependencies
+        run: npm --prefix frontend install
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Build frontend
+        run: npm --prefix frontend run build
+      - name: Check whitespace
+        run: git diff --check origin/main...HEAD
