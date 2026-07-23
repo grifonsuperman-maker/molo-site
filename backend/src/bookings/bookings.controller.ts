@@ -116,6 +116,16 @@ export class BookingsController {
   }
 
   @Public()
+  @Patch(':id/guest/change-time')
+  guestChangeTime(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+    @Body() dto: RequestRescheduleDto,
+  ) {
+    return this.guestService.requestTimeChange(id, token, dto);
+  }
+
+  @Public()
   @Patch(':id/guest/change-table')
   guestChangeTable(
     @Param('id') id: string,
@@ -185,8 +195,8 @@ export class BookingsController {
 
   @Patch(':id/check-in')
   @Roles('waiter', 'admin', 'owner')
-  checkIn(@Param('id') id: string) {
-    return this.service.checkIn(id);
+  checkIn(@Param('id') id: string, @Req() request: any) {
+    return this.service.checkIn(id, request.user);
   }
 
   @Patch(':id/complete')
