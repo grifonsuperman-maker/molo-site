@@ -18,9 +18,9 @@ export class AvailabilityPermissionsService {
       throw new ForbiddenException('Недостатньо прав для керування столами та локаціями');
     }
 
-    const restaurant = await this.restaurants.findOne({
-      where: {},
+    const [restaurant] = await this.restaurants.find({
       order: { createdAt: 'ASC' },
+      take: 1,
     });
     if (!restaurant?.adminCanManageZones) {
       throw new ForbiddenException(
