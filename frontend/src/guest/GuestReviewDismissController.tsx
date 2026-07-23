@@ -32,18 +32,20 @@ function availableStorages() {
 }
 
 function readDismissedIds() {
+  const ids = new Set<string>();
+
   for (const storage of availableStorages()) {
     try {
       const parsed = JSON.parse(storage.getItem(DISMISSED_REVIEW_STORAGE_KEY) || '[]');
       if (Array.isArray(parsed)) {
-        return new Set(
-          parsed.filter((value): value is string => typeof value === 'string' && Boolean(value)),
-        );
+        parsed.forEach((value) => {
+          if (typeof value === 'string' && value) ids.add(value);
+        });
       }
     } catch {}
   }
 
-  return new Set<string>();
+  return ids;
 }
 
 const dismissedIds = readDismissedIds();
