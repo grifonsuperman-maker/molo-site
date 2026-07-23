@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -40,7 +42,7 @@ jobs:
         with:
           node-version: 20
       - name: Install backend dependencies
-        run: npm --prefix backend install --no-audit --no-fund
+        run: npm --prefix backend install --no-audit --no-fund --ignore-scripts --legacy-peer-deps
       - name: Build backend
         shell: bash
         run: set -o pipefail; npm --prefix backend run build 2>&1 | tee backend-build.log
