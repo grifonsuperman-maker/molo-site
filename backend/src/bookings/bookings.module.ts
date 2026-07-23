@@ -22,6 +22,7 @@ import { BookingRescheduleRequest } from './entities/booking-reschedule-request.
 import { Booking } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
+import { GuestReviewsController } from './guest-reviews.controller';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { GuestBookingsService } from './guest-bookings.service';
     BookingsController,
     AdminBookingEventsController,
     AvailabilityBlocksController,
+    GuestReviewsController,
   ],
   providers: [
     BookingsService,
