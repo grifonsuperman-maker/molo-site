@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { restaurantApi } from '../api/restaurant';
-import type { Restaurant, SiteMode } from '../api/types';
+import type { HolidayKey, Restaurant, SiteMode } from '../api/types';
 
 const TITLE_ROTATION_MS = 20 * 60 * 1000;
 const TITLE_SYNC_MS = 30 * 1000;
@@ -32,9 +32,21 @@ const NIGHT_TO_DAY = Object.fromEntries(
   Object.entries(DAY_TO_NIGHT).map(([day, night]) => [night, day]),
 ) as Record<string, string>;
 
+const FILE_TO_DAY = Object.fromEntries(
+  Object.entries(DAY_TO_NIGHT).map(([day, night]) => [
+    night.split('/').pop() || '',
+    day,
+  ]),
+) as Record<string, string>;
+
 type TitleRotationState = {
   bucket: number;
   index: number;
+};
+
+type ThemeState = {
+  siteMode: SiteMode;
+  holidayKey: HolidayKey | null;
 };
 
 function unwrapRestaurant(value: unknown): Restaurant | null {
@@ -156,8 +168,64 @@ function chooseTitleImage() {
   return TITLE_IMAGES[fallbackTitleIndex(bucket)];
 }
 
-function preloadImages() {
+function holidayPath(dayPath: string, holidayKey: HolidayKey | null) {
+  const nightPath = DAY_TO_NIGHT[dayPath];
+  const fileName = nightPath?.split('/').pop();
+
+  if (!fileName) return dayPath;
+
+  return `/maps/themes/holiday/${holidayKey || 'new-year'}/${fileName}`;
+}
+
+function activePath(
+  dayPath: string,
+  siteMode: SiteMode,
+  holidayKey: HolidayKey | null,
+) {
+  if (siteMode === 'night') return DAY_TO_NIGHT[dayPath] || dayPath;
+  if (siteMode === 'holiday') return holidayPath(dayPath, holidayKey);
+  return dayPath;
+}
+
+function dayPathFromCurrent(currentPath: string) {
+  if (DAY_TO_NIGHT[currentPath]) return currentPath;
+  if (NIGHT_TO_DAY[currentPath]) return NIGHT_TO_DAY[currentPath];
+
+  const holidayMatch = currentPath.match(
+    /^\/maps\/themes\/holiday\/[^/]+\/([^/]+)\.png$/,
+  );
+
+  if (!holidayMatch) return '';
+
+  return FILE_TO_DAY[`${holidayMatch[1]}.png`] || '';
+}
+
+function bindImageFallback(image: HTMLImageElement) {
+  if (image.dataset.moloFallbackBound === 'true') return;
+
+  image.dataset.moloFallbackBound = 'true';
+  image.addEventListener('error', () => {
+    const currentPath = imagePath(image.getAttribute('src'));
+    const fallbackPath = image.dataset.moloFallback || '';
+
+    if (currentPath) {
+      image.dataset.moloFailedSrc = currentPath;
+    }
+
+    if (fallbackPath && currentPath !== fallbackPath) {
+      image.setAttribute('src', fallbackPath);
+    }
+  });
+}
+
+function preloadImages(theme: ThemeState) {
   const paths = [...TITLE_IMAGES, ...Object.values(DAY_TO_NIGHT)];
+
+  if (theme.siteMode === 'holiday') {
+    Object.keys(DAY_TO_NIGHT).forEach((dayPath) => {
+      paths.push(holidayPath(dayPath, theme.holidayKey));
+    });
+  }
 
   paths.forEach((path) => {
     const image = new Image();
@@ -165,7 +233,7 @@ function preloadImages() {
   });
 }
 
-function applyPhotos(siteMode: SiteMode, titleImage: string) {
+function applyPhotos(theme: ThemeState, titleImage: string) {
   const images = Array.from(document.querySelectorAll<HTMLImageElement>('img'));
   let titleVisible = false;
 
@@ -176,6 +244,8 @@ function applyPhotos(siteMode: SiteMode, titleImage: string) {
 
     if (isTitle) {
       image.dataset.moloTitle = 'true';
+      image.dataset.moloFallback = '/hero-bg.jpg';
+      bindImageFallback(image);
       const titleSection = image.closest('section');
 
       if (titleSection) {
@@ -183,7 +253,10 @@ function applyPhotos(siteMode: SiteMode, titleImage: string) {
         titleVisible = true;
       }
 
-      if (currentPath !== titleImage) {
+      if (
+        currentPath !== titleImage &&
+        image.dataset.moloFailedSrc !== titleImage
+      ) {
         image.setAttribute('src', titleImage);
       }
 
@@ -191,17 +264,28 @@ function applyPhotos(siteMode: SiteMode, titleImage: string) {
     }
 
     const storedDayPath = image.dataset.moloDaySrc || '';
-    const dayPath =
-      storedDayPath ||
-      NIGHT_TO_DAY[currentPath] ||
-      (DAY_TO_NIGHT[currentPath] ? currentPath : '');
+    const dayPath = storedDayPath || dayPathFromCurrent(currentPath);
 
     if (!dayPath) return;
 
     image.dataset.moloDaySrc = dayPath;
-    const nextPath = siteMode === 'night' ? DAY_TO_NIGHT[dayPath] : dayPath;
+    image.dataset.moloFallback = dayPath;
+    bindImageFallback(image);
 
-    if (nextPath && currentPath !== nextPath) {
+    const nextPath = activePath(dayPath, theme.siteMode, theme.holidayKey);
+
+    if (
+      image.dataset.moloFailedSrc &&
+      image.dataset.moloFailedSrc !== nextPath
+    ) {
+      delete image.dataset.moloFailedSrc;
+    }
+
+    if (
+      nextPath &&
+      currentPath !== nextPath &&
+      image.dataset.moloFailedSrc !== nextPath
+    ) {
       image.setAttribute('src', nextPath);
     }
   });
@@ -210,12 +294,15 @@ function applyPhotos(siteMode: SiteMode, titleImage: string) {
 }
 
 export default function SitePhotoController() {
-  const [siteMode, setSiteMode] = useState<SiteMode>('day');
+  const [theme, setTheme] = useState<ThemeState>({
+    siteMode: 'day',
+    holidayKey: null,
+  });
   const [titleImage, setTitleImage] = useState(() => chooseTitleImage());
 
   useEffect(() => {
-    preloadImages();
-  }, []);
+    preloadImages(theme);
+  }, [theme.siteMode, theme.holidayKey]);
 
   useEffect(() => {
     let stopped = false;
@@ -225,7 +312,13 @@ export default function SitePhotoController() {
         .get()
         .then((response) => {
           const restaurant = unwrapRestaurant(response);
-          if (!stopped) setSiteMode(restaurant?.siteMode || 'day');
+
+          if (!stopped) {
+            setTheme({
+              siteMode: restaurant?.siteMode || 'day',
+              holidayKey: restaurant?.holidayKey || null,
+            });
+          }
         })
         .catch(() => {});
     };
@@ -269,7 +362,7 @@ export default function SitePhotoController() {
   }, []);
 
   useEffect(() => {
-    const update = () => applyPhotos(siteMode, titleImage);
+    const update = () => applyPhotos(theme, titleImage);
     update();
 
     const observer = new MutationObserver(update);
@@ -284,7 +377,7 @@ export default function SitePhotoController() {
       observer.disconnect();
       document.body.classList.remove('molo-title-visible');
     };
-  }, [siteMode, titleImage]);
+  }, [theme, titleImage]);
 
   return (
     <style>{`
