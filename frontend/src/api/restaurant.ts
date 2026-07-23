@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { Restaurant, SiteMode } from './types';
+import type { HolidayKey, Restaurant, SiteMode } from './types';
 
 export const restaurantApi = {
   get: () => api.get<Restaurant>('/restaurant'),
@@ -16,8 +16,8 @@ export const restaurantApi = {
   adminCloseBooking: () => api.post('/restaurant/admin/close-booking'),
   adminOpen: () => api.post('/restaurant/admin/open'),
   adminClose: (message?: string) => api.post('/restaurant/admin/close', { message }),
-  adminSetSiteMode: (siteMode: SiteMode) =>
-    api.patch('/restaurant/admin/site-mode', { siteMode }),
+  adminSetSiteMode: (siteMode: SiteMode, holidayKey?: HolidayKey | null) =>
+    api.patch('/restaurant/admin/site-mode', { siteMode, holidayKey }),
   adminUpdateSettings: (body: Pick<Partial<Restaurant>, 'menuUrl' | 'closeMessage' | 'bookingClosedMessage'>) =>
     api.patch('/restaurant/admin/settings', body),
 };
