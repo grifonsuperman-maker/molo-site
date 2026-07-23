@@ -23,7 +23,7 @@ export const TABLE_STATUS_LABEL: Record<TableStatus, string> = {
   closed: 'Закритий',
 };
 export const TABLE_STATUS_COLOR: Record<TableStatus, string> = {
-  free: '#ffffff',
+  free: 'transparent',
   pending: '#38bdf8',
   reserved: '#fb923c',
   occupied: '#ff3b4f',
