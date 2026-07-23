@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nest
 
 import { Public } from '../common/decorators/public.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BookingCreationLockService } from './booking-creation-lock.service';
 import { BookingsService } from './bookings.service';
 import { GuestBookingsService } from './guest-bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
@@ -20,12 +21,20 @@ export class BookingsController {
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
     private readonly notifications: NotificationsService,
+    private readonly creationLock: BookingCreationLockService,
   ) {}
 
   @Public()
   @Post()
   create(@Body() dto: CreateBookingDto) {
-    return this.service.create(dto);
+    return this.creationLock.run(
+      {
+        tableId: dto.tableId,
+        tableNumber: dto.tableNumber,
+        bookingDate: dto.bookingDate,
+      },
+      () => this.service.create(dto),
+    );
   }
 
   @Public()
