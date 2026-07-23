@@ -12,6 +12,8 @@ jobs:
   backend-debug:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      NODE_ENV: development
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,8 +25,8 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
-      - name: Install backend dependencies
-        run: npm --prefix backend ci
+      - name: Install backend dependencies including Nest CLI
+        run: npm --prefix backend ci --include=dev
 
       - name: Build backend and capture log
         id: build
