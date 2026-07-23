@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
+import GuestWaiterCallController from "./guest/GuestWaiterCallController";
 import WaiterApp from "./waiter/WaiterApp";
 import HookahApp from "./hookah/HookahApp";
 import AdminWorkspace from "./admin/AdminWorkspace";
@@ -111,7 +112,12 @@ export default function App() {
         </button>
       </div>
 
-      {mode === "guest" && <GuestApp />}
+      {mode === "guest" && (
+        <>
+          <GuestApp />
+          <GuestWaiterCallController />
+        </>
+      )}
       {mode === "waiter" && <WaiterApp />}
       {mode === "hookah" && <HookahApp />}
       {mode === "admin" && (
