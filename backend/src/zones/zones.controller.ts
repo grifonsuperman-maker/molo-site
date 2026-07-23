@@ -1,8 +1,10 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-import { ZonesService } from './zones.service';
+
+import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
-import { Public } from '../common/decorators/public.decorator';
+import { ZonesService } from './zones.service';
 
 @Controller('zones')
 export class ZonesController {
@@ -14,43 +16,43 @@ export class ZonesController {
     return this.service.findAll();
   }
 
-  @Public()
+  @Roles('owner')
   @Post()
   create(@Body() dto: CreateZoneDto) {
     return this.service.create(dto);
   }
 
-  @Public()
+  @Roles('owner')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateZoneDto) {
     return this.service.update(id, dto);
   }
 
-  @Public()
+  @Roles('owner')
   @Patch(':id/close')
   close(@Param('id') id: string) {
     return this.service.close(id);
   }
 
-  @Public()
+  @Roles('owner')
   @Patch(':id/open')
   open(@Param('id') id: string) {
     return this.service.open(id);
   }
 
-  @Public()
+  @Roles('admin')
   @Patch(':id/admin/close')
   adminClose(@Param('id') id: string) {
     return this.service.adminClose(id);
   }
 
-  @Public()
+  @Roles('admin')
   @Patch(':id/admin/open')
   adminOpen(@Param('id') id: string) {
     return this.service.adminOpen(id);
   }
 
-  @Public()
+  @Roles('owner')
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.service.remove(id);
