@@ -1,0 +1,27 @@
+name: Export waiter fix sources
+
+on:
+  push:
+    branches:
+      - fix/waiter-table-state-sync
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: waiter-fix-sources
+          path: |
+            backend/src/bookings/bookings.service.ts
+            backend/src/bookings/bookings.controller.ts
+            backend/src/bookings/bookings.service.spec.ts
+            backend/src/waiter-calls/waiter-calls.service.ts
+            backend/src/waiter-calls/waiter-calls.controller.ts
+            backend/src/waiter-calls/waiter-calls.module.ts
+            backend/src/waiter-calls/waiter-calls.service.spec.ts
+            frontend/src/waiter/WaiterApp.tsx
