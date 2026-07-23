@@ -4,6 +4,10 @@ export type GuestReviewRecord = {
   id: string;
   text: string;
   isPublished: boolean;
+  responseText?: string | null;
+  respondedAt?: string | null;
+  respondedByName?: string | null;
+  respondedByRole?: string | null;
   createdAt: string;
   booking?: {
     id: string;
@@ -24,4 +28,9 @@ export type GuestReviewRecord = {
 
 export const reviewsApi = {
   getAll: () => api.get<GuestReviewRecord[]>('/guest-reviews'),
+  respond: (id: string, text: string) =>
+    api.patch<GuestReviewRecord>(
+      `/guest-reviews/${encodeURIComponent(id)}/response`,
+      { text },
+    ),
 };
