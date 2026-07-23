@@ -111,7 +111,9 @@ export class WaiterCallsService {
   async guestStatus(bookingId: string) {
     const booking = await this.getBooking(bookingId);
     const tableStatus = booking.table?.status || null;
-    const canCall = booking.status === 'approved' && tableStatus === 'occupied';
+    const visitStarted = Boolean(booking.checkedInAt);
+    const visitStillActive = tableStatus !== 'cleaning' && tableStatus !== 'closed';
+    const canCall = booking.status === 'approved' && visitStarted && visitStillActive;
 
     const activeCall =
       this.calls.find(
