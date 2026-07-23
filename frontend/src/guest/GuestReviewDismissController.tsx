@@ -226,7 +226,12 @@ export default function GuestReviewDismissController() {
 
     function handleDialogClose(event: MouseEvent) {
       const button = (event.target as Element | null)?.closest('button');
-      if (!button || button.textContent?.trim() !== 'Закрити') return;
+      if (!button) return;
+
+      const closesDialog =
+        button.textContent?.trim() === 'Закрити' ||
+        button.getAttribute('aria-label') === 'Закрити мої бронювання';
+      if (!closesDialog) return;
       if (!button.closest('[role="dialog"][aria-label="Мої бронювання"]')) return;
       if (!latestReviewCandidate(latestRawBookings)) return;
       dismissReview();
