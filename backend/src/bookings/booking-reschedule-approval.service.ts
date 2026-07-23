@@ -31,9 +31,15 @@ export class BookingRescheduleApprovalService {
         let lockedDate = preview.requestedDate;
         await this.lockSlot(manager, lockedTableId, lockedDate);
 
+        const bookingRepository = manager.getRepository(Booking);
+        const lockedBooking = await bookingRepository.findOne({
+          where: { id: preview.booking.id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedBooking) throw new NotFoundException('Бронювання не знайдено');
+
         const request = await requestRepository.findOne({
           where: { id: requestId },
-          relations: ['booking'],
           lock: { mode: 'pessimistic_write' },
         });
         if (!request) throw new NotFoundException('Запит не знайдено');
@@ -41,11 +47,9 @@ export class BookingRescheduleApprovalService {
           throw new BadRequestException('Цей запит уже опрацьовано');
         }
 
-        const bookingRepository = manager.getRepository(Booking);
         const booking = await bookingRepository.findOne({
-          where: { id: request.booking.id },
+          where: { id: lockedBooking.id },
           relations: ['table'],
-          lock: { mode: 'pessimistic_write' },
         });
         if (!booking) throw new NotFoundException('Бронювання не знайдено');
         if (!booking.table?.id) {
@@ -67,10 +71,16 @@ export class BookingRescheduleApprovalService {
           await this.lockSlot(manager, lockedTableId, lockedDate);
         }
 
-        const table = await manager.getRepository(TableEntity).findOne({
+        const tableRepository = manager.getRepository(TableEntity);
+        const lockedTable = await tableRepository.findOne({
           where: { id: booking.table.id },
-          relations: ['zone'],
           lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedTable) throw new NotFoundException('Стіл не знайдено');
+
+        const table = await tableRepository.findOne({
+          where: { id: lockedTable.id },
+          relations: ['zone'],
         });
         if (!table) throw new NotFoundException('Стіл не знайдено');
         this.assertTableAvailable(table);
