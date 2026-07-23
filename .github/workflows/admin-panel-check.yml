@@ -9,21 +9,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install frontend dependencies
+        run: npm --prefix frontend install --no-audit --no-fund --omit=optional
+      - name: Build frontend
+        run: npm --prefix frontend run build
+      - name: Check whitespace
+        run: git diff --check origin/main...HEAD
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Install backend dependencies
-        run: npm --prefix backend install --no-audit --no-fund
-      - name: Install frontend dependencies
-        run: npm --prefix frontend install --no-audit --no-fund
+        run: npm --prefix backend install --no-audit --no-fund --omit=optional
       - name: Build backend
         run: npm --prefix backend run build
-      - name: Build frontend
-        run: npm --prefix frontend run build
-      - name: Check whitespace
-        run: git diff --check origin/main...HEAD
