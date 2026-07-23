@@ -41,9 +41,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-      - name: Install backend dependencies
-        run: npm --prefix backend ci --ignore-scripts --no-audit --no-fund
+      - name: Install backend dependencies including Nest CLI
+        run: npm --prefix backend install --include=dev --package-lock=false --no-audit --no-fund
       - name: Build backend
         run: npm --prefix backend run build
