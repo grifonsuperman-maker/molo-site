@@ -12,11 +12,16 @@ import { UpdateThemeDto } from './dto/update-theme.dto';
 import { CloseRestaurantDto } from './dto/close-restaurant.dto';
 import { LogsService } from '../logs/logs.service';
 
-type AdminPermissionKey =
+export type AdminPermissionKey =
+  | 'adminCanManageZones'
   | 'adminCanManageOnlineBooking'
   | 'adminCanManageRestaurant'
   | 'adminCanChangeSiteMode'
-  | 'adminCanEditRestaurantSettings';
+  | 'adminCanEditRestaurantSettings'
+  | 'adminCanManageBlacklist'
+  | 'adminCanRespondReviews'
+  | 'adminCanManageStaffShifts'
+  | 'adminCanSendBroadcasts';
 
 @Injectable()
 export class RestaurantService {
@@ -44,6 +49,10 @@ export class RestaurantService {
       adminCanManageRestaurant: false,
       adminCanChangeSiteMode: false,
       adminCanEditRestaurantSettings: false,
+      adminCanManageBlacklist: false,
+      adminCanRespondReviews: false,
+      adminCanManageStaffShifts: false,
+      adminCanSendBroadcasts: false,
       address: null,
       menuUrl:
         'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio',
@@ -132,7 +141,7 @@ export class RestaurantService {
     );
   }
 
-  private async assertAdminPermission(permission: AdminPermissionKey, message: string) {
+  async assertAdminPermission(permission: AdminPermissionKey, message: string) {
     const restaurant = await this.getRestaurant();
 
     if (!restaurant[permission]) {
