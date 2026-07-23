@@ -1,5 +1,12 @@
 export type RestaurantStatus = 'open' | 'booking_closed' | 'closed';
 export type SiteMode = 'day' | 'night' | 'holiday';
+export type HolidayKey =
+  | 'new-year'
+  | 'christmas'
+  | 'valentines'
+  | 'easter'
+  | 'halloween'
+  | 'march-8';
 export type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'cleaning' | 'closed';
 export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
 
@@ -15,6 +22,7 @@ export type Restaurant = {
   menuUrl: string | null;
   status: RestaurantStatus;
   siteMode?: SiteMode;
+  holidayKey?: HolidayKey | null;
   closeMessage: string;
   bookingClosedMessage: string;
   mapWidth?: number;
