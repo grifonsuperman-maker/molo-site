@@ -20,7 +20,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm --prefix frontend install --no-audit --no-fund --omit=optional
       - name: Build frontend
-        run: npm --prefix frontend run build
+        shell: bash
+        run: set -o pipefail; npm --prefix frontend run build 2>&1 | tee frontend-build.log
+      - name: Upload frontend build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-log
+          path: frontend-build.log
       - name: Check whitespace
         run: git diff --check origin/main...HEAD
 
@@ -35,4 +42,11 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend install --no-audit --no-fund --omit=optional
       - name: Build backend
-        run: npm --prefix backend run build
+        shell: bash
+        run: set -o pipefail; npm --prefix backend run build 2>&1 | tee backend-build.log
+      - name: Upload backend build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build-log
+          path: backend-build.log
