@@ -8,6 +8,7 @@ import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 
 import { BookingExpirationService } from './booking-expiration.service';
+import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsController } from './bookings.controller';
 import { BookingsService } from './bookings.service';
@@ -38,6 +39,7 @@ import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
     BookingsService,
     GuestBookingsService,
     BookingExpirationService,
+    BookingRescheduleApprovalService,
     BookingTableLockService,
   ],
   exports: [BookingsService, GuestBookingsService],
