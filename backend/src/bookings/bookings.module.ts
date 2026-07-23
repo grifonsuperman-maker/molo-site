@@ -7,6 +7,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 
+import { BookingCalendarController } from './booking-calendar.controller';
+import { BookingCalendarService } from './booking-calendar.service';
 import { BookingExpirationService } from './booking-expiration.service';
 import { BookingsController } from './bookings.controller';
 import { BookingsService } from './bookings.service';
@@ -30,8 +32,13 @@ import { GuestReview } from './entities/guest-review.entity';
     LogsModule,
     NotificationsModule,
   ],
-  controllers: [BookingsController],
-  providers: [BookingsService, GuestBookingsService, BookingExpirationService],
+  controllers: [BookingsController, BookingCalendarController],
+  providers: [
+    BookingsService,
+    GuestBookingsService,
+    BookingExpirationService,
+    BookingCalendarService,
+  ],
   exports: [BookingsService, GuestBookingsService],
 })
 export class BookingsModule {}
