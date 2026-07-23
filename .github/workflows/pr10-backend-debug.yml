@@ -1,0 +1,56 @@
+name: PR 10 Backend Debug
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  backend-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Build backend and capture log
+        id: build
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          npm --prefix backend run build > backend-build.log 2>&1
+          status=$?
+          echo "$status" > backend-build.status
+          exit 0
+
+      - name: Upload backend build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build-log
+          path: |
+            backend-build.log
+            backend-build.status
+
+      - name: Fail if backend build failed
+        shell: bash
+        run: |
+          status=$(cat backend-build.status)
+          if [ "$status" != "0" ]; then
+            echo "Backend build failed with status $status"
+            exit "$status"
+          fi
