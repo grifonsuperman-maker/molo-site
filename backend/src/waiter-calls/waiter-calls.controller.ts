@@ -1,51 +1,56 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
 import { WaiterCallsService } from './waiter-calls.service';
+import { Roles } from '../common/decorators/roles.decorator';
 
-@Public()
 @Controller('waiter-calls')
 export class WaiterCallsController {
   constructor(private readonly service: WaiterCallsService) {}
 
   @Post()
+  @Public()
   createFromGuest(@Body() dto: { bookingId: string }) {
     return this.service.createFromGuest(dto);
   }
 
   @Get()
-  list(@Query('waiterId') waiterId?: string) {
-    return this.service.list(waiterId);
+  @Roles('waiter')
+  list(@Req() request: any) {
+    return this.service.list(request.user.staffId);
   }
 
   @Get('guest-status/:bookingId')
+  @Public()
   guestStatus(@Param('bookingId') bookingId: string) {
     return this.service.guestStatus(bookingId);
   }
 
   @Get('assignments')
-  assignments(@Query('waiterId') waiterId: string) {
-    return this.service.myAssignments(waiterId);
+  @Roles('waiter')
+  assignments(@Req() request: any) {
+    return this.service.myAssignments(request.user.staffId);
   }
 
   @Post('assign')
+  @Roles('waiter')
   assign(@Body() dto: {
     bookingId: string;
     tableId?: string | null;
     tableNumber?: string | null;
-    waiterId: string;
-    waiterName: string;
-  }) {
-    return this.service.assign(dto);
+  }, @Req() request: any) {
+    return this.service.assign({ ...dto, waiterId: request.user.staffId, waiterName: request.user.name });
   }
 
   @Patch(':id/accept')
-  accept(@Param('id') id: string, @Body() dto: { waiterId: string; waiterName: string }) {
-    return this.service.accept(id, dto);
+  @Roles('waiter')
+  accept(@Param('id') id: string, @Req() request: any) {
+    return this.service.accept(id, { waiterId: request.user.staffId, waiterName: request.user.name });
   }
 
   @Patch(':id/close')
-  close(@Param('id') id: string) {
-    return this.service.close(id);
+  @Roles('waiter')
+  close(@Param('id') id: string, @Req() request: any) {
+    return this.service.close(id, request.user.staffId);
   }
 }

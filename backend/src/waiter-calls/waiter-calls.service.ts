@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -12,7 +12,6 @@ export type WaiterCall = {
   tableId: string | null;
   tableNumber: string | null;
   clientName: string | null;
-  clientPhone: string | null;
   waiterId: string | null;
   waiterName: string | null;
   status: WaiterCallStatus;
@@ -163,7 +162,6 @@ export class WaiterCallsService {
       tableId: booking.table?.id || null,
       tableNumber: booking.table?.tableNumber || null,
       clientName: booking.client?.fullName || null,
-      clientPhone: booking.client?.phone || null,
       waiterId: assignment?.waiterId || null,
       waiterName: assignment?.waiterName || null,
       status: 'new',
@@ -198,11 +196,38 @@ export class WaiterCallsService {
       .slice(0, 50);
   }
 
+  detachBooking(bookingId: string) {
+    this.assignments = this.assignments.filter((assignment) => assignment.bookingId !== bookingId);
+  }
+
+  /** Invalidates active guest calls after the booking has been moved to another table. */
+  closeActiveCallsAndDetachBooking(bookingId: string) {
+    const closedAt = this.now();
+
+    for (const call of this.calls) {
+      if (call.bookingId === bookingId && (call.status === 'new' || call.status === 'accepted')) {
+        call.status = 'closed';
+        call.closedAt = closedAt;
+      }
+    }
+
+    this.detachBooking(bookingId);
+  }
+
   accept(id: string, dto: { waiterId: string; waiterName: string }) {
     const call = this.calls.find((item) => item.id === id);
     if (!call) throw new NotFoundException('Виклик не знайдено');
     if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
     if (!dto.waiterId) throw new BadRequestException('waiterId обовʼязковий');
+    if (call.waiterId && call.waiterId !== dto.waiterId) {
+      throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+    }
+    if (call.status === 'accepted') {
+      return {
+        message: 'Виклик вже прийнято',
+        call,
+      };
+    }
 
     call.status = 'accepted';
     call.waiterId = dto.waiterId;
@@ -231,9 +256,15 @@ export class WaiterCallsService {
     };
   }
 
-  close(id: string) {
+  close(id: string, waiterId: string) {
     const call = this.calls.find((item) => item.id === id);
     if (!call) throw new NotFoundException('Виклик не знайдено');
+    if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
+    if (call.status !== 'accepted') throw new BadRequestException('Спочатку прийміть виклик');
+    if (!waiterId) throw new BadRequestException('waiterId обовʼязковий');
+    if (call.waiterId !== waiterId) {
+      throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+    }
 
     call.status = 'closed';
     call.closedAt = this.now();

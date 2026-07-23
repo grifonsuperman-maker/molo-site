@@ -308,4 +308,7 @@ export const bookingsApi = {
 
   complete: (id: string) =>
     api.patch<ActionResponse>(`/bookings/${encode(id)}/complete`),
+
+  waiterTransfer: (id: string, tableId: string) =>
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/waiter-transfer`, { tableId }),
 };

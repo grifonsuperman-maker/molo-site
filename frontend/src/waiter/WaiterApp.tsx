@@ -1,815 +1,472 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from "react";
+import { bookingsApi } from "../api/bookings";
+import { clearAccessToken } from "../api/client";
+import { staffApi, type StaffMember } from "../api/staff";
+import { tablesApi } from "../api/tables";
+import {
+  waiterCallsApi,
+  type WaiterAssignment,
+  type WaiterCall,
+} from "../api/waiterCalls";
+import type { Booking, TableItem } from "../api/types";
 
-import { bookingsApi } from '../api/bookings';
-import { tablesApi } from '../api/tables';
-import { waiterCallsApi } from '../api/waiterCalls';
-import type { WaiterAssignment, WaiterCall } from '../api/waiterCalls';
-import type { Booking } from '../api/types';
-import { usePersistentState } from '../hooks/usePersistentState';
-
-type LocationKey =
-  | 'hall'
-  | 'canopy'
-  | 'gazebo'
-  | 'rotang'
-  | 'embankment'
-  | 'glass_gazebo'
-  | 'water_gazebo'
-  | 'other';
-
-type WaiterView =
-  | { kind: 'calls' }
-  | { kind: 'my_tables' }
-  | { kind: 'all_locations' }
-  | { kind: 'location'; location: LocationKey }
-  | { kind: 'history' };
-
-type LocationInfo = {
-  key: LocationKey;
-  label: string;
-  description: string;
-};
-
-type BookingAction = {
-  key: 'arrived' | 'cleaning' | 'ready';
-  label: string;
-  confirmText: string;
-  tone: 'amber' | 'cyan' | 'green';
-};
-
-const LOCATIONS: LocationInfo[] = [
-  { key: 'hall', label: 'Зал ресторану', description: 'Столи 1–14' },
-  { key: 'canopy', label: 'Навіс', description: 'Столи 15–20' },
-  { key: 'gazebo', label: 'Велика альтанка', description: 'Столи 21–36' },
-  { key: 'rotang', label: 'Ротанг', description: 'Столи 37–39' },
-  { key: 'embankment', label: 'Набережна', description: 'Столи 40–44' },
-  { key: 'glass_gazebo', label: 'Скляна альтанка', description: 'Столи 45–50' },
-  { key: 'water_gazebo', label: 'Альтанка на воді', description: 'Столи 100–109' },
-  { key: 'other', label: 'Інші столи', description: 'Столи без локації' },
-];
-
+const SESSION_KEY = "molo_waiter_staff";
+const SHIFT_ENDED_KEY = "molo_waiter_shift_ended_name";
+const ACTIVE = new Set(["pending", "approved"]);
 const STATUS_LABELS: Record<string, string> = {
-  pending: 'Очікує',
-  approved: 'Підтверджено',
-  rejected: 'Відхилено',
-  cancelled: 'Скасовано',
-  completed: 'Завершено',
-  free: 'Вільний',
-  reserved: 'Підтверджено',
-  occupied: 'Зайнятий',
-  cleaning: 'Готується',
-  closed: 'Закритий',
+  pending: "Очікує",
+  approved: "Підтверджено",
+  rejected: "Відхилено",
+  cancelled: "Скасовано",
+  completed: "Завершено",
+  free: "Вільний",
+  reserved: "Підтверджено",
+  occupied: "Зайнятий",
+  cleaning: "Готується",
+  closed: "Закритий",
 };
+const loc = (n: number) =>
+  n <= 14
+    ? "Зал ресторану"
+    : n <= 20
+      ? "Навіс"
+      : n <= 36
+        ? "Велика альтанка"
+        : n <= 39
+          ? "Ротанг"
+          : n <= 44
+            ? "Набережна"
+            : n <= 50
+              ? "Скляна альтанка"
+              : n >= 100
+                ? "Альтанка на воді"
+                : "Інші столи";
+const time = (v?: string | null) => String(v || "--:--").slice(0, 5);
 
-const ACTIVE_BOOKING_STATUSES = new Set(['pending', 'approved']);
-const HISTORY_BOOKING_STATUSES = new Set(['completed', 'cancelled', 'rejected']);
-
-function todayInKyiv() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Kyiv',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-
-  const year = parts.find((part) => part.type === 'year')?.value || '1970';
-  const month = parts.find((part) => part.type === 'month')?.value || '01';
-  const day = parts.find((part) => part.type === 'day')?.value || '01';
-
-  return `${year}-${month}-${day}`;
-}
-
-function normalizeDate(value: string) {
-  return String(value || '').slice(0, 10);
-}
-
-function timeLabel(value: string | null | undefined) {
-  if (!value) return '--:--';
-  const [hours = '00', minutes = '00'] = String(value).split(':');
-  return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
-}
-
-function tableNumber(booking: Booking) {
-  return Number(booking.table?.tableNumber || 0);
-}
-
-function getLocationKeyByTableNumber(value: number): LocationKey {
-  if (value >= 1 && value <= 14) return 'hall';
-  if (value >= 15 && value <= 20) return 'canopy';
-  if (value >= 21 && value <= 36) return 'gazebo';
-  if (value >= 37 && value <= 39) return 'rotang';
-  if (value >= 40 && value <= 44) return 'embankment';
-  if (value >= 45 && value <= 50) return 'glass_gazebo';
-  if (value >= 100 && value <= 109) return 'water_gazebo';
-  return 'other';
-}
-
-function getBookingLocationKey(booking: Booking): LocationKey {
-  return getLocationKeyByTableNumber(tableNumber(booking));
-}
-
-function sortBookings(a: Booking, b: Booking) {
-  const byTime = String(a.bookingTime || '').localeCompare(String(b.bookingTime || ''));
-  if (byTime !== 0) return byTime;
-  return tableNumber(a) - tableNumber(b);
-}
-
-function statusClass(status: string) {
-  if (status === 'pending') return 'border-sky-300/40 bg-sky-400/10 text-sky-100';
-  if (status === 'approved' || status === 'reserved') {
-    return 'border-amber-300/40 bg-amber-400/10 text-amber-100';
+function Login({ onLogin }: { onLogin: (staff: StaffMember) => void }) {
+  const endedName = localStorage.getItem(SHIFT_ENDED_KEY);
+  const [options, setOptions] = useState<
+    { id: string; fullName: string; role: string; isOnShift: boolean }[]
+  >([]);
+  const [staffId, setStaffId] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    staffApi
+      .getLoginOptions()
+      .then((v) => {
+        const waiters = v.filter((x) => x.role === "waiter");
+        setOptions(waiters);
+        setStaffId(waiters[0]?.id || "");
+      })
+      .catch(() => setError("Не вдалося завантажити працівників."));
+  }, []);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!/^\d{4,6}$/.test(pin)) return setError("PIN має містити 4–6 цифр.");
+    try {
+      setBusy(true);
+      setError("");
+      const result = await staffApi.loginWithPin(staffId, pin);
+      if (result.staff.role !== "waiter")
+        throw new Error("Для пульта доступний лише офіціант.");
+      localStorage.removeItem(SHIFT_ENDED_KEY);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(result.staff));
+      onLogin(result.staff);
+    } catch (x: any) {
+      setError(x.message || "Не вдалося увійти.");
+    } finally {
+      setBusy(false);
+    }
   }
-  if (status === 'occupied') return 'border-red-300/40 bg-red-400/10 text-red-100';
-  if (status === 'cleaning') return 'border-cyan-300/40 bg-cyan-400/10 text-cyan-100';
-  if (status === 'completed') return 'border-emerald-300/40 bg-emerald-400/10 text-emerald-100';
-  if (status === 'rejected' || status === 'cancelled') {
-    return 'border-neutral-500/40 bg-neutral-500/10 text-neutral-300';
-  }
-  return 'border-white/15 bg-white/5 text-white/70';
-}
-
-function getSavedWaiter() {
-  const existingId = window.localStorage.getItem('molo_waiter_id');
-  const existingName = window.localStorage.getItem('molo_waiter_name');
-
-  if (existingId && existingName) {
-    return { waiterId: existingId, waiterName: existingName };
-  }
-
-  const waiterName =
-    window.prompt('Введи імʼя офіціанта для цього телефону')?.trim() || 'Офіціант';
-  const waiterId =
-    existingId || `waiter_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-  window.localStorage.setItem('molo_waiter_id', waiterId);
-  window.localStorage.setItem('molo_waiter_name', waiterName);
-
-  return { waiterId, waiterName };
-}
-
-function isValidView(value: WaiterView) {
-  if (!value || typeof value !== 'object' || !('kind' in value)) return false;
-
-  if (
-    value.kind === 'calls' ||
-    value.kind === 'my_tables' ||
-    value.kind === 'all_locations' ||
-    value.kind === 'history'
-  ) {
-    return true;
-  }
-
   return (
-    value.kind === 'location' &&
-    LOCATIONS.some((location) => location.key === value.location)
-  );
-}
-
-function ActionButton({
-  children,
-  onClick,
-  disabled,
-  tone,
-}: {
-  children: string;
-  onClick: () => void;
-  disabled?: boolean;
-  tone: 'amber' | 'cyan' | 'green';
-}) {
-  const toneClass =
-    tone === 'amber'
-      ? 'border-amber-200/60 bg-amber-300/15 text-amber-100 active:bg-amber-300/25'
-      : tone === 'cyan'
-        ? 'border-cyan-200/50 bg-cyan-300/12 text-cyan-100 active:bg-cyan-300/20'
-        : 'border-emerald-200/50 bg-emerald-400/15 text-emerald-100 active:bg-emerald-400/25';
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`w-full rounded-2xl border px-4 py-3 text-sm font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${toneClass}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="rounded-[28px] border border-dashed border-white/15 bg-white/[0.03] p-6 text-center text-sm text-white/55">
-      {text}
-    </div>
+    <main className="min-h-screen bg-[#121313] px-4 py-8 text-white">
+      {endedName && (
+        <section className="mx-auto mb-4 max-w-md rounded-[30px] border border-amber-200/40 bg-black/35 p-6 text-center">
+          <p className="text-xl font-black">
+            Дякуємо за сьогоднішню зміну, {endedName} 🤍
+          </p>
+          <p className="mt-3 text-white/70">
+            Гарного вечора та приємного відпочинку.
+          </p>
+          <p className="mt-2 text-sm text-white/55">
+            Наступний вхід буде доступний після відкриття нової зміни
+            Адміністратором.
+          </p>
+        </section>
+      )}
+      <form
+        onSubmit={submit}
+        className="mx-auto max-w-md rounded-[30px] border border-white/15 bg-black/35 p-6 shadow-[0_0_35px_rgba(251,191,36,.08)]"
+      >
+        <p className="text-xs tracking-[.25em] text-amber-200">MOLO</p>
+        <h1 className="mt-2 text-3xl font-black">Пульт офіціанта</h1>
+        <label className="mt-7 block text-sm text-white/70">
+          Офіціант
+          <select
+            value={staffId}
+            onChange={(e) => setStaffId(e.target.value)}
+            className="mt-2 w-full rounded-2xl border border-white/15 bg-black/40 p-4 text-white"
+          >
+            {options.map((x) => (
+              <option key={x.id} value={x.id} disabled={!x.isOnShift}>
+                {x.fullName}
+                {x.isOnShift ? "" : " — не на зміні"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="mt-4 block text-sm text-white/70">
+          PIN
+          <input
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
+            type="password"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+            className="mt-2 w-full rounded-2xl border border-white/15 bg-black/40 p-4 text-xl tracking-[.4em] text-white"
+          />
+        </label>
+        {error && <p className="mt-3 text-sm text-red-200">{error}</p>}
+        <button
+          disabled={busy || !staffId}
+          className="mt-6 w-full rounded-2xl border border-amber-200/70 bg-amber-300/10 p-4 font-black text-amber-100 transition duration-150 active:scale-95"
+        >
+          {busy ? "Входимо…" : "Увійти"}
+        </button>
+      </form>
+    </main>
   );
 }
 
 export default function WaiterApp() {
+  const [staff, setStaff] = useState<StaffMember | null>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    } catch {
+      return null;
+    }
+  });
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [calls, setCalls] = useState<WaiterCall[]>([]);
   const [assignments, setAssignments] = useState<WaiterAssignment[]>([]);
-  const [view, setView] = usePersistentState<WaiterView>('molo_waiter_view', {
-    kind: 'calls',
-  });
-  const [today, setToday] = useState(() => todayInKyiv());
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [waiter, setWaiter] = useState(() => getSavedWaiter());
-
-  useEffect(() => {
-    if (!isValidView(view)) {
-      setView({ kind: 'calls' });
-    }
-  }, [setView, view]);
-
-  const todayBookings = useMemo(() => {
-    return bookings
-      .filter((booking) => normalizeDate(booking.bookingDate) === today)
-      .sort(sortBookings);
-  }, [bookings, today]);
-
-  const activeTodayBookings = useMemo(
-    () => todayBookings.filter((booking) => ACTIVE_BOOKING_STATUSES.has(booking.status)),
-    [todayBookings],
-  );
-
-  const historyTodayBookings = useMemo(
-    () => todayBookings.filter((booking) => HISTORY_BOOKING_STATUSES.has(booking.status)),
-    [todayBookings],
-  );
-
-  const myTableNumbers = useMemo(() => {
-    return new Set(
-      assignments
-        .map((assignment) => String(assignment.tableNumber || ''))
-        .filter(Boolean),
-    );
-  }, [assignments]);
-
-  const myBookings = useMemo(() => {
-    return activeTodayBookings.filter((booking) =>
-      myTableNumbers.has(String(booking.table?.tableNumber || '')),
-    );
-  }, [activeTodayBookings, myTableNumbers]);
-
-  const myCalls = useMemo(
-    () => calls.filter((call) => call.waiterId === waiter.waiterId),
-    [calls, waiter.waiterId],
-  );
-
-  const commonCalls = useMemo(
-    () => calls.filter((call) => !call.waiterId),
-    [calls],
-  );
-
-  const selectedLocation =
-    view.kind === 'location'
-      ? LOCATIONS.find((location) => location.key === view.location) || null
-      : null;
-
-  const selectedLocationBookings = useMemo(() => {
-    if (view.kind !== 'location') return [];
-
-    return activeTodayBookings.filter(
-      (booking) => getBookingLocationKey(booking) === view.location,
-    );
-  }, [activeTodayBookings, view]);
-
+  const [tab, setTab] = useState<"calls" | "mine" | "all" | "history">("calls");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  const [transfer, setTransfer] = useState<Booking | null>(null);
+  const [tables, setTables] = useState<TableItem[]>([]);
+  const logout = () => {
+    localStorage.setItem(SHIFT_ENDED_KEY, staff?.fullName || "");
+    localStorage.removeItem(SESSION_KEY);
+    clearAccessToken();
+    setStaff(null);
+  };
   async function load() {
+    if (!staff) return;
     try {
-      setLoading(true);
-      setError(null);
-
-      const kyivToday = todayInKyiv();
-      setToday(kyivToday);
-
-      const [bookingsResult, callsResult, assignmentsResult] = await Promise.all([
+      const [b, c, a] = await Promise.all([
         bookingsApi.getToday(),
-        waiterCallsApi.list(waiter.waiterId),
-        waiterCallsApi.assignments(waiter.waiterId),
+        waiterCallsApi.list(),
+        waiterCallsApi.assignments(),
       ]);
-
-      setBookings(bookingsResult);
-      setCalls(callsResult);
-      setAssignments(assignmentsResult);
-    } catch (loadError: any) {
-      setError(loadError?.message || 'Не вдалося завантажити дані офіціанта');
-    } finally {
-      setLoading(false);
+      setBookings(b);
+      setCalls(c);
+      setAssignments(a);
+      setError("");
+    } catch (x: any) {
+      if (/зміну|заблокований|архівований|авторизац/i.test(x.message || ""))
+        logout();
+      else setError(x.message || "Не вдалося оновити дані.");
     }
   }
-
   useEffect(() => {
     load();
-    const interval = window.setInterval(load, 15000);
-    return () => window.clearInterval(interval);
-  }, [waiter.waiterId]);
-
-  async function runAction(
-    actionKey: string,
-    successMessage: string,
-    action: () => Promise<unknown>,
-  ) {
-    if (busyAction) return;
-
+    const id = window.setInterval(load, 15000);
+    return () => clearInterval(id);
+  }, [staff?.id]);
+  const active = useMemo(
+    () => bookings.filter((b) => ACTIVE.has(b.status)),
+    [bookings],
+  );
+  const mine = useMemo(() => {
+    const ids = new Set(
+      assignments
+        .filter((a) => a.waiterId === staff?.id)
+        .map((a) => a.bookingId),
+    );
+    return active.filter((b) => ids.has(b.id));
+  }, [active, assignments, staff]);
+  async function act(key: string, job: () => Promise<unknown>) {
     try {
-      setBusyAction(actionKey);
-      setError(null);
-      setSuccess(null);
-
-      await action();
+      setBusy(key);
+      await job();
       await load();
-
-      setSuccess(successMessage);
-      window.setTimeout(() => setSuccess(null), 2500);
-    } catch (actionError: any) {
-      setError(actionError?.message || 'Дія не виконана');
+    } catch (x: any) {
+      setError(x.message || "Дія не виконана.");
     } finally {
-      setBusyAction(null);
+      setBusy("");
     }
   }
-
-  function changeWaiter() {
-    const nextName = window.prompt('Імʼя офіціанта', waiter.waiterName)?.trim();
-    if (!nextName) return;
-
-    const nextWaiter = {
-      waiterId: waiter.waiterId,
-      waiterName: nextName,
-    };
-
-    window.localStorage.setItem('molo_waiter_name', nextName);
-    setWaiter(nextWaiter);
-  }
-
-  function getBookingAction(booking: Booking): BookingAction | null {
-    if (booking.status !== 'approved' || !booking.table?.id) return null;
-
-    if (booking.table.status === 'occupied') {
-      return {
-        key: 'cleaning',
-        label: 'Гості пішли, почати прибирання',
-        confirmText: 'Гості пішли та можна починати прибирання?',
-        tone: 'cyan',
-      };
-    }
-
-    if (booking.table.status === 'cleaning') {
-      return {
-        key: 'ready',
-        label: 'Стіл готовий',
-        confirmText: 'Прибирання завершено і стіл готовий?',
-        tone: 'green',
-      };
-    }
-
-    if (booking.table.status === 'reserved' || booking.table.status === 'free') {
-      return {
-        key: 'arrived',
-        label: 'Гість прийшов',
-        confirmText: 'Гість уже прийшов?',
-        tone: 'amber',
-      };
-    }
-
-    return null;
-  }
-
-  function performBookingAction(booking: Booking, action: BookingAction) {
-    const number = booking.table?.tableNumber || '-';
-    const confirmed = window.confirm(
-      `Стіл №${number}\n\n${action.confirmText}`,
-    );
-
-    if (!confirmed) return;
-
-    if (action.key === 'arrived') {
-      runAction(`${booking.id}:arrived`, `Стіл №${number}: гість прийшов`, async () => {
-        await bookingsApi.checkIn(booking.id);
-        await waiterCallsApi.assign({
-          bookingId: booking.id,
-          tableId: booking.table?.id || null,
-          tableNumber: booking.table?.tableNumber || null,
-          waiterId: waiter.waiterId,
-          waiterName: waiter.waiterName,
-        });
-      });
-      return;
-    }
-
-    if (action.key === 'cleaning') {
-      runAction(
-        `${booking.id}:cleaning`,
-        `Стіл №${number}: розпочато прибирання`,
-        () => tablesApi.cleaning(booking.table!.id),
+  async function openTransfer(b: Booking) {
+    setTransfer(b);
+    try {
+      setTables(
+        (await tablesApi.getAll()).filter(
+          (t) => t.status === "free" && t.isVisible,
+        ),
       );
-      return;
+    } catch (x: any) {
+      setError(x.message || "Не вдалося завантажити столи.");
     }
-
-    runAction(
-      `${booking.id}:ready`,
-      `Стіл №${number}: готовий`,
-      () => bookingsApi.complete(booking.id),
-    );
   }
-
-  function acceptCall(call: WaiterCall) {
-    runAction(
-      `call:${call.id}:accept`,
-      `Виклик столу №${call.tableNumber || '-'} прийнято`,
-      () =>
-        waiterCallsApi.accept(call.id, {
-          waiterId: waiter.waiterId,
-          waiterName: waiter.waiterName,
-        }),
-    );
-  }
-
-  function closeCall(call: WaiterCall) {
-    runAction(
-      `call:${call.id}:close`,
-      `Виклик столу №${call.tableNumber || '-'} закрито`,
-      () => waiterCallsApi.close(call.id),
-    );
-  }
-
-  function renderCallCard(call: WaiterCall) {
-    const assignedToMe = call.waiterId === waiter.waiterId;
-
-    return (
-      <article
-        key={call.id}
-        className="rounded-[28px] border border-amber-200/35 bg-amber-300/10 p-4 text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.08)]"
-      >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-amber-100/65">
-              Виклик офіціанта
-            </p>
-
-            <h2 className="mt-1 text-2xl font-black">
-              Стіл №{call.tableNumber || '-'}
-            </h2>
-
-            <p className="mt-1 text-sm text-white/70">
-              Гість: {call.clientName || '-'} ·{' '}
-              {new Date(call.createdAt).toLocaleTimeString('uk-UA', {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </p>
-
-            <p className="mt-1 text-xs text-white/50">
-              {assignedToMe
-                ? 'Це твій стіл'
-                : call.waiterName
-                  ? `Закріплено: ${call.waiterName}`
-                  : 'Загальний виклик без офіціанта'}
-            </p>
-          </div>
-
-          <span
-            className={`w-fit rounded-full border px-3 py-1 text-xs font-semibold ${
-              call.status === 'accepted'
-                ? 'border-emerald-200/35 bg-emerald-400/10 text-emerald-100'
-                : 'border-amber-200/45 bg-black/20 text-amber-100'
-            }`}
-          >
-            {call.status === 'accepted' ? 'Прийнято' : 'Новий'}
-          </span>
-        </div>
-
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => acceptCall(call)}
-            disabled={Boolean(busyAction) || call.status === 'accepted'}
-            className="rounded-2xl border border-amber-200/60 bg-amber-300/15 px-3 py-3 text-sm font-semibold text-amber-100 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busyAction === `call:${call.id}:accept` ? 'Зачекайте...' : 'Прийняв'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => closeCall(call)}
-            disabled={Boolean(busyAction)}
-            className="rounded-2xl border border-emerald-200/50 bg-emerald-400/15 px-3 py-3 text-sm font-semibold text-emerald-100 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busyAction === `call:${call.id}:close`
-              ? 'Закриваємо...'
-              : 'Закрити виклик'}
-          </button>
-        </div>
-      </article>
-    );
-  }
-
-  function renderBookingCard(booking: Booking) {
-    const location = LOCATIONS.find(
-      (item) => item.key === getBookingLocationKey(booking),
-    );
-    const isMyTable = myTableNumbers.has(
-      String(booking.table?.tableNumber || ''),
-    );
-    const action = getBookingAction(booking);
-    const visibleStatus =
-      booking.status === 'approved'
-        ? booking.table?.status || booking.status
-        : booking.status;
-    const actionKey = action ? `${booking.id}:${action.key}` : null;
-
-    return (
-      <article
-        key={booking.id}
-        className={`rounded-[30px] border p-4 shadow-[0_0_34px_rgba(0,0,0,.18)] ${
-          isMyTable
-            ? 'border-emerald-300/35 bg-emerald-400/10'
-            : 'border-white/10 bg-neutral-900/90'
-        }`}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-2xl border border-amber-200/40 bg-amber-300/12 px-3 py-1 text-sm font-black text-amber-100">
-                Стіл №{booking.table?.tableNumber || '-'}
-              </span>
-
-              <span
-                className={`rounded-2xl border px-3 py-1 text-xs font-semibold ${statusClass(
-                  visibleStatus,
-                )}`}
-              >
-                {STATUS_LABELS[visibleStatus] || visibleStatus}
-              </span>
-
-              {isMyTable && (
-                <span className="rounded-2xl border border-emerald-200/40 bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-100">
-                  Мій стіл
-                </span>
-              )}
-            </div>
-
-            <h2 className="mt-3 text-xl font-semibold text-white">
-              {timeLabel(booking.bookingTime)} ·{' '}
-              {booking.client?.fullName || 'Гість'}
-            </h2>
-
-            <p className="mt-1 text-sm text-white/60">
-              {location?.label || 'Локація не визначена'} · {booking.guestsCount}{' '}
-              гостей
-            </p>
-
-            {booking.client?.phone && (
-              <a
-                href={`tel:${booking.client.phone}`}
-                className="mt-2 inline-block text-sm font-semibold text-amber-100 underline decoration-amber-200/40 underline-offset-4"
-              >
-                {booking.client.phone}
-              </a>
-            )}
-          </div>
-        </div>
-
-        {booking.wishes && (
-          <p className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3 text-sm leading-snug text-white/70">
-            {booking.wishes}
-          </p>
-        )}
-
-        {action && actionKey && (
-          <div className="mt-4">
-            <ActionButton
-              tone={action.tone}
-              onClick={() => performBookingAction(booking, action)}
-              disabled={Boolean(busyAction)}
-            >
-              {busyAction === actionKey ? 'Зачекайте...' : action.label}
-            </ActionButton>
-          </div>
-        )}
-
-        {!action && ACTIVE_BOOKING_STATUSES.has(booking.status) && (
-          <p className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3 text-sm text-white/55">
-            {booking.status === 'pending'
-              ? 'Очікує підтвердження Адміністратора.'
-              : 'Для цього стану дій Офіціанта немає.'}
-          </p>
-        )}
-      </article>
-    );
-  }
-
-  function renderPrimaryTabs() {
-    return (
-      <div className="grid grid-cols-2 gap-2 rounded-[24px] border border-white/10 bg-black/25 p-2">
-        <button
-          type="button"
-          onClick={() => setView({ kind: 'calls' })}
-          className={`rounded-2xl px-4 py-3 text-sm font-black transition ${
-            view.kind === 'calls'
-              ? 'bg-amber-300 text-neutral-950'
-              : 'bg-white/5 text-white/75'
-          }`}
-        >
-          Виклики{calls.length > 0 ? ` · ${calls.length}` : ''}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setView({ kind: 'my_tables' })}
-          className={`rounded-2xl px-4 py-3 text-sm font-black transition ${
-            view.kind === 'my_tables'
-              ? 'bg-emerald-300 text-neutral-950'
-              : 'bg-white/5 text-white/75'
-          }`}
-        >
-          Мої столи{myBookings.length > 0 ? ` · ${myBookings.length}` : ''}
-        </button>
-      </div>
-    );
-  }
-
+  if (!staff) return <Login onLogin={setStaff} />;
+  const cards =
+    tab === "mine"
+      ? mine
+      : tab === "history"
+        ? bookings.filter((b) => !ACTIVE.has(b.status))
+        : active;
   return (
-    <div className="min-h-screen bg-[#10100f] px-4 py-5 pb-28 text-white lg:px-8">
-      <div className="mx-auto max-w-5xl">
-        <header className="mb-5 rounded-[32px] border border-white/10 bg-neutral-900 p-5 shadow-2xl">
-          <div className="flex items-start justify-between gap-3">
+    <main className="min-h-screen bg-[#121313] px-4 py-5 pb-28 text-white">
+      <div className="mx-auto max-w-4xl">
+        <header className="rounded-[30px] border border-white/15 bg-black/35 p-5 shadow-[0_0_36px_rgba(255,255,255,.04)]">
+          <div className="flex justify-between gap-3">
             <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-amber-300/75">
-                MOLO Restaurant
-              </p>
-
-              <h1 className="mt-2 text-3xl font-black tracking-tight">
-                Пульт офіціанта
-              </h1>
-
-              <button
-                type="button"
-                onClick={changeWaiter}
-                className="mt-3 rounded-2xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white/70"
-              >
-                Офіціант: {waiter.waiterName}
-              </button>
+              <p className="text-xs tracking-[.25em] text-amber-200">MOLO</p>
+              <h1 className="mt-1 text-3xl font-black">Пульт офіціанта</h1>
+              <p className="mt-2 text-white/65">Офіціант: {staff.fullName}</p>
             </div>
-
             <button
-              type="button"
               onClick={load}
-              disabled={loading}
-              className="rounded-2xl border border-amber-200/40 bg-amber-300/10 px-3 py-2 text-xs font-semibold text-amber-100 transition active:scale-[0.98] disabled:opacity-50"
+              className="h-fit rounded-2xl border border-amber-200/50 bg-amber-300/10 px-4 py-3 text-amber-100 transition duration-150 active:scale-95"
             >
-              {loading ? 'Оновлюємо...' : 'Оновити'}
+              Оновити
             </button>
           </div>
-
-          <div className="mt-5">{renderPrimaryTabs()}</div>
-
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={() => setView({ kind: 'all_locations' })}
-              className={`rounded-2xl border px-3 py-2 text-xs font-semibold transition ${
-                view.kind === 'all_locations' || view.kind === 'location'
-                  ? 'border-amber-200/55 bg-amber-300/15 text-amber-100'
-                  : 'border-white/15 bg-white/5 text-white/70'
-              }`}
-            >
-              Усі бронювання · {activeTodayBookings.length}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setView({ kind: 'history' })}
-              className={`rounded-2xl border px-3 py-2 text-xs font-semibold transition ${
-                view.kind === 'history'
-                  ? 'border-white/35 bg-white/10 text-white'
-                  : 'border-white/15 bg-white/5 text-white/60'
-              }`}
-            >
-              Історія · {historyTodayBookings.length}
-            </button>
-          </div>
+          <nav className="mt-5 grid grid-cols-2 gap-2">
+            {(
+              [
+                ["calls", "Виклики"],
+                ["mine", "Мої столи"],
+                ["all", "Усі бронювання"],
+                ["history", "Історія"],
+              ] as const
+            ).map(([k, l]) => (
+              <button
+                key={k}
+                onClick={() => setTab(k)}
+                className={`rounded-2xl border px-3 py-3 font-bold transition duration-150 active:scale-95 ${tab === k ? "border-amber-200/70 bg-amber-300/10 text-white" : "border-white/10 bg-white/[.03] text-white/65"}`}
+              >
+                {l}
+                {k === "calls" && calls.length ? (
+                  <span className="ml-2 rounded-full border border-amber-200/70 px-2 py-1 text-xs text-amber-100 shadow-[0_0_12px_rgba(251,191,36,.7)]">
+                    {calls.length}
+                  </span>
+                ) : (
+                  ""
+                )}
+              </button>
+            ))}
+          </nav>
         </header>
-
         {error && (
-          <div className="mb-4 rounded-3xl border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100">
+          <p className="mt-4 rounded-2xl border border-red-300/40 p-3 text-red-100">
             {error}
-          </div>
+          </p>
         )}
-
-        {success && (
-          <div className="mb-4 rounded-3xl border border-emerald-300/30 bg-emerald-500/10 p-4 text-sm font-semibold text-emerald-100">
-            {success}
-          </div>
-        )}
-
-        {view.kind === 'calls' && (
-          <section className="space-y-3">
-            {calls.length > 0 ? (
-              <>
-                {myCalls.map((call) => renderCallCard(call))}
-                {commonCalls.map((call) => renderCallCard(call))}
-              </>
-            ) : (
-              <EmptyState text="Нових викликів немає." />
-            )}
-          </section>
-        )}
-
-        {view.kind === 'my_tables' && (
-          <section className="grid gap-3">
-            {myBookings.length > 0 ? (
-              myBookings.map((booking) => renderBookingCard(booking))
-            ) : (
-              <EmptyState text="За тобою поки не закріплено активних столів." />
-            )}
-          </section>
-        )}
-
-        {view.kind === 'all_locations' && (
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {LOCATIONS.map((location) => {
-              const locationBookings = activeTodayBookings.filter(
-                (booking) => getBookingLocationKey(booking) === location.key,
-              );
-
-              return (
-                <button
-                  key={location.key}
-                  type="button"
-                  onClick={() =>
-                    setView({ kind: 'location', location: location.key })
-                  }
-                  className="rounded-[30px] border border-white/10 bg-neutral-900 p-5 text-left shadow-xl transition active:scale-[0.99]"
+        {tab === "calls" ? (
+          <section className="mt-4 grid gap-3">
+            {calls.length ? (
+              calls.map((c) => (
+                <article
+                  key={c.id}
+                  className={`rounded-[28px] border bg-black/35 p-4 ${c.status === "new" ? "animate-pulse border-orange-300/70 shadow-[0_0_22px_rgba(251,100,40,.4)]" : "border-emerald-300/50"}`}
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex justify-between">
                     <div>
-                      <h2 className="text-xl font-black text-white">
-                        {location.label}
+                      <p className="text-sm text-white/65">Виклик офіціанта</p>
+                      <h2 className="text-2xl font-black">
+                        Стіл №{c.tableNumber || "—"}
                       </h2>
-                      <p className="mt-1 text-sm text-white/50">
-                        {location.description}
+                      <p className="text-white/65">
+                        {c.clientName || "Гість"} ·{" "}
+                        {new Date(c.createdAt).toLocaleTimeString("uk-UA", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                       </p>
                     </div>
-
-                    <span className="min-w-12 rounded-2xl border border-amber-200/45 bg-amber-300/15 px-3 py-2 text-center text-xl font-black text-amber-100">
-                      {locationBookings.length}
-                    </span>
+                    <b className="h-fit rounded-full border border-amber-200/60 px-3 py-1 text-amber-100">
+                      {c.status === "new" ? "Новий" : "Прийнято"}
+                    </b>
                   </div>
-
-                  <p className="mt-4 text-sm font-semibold text-amber-100/85">
-                    Відкрити бронювання
-                  </p>
-                </button>
-              );
-            })}
-          </section>
-        )}
-
-        {view.kind === 'location' && (
-          <section>
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-[28px] border border-white/10 bg-neutral-900 p-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-white/45">
-                  {selectedLocation?.description}
-                </p>
-                <h2 className="mt-1 text-2xl font-black">
-                  {selectedLocation?.label}
-                </h2>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setView({ kind: 'all_locations' })}
-                className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white/80"
-              >
-                Назад
-              </button>
-            </div>
-
-            <div className="grid gap-3">
-              {selectedLocationBookings.length > 0 ? (
-                selectedLocationBookings.map((booking) =>
-                  renderBookingCard(booking),
-                )
-              ) : (
-                <EmptyState text="У цій локації активних бронювань немає." />
-              )}
-            </div>
-          </section>
-        )}
-
-        {view.kind === 'history' && (
-          <section className="grid gap-3">
-            {historyTodayBookings.length > 0 ? (
-              historyTodayBookings.map((booking) => renderBookingCard(booking))
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <button
+                      disabled={!!busy || c.status === "accepted"}
+                      onClick={() =>
+                        act(`a${c.id}`, () => waiterCallsApi.accept(c.id))
+                      }
+                      className="rounded-2xl border border-amber-200/70 bg-amber-300/10 p-3 text-amber-100 active:scale-95"
+                    >
+                      Прийняв
+                    </button>
+                    <button
+                      disabled={!!busy || c.status !== "accepted"}
+                      onClick={() =>
+                        act(`c${c.id}`, () => waiterCallsApi.close(c.id))
+                      }
+                      className="rounded-2xl border border-emerald-200/70 bg-emerald-300/10 p-3 text-emerald-100 active:scale-95"
+                    >
+                      Закрити виклик
+                    </button>
+                  </div>
+                </article>
+              ))
             ) : (
-              <EmptyState text="Завершених або скасованих бронювань сьогодні немає." />
+              <p className="mt-4 text-white/60">Нових викликів немає.</p>
             )}
           </section>
+        ) : (
+          <section className="mt-4 grid gap-3">
+            {cards.length ? cards.map((b) => {
+              const tableStatus = b.table?.status;
+              const checkedIn = Boolean(b.checkedInAt);
+              const action: [string, () => Promise<unknown>, string] | null =
+                b.status !== "approved" || !b.table
+                  ? null
+                  : checkedIn && tableStatus === "occupied"
+                    ? [
+                        "Гості пішли, почати прибирання",
+                        () => tablesApi.cleaning(b.table!.id),
+                        "cyan",
+                      ]
+                    : checkedIn && tableStatus === "cleaning"
+                      ? [
+                          "Стіл готовий",
+                          () => bookingsApi.complete(b.id),
+                          "green",
+                        ]
+                      : !checkedIn &&
+                          tableStatus !== "occupied" &&
+                          tableStatus !== "cleaning" &&
+                          tableStatus !== "closed"
+                        ? [
+                            "Гість прийшов",
+                            () =>
+                              bookingsApi
+                                .checkIn(b.id)
+                                .then(() =>
+                                  waiterCallsApi.assign({
+                                    bookingId: b.id,
+                                    tableId: b.table?.id,
+                                    tableNumber: b.table?.tableNumber,
+                                  }),
+                                ),
+                            "gold",
+                          ]
+                        : null;
+              const displayStatus =
+                b.status === "approved" &&
+                checkedIn &&
+                (tableStatus === "occupied" || tableStatus === "cleaning")
+                  ? tableStatus
+                  : b.status;
+              const showControls = Boolean(action) || b.status === "approved";
+              return (
+                <article
+                  key={b.id}
+                  className="rounded-[28px] border border-white/15 bg-black/35 p-4"
+                >
+                  <div className="flex justify-between">
+                    <div>
+                      <h2 className="text-2xl font-black">
+                        Стіл №{b.table?.tableNumber || "—"}
+                      </h2>
+                      <p className="mt-1 text-lg">
+                        {time(b.bookingTime)} · {b.client?.fullName || "Гість"}
+                      </p>
+                      <p className="text-sm text-white/60">
+                        {loc(Number(b.table?.tableNumber || 0))} ·{" "}
+                        {b.guestsCount} гостей
+                      </p>
+                    </div>
+                    <span className="h-fit rounded-full border border-white/20 px-3 py-1 text-sm text-white/70">
+                      {STATUS_LABELS[displayStatus] || displayStatus}
+                    </span>
+                  </div>
+                  {b.wishes && (
+                    <p className="mt-3 text-sm text-white/65">{b.wishes}</p>
+                  )}
+                  {showControls && (
+                    <div className="mt-4 grid gap-2">
+                      {action && (
+                        <button
+                          disabled={!!busy}
+                          onClick={() => {
+                            if (confirm(action[0] + "?")) act(b.id, action[1]);
+                          }}
+                          className={`rounded-2xl border bg-white/[.03] p-3 font-bold active:scale-95 ${action[2] === "gold" ? "border-amber-200/75 text-amber-100" : action[2] === "cyan" ? "border-cyan-200/70 text-cyan-100" : "border-emerald-200/70 text-emerald-100"}`}
+                        >
+                          {action[0]}
+                        </button>
+                      )}
+                      {b.status === "approved" && (
+                        <button
+                          disabled={!!busy}
+                          onClick={() => openTransfer(b)}
+                          className="rounded-2xl border border-amber-100/70 bg-white/[.03] p-3 font-bold text-amber-50 active:scale-95"
+                        >
+                          Змінити стіл
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            }) : <p className="text-white/60">Бронювань немає.</p>}
+          </section>
+        )}
+        {transfer && (
+          <div className="fixed inset-0 z-20 flex items-end bg-black/70">
+            <div className="max-h-[80vh] w-full overflow-auto rounded-t-[30px] border border-white/15 bg-[#171818] p-5">
+              <div className="flex justify-between">
+                <h2 className="text-2xl font-black">Змінити стіл</h2>
+                <button onClick={() => setTransfer(null)}>Закрити</button>
+              </div>
+              <p className="mt-2 text-white/60">
+                Оберіть вільний стіл для бронювання.
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {tables.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      if (
+                        confirm(
+                          `Пересадити гостей зі столу №${transfer.table?.tableNumber} на стіл №${t.tableNumber}?`,
+                        )
+                      )
+                        act(`t${transfer.id}`, () =>
+                          bookingsApi
+                            .waiterTransfer(transfer.id, t.id)
+                            .then(() => setTransfer(null)),
+                        );
+                    }}
+                    className="rounded-2xl border border-white/20 bg-black/30 p-4 text-left active:scale-95"
+                  >
+                    <b>Стіл №{t.tableNumber}</b>
+                    <span className="block text-sm text-white/55">
+                      {loc(Number(t.tableNumber))}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }
