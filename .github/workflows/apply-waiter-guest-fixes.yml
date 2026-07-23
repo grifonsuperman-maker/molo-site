@@ -1,0 +1,60 @@
+name: Apply waiter and guest fixes
+
+on:
+  push:
+    branches:
+      - fix/waiter-transfer-guest-actions-final2
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/waiter-transfer-guest-actions-final2
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Apply targeted fixes
+        run: python .github/scripts/apply_waiter_guest_fixes.py
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend install --no-audit --no-fund --package-lock=false
+
+      - name: Build frontend
+        run: npm --prefix frontend run build
+
+      - name: Install backend dependencies
+        run: |
+          npm --prefix backend install --include=dev --no-audit --no-fund --package-lock=false
+          npm --prefix backend install --no-save @nestjs/cli@10.4.9 --no-audit --no-fund --package-lock=false
+
+      - name: Build backend
+        run: npm --prefix backend run build
+
+      - name: Check diff
+        run: git diff --check
+
+      - name: Commit product changes
+        run: |
+          if git diff --quiet; then
+            echo "No product changes to commit"
+            exit 0
+          fi
+          git config user.name "chatgpt-codex-connector[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/bookings/bookings.controller.ts \
+            backend/src/bookings/bookings.service.ts \
+            backend/src/bookings/guest-bookings.service.ts \
+            frontend/src/api/types.ts \
+            frontend/src/api/bookings.ts \
+            frontend/src/waiter/WaiterApp.tsx \
+            frontend/src/guest/GuestApp.tsx
+          git commit -m "Fix waiter transfer and per-booking guest actions"
+          git push origin HEAD:fix/waiter-transfer-guest-actions-final2
