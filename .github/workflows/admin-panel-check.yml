@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 20
       - name: Install frontend dependencies
-        run: npm --prefix frontend install --no-audit --no-fund --omit=optional
+        run: npm --prefix frontend install --no-audit --no-fund
       - name: Build frontend
         shell: bash
         run: set -o pipefail; npm --prefix frontend run build 2>&1 | tee frontend-build.log
@@ -40,7 +40,7 @@ jobs:
         with:
           node-version: 20
       - name: Install backend dependencies
-        run: npm --prefix backend install --no-audit --no-fund --omit=optional
+        run: npm --prefix backend install --no-audit --no-fund
       - name: Build backend
         shell: bash
         run: set -o pipefail; npm --prefix backend run build 2>&1 | tee backend-build.log
