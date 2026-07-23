@@ -13,6 +13,7 @@ import { AdminBookingEventsController } from './admin-booking-events.controller'
 import { AdminBookingEventsService } from './admin-booking-events.service';
 import { AvailabilityBlocksController } from './availability-blocks.controller';
 import { AvailabilityBlocksService } from './availability-blocks.service';
+import { AvailabilityPermissionsService } from './availability-permissions.service';
 import { BookingExpirationService } from './booking-expiration.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsController } from './bookings.controller';
@@ -56,6 +57,7 @@ import { GuestReviewsController } from './guest-reviews.controller';
     BookingTableLockService,
     AdminBookingEventsService,
     AvailabilityBlocksService,
+    AvailabilityPermissionsService,
   ],
   exports: [BookingsService, GuestBookingsService, AvailabilityBlocksService],
 })
