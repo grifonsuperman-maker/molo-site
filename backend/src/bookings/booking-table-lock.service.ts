@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, QueryRunner, Repository } from 'typeorm';
 
 import { TableEntity } from '../tables/entities/table.entity';
+import { CreateAvailabilityBlockDto } from './dto/create-availability-block.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { Booking } from './entities/booking.entity';
 
@@ -21,6 +22,28 @@ export class BookingTableLockService {
   async withCreateLock<T>(dto: CreateBookingDto, work: () => Promise<T>) {
     const tableKey = await this.resolveTableKey(dto.tableId, dto.tableNumber);
     return this.withLocks([[tableKey, dto.bookingDate]], work);
+  }
+
+  async withAvailabilityBlockLock<T>(
+    dto: CreateAvailabilityBlockDto,
+    work: () => Promise<T>,
+  ) {
+    const date = String(dto.blockDate || '').trim();
+    if (dto.tableId) {
+      const tableKey = await this.resolveTableKey(dto.tableId, null);
+      return this.withLocks([[tableKey, date]], work);
+    }
+
+    const zoneId = String(dto.zoneId || '').trim();
+    if (!zoneId) throw new BadRequestException('Оберіть стіл або локацію');
+    const zoneTables = await this.tables.find({
+      where: { zone: { id: zoneId } } as any,
+    });
+    const tableKeys = zoneTables.map((table) => table.id).sort();
+    const locks: AdvisoryLock[] = tableKeys.length
+      ? tableKeys.map((tableId) => [tableId, date] as const)
+      : [[`zone:${zoneId}`, date]];
+    return this.withLocks(locks, work);
   }
 
   async withTransferLock<T>(bookingId: string, tableId: string, work: () => Promise<T>) {
