@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CalendarClock, LayoutDashboard, UsersRound } from 'lucide-react';
 
 import AdminAuthGate from './AdminAuthGate';
+import AdminGuestAttentionPanel from './AdminGuestAttentionPanel';
 import AdminStaffPanel from './AdminStaffPanel';
 import CompactAdminPanel from './CompactAdminPanel';
 import AdminTablesByLocation from './AdminTablesByLocation';
@@ -186,7 +187,10 @@ export default function AdminWorkspace() {
         </div>
 
         {section === 'panel' ? (
-          <CompactAdminPanel />
+          <>
+            <AdminGuestAttentionPanel />
+            <CompactAdminPanel />
+          </>
         ) : (
           <main className="mx-auto min-h-screen max-w-5xl px-3 pb-36 pt-3 sm:px-4 lg:px-8">
             <section className="rounded-[28px] border border-fuchsia-300/20 bg-[radial-gradient(circle_at_top,rgba(217,70,239,.10),transparent_38%),rgba(10,10,10,.96)] p-3 shadow-[0_0_38px_rgba(217,70,239,.08)] sm:p-5">
