@@ -158,16 +158,10 @@ function dismissReview(bookingId?: string | null) {
 
   if (!target) return;
 
-  const completedIds = new Set(
-    latestRawBookings
-      .filter((booking) => booking.status === 'completed')
-      .map((booking) => booking.bookingId),
-  );
-  if (completedIds.size === 0) completedIds.add(target.bookingId);
-
-  completedIds.forEach((id) => dismissedIds.add(id));
+  const dismissedBookingIds = new Set([target.bookingId]);
+  dismissedIds.add(target.bookingId);
   persistDismissedIds();
-  removeStoredTokens(completedIds);
+  removeStoredTokens(dismissedBookingIds);
 
   const visible = filterGuestHistory(latestRawBookings);
   publish(visible);
