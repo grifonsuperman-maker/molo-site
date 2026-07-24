@@ -1,0 +1,50 @@
+name: One-time PR28 transfer copy fix
+
+on:
+  push:
+    branches:
+      - fix/guest-actions-latest-main-2026-07-24
+    paths:
+      - .github/workflows/one-time-fix-pr28-transfer-copy.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/guest-actions-latest-main-2026-07-24
+          fetch-depth: 0
+      - name: Apply exact copy fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/src/waiter/WaiterAppV2.tsx')
+          text = path.read_text(encoding='utf-8')
+          old_copy = 'Призначення офіціанта скинуто. Новий офіціант має повторно натиснути «Гість прийшов».'
+          new_copy = 'Поточний офіціант залишається призначеним до нового столу. Виклик гостя доступний без повторного check-in.'
+
+          if old_copy not in text:
+              raise SystemExit('Expected transfer success copy was not found')
+          if "setTab('all')" not in text:
+              raise SystemExit('Expected transfer success tab target was not found')
+
+          text = text.replace(old_copy, new_copy, 1)
+          text = text.replace("setTab('all')", "setTab('mine')", 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit clean final change
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-time-fix-pr28-transfer-copy.yml
+          git add frontend/src/waiter/WaiterAppV2.tsx
+          git commit -m "Уточнити підтвердження пересадки гостей"
+          git push origin HEAD:fix/guest-actions-latest-main-2026-07-24
