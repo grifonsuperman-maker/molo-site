@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
-import GuestAdminCallController from "./guest/GuestAdminCallController";
 import GuestWaiterCallController from "./guest/GuestWaiterCallController";
 import GuestReviewDismissController from "./guest/GuestReviewDismissController";
 import WaiterApp from "./waiter/WaiterAppV2";
@@ -122,7 +121,6 @@ export default function App() {
         <>
           <GuestApp />
           <GuestWaiterCallController />
-          <GuestAdminCallController />
           <GuestReviewDismissController />
         </>
       )}
