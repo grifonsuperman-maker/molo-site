@@ -50,6 +50,15 @@ jobs:
           status=$?
           cat backend-build.log
           exit $status
+      - name: Run backend tests
+        shell: bash
+        run: |
+          mapfile -t tests < <(find src -name '*.spec.ts' -print)
+          if [ "${#tests[@]}" -eq 0 ]; then
+            echo "No backend spec files found"
+            exit 0
+          fi
+          node --test --require ts-node/register "${tests[@]}"
       - name: Upload backend build log
         if: always()
         uses: actions/upload-artifact@v4
