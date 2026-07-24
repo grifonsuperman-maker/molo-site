@@ -84,6 +84,8 @@ export type Booking = {
   waitExtendedUntil?: string | null;
   waitExtendedCount?: number;
   checkedInAt?: string | null;
+  assignedWaiterId?: string | null;
+  assignedWaiterName?: string | null;
   noShowAlertSentAt?: string | null;
   guestsCount: number;
   wishes: string | null;

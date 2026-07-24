@@ -1,8 +1,11 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 
 import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AvailabilityBlocksService } from './availability-blocks.service';
+import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
@@ -14,6 +17,7 @@ import { GuestLatenessDto } from './dto/guest-lateness.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
 import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
+import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { GuestBookingsService } from './guest-bookings.service';
 
 @Controller('bookings')
@@ -23,6 +27,9 @@ export class BookingsController {
     private readonly guestService: GuestBookingsService,
     private readonly tableLock: BookingTableLockService,
     private readonly availabilityBlocks: AvailabilityBlocksService,
+    private readonly rescheduleApproval: BookingRescheduleApprovalService,
+    private readonly dataSource: DataSource,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @Public()
@@ -60,8 +67,6 @@ export class BookingsController {
     return this.service.getPendingReminders();
   }
 
-  // Тимчасово відкрито для тестових панелей.
-  // Після впровадження авторизації повернемо перевірку ролей.
   @Public()
   @Get('today')
   @Roles('waiter', 'admin', 'owner')
@@ -120,6 +125,37 @@ export class BookingsController {
     @Body() dto: GuestLatenessDto,
   ) {
     return this.guestService.reportLateness(id, token, dto);
+  }
+
+  @Public()
+  @Patch(':id/guest/change-time')
+  async guestChangeTime(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+    @Body() dto: RequestRescheduleDto,
+  ) {
+    const result = await this.guestService.requestTimeChange(id, token, dto);
+
+    try {
+      const request = await this.dataSource
+        .getRepository(BookingRescheduleRequest)
+        .findOne({
+          where: {
+            booking: { id },
+            status: 'pending',
+          } as any,
+          relations: ['booking', 'booking.table', 'booking.client'],
+          order: { createdAt: 'DESC' },
+        });
+
+      if (request) {
+        await this.notifications.notifyRescheduleRequest(request);
+      }
+    } catch (notificationError) {
+      console.error('Guest reschedule notification failed', notificationError);
+    }
+
+    return result;
   }
 
   @Public()
@@ -192,8 +228,8 @@ export class BookingsController {
 
   @Patch(':id/check-in')
   @Roles('waiter', 'admin', 'owner')
-  checkIn(@Param('id') id: string) {
-    return this.service.checkIn(id);
+  checkIn(@Param('id') id: string, @Req() request: any) {
+    return this.service.checkIn(id, request.user);
   }
 
   @Patch(':id/complete')
@@ -219,7 +255,7 @@ export class BookingsController {
   @Public()
   @Patch('reschedule/:requestId/approve')
   approveReschedule(@Param('requestId') requestId: string) {
-    return this.service.approveReschedule(requestId);
+    return this.rescheduleApproval.approve(requestId);
   }
 
   @Public()

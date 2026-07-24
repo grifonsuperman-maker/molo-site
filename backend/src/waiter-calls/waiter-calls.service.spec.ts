@@ -3,8 +3,22 @@ import { test } from 'node:test';
 
 import { WaiterCallsService } from './waiter-calls.service';
 
+function createService() {
+  const histories = {
+    createQueryBuilder: () => ({
+      leftJoin() { return this; },
+      where() { return this; },
+      andWhere() { return this; },
+      orderBy() { return this; },
+      async getOne() { return null; },
+    }),
+  };
+
+  return new WaiterCallsService({} as any, histories as any);
+}
+
 test('closeActiveCallsAndDetachBooking hides transferred booking calls and assignments', async () => {
-  const service = new WaiterCallsService({} as any);
+  const service = createService();
   const booking = {
     id: 'transferred-booking',
     status: 'approved',
@@ -41,7 +55,7 @@ test('closeActiveCallsAndDetachBooking hides transferred booking calls and assig
 });
 
 test('accept rejects a waiter when a new call is already assigned to another waiter', () => {
-  const service = new WaiterCallsService({} as any);
+  const service = createService();
   (service as any).calls = [
     {
       id: 'assigned-new-call', bookingId: 'booking-1', tableId: 'table-1', tableNumber: '1',
@@ -62,7 +76,7 @@ test('accept rejects a waiter when a new call is already assigned to another wai
 });
 
 test('accept allows the waiter already assigned to a new call', () => {
-  const service = new WaiterCallsService({} as any);
+  const service = createService();
   (service as any).calls = [
     {
       id: 'assigned-new-call', bookingId: 'booking-1', tableId: 'table-1', tableNumber: '1',
@@ -82,7 +96,7 @@ test('accept allows the waiter already assigned to a new call', () => {
 });
 
 test('close rejects a waiter who is not assigned to the call', () => {
-  const service = new WaiterCallsService({} as any);
+  const service = createService();
   (service as any).calls = [
     {
       id: 'accepted-call', bookingId: 'booking-1', tableId: 'table-1', tableNumber: '1',
@@ -102,7 +116,7 @@ test('close rejects a waiter who is not assigned to the call', () => {
 });
 
 test('close allows the assigned waiter to close an accepted call', () => {
-  const service = new WaiterCallsService({} as any);
+  const service = createService();
   (service as any).calls = [
     {
       id: 'accepted-call', bookingId: 'booking-1', tableId: 'table-1', tableNumber: '1',
@@ -118,7 +132,7 @@ test('close allows the assigned waiter to close an accepted call', () => {
 });
 
 test('close rejects a new call until it has been accepted', () => {
-  const service = new WaiterCallsService({} as any);
+  const service = createService();
   (service as any).calls = [
     {
       id: 'new-call', bookingId: 'booking-1', tableId: 'table-1', tableNumber: '1',

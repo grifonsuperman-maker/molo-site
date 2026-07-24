@@ -343,14 +343,15 @@ export class BookingsService {
     previousData?: Record<string, unknown> | null,
     newData?: Record<string, unknown> | null,
     reason?: string | null,
+    actor?: AuthUser | null,
   ) {
     await this.histories.save(
       this.histories.create({
         booking,
         action,
         actorRole,
-        actorStaffId: null,
-        actorName: null,
+        actorStaffId: actor?.staffId || null,
+        actorName: actor?.name || null,
         previousData: previousData || null,
         newData: newData || null,
         reason: reason || null,
@@ -688,12 +689,45 @@ export class BookingsService {
 
   async getByDate(date: string) {
     const bookingDate = this.normalizeBookingDate(date);
-
-    return this.bookings.find({
+    const bookings = await this.bookings.find({
       where: { bookingDate },
       relations: ['table', 'table.zone', 'client'],
       order: { bookingTime: 'ASC', createdAt: 'DESC' },
       take: 1000,
+    });
+
+    if (!bookings.length) return bookings;
+
+    const assignmentEvents = await this.histories
+      .createQueryBuilder('history')
+      .leftJoinAndSelect('history.booking', 'booking')
+      .where('booking.id IN (:...bookingIds)', {
+        bookingIds: bookings.map((booking) => booking.id),
+      })
+      .andWhere('history.action IN (:...actions)', {
+        actions: ['booking_checked_in', 'waiter_table_transfer'],
+      })
+      .orderBy('history.createdAt', 'DESC')
+      .getMany();
+
+    const latestAssignmentEvent = new Map<string, BookingHistory>();
+    for (const event of assignmentEvents) {
+      if (!latestAssignmentEvent.has(event.booking.id)) {
+        latestAssignmentEvent.set(event.booking.id, event);
+      }
+    }
+
+    return bookings.map((booking) => {
+      const event = latestAssignmentEvent.get(booking.id);
+      const hasAssignedWaiter =
+        event?.action === 'booking_checked_in' &&
+        event.actorRole === 'waiter' &&
+        Boolean(event.actorStaffId);
+
+      return Object.assign(booking, {
+        assignedWaiterId: hasAssignedWaiter ? event?.actorStaffId || null : null,
+        assignedWaiterName: hasAssignedWaiter ? event?.actorName || null : null,
+      });
     });
   }
 
@@ -844,7 +878,7 @@ export class BookingsService {
     return { message: 'Гість не прийшов. Бронювання знято, стіл вільний.' };
   }
 
-  async checkIn(id: string) {
+  async checkIn(id: string, actor?: AuthUser) {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
@@ -853,9 +887,21 @@ export class BookingsService {
     if (!booking.approvedAt) booking.approvedAt = new Date();
     if (!booking.checkedInAt) booking.checkedInAt = new Date();
     await this.bookings.save(booking);
-    await this.saveHistory(booking, 'booking_checked_in', 'admin', previousData, this.bookingSnapshot(booking));
+    await this.saveHistory(
+      booking,
+      'booking_checked_in',
+      actor?.role || 'admin',
+      previousData,
+      this.bookingSnapshot(booking),
+      null,
+      actor || null,
+    );
     await this.setTableStatusOnlyForToday(booking.table, 'occupied', booking.bookingDate, true);
-    await this.safeLog('Гості прийшли', { bookingId: id });
+    await this.safeLog('Гості прийшли', {
+      bookingId: id,
+      waiterId: actor?.staffId || null,
+      waiterName: actor?.name || null,
+    });
     return { message: 'Гості відмічені як присутні' };
   }
 
