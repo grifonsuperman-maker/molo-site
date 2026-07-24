@@ -68,6 +68,8 @@ export type Client = {
   totalGuests: number;
   isRegular: boolean;
   isBlacklisted: boolean;
+  blacklistReason?: string | null;
+  blacklistedAt?: string | null;
 };
 
 export type Booking = {
@@ -96,6 +98,9 @@ export type Booking = {
   cancelledAt?: string | null;
   completedAt?: string | null;
   lateNotifiedAt?: string | null;
+  latenessHours?: number | null;
+  latenessMinutes?: number | null;
+  expectedArrivalAt?: string | null;
   createdAt: string;
 };
 
