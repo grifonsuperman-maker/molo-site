@@ -22,7 +22,16 @@ jobs:
       - name: Install frontend dependencies
         run: npm --prefix frontend install --no-audit --no-fund
       - name: Build frontend
-        run: npm --prefix frontend run build
+        shell: bash
+        run: |
+          set -o pipefail
+          npm --prefix frontend run build 2>&1 | tee frontend-build.log
+      - name: Upload frontend build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: director-syrve-frontend-build-log
+          path: frontend-build.log
       - name: Check whitespace
         run: git diff --check origin/codex/director-syrve-ci-base...HEAD
 
