@@ -5,6 +5,7 @@ import AdminAuthGate from './AdminAuthGate';
 import AdminStaffPanel from './AdminStaffPanel';
 import CompactAdminPanel from './CompactAdminPanel';
 import AdminVisualTablePlanner from './AdminVisualTablePlanner';
+import './admin-table-planner-fix.css';
 
 type AdminSection = 'panel' | 'staff';
 
@@ -23,6 +24,13 @@ export default function AdminWorkspace() {
   const [planningOpen, setPlanningOpen] = useState(false);
 
   useEffect(() => {
+    Object.values(LOCATION_PHOTOS).forEach((src) => {
+      const image = new Image();
+      image.src = src;
+    });
+  }, []);
+
+  useEffect(() => {
     if (!planningOpen) return;
 
     const root = document.querySelector<HTMLElement>('[data-admin-location-planner]');
@@ -35,19 +43,44 @@ export default function AdminWorkspace() {
       if (!image) return;
 
       const expectedDayPhoto = LOCATION_PHOTOS[image.alt];
-      if (!expectedDayPhoto || image.dataset.moloDaySrc === expectedDayPhoto) return;
+      if (!expectedDayPhoto) return;
 
-      image.dataset.moloDaySrc = expectedDayPhoto;
-      image.dataset.moloFallback = expectedDayPhoto;
-      delete image.dataset.moloFailedSrc;
+      const revealCurrentPhoto = () => {
+        const currentExpectedPhoto = LOCATION_PHOTOS[image.alt];
+        const currentPath = new URL(
+          image.getAttribute('src') || '',
+          window.location.origin,
+        ).pathname;
+
+        if (currentExpectedPhoto === expectedDayPhoto && currentPath === expectedDayPhoto) {
+          image.dataset.moloPhotoLoading = 'false';
+        }
+      };
 
       const currentPath = new URL(
         image.getAttribute('src') || '',
         window.location.origin,
       ).pathname;
 
-      if (currentPath !== expectedDayPhoto) {
-        image.setAttribute('src', expectedDayPhoto);
+      if (image.dataset.moloDaySrc !== expectedDayPhoto || currentPath !== expectedDayPhoto) {
+        image.dataset.moloPhotoLoading = 'true';
+        image.addEventListener('load', revealCurrentPhoto, { once: true });
+        image.dataset.moloDaySrc = expectedDayPhoto;
+        image.dataset.moloFallback = expectedDayPhoto;
+        delete image.dataset.moloFailedSrc;
+
+        if (currentPath !== expectedDayPhoto) {
+          image.setAttribute('src', expectedDayPhoto);
+        } else if (image.complete) {
+          revealCurrentPhoto();
+        }
+      } else if (image.complete) {
+        revealCurrentPhoto();
+      }
+
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement && root.contains(activeElement)) {
+        activeElement.blur();
       }
     };
 
