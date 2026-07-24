@@ -62,6 +62,23 @@ export type GuestAdminCallStatus = {
 
 type ActionResponse = { message: string };
 
+try {
+  const legacyIds = JSON.parse(
+    window.localStorage.getItem('molo_admin_acknowledged_events_v1') || '[]',
+  );
+  const currentIds = JSON.parse(
+    window.localStorage.getItem('molo_admin_attention_acknowledged_v1') || '[]',
+  );
+  const merged = new Set<string>(Array.isArray(currentIds) ? currentIds.map(String) : []);
+  if (Array.isArray(legacyIds)) {
+    legacyIds.forEach((id) => merged.add(`history:${String(id)}`));
+  }
+  window.localStorage.setItem(
+    'molo_admin_attention_acknowledged_v1',
+    JSON.stringify([...merged].slice(-500)),
+  );
+} catch {}
+
 function encode(value: string) {
   return encodeURIComponent(value);
 }
