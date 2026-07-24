@@ -1,63 +1,87 @@
 import { useState } from 'react';
-import { CalendarClock } from 'lucide-react';
+import { CalendarClock, LayoutDashboard, UsersRound } from 'lucide-react';
 
 import AdminAuthGate from './AdminAuthGate';
 import AdminStaffPanel from './AdminStaffPanel';
 import CompactAdminPanel from './CompactAdminPanel';
 import AdminVisualTablePlanner from './AdminVisualTablePlanner';
 
-type AdminSection = 'main' | 'staff';
+type AdminSection = 'panel' | 'staff';
 
 export default function AdminWorkspace() {
-  const [section, setSection] = useState<AdminSection>('main');
+  const [section, setSection] = useState<AdminSection>('panel');
   const [planningOpen, setPlanningOpen] = useState(false);
 
   return (
     <AdminAuthGate>
-      <div className="min-h-screen bg-black text-white">
-        <div className="sticky top-0 z-50 border-b border-white/10 bg-black/90 px-3 py-2 backdrop-blur-xl">
-          <div className="mx-auto flex max-w-7xl gap-2">
-            <button
-              type="button"
-              onClick={() => setSection('main')}
-              className={`flex-1 rounded-2xl px-4 py-3 text-sm font-black transition active:scale-[0.98] ${
-                section === 'main'
-                  ? 'bg-amber-300 text-neutral-950 shadow-[0_0_22px_rgba(251,191,36,.14)]'
-                  : 'border border-white/10 bg-neutral-900 text-white/70'
-              }`}
-            >
-              Пульт
-            </button>
+      <div className="molo-admin-workspace min-h-screen bg-black text-white">
+        <style>
+          {`
+            .molo-admin-workspace > main > nav {
+              bottom: 82px;
+            }
 
+            .molo-admin-workspace > main {
+              padding-bottom: 176px;
+            }
+          `}
+        </style>
+
+        <div className="sticky top-0 z-[60] border-b border-white/10 bg-black/92 px-3 py-2 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-7xl items-center gap-2">
             <button
               type="button"
-              onClick={() => setSection('staff')}
-              className={`flex-1 rounded-2xl px-4 py-3 text-sm font-black transition active:scale-[0.98] ${
-                section === 'staff'
-                  ? 'bg-amber-300 text-neutral-950 shadow-[0_0_22px_rgba(251,191,36,.14)]'
-                  : 'border border-white/10 bg-neutral-900 text-white/70'
+              onClick={() => setSection('panel')}
+              className={`inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl border px-3 py-3 text-sm font-black transition active:scale-[0.98] ${
+                section === 'panel'
+                  ? 'border-amber-200/60 bg-amber-300 text-neutral-950 shadow-[0_0_22px_rgba(251,191,36,.14)]'
+                  : 'border-white/10 bg-white/[0.04] text-white/65'
               }`}
             >
-              Персонал
+              <LayoutDashboard size={18} />
+              <span>Пульт</span>
             </button>
 
             <button
               type="button"
               onClick={() => setPlanningOpen(true)}
-              title="Планування столів і локацій"
-              aria-label="Планування столів і локацій"
-              className="grid h-[46px] w-[46px] shrink-0 place-items-center rounded-2xl border border-fuchsia-300/30 bg-fuchsia-400/10 text-fuchsia-100 shadow-[0_0_20px_rgba(217,70,239,.08)] transition active:scale-95"
+              className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-3 text-sm font-black text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,.08)] transition active:scale-[0.98]"
             >
-              <CalendarClock size={20} />
+              <CalendarClock size={18} />
+              <span className="truncate">План столів</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSection('staff')}
+              className={`inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl border px-3 py-3 text-sm font-black transition active:scale-[0.98] ${
+                section === 'staff'
+                  ? 'border-fuchsia-300/60 bg-fuchsia-300 text-neutral-950 shadow-[0_0_22px_rgba(217,70,239,.14)]'
+                  : 'border-white/10 bg-white/[0.04] text-white/65'
+              }`}
+            >
+              <UsersRound size={18} />
+              <span>Персонал</span>
             </button>
           </div>
         </div>
 
-        {section === 'main' ? (
+        {section === 'panel' ? (
           <CompactAdminPanel />
         ) : (
-          <main className="mx-auto max-w-5xl p-4 pb-28 lg:p-8">
-            <AdminStaffPanel />
+          <main className="mx-auto min-h-screen max-w-5xl px-3 pb-36 pt-3 sm:px-4 lg:px-8">
+            <section className="rounded-[28px] border border-fuchsia-300/20 bg-[radial-gradient(circle_at_top,rgba(217,70,239,.10),transparent_38%),rgba(10,10,10,.96)] p-3 shadow-[0_0_38px_rgba(217,70,239,.08)] sm:p-5">
+              <div className="mb-4 flex items-center gap-3">
+                <span className="grid h-11 w-11 place-items-center rounded-2xl border border-fuchsia-300/30 bg-fuchsia-400/10 text-fuchsia-100">
+                  <UsersRound size={20} />
+                </span>
+                <div>
+                  <h1 className="text-xl font-black">Персонал</h1>
+                  <p className="text-xs text-white/45">Зміни, доступ і працівники ресторану</p>
+                </div>
+              </div>
+              <AdminStaffPanel />
+            </section>
           </main>
         )}
 
