@@ -8,6 +8,11 @@ import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
 import { Zone } from '../zones/entities/zone.entity';
+import {
+  AdminAttentionController,
+  GuestAdminAttentionController,
+} from './admin-attention.controller';
+import { AdminAttentionService } from './admin-attention.service';
 import { AdminBookingEventsController } from './admin-booking-events.controller';
 import { AdminBookingEventsService } from './admin-booking-events.service';
 import { AvailabilityBlocksController } from './availability-blocks.controller';
@@ -21,7 +26,9 @@ import { BookingsService } from './bookings.service';
 import { AvailabilityBlock } from './entities/availability-block.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
+import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking } from './entities/booking.entity';
+import { GuestAdminCall } from './entities/guest-admin-call.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
 
@@ -31,7 +38,9 @@ import { GuestBookingsService } from './guest-bookings.service';
       Booking,
       BookingHistory,
       BookingRescheduleRequest,
+      BookingTableChangeRequest,
       GuestReview,
+      GuestAdminCall,
       AvailabilityBlock,
       Client,
       TableEntity,
@@ -45,6 +54,8 @@ import { GuestBookingsService } from './guest-bookings.service';
   controllers: [
     BookingsController,
     AdminBookingEventsController,
+    AdminAttentionController,
+    GuestAdminAttentionController,
     AvailabilityBlocksController,
   ],
   providers: [
@@ -54,6 +65,7 @@ import { GuestBookingsService } from './guest-bookings.service';
     BookingRescheduleApprovalService,
     BookingTableLockService,
     AdminBookingEventsService,
+    AdminAttentionService,
     AvailabilityBlocksService,
     AvailabilityPermissionsService,
   ],
