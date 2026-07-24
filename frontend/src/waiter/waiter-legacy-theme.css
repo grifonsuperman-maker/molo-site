@@ -102,10 +102,11 @@
 }
 
 .molo-waiter-legacy-theme > main > div:nth-of-type(2) > section > article button[class*="border-fuchsia"] {
-  border-color: rgba(240, 171, 252, 0.82) !important;
-  background: rgba(217, 70, 239, 0.12) !important;
-  color: #fde8ff !important;
-  box-shadow: 0 0 22px rgba(217, 70, 239, 0.3) !important;
+  display: none !important;
+}
+
+.molo-waiter-legacy-theme > main > div:nth-of-type(2) > section > article div:has(> button[class*="border-fuchsia"]:only-child) {
+  display: none !important;
 }
 
 .molo-waiter-legacy-theme > main > div:nth-of-type(2) > form button {
