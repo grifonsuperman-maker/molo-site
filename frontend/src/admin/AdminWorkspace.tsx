@@ -4,6 +4,7 @@ import { CalendarClock, LayoutDashboard, UsersRound } from 'lucide-react';
 import AdminAuthGate from './AdminAuthGate';
 import AdminStaffPanel from './AdminStaffPanel';
 import CompactAdminPanel from './CompactAdminPanel';
+import AdminTablesByLocation from './AdminTablesByLocation';
 import AdminVisualTablePlanner from './AdminVisualTablePlanner';
 import './admin-table-planner-fix.css';
 
@@ -22,12 +23,29 @@ const LOCATION_PHOTOS: Record<string, string> = {
 export default function AdminWorkspace() {
   const [section, setSection] = useState<AdminSection>('panel');
   const [planningOpen, setPlanningOpen] = useState(false);
+  const [tablesOpen, setTablesOpen] = useState(false);
 
   useEffect(() => {
     Object.values(LOCATION_PHOTOS).forEach((src) => {
       const image = new Image();
       image.src = src;
     });
+  }, []);
+
+  useEffect(() => {
+    const workspace = document.querySelector<HTMLElement>('.molo-admin-workspace');
+    if (!workspace) return;
+
+    const openGroupedTables = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest('button');
+      if (!button || !button.closest('nav') || button.textContent?.trim() !== 'Столи') return;
+      setTablesOpen(true);
+    };
+
+    workspace.addEventListener('click', openGroupedTables);
+    return () => workspace.removeEventListener('click', openGroupedTables);
   }, []);
 
   useEffect(() => {
@@ -105,6 +123,14 @@ export default function AdminWorkspace() {
     };
   }, [planningOpen]);
 
+  function closeGroupedTables() {
+    setTablesOpen(false);
+    window.requestAnimationFrame(() => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.molo-admin-workspace nav button'));
+      buttons.find((button) => button.textContent?.trim() === 'Головна')?.click();
+    });
+  }
+
   return (
     <AdminAuthGate>
       <div className="molo-admin-workspace min-h-screen bg-black text-white">
@@ -177,6 +203,8 @@ export default function AdminWorkspace() {
             </section>
           </main>
         )}
+
+        {tablesOpen && <AdminTablesByLocation onClose={closeGroupedTables} />}
 
         {planningOpen && (
           <div data-admin-location-planner>
