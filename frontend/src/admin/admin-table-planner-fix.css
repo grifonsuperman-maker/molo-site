@@ -35,14 +35,6 @@
     0 0 14px rgba(56, 189, 248, 0.24) !important;
 }
 
-[data-admin-location-planner] img[data-molo-photo-loading="true"] {
-  opacity: 0 !important;
-}
-
-[data-admin-location-planner] img {
-  transition: opacity 160ms ease;
-}
-
 @media (hover: none) {
   [data-admin-location-planner] button:hover:not(:disabled) {
     transform: none !important;
