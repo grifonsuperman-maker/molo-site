@@ -18,6 +18,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { StaffModule } from './staff/staff.module';
+import { SyrveIntegrationModule } from './syrve/syrve-integration.module';
 import { TablesModule } from './tables/tables.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { WaiterCallsModule } from './waiter-calls/waiter-calls.module';
@@ -75,6 +76,7 @@ import { ZonesModule } from './zones/zones.module';
     SchedulesModule,
     WaiterCallsModule,
     HookahCallsModule,
+    SyrveIntegrationModule,
   ],
 
   providers: [
