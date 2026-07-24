@@ -23,11 +23,9 @@ import {
 } from './entities/booking-table-change-request.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
-import { GuestAdminCall, GuestAdminCallStatus } from './entities/guest-admin-call.entity';
 import { GuestReview } from './entities/guest-review.entity';
 
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
-const ACTIVE_ADMIN_CALL_STATUSES: GuestAdminCallStatus[] = ['new', 'accepted'];
 const DEFAULT_DURATION_MINUTES = 120;
 const CLEANUP_MINUTES = 15;
 
@@ -44,8 +42,6 @@ export class AdminAttentionService {
     private readonly tableChanges: Repository<BookingTableChangeRequest>,
     @InjectRepository(GuestReview)
     private readonly reviews: Repository<GuestReview>,
-    @InjectRepository(GuestAdminCall)
-    private readonly adminCalls: Repository<GuestAdminCall>,
     private readonly dataSource: DataSource,
     private readonly bookingEvents: AdminBookingEventsService,
     private readonly rescheduleApproval: BookingRescheduleApprovalService,
@@ -54,48 +50,35 @@ export class AdminAttentionService {
 
   async feed(limit?: number) {
     const take = Math.min(300, Math.max(1, Number(limit) || 120));
-    const [bookingEvents, reschedules, tableChanges, reviews, adminCalls] =
-      await Promise.all([
-        this.bookingEvents.findRecent(take),
-        this.reschedules.find({
-          where: { status: 'pending' },
-          relations: ['booking', 'booking.table', 'booking.table.zone', 'booking.client'],
-          order: { createdAt: 'DESC' },
-          take,
-        }),
-        this.tableChanges.find({
-          where: { status: 'pending' },
-          relations: [
-            'booking',
-            'booking.table',
-            'booking.table.zone',
-            'booking.client',
-            'selectedTable',
-            'selectedTable.zone',
-          ],
-          order: { createdAt: 'DESC' },
-          take,
-        }),
-        this.reviews.find({
-          relations: ['booking', 'booking.table', 'booking.table.zone', 'booking.client'],
-          order: { createdAt: 'DESC' },
-          take,
-        }),
-        this.adminCalls.find({
-          where: { status: In(ACTIVE_ADMIN_CALL_STATUSES) },
-          relations: ['booking', 'booking.table', 'booking.table.zone', 'booking.client'],
-          order: { createdAt: 'ASC' },
-          take,
-        }),
-      ]);
+    const [bookingEvents, reschedules, tableChanges, reviews] = await Promise.all([
+      this.bookingEvents.findRecent(take),
+      this.reschedules.find({
+        where: { status: 'pending' },
+        relations: ['booking', 'booking.table', 'booking.table.zone', 'booking.client'],
+        order: { createdAt: 'DESC' },
+        take,
+      }),
+      this.tableChanges.find({
+        where: { status: 'pending' },
+        relations: [
+          'booking',
+          'booking.table',
+          'booking.table.zone',
+          'booking.client',
+          'selectedTable',
+          'selectedTable.zone',
+        ],
+        order: { createdAt: 'DESC' },
+        take,
+      }),
+      this.reviews.find({
+        relations: ['booking', 'booking.table', 'booking.table.zone', 'booking.client'],
+        order: { createdAt: 'DESC' },
+        take,
+      }),
+    ]);
 
-    return {
-      bookingEvents,
-      reschedules,
-      tableChanges,
-      reviews,
-      adminCalls,
-    };
+    return { bookingEvents, reschedules, tableChanges, reviews };
   }
 
   async requestTableChange(
@@ -105,18 +88,10 @@ export class AdminAttentionService {
   ) {
     try {
       await this.dataSource.transaction(async (manager) => {
-        const booking = await this.findOwnedBooking(
-          bookingId,
-          token,
-          manager,
-          true,
-        );
+        const booking = await this.findOwnedBooking(bookingId, token, manager, true);
         this.assertGuestCanRequestChange(booking);
 
-        const requestedTableNumber = await this.resolveRequestedTableNumber(
-          manager,
-          dto,
-        );
+        const requestedTableNumber = await this.resolveRequestedTableNumber(manager, dto);
         if (
           requestedTableNumber &&
           String(booking.table?.tableNumber || '') === requestedTableNumber
@@ -241,16 +216,8 @@ export class AdminAttentionService {
         reason: `Стіл №${previousTableNumber} → №${nextTable.tableNumber}`,
       });
 
-      await this.synchronizeTableForToday(
-        manager,
-        previousTableId,
-        booking.bookingDate,
-      );
-      await this.synchronizeTableForToday(
-        manager,
-        nextTable.id,
-        booking.bookingDate,
-      );
+      await this.synchronizeTableForToday(manager, previousTableId, booking.bookingDate);
+      await this.synchronizeTableForToday(manager, nextTable.id, booking.bookingDate);
 
       return { message: 'Пересадку підтверджено' };
     });
@@ -384,143 +351,6 @@ export class AdminAttentionService {
     return { message: 'Запит на зміну часу відхилено' };
   }
 
-  async guestAdminCallStatus(bookingId: string) {
-    const booking = await this.bookings.findOne({
-      where: { id: bookingId },
-      relations: ['table', 'client'],
-    });
-    if (!booking) throw new NotFoundException('Бронювання не знайдено');
-
-    const activeCall = await this.adminCalls.findOne({
-      where: {
-        booking: { id: booking.id },
-        status: In(ACTIVE_ADMIN_CALL_STATUSES),
-      } as any,
-      relations: ['booking'],
-      order: { createdAt: 'DESC' },
-    });
-
-    return {
-      bookingId: booking.id,
-      tableNumber: booking.table?.tableNumber || null,
-      bookingStatus: booking.status,
-      canCall: Boolean(
-        booking.status === 'approved' && booking.checkedInAt && booking.table,
-      ),
-      activeCall: activeCall ? this.adminCallPayload(activeCall, booking) : null,
-    };
-  }
-
-  async createGuestAdminCall(bookingId: string) {
-    return this.dataSource.transaction(async (manager) => {
-      const booking = await manager.getRepository(Booking).findOne({
-        where: { id: bookingId },
-        relations: ['table', 'client'],
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!booking) throw new NotFoundException('Бронювання не знайдено');
-      if (booking.status !== 'approved' || !booking.checkedInAt || !booking.table) {
-        throw new BadRequestException(
-          'Виклик Адміністратора доступний після позначки «Гість прийшов»',
-        );
-      }
-
-      const repository = manager.getRepository(GuestAdminCall);
-      const existing = await repository.findOne({
-        where: {
-          booking: { id: booking.id },
-          status: In(ACTIVE_ADMIN_CALL_STATUSES),
-        } as any,
-        relations: ['booking'],
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (existing) {
-        return {
-          message: 'Виклик Адміністратора вже активний',
-          call: this.adminCallPayload(existing, booking),
-        };
-      }
-
-      const call = await repository.save(
-        repository.create({
-          booking,
-          status: 'new',
-          acceptedAt: null,
-          completedAt: null,
-        }),
-      );
-      await this.saveHistory(manager, booking, 'guest_called_admin', {
-        newData: { callId: call.id, status: call.status },
-        reason: `Стіл №${booking.table.tableNumber}`,
-      });
-
-      return {
-        message: 'Виклик Адміністратора відправлено',
-        call: this.adminCallPayload(call, booking),
-      };
-    });
-  }
-
-  async acceptAdminCall(callId: string, actor?: AuthUser) {
-    return this.updateAdminCall(callId, 'accepted', actor);
-  }
-
-  async completeAdminCall(callId: string, actor?: AuthUser) {
-    return this.updateAdminCall(callId, 'completed', actor);
-  }
-
-  private async updateAdminCall(
-    callId: string,
-    nextStatus: Exclude<GuestAdminCallStatus, 'new'>,
-    actor?: AuthUser,
-  ) {
-    return this.dataSource.transaction(async (manager) => {
-      const repository = manager.getRepository(GuestAdminCall);
-      const call = await repository.findOne({
-        where: { id: callId },
-        relations: ['booking', 'booking.table', 'booking.client'],
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!call) throw new NotFoundException('Виклик Адміністратора не знайдено');
-
-      if (nextStatus === 'accepted') {
-        if (call.status !== 'new') {
-          throw new BadRequestException('Цей виклик уже прийнято або завершено');
-        }
-        call.status = 'accepted';
-        call.acceptedAt = new Date();
-      } else {
-        if (call.status !== 'accepted') {
-          throw new BadRequestException('Спочатку прийміть виклик');
-        }
-        call.status = 'completed';
-        call.completedAt = new Date();
-      }
-      await repository.save(call);
-
-      await this.saveHistory(
-        manager,
-        call.booking,
-        nextStatus === 'accepted'
-          ? 'admin_accepted_guest_call'
-          : 'admin_completed_guest_call',
-        {
-          actor,
-          newData: { callId: call.id, status: call.status },
-          reason: `Стіл №${call.booking.table?.tableNumber || '-'}`,
-        },
-      );
-
-      return {
-        message:
-          nextStatus === 'accepted'
-            ? 'Виклик прийнято'
-            : 'Виклик завершено',
-        call: this.adminCallPayload(call, call.booking),
-      };
-    });
-  }
-
   private async findOwnedBooking(
     id: string,
     token: string,
@@ -564,9 +394,7 @@ export class AdminAttentionService {
     if (!tableNumber && !tableId) return null;
     if (tableNumber) return tableNumber;
 
-    const table = await manager.getRepository(TableEntity).findOne({
-      where: { id: tableId },
-    });
+    const table = await manager.getRepository(TableEntity).findOne({ where: { id: tableId } });
     if (!table) throw new BadRequestException('Стіл не знайдено');
     return String(table.tableNumber);
   }
@@ -611,8 +439,7 @@ export class AdminAttentionService {
     const end = start + this.duration(booking) + CLEANUP_MINUTES;
     const conflict = candidates.find((candidate) => {
       const candidateStart = this.timeToMinutes(candidate.bookingTime);
-      const candidateEnd =
-        candidateStart + this.duration(candidate) + CLEANUP_MINUTES;
+      const candidateEnd = candidateStart + this.duration(candidate) + CLEANUP_MINUTES;
       return start < candidateEnd && end > candidateStart;
     });
 
@@ -723,19 +550,6 @@ export class AdminAttentionService {
       tableNumber: booking.table?.tableNumber || null,
       guestsCount: booking.guestsCount,
       checkedInAt: booking.checkedInAt || null,
-    };
-  }
-
-  private adminCallPayload(call: GuestAdminCall, booking: Booking) {
-    return {
-      id: call.id,
-      status: call.status,
-      createdAt: call.createdAt,
-      acceptedAt: call.acceptedAt,
-      completedAt: call.completedAt,
-      bookingId: booking.id,
-      tableNumber: booking.table?.tableNumber || null,
-      clientName: booking.client?.fullName || null,
     };
   }
 
