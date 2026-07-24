@@ -38,6 +38,6 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: backend/package.json
-      - run: npm install --include=dev --no-audit --no-fund --legacy-peer-deps --ignore-scripts
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --include=dev --no-audit --no-fund
       - run: npm run build
