@@ -5,6 +5,7 @@ import { waiterCallsApi } from '../api/waiterCalls';
 
 const POLLING_MS = 15_000;
 const TOKEN_WATCH_MS = 1_000;
+const PLAYED_CALLS_KEY = 'molo_waiter_played_call_sounds_v1';
 
 type AudioContextConstructor = typeof AudioContext;
 
@@ -35,15 +36,47 @@ function getAudioContext() {
   return audioContext;
 }
 
+function readPlayedCallIds() {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(PLAYED_CALLS_KEY) || '[]');
+    return new Set<string>(Array.isArray(value) ? value.map(String) : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function savePlayedCallIds(ids: Set<string>) {
+  try {
+    sessionStorage.setItem(PLAYED_CALLS_KEY, JSON.stringify([...ids].slice(-200)));
+  } catch {
+    // У приватному режимі sessionStorage може бути недоступним.
+  }
+}
+
 async function unlockAudio() {
   const context = getAudioContext();
-  if (!context || context.state !== 'suspended') return;
+  if (!context) return false;
 
-  try {
-    await context.resume();
-  } catch {
-    // Мобільний браузер може дозволити звук лише після наступного натискання.
+  if (context.state === 'suspended') {
+    try {
+      await context.resume();
+    } catch {
+      return false;
+    }
   }
+
+  if (context.state !== 'running') return false;
+
+  // Короткий беззвучний імпульс у межах натискання надійніше розблоковує звук на Android.
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  gain.gain.setValueAtTime(0.00001, context.currentTime);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(context.currentTime);
+  oscillator.stop(context.currentTime + 0.02);
+
+  return true;
 }
 
 function scheduleTone(context: AudioContext, note: MelodyNote) {
@@ -62,11 +95,11 @@ function scheduleTone(context: AudioContext, note: MelodyNote) {
   harmonic.frequency.setValueAtTime(note.frequency * 2, startAt);
 
   gain.gain.setValueAtTime(0.0001, startAt);
-  gain.gain.exponentialRampToValueAtTime(0.14, startAt + 0.025);
+  gain.gain.exponentialRampToValueAtTime(0.22, startAt + 0.025);
   gain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
 
   harmonicGain.gain.setValueAtTime(0.0001, startAt);
-  harmonicGain.gain.exponentialRampToValueAtTime(0.035, startAt + 0.025);
+  harmonicGain.gain.exponentialRampToValueAtTime(0.055, startAt + 0.025);
   harmonicGain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
 
   oscillator.connect(gain);
@@ -82,71 +115,66 @@ function scheduleTone(context: AudioContext, note: MelodyNote) {
 
 async function playCallMelody() {
   const context = getAudioContext();
-  if (!context) return;
+  if (!context) return false;
 
   if (context.state === 'suspended') {
     try {
       await context.resume();
     } catch {
-      return;
+      return false;
     }
   }
 
+  if (context.state !== 'running') return false;
+
   MELODY.forEach((note) => scheduleTone(context, note));
+  return true;
 }
 
 export default function WaiterCallAlertController() {
-  const knownCallIdsRef = useRef<Set<string>>(new Set());
-  const baselineReadyRef = useRef(false);
+  const playedCallIdsRef = useRef<Set<string>>(readPlayedCallIds());
   const accessTokenRef = useRef('');
   const checkingRef = useRef(false);
 
   useEffect(() => {
-    const handleInteraction = () => {
-      void unlockAudio();
-    };
-
-    window.addEventListener('pointerdown', handleInteraction, { capture: true });
-    window.addEventListener('keydown', handleInteraction, { capture: true });
-
     async function checkCalls() {
       if (checkingRef.current) return;
 
       const accessToken = getAccessToken() || '';
       if (!accessToken) {
         accessTokenRef.current = '';
-        baselineReadyRef.current = false;
-        knownCallIdsRef.current.clear();
         return;
       }
 
-      if (accessTokenRef.current !== accessToken) {
-        accessTokenRef.current = accessToken;
-        baselineReadyRef.current = false;
-        knownCallIdsRef.current.clear();
-      }
-
+      accessTokenRef.current = accessToken;
       checkingRef.current = true;
 
       try {
         const calls = await waiterCallsApi.list();
-        const newCalls = calls.filter(
-          (call) => call.status === 'new' && !knownCallIdsRef.current.has(call.id),
+        const callsWithoutSound = calls.filter(
+          (call) => call.status === 'new' && !playedCallIdsRef.current.has(call.id),
         );
 
-        calls.forEach((call) => knownCallIdsRef.current.add(call.id));
-
-        if (baselineReadyRef.current && newCalls.length > 0) {
-          await playCallMelody();
+        if (callsWithoutSound.length > 0) {
+          const played = await playCallMelody();
+          if (played) {
+            callsWithoutSound.forEach((call) => playedCallIdsRef.current.add(call.id));
+            savePlayedCallIds(playedCallIdsRef.current);
+          }
         }
-
-        baselineReadyRef.current = true;
       } catch {
         // Основний пульт сам покаже помилку завантаження; контролер звуку мовчить.
       } finally {
         checkingRef.current = false;
       }
     }
+
+    const handleInteraction = () => {
+      void unlockAudio().then(() => checkCalls());
+    };
+
+    window.addEventListener('pointerdown', handleInteraction, { capture: true });
+    window.addEventListener('keydown', handleInteraction, { capture: true });
 
     void checkCalls();
     const pollingTimer = window.setInterval(() => void checkCalls(), POLLING_MS);
