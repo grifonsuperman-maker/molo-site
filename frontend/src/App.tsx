@@ -4,6 +4,7 @@ import GuestApp from "./guest/GuestApp";
 import GuestWaiterCallController from "./guest/GuestWaiterCallController";
 import GuestReviewDismissController from "./guest/GuestReviewDismissController";
 import WaiterApp from "./waiter/WaiterAppV2";
+import WaiterTransferResetController from "./waiter/WaiterTransferResetController";
 import HookahApp from "./hookah/HookahApp";
 import AdminWorkspace from "./admin/AdminWorkspace";
 import DirectorPanel from "./director/DirectorPanel";
@@ -120,7 +121,12 @@ export default function App() {
           <GuestReviewDismissController />
         </>
       )}
-      {mode === "waiter" && <WaiterApp />}
+      {mode === "waiter" && (
+        <>
+          <WaiterTransferResetController />
+          <WaiterApp />
+        </>
+      )}
       {mode === "hookah" && <HookahApp />}
       {mode === "admin" && (
         <>
