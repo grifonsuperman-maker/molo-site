@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DataSource, EntityManager } from 'typeorm';
 
 import { TableEntity } from '../tables/entities/table.entity';
+import { AvailabilityBlocksService } from './availability-blocks.service';
+import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
 
@@ -11,7 +13,10 @@ const CLEANUP_MINUTES = 15;
 
 @Injectable()
 export class BookingRescheduleApprovalService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly availabilityBlocks: AvailabilityBlocksService,
+  ) {}
 
   async approve(requestId: string) {
     try {
@@ -86,6 +91,18 @@ export class BookingRescheduleApprovalService {
         this.assertTableAvailable(table);
 
         const durationMinutes = this.duration(booking);
+        await this.availabilityBlocks.assertBookable({
+          tableId: table.id,
+          tableNumber: table.tableNumber,
+          bookingDate: request.requestedDate,
+          bookingTime: requestedTime,
+          durationMinutes,
+          fullName: '',
+          phone: '',
+          guestDeviceId: '',
+          guestsCount: booking.guestsCount,
+        } as CreateBookingDto);
+
         const requestedStart = this.timeToMinutes(requestedTime);
         const requestedAvailableFrom =
           requestedStart + durationMinutes + CLEANUP_MINUTES;
