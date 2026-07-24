@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { CalendarClock, LayoutDashboard, UsersRound } from 'lucide-react';
 
+import AdminAttentionCenter from './AdminAttentionCenter';
 import AdminAuthGate from './AdminAuthGate';
 import AdminStaffPanel from './AdminStaffPanel';
 import CompactAdminPanel from './CompactAdminPanel';
@@ -9,6 +10,7 @@ import AdminVisualTablePlanner from './AdminVisualTablePlanner';
 import './admin-table-planner-fix.css';
 
 type AdminSection = 'panel' | 'staff';
+type CompactTab = 'home' | 'bookings' | 'tables' | 'guests' | 'more';
 
 const LOCATION_PHOTOS: Record<string, string> = {
   'Зал ресторану': '/maps/hall-bg-numbered.png',
@@ -20,8 +22,17 @@ const LOCATION_PHOTOS: Record<string, string> = {
   'Альтанка на воді': '/maps/water-gazebo-day-numbered.png',
 };
 
+const COMPACT_TAB_BY_LABEL: Record<string, CompactTab> = {
+  'Головна': 'home',
+  'Броні': 'bookings',
+  'Столи': 'tables',
+  'Гості': 'guests',
+  'Ще': 'more',
+};
+
 export default function AdminWorkspace() {
   const [section, setSection] = useState<AdminSection>('panel');
+  const [compactTab, setCompactTab] = useState<CompactTab>('home');
   const [planningOpen, setPlanningOpen] = useState(false);
   const [tablesOpen, setTablesOpen] = useState(false);
 
@@ -31,6 +42,35 @@ export default function AdminWorkspace() {
       image.src = src;
     });
   }, []);
+
+  useEffect(() => {
+    if (section !== 'panel') return;
+
+    const workspace = document.querySelector<HTMLElement>('.molo-admin-workspace');
+    if (!workspace) return;
+
+    const syncActiveTab = () => {
+      const nav = workspace.querySelector<HTMLElement>(':scope > main > nav');
+      if (!nav) return;
+
+      const activeButton = Array.from(nav.querySelectorAll<HTMLButtonElement>('button')).find(
+        (button) => button.className.includes('bg-amber-300'),
+      );
+      const nextTab = COMPACT_TAB_BY_LABEL[activeButton?.textContent?.trim() || ''];
+      if (nextTab && nextTab !== 'tables') setCompactTab(nextTab);
+    };
+
+    syncActiveTab();
+    const observer = new MutationObserver(syncActiveTab);
+    observer.observe(workspace, {
+      attributes: true,
+      attributeFilter: ['class'],
+      childList: true,
+      subtree: true,
+    });
+
+    return () => observer.disconnect();
+  }, [section]);
 
   useEffect(() => {
     if (!planningOpen) return;
@@ -107,31 +147,47 @@ export default function AdminWorkspace() {
     };
   }, [planningOpen]);
 
-  function openGroupedTables(event: ReactMouseEvent<HTMLDivElement>) {
+  function openAdminTab(label: 'Головна' | 'Броні' | 'Гості') {
+    const buttons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.molo-admin-workspace > main > nav button'),
+    );
+    buttons.find((button) => button.textContent?.trim() === label)?.click();
+  }
+
+  function handleWorkspaceClick(event: ReactMouseEvent<HTMLDivElement>) {
     const target = event.target;
     if (!(target instanceof Element)) return;
 
     const button = target.closest('button');
-    if (!button || !button.closest('nav') || button.textContent?.trim() !== 'Столи') return;
+    if (!button || !button.closest('nav')) return;
 
-    event.preventDefault();
-    event.stopPropagation();
-    setTablesOpen(true);
+    const label = button.textContent?.trim() || '';
+    const nextTab = COMPACT_TAB_BY_LABEL[label];
+    if (!nextTab) return;
+
+    if (nextTab === 'tables') {
+      event.preventDefault();
+      event.stopPropagation();
+      setCompactTab('tables');
+      setTablesOpen(true);
+      return;
+    }
+
+    setCompactTab(nextTab);
   }
 
   function closeGroupedTables() {
     setTablesOpen(false);
-    window.requestAnimationFrame(() => {
-      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.molo-admin-workspace nav button'));
-      buttons.find((button) => button.textContent?.trim() === 'Головна')?.click();
-    });
+    setCompactTab('home');
+    window.requestAnimationFrame(() => openAdminTab('Головна'));
   }
 
   return (
     <AdminAuthGate>
       <div
         className="molo-admin-workspace min-h-screen bg-black text-white"
-        onClickCapture={openGroupedTables}
+        data-compact-tab={compactTab}
+        onClickCapture={handleWorkspaceClick}
       >
         <style>
           {`
@@ -141,6 +197,10 @@ export default function AdminWorkspace() {
 
             .molo-admin-workspace > main {
               padding-bottom: 176px;
+            }
+
+            .molo-admin-workspace[data-compact-tab="home"] > main > section:first-of-type > :first-child {
+              display: none;
             }
           `}
         </style>
@@ -185,7 +245,15 @@ export default function AdminWorkspace() {
         </div>
 
         {section === 'panel' ? (
-          <CompactAdminPanel />
+          <>
+            {compactTab === 'home' && (
+              <AdminAttentionCenter
+                onOpenBookings={() => openAdminTab('Броні')}
+                onOpenGuests={() => openAdminTab('Гості')}
+              />
+            )}
+            <CompactAdminPanel />
+          </>
         ) : (
           <main className="mx-auto min-h-screen max-w-5xl px-3 pb-36 pt-3 sm:px-4 lg:px-8">
             <section className="rounded-[28px] border border-fuchsia-300/20 bg-[radial-gradient(circle_at_top,rgba(217,70,239,.10),transparent_38%),rgba(10,10,10,.96)] p-3 shadow-[0_0_38px_rgba(217,70,239,.08)] sm:p-5">
