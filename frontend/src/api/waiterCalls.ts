@@ -1,4 +1,6 @@
+import { bookingsApi } from './bookings';
 import { api } from './client';
+import type { Booking } from './types';
 
 export type WaiterCallStatus = 'new' | 'accepted' | 'closed';
 
@@ -35,6 +37,51 @@ export type GuestWaiterCallStatus = {
   waiterName: string | null;
   activeCall: WaiterCall | null;
 };
+
+type PatchableBookingsApi = typeof bookingsApi & {
+  __waiterAssignmentsPatched?: boolean;
+};
+
+const patchableBookingsApi = bookingsApi as PatchableBookingsApi;
+
+if (!patchableBookingsApi.__waiterAssignmentsPatched) {
+  const originalGetToday = bookingsApi.getToday.bind(bookingsApi);
+
+  bookingsApi.getToday = async () => {
+    const bookings = await originalGetToday();
+
+    if (
+      typeof window !== 'undefined' &&
+      window.location.hash.replace('#', '') !== 'waiter'
+    ) {
+      return bookings;
+    }
+
+    try {
+      const assignments = await api.get<WaiterAssignment[]>('/waiter-calls/assignments');
+      const assignmentByBookingId = new Map(
+        assignments.map((assignment) => [assignment.bookingId, assignment]),
+      );
+
+      return bookings.map((booking: Booking) => {
+        if (booking.assignedWaiterId) return booking;
+
+        const assignment = assignmentByBookingId.get(booking.id);
+        if (!assignment) return booking;
+
+        return {
+          ...booking,
+          assignedWaiterId: assignment.waiterId,
+          assignedWaiterName: assignment.waiterName,
+        };
+      });
+    } catch {
+      return bookings;
+    }
+  };
+
+  patchableBookingsApi.__waiterAssignmentsPatched = true;
+}
 
 export const waiterCallsApi = {
   guestStatus: (bookingId: string) =>

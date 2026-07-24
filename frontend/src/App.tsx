@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
+import GuestWaiterCallController from "./guest/GuestWaiterCallController";
+import GuestReviewDismissController from "./guest/GuestReviewDismissController";
 import WaiterApp from "./waiter/WaiterAppV2";
 import "./waiter/waiter-legacy-theme.css";
 import HookahApp from "./hookah/HookahApp";
@@ -113,7 +115,13 @@ export default function App() {
         </button>
       </div>
 
-      {mode === "guest" && <GuestApp />}
+      {mode === "guest" && (
+        <>
+          <GuestApp />
+          <GuestWaiterCallController />
+          <GuestReviewDismissController />
+        </>
+      )}
       {mode === "waiter" && (
         <div className="molo-waiter-legacy-theme">
           <WaiterApp />
