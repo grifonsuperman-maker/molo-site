@@ -12,6 +12,8 @@ import { AdminBookingEventsController } from './admin-booking-events.controller'
 import { AdminBookingEventsService } from './admin-booking-events.service';
 import { AdminGuestActionsController } from './admin-guest-actions.controller';
 import { AdminGuestActionsService } from './admin-guest-actions.service';
+import { AdminRescheduleActionsController } from './admin-reschedule-actions.controller';
+import { AdminRescheduleActionsService } from './admin-reschedule-actions.service';
 import { AvailabilityBlocksController } from './availability-blocks.controller';
 import { AvailabilityBlocksService } from './availability-blocks.service';
 import { AvailabilityPermissionsService } from './availability-permissions.service';
@@ -49,6 +51,7 @@ import { GuestBookingsService } from './guest-bookings.service';
   controllers: [
     BookingsController,
     AdminGuestActionsController,
+    AdminRescheduleActionsController,
     AdminBookingEventsController,
     AvailabilityBlocksController,
   ],
@@ -59,6 +62,7 @@ import { GuestBookingsService } from './guest-bookings.service';
     BookingRescheduleApprovalService,
     BookingTableLockService,
     AdminGuestActionsService,
+    AdminRescheduleActionsService,
     AdminBookingEventsService,
     AvailabilityBlocksService,
     AvailabilityPermissionsService,
