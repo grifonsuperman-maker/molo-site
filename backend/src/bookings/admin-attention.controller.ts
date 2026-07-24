@@ -1,0 +1,108 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
+
+import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
+import { AdminAttentionService } from './admin-attention.service';
+import { GuestChangeTableDto } from './dto/guest-change-table.dto';
+
+@Roles('owner', 'admin')
+@Controller('bookings/admin-attention')
+export class AdminAttentionController {
+  constructor(private readonly attention: AdminAttentionService) {}
+
+  @Get()
+  feed(@Query('limit') limit?: string) {
+    return this.attention.feed(Number(limit));
+  }
+
+  @Patch('reschedules/:requestId/approve')
+  approveReschedule(@Param('requestId') requestId: string, @Req() request: any) {
+    return this.attention.approveReschedule(requestId, request.user);
+  }
+
+  @Patch('reschedules/:requestId/reject')
+  rejectReschedule(
+    @Param('requestId') requestId: string,
+    @Body('adminComment') adminComment: string,
+    @Req() request: any,
+  ) {
+    return this.attention.rejectReschedule(
+      requestId,
+      adminComment,
+      request.user,
+    );
+  }
+
+  @Patch('table-changes/:requestId/approve')
+  approveTableChange(
+    @Param('requestId') requestId: string,
+    @Body('tableId') tableId: string,
+    @Req() request: any,
+  ) {
+    return this.attention.approveTableChange(
+      requestId,
+      tableId,
+      request.user,
+    );
+  }
+
+  @Patch('table-changes/:requestId/reject')
+  rejectTableChange(
+    @Param('requestId') requestId: string,
+    @Body('adminComment') adminComment: string,
+    @Req() request: any,
+  ) {
+    return this.attention.rejectTableChange(
+      requestId,
+      adminComment,
+      request.user,
+    );
+  }
+
+  @Patch('admin-calls/:callId/accept')
+  acceptAdminCall(@Param('callId') callId: string, @Req() request: any) {
+    return this.attention.acceptAdminCall(callId, request.user);
+  }
+
+  @Patch('admin-calls/:callId/complete')
+  completeAdminCall(@Param('callId') callId: string, @Req() request: any) {
+    return this.attention.completeAdminCall(callId, request.user);
+  }
+}
+
+@Controller('bookings')
+export class GuestAdminAttentionController {
+  constructor(private readonly attention: AdminAttentionService) {}
+
+  @Public()
+  @Patch(':id/guest/request-table-change')
+  requestTableChange(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+    @Body() dto: GuestChangeTableDto,
+  ) {
+    return this.attention.requestTableChange(id, token, dto);
+  }
+
+  @Public()
+  @Get(':id/guest/admin-call')
+  adminCallStatus(@Param('id') id: string) {
+    return this.attention.guestAdminCallStatus(id);
+  }
+
+  @Public()
+  @Post(':id/guest/admin-call')
+  createAdminCall(@Param('id') id: string) {
+    return this.attention.createGuestAdminCall(id);
+  }
+}
