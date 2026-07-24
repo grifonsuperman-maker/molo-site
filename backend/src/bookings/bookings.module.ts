@@ -7,7 +7,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
-import { Zone } from '../zones/zones.entity';
+import { Zone } from '../zones/entities/zone.entity';
 import {
   AdminAttentionController,
   GuestAdminAttentionController,
