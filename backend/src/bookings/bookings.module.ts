@@ -10,6 +10,8 @@ import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
 import { Zone } from '../zones/entities/zone.entity';
 import { AdminBookingEventsController } from './admin-booking-events.controller';
 import { AdminBookingEventsService } from './admin-booking-events.service';
+import { AdminGuestRequestsController } from './admin-guest-requests.controller';
+import { AdminGuestRequestsService } from './admin-guest-requests.service';
 import { AvailabilityBlocksController } from './availability-blocks.controller';
 import { AvailabilityBlocksService } from './availability-blocks.service';
 import { AvailabilityPermissionsService } from './availability-permissions.service';
@@ -21,9 +23,11 @@ import { BookingsService } from './bookings.service';
 import { AvailabilityBlock } from './entities/availability-block.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
+import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
+import { GuestTableChangeRequestsService } from './guest-table-change-requests.service';
 
 @Module({
   imports: [
@@ -31,6 +35,7 @@ import { GuestBookingsService } from './guest-bookings.service';
       Booking,
       BookingHistory,
       BookingRescheduleRequest,
+      BookingTableChangeRequest,
       GuestReview,
       AvailabilityBlock,
       Client,
@@ -45,15 +50,18 @@ import { GuestBookingsService } from './guest-bookings.service';
   controllers: [
     BookingsController,
     AdminBookingEventsController,
+    AdminGuestRequestsController,
     AvailabilityBlocksController,
   ],
   providers: [
     BookingsService,
     GuestBookingsService,
+    GuestTableChangeRequestsService,
     BookingExpirationService,
     BookingRescheduleApprovalService,
     BookingTableLockService,
     AdminBookingEventsService,
+    AdminGuestRequestsService,
     AvailabilityBlocksService,
     AvailabilityPermissionsService,
   ],
