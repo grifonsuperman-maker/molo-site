@@ -40,12 +40,12 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci --include=dev --no-audit --no-fund
-      - name: Build backend
+      - name: Type-check and compile backend
         id: backend_build
         shell: bash
         run: |
           set +e
-          npx --yes --package @nestjs/cli@10.4.9 --package typescript@5.7.2 nest build > backend-build.log 2>&1
+          npx --yes --package typescript@5.7.2 tsc -p tsconfig.json > backend-build.log 2>&1
           status=$?
           cat backend-build.log
           exit $status
