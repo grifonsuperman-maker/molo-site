@@ -22,7 +22,9 @@ bookingsApi.guestList = async (guestDeviceId: string, tokens: string[] = []) => 
 function subscribe(listener: GuestBookingListener) {
   guestBookingListeners.add(listener);
   listener(latestGuestBookings);
-  return () => guestBookingListeners.delete(listener);
+  return () => {
+    guestBookingListeners.delete(listener);
+  };
 }
 
 function errorText(error: unknown) {
