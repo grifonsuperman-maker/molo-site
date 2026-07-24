@@ -5,7 +5,6 @@ import {
   Headers,
   Param,
   Patch,
-  Post,
   Query,
   Req,
 } from '@nestjs/common';
@@ -68,16 +67,6 @@ export class AdminAttentionController {
       request.user,
     );
   }
-
-  @Patch('admin-calls/:callId/accept')
-  acceptAdminCall(@Param('callId') callId: string, @Req() request: any) {
-    return this.attention.acceptAdminCall(callId, request.user);
-  }
-
-  @Patch('admin-calls/:callId/complete')
-  completeAdminCall(@Param('callId') callId: string, @Req() request: any) {
-    return this.attention.completeAdminCall(callId, request.user);
-  }
 }
 
 @Controller('bookings')
@@ -92,17 +81,5 @@ export class GuestAdminAttentionController {
     @Body() dto: GuestChangeTableDto,
   ) {
     return this.attention.requestTableChange(id, token, dto);
-  }
-
-  @Public()
-  @Get(':id/guest/admin-call')
-  adminCallStatus(@Param('id') id: string) {
-    return this.attention.guestAdminCallStatus(id);
-  }
-
-  @Public()
-  @Post(':id/guest/admin-call')
-  createAdminCall(@Param('id') id: string) {
-    return this.attention.createGuestAdminCall(id);
   }
 }
