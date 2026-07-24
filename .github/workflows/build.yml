@@ -28,7 +28,7 @@ jobs:
 
   backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: backend
@@ -40,6 +40,8 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci --include=dev --no-audit --no-fund
+      - name: Install Nest CLI for build
+        run: npm install --no-save --no-audit --no-fund @nestjs/cli@10.4.9 typescript@5.7.2
       - name: Build backend
         id: backend_build
         shell: bash
