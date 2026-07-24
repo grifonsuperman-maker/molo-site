@@ -10,6 +10,8 @@ import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
 import { Zone } from '../zones/entities/zone.entity';
 import { AdminBookingEventsController } from './admin-booking-events.controller';
 import { AdminBookingEventsService } from './admin-booking-events.service';
+import { AdminGuestActionsController } from './admin-guest-actions.controller';
+import { AdminGuestActionsService } from './admin-guest-actions.service';
 import { AvailabilityBlocksController } from './availability-blocks.controller';
 import { AvailabilityBlocksService } from './availability-blocks.service';
 import { AvailabilityPermissionsService } from './availability-permissions.service';
@@ -21,6 +23,7 @@ import { BookingsService } from './bookings.service';
 import { AvailabilityBlock } from './entities/availability-block.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
+import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
@@ -31,6 +34,7 @@ import { GuestBookingsService } from './guest-bookings.service';
       Booking,
       BookingHistory,
       BookingRescheduleRequest,
+      BookingTableChangeRequest,
       GuestReview,
       AvailabilityBlock,
       Client,
@@ -44,6 +48,7 @@ import { GuestBookingsService } from './guest-bookings.service';
   ],
   controllers: [
     BookingsController,
+    AdminGuestActionsController,
     AdminBookingEventsController,
     AvailabilityBlocksController,
   ],
@@ -53,6 +58,7 @@ import { GuestBookingsService } from './guest-bookings.service';
     BookingExpirationService,
     BookingRescheduleApprovalService,
     BookingTableLockService,
+    AdminGuestActionsService,
     AdminBookingEventsService,
     AvailabilityBlocksService,
     AvailabilityPermissionsService,

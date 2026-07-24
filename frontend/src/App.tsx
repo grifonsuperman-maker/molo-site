@@ -3,6 +3,7 @@ import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
 import GuestWaiterCallController from "./guest/GuestWaiterCallController";
 import GuestReviewDismissController from "./guest/GuestReviewDismissController";
+import GuestTableChangeRequestController from "./guest/GuestTableChangeRequestController";
 import WaiterApp from "./waiter/WaiterAppV2";
 import WaiterCallAlertController from "./waiter/WaiterCallAlertController";
 import "./waiter/waiter-legacy-theme.css";
@@ -119,6 +120,7 @@ export default function App() {
 
       {mode === "guest" && (
         <>
+          <GuestTableChangeRequestController />
           <GuestApp />
           <GuestWaiterCallController />
           <GuestReviewDismissController />
