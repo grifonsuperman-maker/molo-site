@@ -44,7 +44,7 @@
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
     "source-map-support": "^0.5.21",
-    "ts-loader": "^10.9.2",
+    "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.2"
