@@ -1,9 +1,10 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
 
+import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { AvailabilityBlocksService } from './availability-blocks.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
-import { GuestBookingsService } from './guest-bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { GuestBookingListDto } from './dto/guest-booking-list.dto';
@@ -12,8 +13,8 @@ import { GuestChangeTableDto } from './dto/guest-change-table.dto';
 import { GuestLatenessDto } from './dto/guest-lateness.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
 import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
-import { Roles } from '../common/decorators/roles.decorator';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
+import { GuestBookingsService } from './guest-bookings.service';
 
 @Controller('bookings')
 export class BookingsController {
@@ -21,24 +22,30 @@ export class BookingsController {
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
     private readonly tableLock: BookingTableLockService,
+    private readonly availabilityBlocks: AvailabilityBlocksService,
   ) {}
 
   @Public()
   @Post()
   create(@Body() dto: CreateBookingDto) {
-    return this.tableLock.withCreateLock(dto, () => this.service.create(dto));
+    return this.tableLock.withCreateLock(dto, async () => {
+      await this.availabilityBlocks.assertBookable(dto);
+      return this.service.create(dto);
+    });
   }
 
   @Public()
   @Get('availability')
-  availability(@Query() dto: CheckAvailabilityDto) {
-    return this.service.checkAvailability(dto);
+  async availability(@Query() dto: CheckAvailabilityDto) {
+    const payload = await this.service.checkAvailability(dto);
+    return this.availabilityBlocks.applyAvailability(dto, payload);
   }
 
   @Public()
   @Get('table-statuses')
-  tableStatuses(@Query() dto: any) {
-    return this.service.getTableStatuses(dto);
+  async tableStatuses(@Query() dto: any) {
+    const payload = await this.service.getTableStatuses(dto);
+    return this.availabilityBlocks.applyTableStatuses(dto, payload);
   }
 
   @Public()

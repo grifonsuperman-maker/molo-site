@@ -1,0 +1,41 @@
+name: Pull request checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install frontend dependencies
+        run: npm --prefix frontend install --no-audit --no-fund
+      - name: Build frontend
+        run: npm --prefix frontend run build
+      - name: Check whitespace
+        run: git diff --check origin/main...HEAD
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install backend dependencies
+        run: npm --prefix backend install --package-lock=false --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+      - name: Build backend
+        run: cd backend && npx --yes @nestjs/cli@10.4.9 build

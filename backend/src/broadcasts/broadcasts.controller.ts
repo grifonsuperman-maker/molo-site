@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+
+import { Roles } from '../common/decorators/roles.decorator';
 import { BroadcastsService } from './broadcasts.service';
 import { CreateBroadcastDto } from './dto/create-broadcast.dto';
-import { Roles } from '../common/decorators/roles.decorator';
 
 @Roles('owner', 'admin')
 @Controller('broadcasts')
@@ -16,6 +17,11 @@ export class BroadcastsController {
   @Post()
   create(@Body() dto: CreateBroadcastDto) {
     return this.service.create(dto);
+  }
+
+  @Post('send-now')
+  sendNow(@Body() dto: CreateBroadcastDto) {
+    return this.service.sendNow(dto);
   }
 
   @Post(':id/send')
