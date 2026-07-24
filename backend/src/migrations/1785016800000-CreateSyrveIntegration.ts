@@ -4,6 +4,8 @@ export class CreateSyrveIntegration1785016800000 implements MigrationInterface {
   name = 'CreateSyrveIntegration1785016800000';
 
   async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "syrve_integrations" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
