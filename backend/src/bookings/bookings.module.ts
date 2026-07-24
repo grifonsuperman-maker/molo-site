@@ -8,6 +8,8 @@ import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
 import { Zone } from '../zones/entities/zone.entity';
+import { AdminAttentionController } from './admin-attention.controller';
+import { AdminAttentionService } from './admin-attention.service';
 import { AdminBookingEventsController } from './admin-booking-events.controller';
 import { AdminBookingEventsService } from './admin-booking-events.service';
 import { AvailabilityBlocksController } from './availability-blocks.controller';
@@ -18,11 +20,15 @@ import { BookingRescheduleApprovalService } from './booking-reschedule-approval.
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsController } from './bookings.controller';
 import { BookingsService } from './bookings.service';
+import { AdminCall } from './entities/admin-call.entity';
 import { AvailabilityBlock } from './entities/availability-block.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
+import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
+import { GuestAttentionController } from './guest-attention.controller';
+import { GuestAttentionService } from './guest-attention.service';
 import { GuestBookingsService } from './guest-bookings.service';
 
 @Module({
@@ -31,6 +37,8 @@ import { GuestBookingsService } from './guest-bookings.service';
       Booking,
       BookingHistory,
       BookingRescheduleRequest,
+      BookingTableChangeRequest,
+      AdminCall,
       GuestReview,
       AvailabilityBlock,
       Client,
@@ -46,10 +54,14 @@ import { GuestBookingsService } from './guest-bookings.service';
     BookingsController,
     AdminBookingEventsController,
     AvailabilityBlocksController,
+    GuestAttentionController,
+    AdminAttentionController,
   ],
   providers: [
     BookingsService,
     GuestBookingsService,
+    GuestAttentionService,
+    AdminAttentionService,
     BookingExpirationService,
     BookingRescheduleApprovalService,
     BookingTableLockService,
@@ -60,6 +72,7 @@ import { GuestBookingsService } from './guest-bookings.service';
   exports: [
     BookingsService,
     GuestBookingsService,
+    GuestAttentionService,
     BookingRescheduleApprovalService,
     AvailabilityBlocksService,
   ],
