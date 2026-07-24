@@ -31,6 +31,9 @@ export class GuestReview {
   @Column({ name: 'external_review_opened_at', type: 'timestamp', nullable: true })
   externalReviewOpenedAt: Date | null;
 
+  @Column({ name: 'acknowledged_at', type: 'timestamp', nullable: true })
+  acknowledgedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
