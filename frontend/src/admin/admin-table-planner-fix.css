@@ -1,0 +1,50 @@
+[data-admin-location-planner] svg [stroke="#34d399"] {
+  stroke: transparent !important;
+  filter: none !important;
+}
+
+[data-admin-location-planner] svg [stroke="#fb7185"] {
+  stroke: #ff3b4f !important;
+}
+
+[data-admin-location-planner] svg [stroke="#a3a3a3"] {
+  stroke: #bdbdbd !important;
+}
+
+[data-admin-location-planner] svg [stroke]:not([stroke="none"]):not([stroke="#34d399"]) {
+  stroke-width: 4 !important;
+  filter: drop-shadow(0 0 4px currentColor) !important;
+}
+
+[data-admin-location-planner] button[class*="bg-amber-300"],
+[data-admin-location-planner] button[class*="bg-sky-300"] {
+  border: 1px solid rgba(253, 230, 138, 0.72) !important;
+  background: rgba(251, 191, 36, 0.07) !important;
+  color: #fff1b8 !important;
+  box-shadow:
+    inset 0 0 18px rgba(251, 191, 36, 0.035),
+    0 0 14px rgba(251, 191, 36, 0.26) !important;
+}
+
+[data-admin-location-planner] button[class*="bg-sky-300"] {
+  border-color: rgba(125, 211, 252, 0.72) !important;
+  background: rgba(56, 189, 248, 0.07) !important;
+  color: #e0f5ff !important;
+  box-shadow:
+    inset 0 0 18px rgba(56, 189, 248, 0.035),
+    0 0 14px rgba(56, 189, 248, 0.24) !important;
+}
+
+[data-admin-location-planner] img[data-molo-photo-loading="true"] {
+  opacity: 0 !important;
+}
+
+[data-admin-location-planner] img {
+  transition: opacity 160ms ease;
+}
+
+@media (hover: none) {
+  [data-admin-location-planner] button:hover:not(:disabled) {
+    transform: none !important;
+  }
+}
