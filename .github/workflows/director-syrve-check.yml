@@ -42,4 +42,4 @@ jobs:
       - name: Build backend
         run: npm --prefix backend run build
 
-# Pull request verification trigger.
+# Final verification trigger for Syrve Cloud API wizard.
