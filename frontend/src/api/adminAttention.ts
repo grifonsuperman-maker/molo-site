@@ -35,40 +35,11 @@ export type AdminGuestReview = {
   booking: Booking;
 };
 
-export type AdminGuestCall = {
-  id: string;
-  status: 'new' | 'accepted' | 'completed';
-  createdAt: string;
-  acceptedAt: string | null;
-  completedAt: string | null;
-  booking: Booking;
-};
-
 export type AdminAttentionFeed = {
   bookingEvents: AdminBookingEvent[];
   reschedules: AdminRescheduleRequest[];
   tableChanges: AdminTableChangeRequest[];
   reviews: AdminGuestReview[];
-  adminCalls: AdminGuestCall[];
-};
-
-export type GuestAdminCallPayload = {
-  id: string;
-  status: 'new' | 'accepted' | 'completed';
-  createdAt: string;
-  acceptedAt: string | null;
-  completedAt: string | null;
-  bookingId: string;
-  tableNumber: string | null;
-  clientName: string | null;
-};
-
-export type GuestAdminCallStatus = {
-  bookingId: string;
-  tableNumber: string | null;
-  bookingStatus: Booking['status'];
-  canCall: boolean;
-  activeCall: GuestAdminCallPayload | null;
 };
 
 function encode(value: string) {
@@ -102,25 +73,5 @@ export const adminAttentionApi = {
     api.patch<{ message: string }>(
       `/bookings/admin-attention/table-changes/${encode(requestId)}/reject`,
       { adminComment },
-    ),
-
-  acceptAdminCall: (callId: string) =>
-    api.patch<{ message: string; call: GuestAdminCallPayload }>(
-      `/bookings/admin-attention/admin-calls/${encode(callId)}/accept`,
-    ),
-
-  completeAdminCall: (callId: string) =>
-    api.patch<{ message: string; call: GuestAdminCallPayload }>(
-      `/bookings/admin-attention/admin-calls/${encode(callId)}/complete`,
-    ),
-
-  guestAdminCallStatus: (bookingId: string) =>
-    api.get<GuestAdminCallStatus>(
-      `/bookings/${encode(bookingId)}/guest/admin-call`,
-    ),
-
-  createGuestAdminCall: (bookingId: string) =>
-    api.post<{ message: string; call: GuestAdminCallPayload }>(
-      `/bookings/${encode(bookingId)}/guest/admin-call`,
     ),
 };
