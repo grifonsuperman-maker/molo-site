@@ -5,8 +5,8 @@ import { restaurantApi } from '../api/restaurant';
 import AdminAuthGate from './AdminAuthGate';
 import AdminReviewsPanel from './AdminReviewsPanel';
 import AdminShiftPanel from './AdminShiftPanel';
-import AdminVisualTablePlanner from './AdminVisualTablePlanner';
 import CompactAdminPanel from './CompactAdminPanel';
+import FutureAvailabilityPanel from './FutureAvailabilityPanel';
 
 type AdminSection = 'main' | 'shifts' | 'reviews';
 
@@ -102,7 +102,7 @@ export default function AdminWorkspace() {
         )}
 
         {planningOpen && canManageZones && (
-          <AdminVisualTablePlanner onClose={() => setPlanningOpen(false)} />
+          <FutureAvailabilityPanel onClose={() => setPlanningOpen(false)} />
         )}
       </div>
     </AdminAuthGate>
