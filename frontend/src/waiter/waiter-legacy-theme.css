@@ -24,6 +24,41 @@
     0 0 45px rgba(251, 191, 36, 0.08) !important;
 }
 
+.molo-waiter-legacy-theme > main > div:nth-of-type(2) > form {
+  border-color: rgba(253, 230, 138, 0.72) !important;
+  background: rgba(0, 0, 0, 0.58) !important;
+  box-shadow:
+    0 0 14px rgba(253, 230, 138, 0.42),
+    0 0 42px rgba(251, 191, 36, 0.28),
+    0 0 72px rgba(34, 211, 238, 0.12),
+    inset 0 0 30px rgba(251, 191, 36, 0.045) !important;
+}
+
+.molo-waiter-legacy-theme > main > div:nth-of-type(2) > form h1 {
+  color: #fffdf4 !important;
+  text-shadow:
+    0 0 10px rgba(253, 230, 138, 0.55),
+    0 0 24px rgba(251, 191, 36, 0.24);
+}
+
+.molo-waiter-legacy-theme > main > div:nth-of-type(2) > form select,
+.molo-waiter-legacy-theme > main > div:nth-of-type(2) > form input {
+  border-color: rgba(253, 230, 138, 0.42) !important;
+  background: rgba(0, 0, 0, 0.72) !important;
+  box-shadow:
+    0 0 12px rgba(251, 191, 36, 0.16),
+    inset 0 0 18px rgba(251, 191, 36, 0.035) !important;
+}
+
+.molo-waiter-legacy-theme > main > div:nth-of-type(2) > form select:focus,
+.molo-waiter-legacy-theme > main > div:nth-of-type(2) > form input:focus {
+  border-color: rgba(253, 230, 138, 0.96) !important;
+  box-shadow:
+    0 0 12px rgba(253, 230, 138, 0.72),
+    0 0 30px rgba(251, 191, 36, 0.34),
+    inset 0 0 20px rgba(251, 191, 36, 0.06) !important;
+}
+
 .molo-waiter-legacy-theme > main > div:nth-of-type(2) > header nav {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
@@ -110,12 +145,22 @@
 }
 
 .molo-waiter-legacy-theme > main > div:nth-of-type(2) > form button {
-  border-color: rgba(253, 230, 138, 0.9) !important;
-  background: rgba(251, 191, 36, 0.14) !important;
-  color: #fff3bd !important;
+  border-color: rgba(253, 230, 138, 0.98) !important;
+  background: rgba(251, 191, 36, 0.2) !important;
+  color: #fff7cf !important;
+  text-shadow: 0 0 9px rgba(253, 230, 138, 0.62);
   box-shadow:
-    0 0 14px rgba(251, 191, 36, 0.52),
-    0 0 30px rgba(251, 191, 36, 0.24) !important;
+    0 0 14px rgba(253, 230, 138, 0.82),
+    0 0 34px rgba(251, 191, 36, 0.48),
+    0 0 58px rgba(251, 191, 36, 0.18),
+    inset 0 0 20px rgba(253, 230, 138, 0.08) !important;
+}
+
+.molo-waiter-legacy-theme > main > div:nth-of-type(2) > form button:active {
+  box-shadow:
+    0 0 18px rgba(253, 230, 138, 0.94),
+    0 0 42px rgba(251, 191, 36, 0.58),
+    inset 0 0 22px rgba(253, 230, 138, 0.12) !important;
 }
 
 @keyframes molo-waiter-call-button {
