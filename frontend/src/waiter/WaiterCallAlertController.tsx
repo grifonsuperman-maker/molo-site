@@ -4,6 +4,7 @@ import { getAccessToken } from '../api/client';
 import { waiterCallsApi } from '../api/waiterCalls';
 
 const POLLING_MS = 15_000;
+const TOKEN_WATCH_MS = 1_000;
 
 type AudioContextConstructor = typeof AudioContext;
 
@@ -148,10 +149,17 @@ export default function WaiterCallAlertController() {
     }
 
     void checkCalls();
-    const timer = window.setInterval(() => void checkCalls(), POLLING_MS);
+    const pollingTimer = window.setInterval(() => void checkCalls(), POLLING_MS);
+    const tokenTimer = window.setInterval(() => {
+      const currentToken = getAccessToken() || '';
+      if (currentToken !== accessTokenRef.current) {
+        void checkCalls();
+      }
+    }, TOKEN_WATCH_MS);
 
     return () => {
-      window.clearInterval(timer);
+      window.clearInterval(pollingTimer);
+      window.clearInterval(tokenTimer);
       window.removeEventListener('pointerdown', handleInteraction, { capture: true });
       window.removeEventListener('keydown', handleInteraction, { capture: true });
     };
