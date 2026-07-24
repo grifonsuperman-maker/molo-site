@@ -4,7 +4,7 @@ import { CalendarClock } from 'lucide-react';
 import AdminAuthGate from './AdminAuthGate';
 import AdminStaffPanel from './AdminStaffPanel';
 import CompactAdminPanel from './CompactAdminPanel';
-import FutureAvailabilityPanel from './FutureAvailabilityPanel';
+import AdminVisualTablePlanner from './AdminVisualTablePlanner';
 
 type AdminSection = 'main' | 'staff';
 
@@ -62,7 +62,7 @@ export default function AdminWorkspace() {
         )}
 
         {planningOpen && (
-          <FutureAvailabilityPanel onClose={() => setPlanningOpen(false)} />
+          <AdminVisualTablePlanner onClose={() => setPlanningOpen(false)} />
         )}
       </div>
     </AdminAuthGate>
