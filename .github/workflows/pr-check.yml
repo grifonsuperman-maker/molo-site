@@ -40,4 +40,4 @@ jobs:
       - name: Build backend
         run: cd backend && npx --yes @nestjs/cli@10.4.9 build
       - name: Test Admin attention center
-        run: npm --prefix backend run test:admin-attention
+        run: cd backend && node --require ts-node/register --test src/bookings/admin-attention.service.spec.ts
