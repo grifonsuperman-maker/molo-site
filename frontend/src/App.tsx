@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
 import WaiterApp from "./waiter/WaiterAppV2";
+import "./waiter/waiter-legacy-theme.css";
 import HookahApp from "./hookah/HookahApp";
 import AdminWorkspace from "./admin/AdminWorkspace";
 import DirectorPanel from "./director/DirectorPanel";
@@ -112,7 +113,11 @@ export default function App() {
       </div>
 
       {mode === "guest" && <GuestApp />}
-      {mode === "waiter" && <WaiterApp />}
+      {mode === "waiter" && (
+        <div className="molo-waiter-legacy-theme">
+          <WaiterApp />
+        </div>
+      )}
       {mode === "hookah" && <HookahApp />}
       {mode === "admin" && (
         <>
