@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { CalendarClock, LayoutDashboard, UsersRound } from 'lucide-react';
 
 import AdminAuthGate from './AdminAuthGate';
@@ -30,22 +30,6 @@ export default function AdminWorkspace() {
       const image = new Image();
       image.src = src;
     });
-  }, []);
-
-  useEffect(() => {
-    const workspace = document.querySelector<HTMLElement>('.molo-admin-workspace');
-    if (!workspace) return;
-
-    const openGroupedTables = (event: Event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      const button = target.closest('button');
-      if (!button || !button.closest('nav') || button.textContent?.trim() !== 'Столи') return;
-      setTablesOpen(true);
-    };
-
-    workspace.addEventListener('click', openGroupedTables);
-    return () => workspace.removeEventListener('click', openGroupedTables);
   }, []);
 
   useEffect(() => {
@@ -123,6 +107,18 @@ export default function AdminWorkspace() {
     };
   }, [planningOpen]);
 
+  function openGroupedTables(event: ReactMouseEvent<HTMLDivElement>) {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    const button = target.closest('button');
+    if (!button || !button.closest('nav') || button.textContent?.trim() !== 'Столи') return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setTablesOpen(true);
+  }
+
   function closeGroupedTables() {
     setTablesOpen(false);
     window.requestAnimationFrame(() => {
@@ -133,7 +129,10 @@ export default function AdminWorkspace() {
 
   return (
     <AdminAuthGate>
-      <div className="molo-admin-workspace min-h-screen bg-black text-white">
+      <div
+        className="molo-admin-workspace min-h-screen bg-black text-white"
+        onClickCapture={openGroupedTables}
+      >
         <style>
           {`
             .molo-admin-workspace > main > nav {
