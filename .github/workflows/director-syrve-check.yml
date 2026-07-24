@@ -1,6 +1,9 @@
 name: Director Syrve integration check
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - codex/director-compact-control-center-2026-07-24
