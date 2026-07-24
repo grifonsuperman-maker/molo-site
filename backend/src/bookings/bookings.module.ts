@@ -14,6 +14,7 @@ import { AvailabilityBlocksController } from './availability-blocks.controller';
 import { AvailabilityBlocksService } from './availability-blocks.service';
 import { AvailabilityPermissionsService } from './availability-permissions.service';
 import { BookingExpirationService } from './booking-expiration.service';
+import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsController } from './bookings.controller';
 import { BookingsService } from './bookings.service';
@@ -50,11 +51,17 @@ import { GuestBookingsService } from './guest-bookings.service';
     BookingsService,
     GuestBookingsService,
     BookingExpirationService,
+    BookingRescheduleApprovalService,
     BookingTableLockService,
     AdminBookingEventsService,
     AvailabilityBlocksService,
     AvailabilityPermissionsService,
   ],
-  exports: [BookingsService, GuestBookingsService, AvailabilityBlocksService],
+  exports: [
+    BookingsService,
+    GuestBookingsService,
+    BookingRescheduleApprovalService,
+    AvailabilityBlocksService,
+  ],
 })
 export class BookingsModule {}

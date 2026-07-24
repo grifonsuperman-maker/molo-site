@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
+import { BookingHistory } from '../bookings/entities/booking-history.entity';
 import { Booking } from '../bookings/entities/booking.entity';
 
 type WaiterCallStatus = 'new' | 'accepted' | 'closed';
@@ -29,6 +30,11 @@ type WaiterAssignment = {
   assignedAt: string;
 };
 
+const WAITER_ASSIGNMENT_HISTORY_ACTIONS = [
+  'booking_checked_in',
+  'waiter_table_transfer',
+];
+
 @Injectable()
 export class WaiterCallsService {
   private calls: WaiterCall[] = [];
@@ -37,6 +43,8 @@ export class WaiterCallsService {
   constructor(
     @InjectRepository(Booking)
     private readonly bookings: Repository<Booking>,
+    @InjectRepository(BookingHistory)
+    private readonly histories: Repository<BookingHistory>,
   ) {}
 
   private now() {
@@ -57,6 +65,18 @@ export class WaiterCallsService {
     return booking;
   }
 
+  private rememberAssignment(assignment: WaiterAssignment) {
+    this.assignments = this.assignments.filter(
+      (item) =>
+        item.bookingId !== assignment.bookingId &&
+        (!assignment.tableId || item.tableId !== assignment.tableId) &&
+        (!assignment.tableNumber || item.tableNumber !== assignment.tableNumber),
+    );
+
+    this.assignments.push(assignment);
+    return assignment;
+  }
+
   private findAssignment(booking: Booking) {
     const tableId = booking.table?.id || null;
     const tableNumber = booking.table?.tableNumber || null;
@@ -71,6 +91,37 @@ export class WaiterCallsService {
       }) || null;
   }
 
+  private async resolveAssignment(booking: Booking) {
+    const inMemoryAssignment = this.findAssignment(booking);
+    if (inMemoryAssignment) return inMemoryAssignment;
+
+    const latestAssignmentEvent = await this.histories
+      .createQueryBuilder('history')
+      .leftJoin('history.booking', 'booking')
+      .where('booking.id = :bookingId', { bookingId: booking.id })
+      .andWhere('history.action IN (:...actions)', {
+        actions: WAITER_ASSIGNMENT_HISTORY_ACTIONS,
+      })
+      .orderBy('history.createdAt', 'DESC')
+      .getOne();
+
+    const hasPersistedWaiter =
+      latestAssignmentEvent?.action === 'booking_checked_in' &&
+      latestAssignmentEvent.actorRole === 'waiter' &&
+      Boolean(latestAssignmentEvent.actorStaffId);
+
+    if (!latestAssignmentEvent || !hasPersistedWaiter) return null;
+
+    return this.rememberAssignment({
+      bookingId: booking.id,
+      tableId: booking.table?.id || null,
+      tableNumber: booking.table?.tableNumber || null,
+      waiterId: latestAssignmentEvent.actorStaffId as string,
+      waiterName: latestAssignmentEvent.actorName || 'Офіціант',
+      assignedAt: latestAssignmentEvent.createdAt.toISOString(),
+    });
+  }
+
   async assign(dto: {
     bookingId: string;
     tableId?: string | null;
@@ -83,23 +134,14 @@ export class WaiterCallsService {
 
     const booking = await this.getBooking(dto.bookingId);
 
-    const assignment: WaiterAssignment = {
+    const assignment = this.rememberAssignment({
       bookingId: booking.id,
       tableId: dto.tableId || booking.table?.id || null,
       tableNumber: dto.tableNumber || booking.table?.tableNumber || null,
       waiterId: dto.waiterId,
       waiterName: dto.waiterName || 'Офіціант',
       assignedAt: this.now(),
-    };
-
-    this.assignments = this.assignments.filter(
-      (item) =>
-        item.bookingId !== assignment.bookingId &&
-        (!assignment.tableId || item.tableId !== assignment.tableId) &&
-        (!assignment.tableNumber || item.tableNumber !== assignment.tableNumber),
-    );
-
-    this.assignments.push(assignment);
+    });
 
     return {
       message: 'Офіціанта закріплено за столом',
@@ -119,7 +161,7 @@ export class WaiterCallsService {
           call.status !== 'closed',
       ) || null;
 
-    const assignment = this.findAssignment(booking);
+    const assignment = await this.resolveAssignment(booking);
 
     return {
       bookingId: booking.id,
@@ -154,7 +196,7 @@ export class WaiterCallsService {
       };
     }
 
-    const assignment = this.findAssignment(booking);
+    const assignment = await this.resolveAssignment(booking);
 
     const call: WaiterCall = {
       id: this.makeId(),
@@ -234,14 +276,7 @@ export class WaiterCallsService {
     call.waiterName = dto.waiterName || 'Офіціант';
     call.acceptedAt = this.now();
 
-    this.assignments = this.assignments.filter(
-      (item) =>
-        item.bookingId !== call.bookingId &&
-        (!call.tableId || item.tableId !== call.tableId) &&
-        (!call.tableNumber || item.tableNumber !== call.tableNumber),
-    );
-
-    this.assignments.push({
+    this.rememberAssignment({
       bookingId: call.bookingId,
       tableId: call.tableId,
       tableNumber: call.tableNumber,

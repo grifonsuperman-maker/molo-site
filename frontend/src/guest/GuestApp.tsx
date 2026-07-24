@@ -718,9 +718,13 @@ export default function GuestApp() {
           if (stopped) return;
           setMyBookings(bookings);
 
+          const activeBookings = bookings.filter(
+            (item) => item.status === 'pending' || item.status === 'approved',
+          );
           const booking =
-            bookings.find((item) => item.bookingId === lastBookingId) ||
-            bookings.find((item) => item.status === 'pending' || item.status === 'approved');
+            activeBookings.find((item) => item.bookingId === lastBookingId) ||
+            activeBookings[0] ||
+            bookings.find((item) => item.bookingId === lastBookingId);
           if (booking) {
             hasGuestBooking = true;
             selectedBookingId = booking.bookingId;
@@ -909,6 +913,7 @@ export default function GuestApp() {
   async function runGuestAction(bookingId: string, token: string, action: (token: string) => Promise<{ message: string; booking?: GuestBooking; askExternalReview?: boolean }>) {
     if (!bookingId || !token || guestActionBusy) return null;
 
+    setLastBookingId(bookingId);
     setGuestActionBusy(true);
     setGuestActionMessage(null);
 
@@ -1933,33 +1938,139 @@ export default function GuestApp() {
                       </div>
                     )}
                   {access && booking.status !== 'cancelled' && (
-                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                      {booking.isLatenessPromptDue && <button type="button" disabled={guestActionBusy} onClick={() => {
-                        const minutes = Number(window.prompt('На скільки хвилин ви запізнюєтеся?', '15'));
-                        if (Number.isInteger(minutes) && minutes > 0 && minutes <= 720) void runGuestAction(booking.bookingId, access.token, (token) => bookingsApi.guestLateness(booking.bookingId, token, Math.floor(minutes / 60), minutes % 60));
-                      }} className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50">Повідомити про запізнення</button>}
-                      {booking.canGuestCancel && <button type="button" disabled={guestActionBusy} onClick={() => {
-                        if (window.confirm('Скасувати це бронювання?')) void runGuestAction(booking.bookingId, access.token, (token) => bookingsApi.guestCancel(booking.bookingId, token));
-                      }} className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50">Скасувати бронювання</button>}
-                      {booking.canGuestChangeTable && <button type="button" disabled={guestActionBusy} onClick={() => {
-                        const tableNumber = window.prompt('Вкажіть номер нового столу');
-                        if (tableNumber?.trim()) void runGuestAction(booking.bookingId, access.token, (token) => bookingsApi.guestChangeTable(booking.bookingId, token, { tableNumber: tableNumber.trim() }));
-                      }} className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50">Змінити стіл</button>}
-                      {booking.canLeaveReview && <button type="button" disabled={guestActionBusy} onClick={() => {
-                        const text = window.prompt('Поділіться враженнями від візиту');
-                        if (text?.trim()) void runGuestAction(booking.bookingId, access.token, (token) => bookingsApi.guestReview(booking.bookingId, token, { text: text.trim() })).then((result) => {
-                          if (result?.askExternalReview) {
-                            setLastBookingId(booking.bookingId);
-                            try {
-                              setShowExternalReviewOffer(
-                                window.sessionStorage.getItem(`${EXTERNAL_REVIEW_SESSION_KEY_PREFIX}${booking.bookingId}`) !== 'true',
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {booking.canReportLateness && (
+                        <button
+                          type="button"
+                          disabled={guestActionBusy || !booking.isLatenessPromptDue}
+                          onClick={() => {
+                            const minutes = Number(window.prompt('На скільки хвилин ви запізнюєтеся?', '15'));
+                            if (Number.isInteger(minutes) && minutes > 0 && minutes <= 720) {
+                              void runGuestAction(
+                                booking.bookingId,
+                                access.token,
+                                (token) => bookingsApi.guestLateness(
+                                  booking.bookingId,
+                                  token,
+                                  Math.floor(minutes / 60),
+                                  minutes % 60,
+                                ),
                               );
-                            } catch {
-                              setShowExternalReviewOffer(true);
                             }
-                          }
-                        });
-                      }} className="rounded-xl border border-emerald-200/35 bg-emerald-300/10 px-3 py-2 text-sm font-bold text-emerald-100 disabled:opacity-50">Залишити відгук</button>}
+                          }}
+                          className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-45"
+                        >
+                          {booking.isLatenessPromptDue
+                            ? 'Повідомити про запізнення'
+                            : `Запізнююсь — доступно після ${String(booking.bookingTime).slice(0, 5)}`}
+                        </button>
+                      )}
+                      {booking.canGuestChangeTime && (
+                        <button
+                          type="button"
+                          disabled={guestActionBusy}
+                          onClick={() => {
+                            const requestedTime = window.prompt(
+                              'Вкажіть новий час у форматі ГГ:ХХ',
+                              String(booking.bookingTime).slice(0, 5),
+                            );
+                            if (requestedTime?.trim()) {
+                              void runGuestAction(
+                                booking.bookingId,
+                                access.token,
+                                (token) => bookingsApi.guestChangeTime(
+                                  booking.bookingId,
+                                  token,
+                                  {
+                                    requestedDate: booking.bookingDate,
+                                    requestedTime: requestedTime.trim(),
+                                  },
+                                ),
+                              );
+                            }
+                          }}
+                          className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50"
+                        >
+                          Змінити час
+                        </button>
+                      )}
+                      {booking.canGuestCancel && (
+                        <button
+                          type="button"
+                          disabled={guestActionBusy}
+                          onClick={() => {
+                            if (window.confirm('Скасувати це бронювання?')) {
+                              void runGuestAction(
+                                booking.bookingId,
+                                access.token,
+                                (token) => bookingsApi.guestCancel(booking.bookingId, token),
+                              );
+                            }
+                          }}
+                          className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50"
+                        >
+                          Скасувати бронювання
+                        </button>
+                      )}
+                      {booking.canGuestChangeTable && (
+                        <button
+                          type="button"
+                          disabled={guestActionBusy}
+                          onClick={() => {
+                            const tableNumber = window.prompt('Вкажіть номер нового столу');
+                            if (tableNumber?.trim()) {
+                              void runGuestAction(
+                                booking.bookingId,
+                                access.token,
+                                (token) => bookingsApi.guestChangeTable(
+                                  booking.bookingId,
+                                  token,
+                                  { tableNumber: tableNumber.trim() },
+                                ),
+                              );
+                            }
+                          }}
+                          className="rounded-xl border border-amber-200/60 bg-amber-300/20 px-3 py-2 text-sm font-bold text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.28)] disabled:opacity-50"
+                        >
+                          Змінити стіл
+                        </button>
+                      )}
+                      {booking.canLeaveReview && (
+                        <button
+                          type="button"
+                          disabled={guestActionBusy}
+                          onClick={() => {
+                            const text = window.prompt('Поділіться враженнями від візиту');
+                            if (text?.trim()) {
+                              void runGuestAction(
+                                booking.bookingId,
+                                access.token,
+                                (token) => bookingsApi.guestReview(
+                                  booking.bookingId,
+                                  token,
+                                  { text: text.trim() },
+                                ),
+                              ).then((result) => {
+                                if (result?.askExternalReview) {
+                                  setLastBookingId(booking.bookingId);
+                                  try {
+                                    setShowExternalReviewOffer(
+                                      window.sessionStorage.getItem(
+                                        `${EXTERNAL_REVIEW_SESSION_KEY_PREFIX}${booking.bookingId}`,
+                                      ) !== 'true',
+                                    );
+                                  } catch {
+                                    setShowExternalReviewOffer(true);
+                                  }
+                                }
+                              });
+                            }
+                          }}
+                          className="rounded-xl border border-emerald-200/35 bg-emerald-300/10 px-3 py-2 text-sm font-bold text-emerald-100 disabled:opacity-50"
+                        >
+                          Залишити відгук
+                        </button>
+                      )}
                     </div>
                   )}
                   {booking.status === 'approved' && <div className="mt-4"><GuestHookahCallPanel bookingId={booking.bookingId} /></div>}
