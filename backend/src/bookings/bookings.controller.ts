@@ -19,12 +19,14 @@ import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { GuestBookingsService } from './guest-bookings.service';
+import { GuestRequestsService } from './guest-requests.service';
 
 @Controller('bookings')
 export class BookingsController {
   constructor(
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
+    private readonly guestRequests: GuestRequestsService,
     private readonly tableLock: BookingTableLockService,
     private readonly availabilityBlocks: AvailabilityBlocksService,
     private readonly rescheduleApproval: BookingRescheduleApprovalService,
@@ -167,7 +169,7 @@ export class BookingsController {
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestChangeTableDto,
   ) {
-    return this.guestService.changeTable(id, token, dto);
+    return this.guestRequests.requestTableChange(id, token, dto);
   }
 
   @Public()
