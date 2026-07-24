@@ -41,12 +41,12 @@ export const adminGuestActionsApi = {
 
   approveReschedule: (requestId: string) =>
     api.patch<ActionResponse>(
-      `/bookings/reschedule/${encode(requestId)}/approve`,
+      `/bookings/admin-actions/reschedules/${encode(requestId)}/approve`,
     ),
 
   rejectReschedule: (requestId: string, adminComment?: string) =>
     api.patch<ActionResponse>(
-      `/bookings/reschedule/${encode(requestId)}/reject`,
+      `/bookings/admin-actions/reschedules/${encode(requestId)}/reject`,
       { adminComment },
     ),
 
