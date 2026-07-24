@@ -28,10 +28,19 @@ export type AdminAttentionItem = {
   booking: Booking;
 };
 
+export type AdminGuestReview = {
+  id: string;
+  text: string;
+  isPublished: boolean;
+  createdAt: string;
+  booking: Booking;
+};
+
 type ActionResponse = { message: string };
 
 export const adminAttentionApi = {
   list: () => api.get<AdminAttentionItem[]>('/bookings/admin-attention'),
+  listReviews: () => api.get<AdminGuestReview[]>('/bookings/admin-reviews'),
   acknowledge: (requestId: string) =>
     api.patch<ActionResponse>(`/bookings/admin-attention/${encodeURIComponent(requestId)}/acknowledge`),
   approveReschedule: (requestId: string) =>
