@@ -158,15 +158,8 @@ function dismissReview(bookingId?: string | null) {
 
   if (!target) return;
 
-  const completedIds = latestRawBookings
-    .filter((booking) => booking.status === 'completed')
-    .map((booking) => booking.bookingId);
-  completedIds.forEach((id) => dismissedIds.add(id));
   dismissedIds.add(target.bookingId);
   persistDismissedIds();
-
-  // Прибираємо доступ лише до відхиленого візиту. Токени інших завершених
-  // бронювань не видаляємо, навіть якщо їхня історія прихована в інтерфейсі.
   removeStoredTokens(new Set([target.bookingId]));
 
   const visible = filterGuestHistory(latestRawBookings);
