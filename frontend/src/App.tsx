@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
-import WaiterApp from "./waiter/WaiterApp";
+import WaiterApp from "./waiter/WaiterAppV2";
 import HookahApp from "./hookah/HookahApp";
 import AdminWorkspace from "./admin/AdminWorkspace";
 import DirectorWorkspace from "./director/DirectorWorkspace";
