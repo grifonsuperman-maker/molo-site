@@ -8,12 +8,18 @@ export type AdminAttentionKind =
   | 'admin_call'
   | 'review';
 
+export type AdminAttentionBooking = Booking & {
+  latenessHours?: number | null;
+  latenessMinutes?: number | null;
+  expectedArrivalAt?: string | null;
+};
+
 export type AdminAttentionItem = {
   id: string;
   sourceId: string;
   kind: AdminAttentionKind;
   createdAt: string;
-  booking: Booking;
+  booking: AdminAttentionBooking;
   action?: string;
   reason?: string | null;
   previousData?: Record<string, unknown> | null;
