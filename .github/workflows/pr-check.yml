@@ -39,3 +39,5 @@ jobs:
         run: npm --prefix backend install --package-lock=false --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
       - name: Build backend
         run: cd backend && npx --yes @nestjs/cli@10.4.9 build
+      - name: Test Admin attention center
+        run: cd backend && node --require ts-node/register --test src/bookings/admin-attention.service.spec.ts
