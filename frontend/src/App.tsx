@@ -5,6 +5,7 @@ import WaiterApp from "./waiter/WaiterAppV2";
 import "./waiter/waiter-legacy-theme.css";
 import HookahApp from "./hookah/HookahApp";
 import AdminWorkspace from "./admin/AdminWorkspace";
+import "./admin/admin-neon-theme.css";
 import DirectorPanel from "./director/DirectorPanel";
 import SitePhotoController from "./theme/SitePhotoController";
 import SiteModeSwitch from "./theme/SiteModeSwitch";
@@ -122,7 +123,9 @@ export default function App() {
       {mode === "admin" && (
         <>
           <SiteModeSwitch role="admin" />
-          <AdminWorkspace />
+          <div className="molo-admin-neon-theme">
+            <AdminWorkspace />
+          </div>
         </>
       )}
       {mode === "director" && (
