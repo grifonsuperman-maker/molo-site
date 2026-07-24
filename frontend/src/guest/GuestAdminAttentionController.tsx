@@ -32,7 +32,9 @@ bookingsApi.guestChangeTable = async (id, token, table) => {
 function subscribe(listener: GuestBookingListener) {
   listeners.add(listener);
   listener(latestBookings);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 function errorText(error: unknown) {
