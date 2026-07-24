@@ -4,7 +4,9 @@ import GuestApp from "./guest/GuestApp";
 import GuestWaiterCallController from "./guest/GuestWaiterCallController";
 import GuestReviewDismissController from "./guest/GuestReviewDismissController";
 import WaiterApp from "./waiter/WaiterAppV2";
+import WaiterCallAlertController from "./waiter/WaiterCallAlertController";
 import "./waiter/waiter-legacy-theme.css";
+import "./waiter/waiter-call-alert.css";
 import HookahApp from "./hookah/HookahApp";
 import AdminWorkspace from "./admin/AdminWorkspace";
 import "./admin/admin-neon-theme.css";
@@ -124,6 +126,7 @@ export default function App() {
       )}
       {mode === "waiter" && (
         <div className="molo-waiter-legacy-theme">
+          <WaiterCallAlertController />
           <WaiterApp />
         </div>
       )}
