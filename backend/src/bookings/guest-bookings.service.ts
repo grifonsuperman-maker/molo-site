@@ -15,7 +15,9 @@ import { GuestCancelBookingDto } from './dto/guest-cancel-booking.dto';
 import { GuestChangeTableDto } from './dto/guest-change-table.dto';
 import { GuestLatenessDto } from './dto/guest-lateness.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
+import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 import { BookingHistory } from './entities/booking-history.entity';
+import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 
@@ -172,6 +174,62 @@ export class GuestBookingsService {
 
     return {
       message: 'Адміністратора та офіціанта повідомлено про запізнення',
+      booking: await this.get(id, token),
+    };
+  }
+
+  async requestTimeChange(id: string, token: string, dto: RequestRescheduleDto) {
+    await this.dataSource.transaction(async (manager) => {
+      const booking = await this.findOwnedBooking(id, token, manager, true);
+      this.assertGuestCanManageActiveBooking(
+        booking,
+        'Зміна часу для цієї броні вже недоступна',
+      );
+
+      const requestedDate = String(dto.requestedDate || '').trim();
+      const requestedTime = String(dto.requestedTime || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+        throw new BadRequestException('Вкажіть дату у форматі YYYY-MM-DD');
+      }
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(requestedTime)) {
+        throw new BadRequestException('Вкажіть час у форматі ГГ:ХХ');
+      }
+      if (requestedDate < this.kyivDate()) {
+        throw new BadRequestException('Не можна перенести бронювання на минулу дату');
+      }
+
+      const repository = manager.getRepository(BookingRescheduleRequest);
+      let request = await repository.findOne({
+        where: {
+          booking: { id: booking.id },
+          status: 'pending',
+        } as any,
+        relations: ['booking'],
+      });
+
+      if (request) {
+        request.requestedDate = requestedDate;
+        request.requestedTime = requestedTime;
+      } else {
+        request = repository.create({
+          booking,
+          requestedDate,
+          requestedTime,
+          status: 'pending',
+          adminComment: null,
+          resolvedAt: null,
+        });
+      }
+      await repository.save(request);
+
+      await this.saveHistory(manager, booking, 'guest_requested_time_change', {
+        newData: { requestedDate, requestedTime },
+        reason: `Новий час: ${requestedDate} ${requestedTime}`,
+      });
+    });
+
+    return {
+      message: 'Запит на зміну часу надіслано адміністратору',
       booking: await this.get(id, token),
     };
   }
@@ -441,6 +499,12 @@ export class GuestBookingsService {
 
   private payload(booking: Booking, reviewExists: boolean, restaurantPhone: string | null) {
     const canManage = ACTIVE_BOOKING_STATUSES.includes(booking.status) && !booking.checkedInAt;
+    const canReportLateness = Boolean(
+      booking.status === 'approved' &&
+        !booking.checkedInAt &&
+        !booking.lateNotifiedAt &&
+        this.isToday(booking.bookingDate),
+    );
     const expectedArrivalOverdue = Boolean(
       booking.status === 'approved' &&
         !booking.checkedInAt &&
@@ -475,6 +539,8 @@ export class GuestBookingsService {
       isExpectedArrivalOverdue: expectedArrivalOverdue,
       canGuestCancel: canManage,
       canGuestChangeTable: canManage,
+      canGuestChangeTime: canManage,
+      canReportLateness,
       canLeaveReview: booking.status === 'completed' && Boolean(booking.checkedInAt) && !reviewExists,
       guestNotification: booking.guestNotification,
       restaurantPhone,

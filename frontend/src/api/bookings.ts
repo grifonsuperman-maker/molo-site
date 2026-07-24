@@ -99,6 +99,8 @@ export type BookingPublicStatus = {
   isLatenessPromptDue?: boolean;
   canGuestCancel?: boolean;
   canGuestChangeTable?: boolean;
+  canGuestChangeTime?: boolean;
+  canReportLateness?: boolean;
   canLeaveReview?: boolean;
   guestNotification?: GuestBooking['guestNotification'];
 };
@@ -126,6 +128,8 @@ export type GuestBooking = {
   isLatenessPromptDue?: boolean;
   canGuestCancel?: boolean;
   canGuestChangeTable?: boolean;
+  canGuestChangeTime?: boolean;
+  canReportLateness?: boolean;
   canLeaveReview?: boolean;
   guestNotification?: {
     title?: string;
@@ -243,6 +247,13 @@ export const bookingsApi = {
 
   guestLateness: (id: string, token: string, hours: number, minutes: number) =>
     api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/lateness`, { hours, minutes }, { headers: guestHeaders(token) }),
+
+  guestChangeTime: (
+    id: string,
+    token: string,
+    payload: { requestedDate: string; requestedTime: string },
+  ) =>
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/change-time`, payload, { headers: guestHeaders(token) }),
 
   guestChangeTable: (id: string, token: string, table: { tableId?: string; tableNumber?: string }) =>
     api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/change-table`, table, { headers: guestHeaders(token) }),
