@@ -5,6 +5,7 @@ import { DataSource, QueryRunner, Repository } from 'typeorm';
 import { TableEntity } from '../tables/entities/table.entity';
 import { CreateAvailabilityBlockDto } from './dto/create-availability-block.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking } from './entities/booking.entity';
 
 type AdvisoryLock = readonly [key: string, scope: string];
@@ -17,6 +18,8 @@ export class BookingTableLockService {
     private readonly tables: Repository<TableEntity>,
     @InjectRepository(Booking)
     private readonly bookings: Repository<Booking>,
+    @InjectRepository(BookingTableChangeRequest)
+    private readonly tableChangeRequests: Repository<BookingTableChangeRequest>,
   ) {}
 
   async withCreateLock<T>(dto: CreateBookingDto, work: () => Promise<T>) {
@@ -60,19 +63,7 @@ export class BookingTableLockService {
       });
       if (!booking) return await work();
 
-      const destinationTableKey = await this.resolveTableKey(tableId, null);
-      const tableKeys = Array.from(
-        new Set(
-          [booking.table?.id, destinationTableKey].filter(
-            (value): value is string => Boolean(value),
-          ),
-        ),
-      ).sort();
-
-      for (const tableKey of tableKeys) {
-        await this.acquireLock(runner, [tableKey, booking.bookingDate], acquired);
-      }
-
+      await this.acquireTransferTableLocks(runner, booking, tableId, acquired);
       return await work();
     } finally {
       try {
@@ -80,6 +71,69 @@ export class BookingTableLockService {
       } finally {
         await runner.release();
       }
+    }
+  }
+
+  async withAdminTableChangeLock<T>(
+    requestId: string,
+    tableId: string,
+    work: () => Promise<T>,
+  ) {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    const acquired: AdvisoryLock[] = [];
+
+    try {
+      await this.acquireLock(
+        runner,
+        [`table-change:${requestId}`, 'admin-transfer'],
+        acquired,
+      );
+
+      const request = await this.tableChangeRequests.findOne({
+        where: { id: requestId },
+        relations: ['booking', 'booking.table'],
+      });
+      if (!request?.booking) return await work();
+
+      await this.acquireLock(
+        runner,
+        [`booking:${request.booking.id}`, 'admin-transfer'],
+        acquired,
+      );
+      await this.acquireTransferTableLocks(
+        runner,
+        request.booking,
+        tableId,
+        acquired,
+      );
+      return await work();
+    } finally {
+      try {
+        await this.releaseLocks(runner, acquired);
+      } finally {
+        await runner.release();
+      }
+    }
+  }
+
+  private async acquireTransferTableLocks(
+    runner: QueryRunner,
+    booking: Booking,
+    tableId: string,
+    acquired: AdvisoryLock[],
+  ) {
+    const destinationTableKey = await this.resolveTableKey(tableId, null);
+    const tableKeys = Array.from(
+      new Set(
+        [booking.table?.id, destinationTableKey].filter(
+          (value): value is string => Boolean(value),
+        ),
+      ),
+    ).sort();
+
+    for (const tableKey of tableKeys) {
+      await this.acquireLock(runner, [tableKey, booking.bookingDate], acquired);
     }
   }
 
