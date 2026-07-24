@@ -1,7 +1,13 @@
 import { useEffect } from 'react';
 
-import { bookingsApi } from '../api/bookings';
+import { bookingsApi, type GuestBooking } from '../api/bookings';
 import { api } from '../api/client';
+
+type GuestActionResponse = {
+  message: string;
+  booking?: GuestBooking;
+  askExternalReview?: boolean;
+};
 
 export default function GuestTableChangeRequestController() {
   useEffect(() => {
@@ -12,7 +18,7 @@ export default function GuestTableChangeRequestController() {
       token: string,
       table: { tableId?: string; tableNumber?: string },
     ) =>
-      api.patch(
+      api.patch<GuestActionResponse>(
         `/bookings/${encodeURIComponent(id)}/guest/table-change-request`,
         { tableNumber: table.tableNumber },
         { headers: { 'x-guest-booking-token': token } },
