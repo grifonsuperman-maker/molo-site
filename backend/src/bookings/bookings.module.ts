@@ -7,7 +7,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
-import { Zone } from '../zones/entities/zone.entity';
+import { Zone } from '../zones/zones.entity';
 import {
   AdminAttentionController,
   GuestAdminAttentionController,
@@ -28,7 +28,6 @@ import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking } from './entities/booking.entity';
-import { GuestAdminCall } from './entities/guest-admin-call.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
 
@@ -40,7 +39,6 @@ import { GuestBookingsService } from './guest-bookings.service';
       BookingRescheduleRequest,
       BookingTableChangeRequest,
       GuestReview,
-      GuestAdminCall,
       AvailabilityBlock,
       Client,
       TableEntity,
