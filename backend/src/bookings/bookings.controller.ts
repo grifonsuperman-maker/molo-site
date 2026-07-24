@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AdminGuestActionsService } from './admin-guest-actions.service';
 import { AvailabilityBlocksService } from './availability-blocks.service';
 import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { BookingTableLockService } from './booking-table-lock.service';
@@ -25,6 +26,7 @@ export class BookingsController {
   constructor(
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
+    private readonly guestActions: AdminGuestActionsService,
     private readonly tableLock: BookingTableLockService,
     private readonly availabilityBlocks: AvailabilityBlocksService,
     private readonly rescheduleApproval: BookingRescheduleApprovalService,
@@ -167,7 +169,7 @@ export class BookingsController {
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestChangeTableDto,
   ) {
-    return this.guestService.changeTable(id, token, dto);
+    return this.guestActions.requestTableChange(id, token, dto.tableNumber);
   }
 
   @Public()
