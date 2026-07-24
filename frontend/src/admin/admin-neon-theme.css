@@ -1,0 +1,276 @@
+.molo-admin-neon-theme {
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
+  overflow-x: hidden;
+  background: #030708;
+  color: #fff;
+}
+
+.molo-admin-neon-theme::before {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  content: "";
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(251, 191, 36, 0.17), transparent 34%),
+    radial-gradient(circle at 92% 18%, rgba(34, 211, 238, 0.13), transparent 36%),
+    radial-gradient(circle at 50% 100%, rgba(217, 70, 239, 0.09), transparent 42%),
+    linear-gradient(180deg, #030708 0%, #071011 54%, #020506 100%);
+}
+
+.molo-admin-neon-theme::after {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  pointer-events: none;
+  opacity: 0.2;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(to bottom, black, transparent 78%);
+}
+
+.molo-admin-neon-theme .molo-admin-workspace,
+.molo-admin-neon-theme .molo-admin-workspace > main {
+  background: transparent !important;
+}
+
+.molo-admin-neon-theme [class*="bg-neutral-950"],
+.molo-admin-neon-theme [class*="bg-neutral-900"],
+.molo-admin-neon-theme [class*="bg-black/90"],
+.molo-admin-neon-theme [class*="bg-black/95"],
+.molo-admin-neon-theme [class*="bg-black/96"] {
+  background-color: rgba(3, 8, 9, 0.84) !important;
+}
+
+.molo-admin-neon-theme :is(section, article, header, nav, form, div)[class*="rounded"][class*="border"] {
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.molo-admin-neon-theme :is(section, article, header, nav, form)[class*="border-white"] {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  box-shadow:
+    inset 0 0 24px rgba(255, 255, 255, 0.018),
+    0 0 24px rgba(34, 211, 238, 0.035);
+}
+
+.molo-admin-neon-theme button {
+  border: 1px solid rgba(255, 255, 255, 0.17) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)) !important;
+  color: rgba(255, 255, 255, 0.82) !important;
+  box-shadow:
+    inset 0 0 18px rgba(255, 255, 255, 0.025),
+    0 0 15px rgba(255, 255, 255, 0.035) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition:
+    transform 150ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease !important;
+}
+
+.molo-admin-neon-theme button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.32) !important;
+  color: #fff !important;
+  box-shadow:
+    inset 0 0 20px rgba(255, 255, 255, 0.035),
+    0 0 22px rgba(255, 255, 255, 0.075) !important;
+}
+
+.molo-admin-neon-theme button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.molo-admin-neon-theme button:focus-visible,
+.molo-admin-neon-theme :is(input, select, textarea):focus-visible {
+  outline: 2px solid rgba(253, 230, 138, 0.95);
+  outline-offset: 3px;
+}
+
+.molo-admin-neon-theme button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42 !important;
+  box-shadow: none !important;
+}
+
+.molo-admin-neon-theme button[class*="amber"],
+.molo-admin-neon-theme button[class*="ring-amber"] {
+  border-color: rgba(253, 230, 138, 0.82) !important;
+  background:
+    linear-gradient(180deg, rgba(251, 191, 36, 0.09), rgba(251, 191, 36, 0.025)) !important;
+  color: #fff1b8 !important;
+  box-shadow:
+    inset 0 0 20px rgba(251, 191, 36, 0.045),
+    0 0 13px rgba(251, 191, 36, 0.34),
+    0 0 30px rgba(251, 191, 36, 0.14) !important;
+}
+
+.molo-admin-neon-theme button[class*="emerald"] {
+  border-color: rgba(110, 231, 183, 0.82) !important;
+  background:
+    linear-gradient(180deg, rgba(52, 211, 153, 0.085), rgba(52, 211, 153, 0.02)) !important;
+  color: #d6fff0 !important;
+  box-shadow:
+    inset 0 0 20px rgba(52, 211, 153, 0.04),
+    0 0 13px rgba(52, 211, 153, 0.3),
+    0 0 30px rgba(52, 211, 153, 0.12) !important;
+}
+
+.molo-admin-neon-theme button[class*="fuchsia"] {
+  border-color: rgba(240, 171, 252, 0.82) !important;
+  background:
+    linear-gradient(180deg, rgba(217, 70, 239, 0.085), rgba(217, 70, 239, 0.02)) !important;
+  color: #fde8ff !important;
+  box-shadow:
+    inset 0 0 20px rgba(217, 70, 239, 0.04),
+    0 0 13px rgba(217, 70, 239, 0.32),
+    0 0 30px rgba(217, 70, 239, 0.13) !important;
+}
+
+.molo-admin-neon-theme button[class*="cyan"] {
+  border-color: rgba(165, 243, 252, 0.82) !important;
+  background:
+    linear-gradient(180deg, rgba(34, 211, 238, 0.08), rgba(34, 211, 238, 0.02)) !important;
+  color: #dcfbff !important;
+  box-shadow:
+    inset 0 0 20px rgba(34, 211, 238, 0.04),
+    0 0 13px rgba(34, 211, 238, 0.3),
+    0 0 30px rgba(34, 211, 238, 0.12) !important;
+}
+
+.molo-admin-neon-theme button[class*="sky"] {
+  border-color: rgba(125, 211, 252, 0.82) !important;
+  background:
+    linear-gradient(180deg, rgba(56, 189, 248, 0.08), rgba(56, 189, 248, 0.02)) !important;
+  color: #e0f5ff !important;
+  box-shadow:
+    inset 0 0 20px rgba(56, 189, 248, 0.04),
+    0 0 13px rgba(56, 189, 248, 0.3),
+    0 0 30px rgba(56, 189, 248, 0.12) !important;
+}
+
+.molo-admin-neon-theme button[class*="orange"] {
+  border-color: rgba(253, 186, 116, 0.84) !important;
+  background:
+    linear-gradient(180deg, rgba(251, 146, 60, 0.085), rgba(251, 146, 60, 0.02)) !important;
+  color: #ffead5 !important;
+  box-shadow:
+    inset 0 0 20px rgba(251, 146, 60, 0.04),
+    0 0 13px rgba(251, 146, 60, 0.31),
+    0 0 30px rgba(251, 146, 60, 0.12) !important;
+}
+
+.molo-admin-neon-theme button[class*="red"] {
+  border-color: rgba(252, 165, 165, 0.82) !important;
+  background:
+    linear-gradient(180deg, rgba(248, 113, 113, 0.08), rgba(248, 113, 113, 0.02)) !important;
+  color: #ffe0e0 !important;
+  box-shadow:
+    inset 0 0 20px rgba(248, 113, 113, 0.04),
+    0 0 13px rgba(248, 113, 113, 0.32),
+    0 0 30px rgba(248, 113, 113, 0.12) !important;
+}
+
+.molo-admin-neon-theme button[class*="bg-white"] {
+  border-color: rgba(255, 255, 255, 0.75) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.02)) !important;
+  color: #fff !important;
+  box-shadow:
+    inset 0 0 18px rgba(255, 255, 255, 0.035),
+    0 0 14px rgba(255, 255, 255, 0.24),
+    0 0 28px rgba(255, 255, 255, 0.08) !important;
+}
+
+.molo-admin-neon-theme :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  background: rgba(2, 7, 8, 0.72) !important;
+  color: #fff !important;
+  box-shadow:
+    inset 0 0 18px rgba(255, 255, 255, 0.02),
+    0 0 14px rgba(34, 211, 238, 0.025);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.molo-admin-neon-theme :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea):focus {
+  border-color: rgba(253, 230, 138, 0.82) !important;
+  box-shadow:
+    inset 0 0 20px rgba(251, 191, 36, 0.035),
+    0 0 12px rgba(251, 191, 36, 0.34),
+    0 0 28px rgba(251, 191, 36, 0.1) !important;
+}
+
+.molo-admin-neon-theme select option {
+  background: #071011;
+  color: #fff;
+}
+
+.molo-admin-neon-theme h1,
+.molo-admin-neon-theme h2,
+.molo-admin-neon-theme [class*="font-black"] {
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.055);
+}
+
+.molo-admin-neon-theme article.animate-pulse {
+  background-color: rgba(7, 10, 11, 0.88) !important;
+  animation: molo-admin-urgent-neon 1.2s ease-in-out infinite !important;
+}
+
+.molo-admin-neon-theme article.animate-pulse[class*="border-red"] {
+  --molo-admin-urgent: 248, 113, 113;
+}
+
+.molo-admin-neon-theme article.animate-pulse[class*="border-fuchsia"] {
+  --molo-admin-urgent: 217, 70, 239;
+}
+
+.molo-admin-neon-theme article.animate-pulse[class*="border-amber"] {
+  --molo-admin-urgent: 251, 191, 36;
+}
+
+.molo-admin-neon-theme article.animate-pulse[class*="border-sky"] {
+  --molo-admin-urgent: 56, 189, 248;
+}
+
+.molo-admin-neon-theme [class*="ring-2"] {
+  --tw-ring-color: rgba(253, 230, 138, 0.82) !important;
+  box-shadow:
+    0 0 0 2px rgba(253, 230, 138, 0.7),
+    0 0 22px rgba(251, 191, 36, 0.24) !important;
+}
+
+@keyframes molo-admin-urgent-neon {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 18px rgba(var(--molo-admin-urgent, 251, 191, 36), 0.34),
+      0 0 36px rgba(var(--molo-admin-urgent, 251, 191, 36), 0.14);
+  }
+
+  50% {
+    transform: scale(1.01);
+    box-shadow:
+      0 0 26px rgba(var(--molo-admin-urgent, 251, 191, 36), 0.68),
+      0 0 54px rgba(var(--molo-admin-urgent, 251, 191, 36), 0.3),
+      0 0 76px rgba(var(--molo-admin-urgent, 251, 191, 36), 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .molo-admin-neon-theme article.animate-pulse {
+    animation: none !important;
+  }
+
+  .molo-admin-neon-theme button {
+    transition: none !important;
+  }
+}
