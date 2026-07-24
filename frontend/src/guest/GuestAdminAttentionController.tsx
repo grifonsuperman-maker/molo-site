@@ -37,6 +37,12 @@ function subscribe(listener: GuestBookingListener) {
   };
 }
 
+function kyivDate() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv',
+  }).format(new Date());
+}
+
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : 'Сталася невідома помилка';
 }
@@ -139,10 +145,12 @@ export default function GuestAdminAttentionController() {
     return () => observer.disconnect();
   }, []);
 
-  const approvedBookings = useMemo(
-    () => bookings.filter((booking) => booking.status === 'approved'),
-    [bookings],
-  );
+  const approvedBookings = useMemo(() => {
+    const today = kyivDate();
+    return bookings.filter(
+      (booking) => booking.status === 'approved' && booking.bookingDate >= today,
+    );
+  }, [bookings]);
 
   if (!target || approvedBookings.length === 0) return null;
 
