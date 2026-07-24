@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
 import GuestWaiterCallController from "./guest/GuestWaiterCallController";
+import GuestAdminAttentionController from "./guest/GuestAdminAttentionController";
 import GuestReviewDismissController from "./guest/GuestReviewDismissController";
 import WaiterApp from "./waiter/WaiterAppV2";
 import WaiterCallAlertController from "./waiter/WaiterCallAlertController";
@@ -9,6 +10,7 @@ import "./waiter/waiter-legacy-theme.css";
 import "./waiter/waiter-call-alert.css";
 import HookahApp from "./hookah/HookahApp";
 import AdminWorkspace from "./admin/AdminWorkspace";
+import AdminAttentionCenter from "./admin/AdminAttentionCenter";
 import "./admin/admin-neon-theme.css";
 import DirectorPanel from "./director/DirectorPanel";
 import SitePhotoController from "./theme/SitePhotoController";
@@ -121,6 +123,7 @@ export default function App() {
         <>
           <GuestApp />
           <GuestWaiterCallController />
+          <GuestAdminAttentionController />
           <GuestReviewDismissController />
         </>
       )}
@@ -135,6 +138,7 @@ export default function App() {
         <>
           <SiteModeSwitch role="admin" />
           <div className="molo-admin-neon-theme">
+            <AdminAttentionCenter />
             <AdminWorkspace />
           </div>
         </>
