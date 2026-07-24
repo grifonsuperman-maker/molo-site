@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalendarClock, LayoutDashboard, UsersRound } from 'lucide-react';
 
 import AdminAuthGate from './AdminAuthGate';
@@ -8,9 +8,69 @@ import AdminVisualTablePlanner from './AdminVisualTablePlanner';
 
 type AdminSection = 'panel' | 'staff';
 
+const LOCATION_PHOTOS: Record<string, string> = {
+  'Зал ресторану': '/maps/hall-bg-numbered.png',
+  'Навіс': '/maps/canopy-day-numbered.png',
+  'Велика альтанка': '/maps/gazebo-day-numbered.png',
+  'Ротанг': '/maps/rotang-day-numbered.png',
+  'Набережна': '/maps/embankment-day-numbered.png',
+  'Скляна альтанка': '/maps/glass-gazebo-day-numbered.png',
+  'Альтанка на воді': '/maps/water-gazebo-day-numbered.png',
+};
+
 export default function AdminWorkspace() {
   const [section, setSection] = useState<AdminSection>('panel');
   const [planningOpen, setPlanningOpen] = useState(false);
+
+  useEffect(() => {
+    if (!planningOpen) return;
+
+    const root = document.querySelector<HTMLElement>('[data-admin-location-planner]');
+    if (!root) return;
+
+    let frame = 0;
+
+    const syncPhoto = () => {
+      const image = root.querySelector<HTMLImageElement>('img[alt]');
+      if (!image) return;
+
+      const expectedDayPhoto = LOCATION_PHOTOS[image.alt];
+      if (!expectedDayPhoto || image.dataset.moloDaySrc === expectedDayPhoto) return;
+
+      image.dataset.moloDaySrc = expectedDayPhoto;
+      image.dataset.moloFallback = expectedDayPhoto;
+      delete image.dataset.moloFailedSrc;
+
+      const currentPath = new URL(
+        image.getAttribute('src') || '',
+        window.location.origin,
+      ).pathname;
+
+      if (currentPath !== expectedDayPhoto) {
+        image.setAttribute('src', expectedDayPhoto);
+      }
+    };
+
+    const scheduleSync = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(syncPhoto);
+    };
+
+    scheduleSync();
+
+    const observer = new MutationObserver(scheduleSync);
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['alt'],
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [planningOpen]);
 
   return (
     <AdminAuthGate>
@@ -27,7 +87,7 @@ export default function AdminWorkspace() {
           `}
         </style>
 
-        <div className="sticky top-0 z-[60] border-b border-white/10 bg-black/92 px-3 py-2 backdrop-blur-xl">
+        <div className="sticky top-0 z-[60] border-b border-white/10 bg-black/90 px-3 py-2 backdrop-blur-xl">
           <div className="mx-auto flex max-w-7xl items-center gap-2">
             <button
               type="button"
@@ -86,7 +146,9 @@ export default function AdminWorkspace() {
         )}
 
         {planningOpen && (
-          <AdminVisualTablePlanner onClose={() => setPlanningOpen(false)} />
+          <div data-admin-location-planner>
+            <AdminVisualTablePlanner onClose={() => setPlanningOpen(false)} />
+          </div>
         )}
       </div>
     </AdminAuthGate>
