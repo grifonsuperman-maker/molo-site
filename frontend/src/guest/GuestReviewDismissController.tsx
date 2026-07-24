@@ -158,16 +158,16 @@ function dismissReview(bookingId?: string | null) {
 
   if (!target) return;
 
-  const completedIds = new Set(
-    latestRawBookings
-      .filter((booking) => booking.status === 'completed')
-      .map((booking) => booking.bookingId),
-  );
-  if (completedIds.size === 0) completedIds.add(target.bookingId);
-
+  const completedIds = latestRawBookings
+    .filter((booking) => booking.status === 'completed')
+    .map((booking) => booking.bookingId);
   completedIds.forEach((id) => dismissedIds.add(id));
+  dismissedIds.add(target.bookingId);
   persistDismissedIds();
-  removeStoredTokens(completedIds);
+
+  // Прибираємо доступ лише до відхиленого візиту. Токени інших завершених
+  // бронювань не видаляємо, навіть якщо їхня історія прихована в інтерфейсі.
+  removeStoredTokens(new Set([target.bookingId]));
 
   const visible = filterGuestHistory(latestRawBookings);
   publish(visible);
