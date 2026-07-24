@@ -12,12 +12,16 @@ import {
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AdminAttentionService } from './admin-attention.service';
+import { BookingTableLockService } from './booking-table-lock.service';
 import { GuestChangeTableDto } from './dto/guest-change-table.dto';
 
 @Roles('owner', 'admin')
 @Controller('bookings/admin-attention')
 export class AdminAttentionController {
-  constructor(private readonly attention: AdminAttentionService) {}
+  constructor(
+    private readonly attention: AdminAttentionService,
+    private readonly tableLock: BookingTableLockService,
+  ) {}
 
   @Get()
   feed(@Query('limit') limit?: string) {
@@ -48,10 +52,10 @@ export class AdminAttentionController {
     @Body('tableId') tableId: string,
     @Req() request: any,
   ) {
-    return this.attention.approveTableChange(
+    return this.tableLock.withAdminTableChangeLock(
       requestId,
       tableId,
-      request.user,
+      () => this.attention.approveTableChange(requestId, tableId, request.user),
     );
   }
 
