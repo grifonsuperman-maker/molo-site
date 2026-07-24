@@ -38,6 +38,11 @@ export type GuestWaiterCallStatus = {
   activeCall: WaiterCall | null;
 };
 
+type TransferTable = {
+  id: string;
+  tableNumber: string;
+};
+
 type PatchableBookingsApi = typeof bookingsApi & {
   __waiterAssignmentsPatched?: boolean;
 };
@@ -46,6 +51,7 @@ const patchableBookingsApi = bookingsApi as PatchableBookingsApi;
 
 if (!patchableBookingsApi.__waiterAssignmentsPatched) {
   const originalGetToday = bookingsApi.getToday.bind(bookingsApi);
+  const originalWaiterTransfer = bookingsApi.waiterTransfer.bind(bookingsApi);
 
   bookingsApi.getToday = async () => {
     const bookings = await originalGetToday();
@@ -78,6 +84,34 @@ if (!patchableBookingsApi.__waiterAssignmentsPatched) {
     } catch {
       return bookings;
     }
+  };
+
+  bookingsApi.waiterTransfer = async (bookingId: string, tableId: string) => {
+    const [bookings, tables] = await Promise.all([
+      originalGetToday(),
+      api.get<TransferTable[]>('/tables'),
+    ]);
+    const booking = bookings.find((item) => item.id === bookingId) || null;
+    const oldTableId = booking?.table?.id || null;
+    const guestsWereSeated = Boolean(booking?.checkedInAt);
+    const destination = tables.find((table) => table.id === tableId) || null;
+
+    const result = await originalWaiterTransfer(bookingId, tableId);
+
+    if (guestsWereSeated) {
+      await bookingsApi.checkIn(bookingId);
+      if (oldTableId) {
+        await api.patch<unknown>(`/tables/${encodeURIComponent(oldTableId)}/cleaning`);
+      }
+    }
+
+    await api.post<{ message: string; assignment: WaiterAssignment }>('/waiter-calls/assign', {
+      bookingId,
+      tableId,
+      tableNumber: destination?.tableNumber || null,
+    });
+
+    return result;
   };
 
   patchableBookingsApi.__waiterAssignmentsPatched = true;
