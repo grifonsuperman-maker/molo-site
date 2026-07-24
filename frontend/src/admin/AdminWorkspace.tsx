@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CalendarClock, LayoutDashboard, UsersRound } from 'lucide-react';
 
 import AdminAuthGate from './AdminAuthGate';
+import AdminGuestRequestsPanel from './AdminGuestRequestsPanel';
 import AdminStaffPanel from './AdminStaffPanel';
 import CompactAdminPanel from './CompactAdminPanel';
 import AdminTablesByLocation from './AdminTablesByLocation';
@@ -184,6 +185,8 @@ export default function AdminWorkspace() {
             </button>
           </div>
         </div>
+
+        {section === 'panel' && <AdminGuestRequestsPanel />}
 
         {section === 'panel' ? (
           <CompactAdminPanel />
