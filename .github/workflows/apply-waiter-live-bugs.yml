@@ -1,31 +1,26 @@
-name: Apply waiter live bug fixes
+name: Verify waiter live bug fixes
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/waiter-live-bugs-20260725
+      - main
     paths:
-      - .github/scripts/apply_waiter_live_bugs.py
+      - frontend/src/waiter/WaiterApp.tsx
+      - backend/src/bookings/bookings.controller.ts
       - .github/workflows/apply-waiter-live-bugs.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-and-build:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: fix/waiter-live-bugs-20260725
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Apply targeted fixes
-        run: python .github/scripts/apply_waiter_live_bugs.py
 
       - name: Install frontend dependencies
         run: npm --prefix frontend install --no-audit --no-fund --package-lock=false
@@ -42,12 +37,4 @@ jobs:
         run: npm --prefix backend run build
 
       - name: Check diff
-        run: git diff --check
-
-      - name: Commit product changes
-        run: |
-          git config user.name "chatgpt-codex-connector[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/src/waiter/WaiterApp.tsx backend/src/bookings/bookings.controller.ts
-          git commit -m "Fix waiter assignments and transfer locations"
-          git push origin HEAD:fix/waiter-live-bugs-20260725
+        run: git diff --check origin/main...HEAD
