@@ -43,6 +43,18 @@ export class Restaurant {
   @Column({ name: 'admin_can_edit_restaurant_settings', default: false })
   adminCanEditRestaurantSettings: boolean;
 
+  @Column({ name: 'admin_can_manage_blacklist', default: false })
+  adminCanManageBlacklist: boolean;
+
+  @Column({ name: 'admin_can_respond_reviews', default: false })
+  adminCanRespondReviews: boolean;
+
+  @Column({ name: 'admin_can_manage_staff_shifts', default: false })
+  adminCanManageStaffShifts: boolean;
+
+  @Column({ name: 'admin_can_send_broadcasts', default: false })
+  adminCanSendBroadcasts: boolean;
+
   @Column({ type: 'text', nullable: true })
   address: string | null;
 
