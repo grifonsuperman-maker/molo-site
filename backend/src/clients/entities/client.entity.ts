@@ -1,5 +1,6 @@
 import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { Booking } from '../../bookings/entities/booking.entity';
+
 @Entity('clients')
 export class Client {
   @PrimaryGeneratedColumn('uuid') id: string;
@@ -14,6 +15,8 @@ export class Client {
   @Column({ type: 'text', nullable: true }) note: string | null;
   @Column({ name: 'is_regular', default: false }) isRegular: boolean;
   @Column({ name: 'is_blacklisted', default: false }) isBlacklisted: boolean;
+  @Column({ name: 'blacklist_reason', type: 'text', nullable: true }) blacklistReason: string | null;
+  @Column({ name: 'blacklisted_at', type: 'timestamp', nullable: true }) blacklistedAt: Date | null;
   @OneToMany(() => Booking, (booking) => booking.client) bookings: Booking[];
   @CreateDateColumn({ name: 'created_at' }) createdAt: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt: Date;
