@@ -42,9 +42,9 @@ jobs:
           set +e
           npm --prefix backend install --package-lock=false --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org > /tmp/backend-install.log 2>&1
           status=$?
-          error=$(grep -E 'npm (ERR!|error)|ERESOLVE|ETARGET|EAI_AGAIN|ECONNRESET|ENOTFOUND' /tmp/backend-install.log | tail -n 1 | tr '\n\r' '  ' | cut -c1-180)
+          error=$(grep -E 'npm (ERR!|error)|ERESOLVE|ETARGET|EAI_AGAIN|ECONNRESET|ENOTFOUND' /tmp/backend-install.log | head -n 1 | tr '\n\r' '  ' | cut -c1-180)
           if [ -z "$error" ]; then
-            error=$(tail -n 1 /tmp/backend-install.log | tr '\n\r' '  ' | cut -c1-180)
+            error=$(head -n 1 /tmp/backend-install.log | tr '\n\r' '  ' | cut -c1-180)
           fi
           echo "status=$status" >> "$GITHUB_OUTPUT"
           echo "error=$error" >> "$GITHUB_OUTPUT"
