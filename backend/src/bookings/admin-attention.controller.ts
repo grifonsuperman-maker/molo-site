@@ -2,15 +2,11 @@ import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
 
 import { Roles } from '../common/decorators/roles.decorator';
 import { AdminAttentionService } from './admin-attention.service';
-import { BookingTableLockService } from './booking-table-lock.service';
 
 @Roles('owner', 'admin')
 @Controller('admin-attention')
 export class AdminAttentionController {
-  constructor(
-    private readonly attention: AdminAttentionService,
-    private readonly tableLock: BookingTableLockService,
-  ) {}
+  constructor(private readonly attention: AdminAttentionService) {}
 
   @Get()
   dashboard() {
@@ -22,9 +18,10 @@ export class AdminAttentionController {
     @Param('requestId') requestId: string,
     @Body('tableId') tableId: string,
   ) {
-    return this.tableLock.withTableChangeRequestLock(requestId, tableId, () =>
-      this.attention.approveTableChange(requestId, tableId),
-    );
+    // approveTableChange already owns a transaction and row locks. Wrapping it in
+    // a session advisory lock held by another QueryRunner requires a second pool
+    // connection and can fail on small/transaction-pooled production databases.
+    return this.attention.approveTableChange(requestId, tableId);
   }
 
   @Patch('table-change/:requestId/reject')
