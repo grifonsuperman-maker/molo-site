@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
+import { Client } from '../clients/entities/client.entity';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -36,7 +37,21 @@ export class BookingsController {
 
   @Public()
   @Post()
-  create(@Body() dto: CreateBookingDto) {
+  async create(@Body() dto: CreateBookingDto) {
+    const normalizedPhone = String(dto.phone || '').replace(/\D/g, '');
+    const blacklistedClients = await this.dataSource.getRepository(Client).find({
+      where: { isBlacklisted: true },
+      take: 10000,
+    });
+    if (
+      normalizedPhone &&
+      blacklistedClients.some(
+        (client) => String(client.phone || '').replace(/\D/g, '') === normalizedPhone,
+      )
+    ) {
+      throw new BadRequestException('Бронювання з цього номера недоступне');
+    }
+
     return this.tableLock.withCreateLock(dto, async () => {
       await this.availabilityBlocks.assertBookable(dto);
       return this.service.create(dto);
