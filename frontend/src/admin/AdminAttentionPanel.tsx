@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, MessageSquareText, RefreshCw, Table2, X } from 'lucide-react';
 
 import {
@@ -71,6 +72,15 @@ export default function AdminAttentionPanel() {
     const timer = window.setInterval(() => void load(true), POLLING_MS);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (!pickerRequest) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [pickerRequest]);
 
   async function runAction(key: string, action: () => Promise<{ message: string }>) {
     setBusy(key);
@@ -144,6 +154,52 @@ export default function AdminAttentionPanel() {
   if (!dashboard) return null;
 
   const pendingCount = dashboard.tableChanges.length;
+  const pickerDialog = pickerRequest && typeof document !== 'undefined'
+    ? createPortal(
+      <div
+        className="molo-admin-neon-theme fixed inset-0 z-[120] flex items-end p-3 sm:items-center sm:justify-center"
+        style={{
+          position: 'fixed',
+          minHeight: 0,
+          overflow: 'visible',
+          background: 'rgba(0, 0, 0, 0.8)',
+          paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))',
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Підібрати новий стіл"
+      >
+        <button type="button" className="absolute inset-0" onClick={() => setPickerRequest(null)} aria-label="Закрити вибір столу" />
+        <section className="relative max-h-[calc(100dvh-1.5rem-env(safe-area-inset-bottom))] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-fuchsia-300/45 bg-neutral-950 p-4 shadow-[0_0_46px_rgba(217,70,239,.20)]">
+          <div className="flex items-start justify-between gap-3">
+            <div><h3 className="text-xl font-black">Підібрати новий стіл</h3><p className="mt-1 text-sm text-white/50">Поточний №{pickerRequest.booking.table?.tableNumber || '—'} · {pickerRequest.booking.guestsCount} гостей</p></div>
+            <button type="button" onClick={() => setPickerRequest(null)} className="grid h-10 w-10 place-items-center rounded-xl border border-white/20"><X size={18} /></button>
+          </div>
+
+          {pickerLoading ? <p className="mt-5 rounded-2xl border border-white/15 p-5 text-center text-white/55">Шукаємо вільні столи…</p> : (
+            <div className="mt-5 space-y-4">
+              {groupedTables.map((group) => (
+                <section key={group.location}>
+                  <h4 className="mb-2 text-sm font-black text-white/70">{group.location}</h4>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {group.tables.map((table) => (
+                      <button key={table.id} type="button" onClick={() => setSelectedTableId(table.id)} className={`rounded-2xl border bg-black/45 px-3 py-3 text-left ${selectedTableId === table.id ? 'border-amber-200 text-amber-100 shadow-[0_0_20px_rgba(250,204,21,.22)]' : 'border-white/20 text-white/75'}`}>
+                        <span className="block text-lg font-black">№{table.tableNumber}</span><span className="block text-xs opacity-55">{table.seats} місць</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+              {!groupedTables.length && <p className="rounded-2xl border border-dashed border-white/15 p-5 text-center text-sm text-white/50">Підходящих вільних столів немає.</p>}
+            </div>
+          )}
+
+          <button type="button" disabled={!selectedTableId || Boolean(busy)} onClick={() => selectedTableId && void runAction(`table-change:${pickerRequest.id}:approve`, () => adminAttentionApi.approveTableChange(pickerRequest.id, selectedTableId))} className="mt-5 w-full rounded-2xl border border-emerald-300/55 bg-black/50 px-4 py-4 font-black text-emerald-100 shadow-[0_0_22px_rgba(52,211,153,.16)] disabled:opacity-35">Підтвердити пересадку</button>
+        </section>
+      </div>,
+      document.body,
+    )
+    : null;
 
   return (
     <section className="mx-auto max-w-7xl px-3 pt-3 sm:px-4 lg:px-8" aria-label="Запити гостей для Адміністратора">
@@ -205,37 +261,7 @@ export default function AdminAttentionPanel() {
         )}
       </div>
 
-      {pickerRequest && (
-        <div className="fixed inset-0 z-[90] flex items-end bg-black/80 p-3 sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Підібрати новий стіл">
-          <button type="button" className="absolute inset-0" onClick={() => setPickerRequest(null)} aria-label="Закрити вибір столу" />
-          <section className="relative max-h-[86dvh] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-fuchsia-300/45 bg-neutral-950 p-4 shadow-[0_0_46px_rgba(217,70,239,.20)]">
-            <div className="flex items-start justify-between gap-3">
-              <div><h3 className="text-xl font-black">Підібрати новий стіл</h3><p className="mt-1 text-sm text-white/50">Поточний №{pickerRequest.booking.table?.tableNumber || '—'} · {pickerRequest.booking.guestsCount} гостей</p></div>
-              <button type="button" onClick={() => setPickerRequest(null)} className="grid h-10 w-10 place-items-center rounded-xl border border-white/20"><X size={18} /></button>
-            </div>
-
-            {pickerLoading ? <p className="mt-5 rounded-2xl border border-white/15 p-5 text-center text-white/55">Шукаємо вільні столи…</p> : (
-              <div className="mt-5 space-y-4">
-                {groupedTables.map((group) => (
-                  <section key={group.location}>
-                    <h4 className="mb-2 text-sm font-black text-white/70">{group.location}</h4>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      {group.tables.map((table) => (
-                        <button key={table.id} type="button" onClick={() => setSelectedTableId(table.id)} className={`rounded-2xl border bg-black/45 px-3 py-3 text-left ${selectedTableId === table.id ? 'border-amber-200 text-amber-100 shadow-[0_0_20px_rgba(250,204,21,.22)]' : 'border-white/20 text-white/75'}`}>
-                          <span className="block text-lg font-black">№{table.tableNumber}</span><span className="block text-xs opacity-55">{table.seats} місць</span>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ))}
-                {!groupedTables.length && <p className="rounded-2xl border border-dashed border-white/15 p-5 text-center text-sm text-white/50">Підходящих вільних столів немає.</p>}
-              </div>
-            )}
-
-            <button type="button" disabled={!selectedTableId || Boolean(busy)} onClick={() => selectedTableId && void runAction(`table-change:${pickerRequest.id}:approve`, () => adminAttentionApi.approveTableChange(pickerRequest.id, selectedTableId))} className="mt-5 w-full rounded-2xl border border-emerald-300/55 bg-black/50 px-4 py-4 font-black text-emerald-100 shadow-[0_0_22px_rgba(52,211,153,.16)] disabled:opacity-35">Підтвердити пересадку</button>
-          </section>
-        </div>
-      )}
+      {pickerDialog}
     </section>
   );
 }
