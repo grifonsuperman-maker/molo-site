@@ -170,16 +170,6 @@ function guestHeaders(token: string): HeadersInit {
   return { 'x-guest-booking-token': token };
 }
 
-function withoutGuestTimeChange<T extends GuestBooking>(booking: T): T {
-  return { ...booking, canGuestChangeTime: false };
-}
-
-function withoutGuestTimeChangeAction(response: ActionResponse): ActionResponse {
-  return response.booking
-    ? { ...response, booking: withoutGuestTimeChange(response.booking) }
-    : response;
-}
-
 function buildAvailabilityQuery(params: {
   tableId: string;
   bookingDate: string;
@@ -244,50 +234,38 @@ export const bookingsApi = {
     ),
 
   getPublicStatus: (id: string) =>
-    api.get<BookingPublicStatus>(`/bookings/${encode(id)}/status`).then((booking) => ({
-      ...booking,
-      canGuestChangeTime: false,
-    })),
+    api.get<BookingPublicStatus>(`/bookings/${encode(id)}/status`),
 
   guestList: (guestDeviceId: string, tokens: string[] = []) =>
-    api.post<GuestBooking[]>('/bookings/guest/list', { guestDeviceId, tokens })
-      .then((bookings) => bookings.map(withoutGuestTimeChange)),
+    api.post<GuestBooking[]>('/bookings/guest/list', { guestDeviceId, tokens }),
 
   getGuest: (id: string, token: string) =>
-    api.get<GuestBooking>(`/bookings/${encode(id)}/guest`, { headers: guestHeaders(token) })
-      .then(withoutGuestTimeChange),
+    api.get<GuestBooking>(`/bookings/${encode(id)}/guest`, { headers: guestHeaders(token) }),
 
   guestCancel: (id: string, token: string, reason?: string) =>
-    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/cancel`, { reason }, { headers: guestHeaders(token) })
-      .then(withoutGuestTimeChangeAction),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/cancel`, { reason }, { headers: guestHeaders(token) }),
 
   guestLateness: (id: string, token: string, hours: number, minutes: number) =>
-    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/lateness`, { hours, minutes }, { headers: guestHeaders(token) })
-      .then(withoutGuestTimeChangeAction),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/lateness`, { hours, minutes }, { headers: guestHeaders(token) }),
 
   guestChangeTime: (
     id: string,
     token: string,
     payload: { requestedDate: string; requestedTime: string },
   ) =>
-    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/change-time`, payload, { headers: guestHeaders(token) })
-      .then(withoutGuestTimeChangeAction),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/change-time`, payload, { headers: guestHeaders(token) }),
 
   guestChangeTable: (id: string, token: string, table: { tableId?: string; tableNumber?: string }) =>
-    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/change-table`, table, { headers: guestHeaders(token) })
-      .then(withoutGuestTimeChangeAction),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/change-table`, table, { headers: guestHeaders(token) }),
 
   guestAcknowledgeNotification: (id: string, token: string) =>
-    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/notification/ack`, undefined, { headers: guestHeaders(token) })
-      .then(withoutGuestTimeChangeAction),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/notification/ack`, undefined, { headers: guestHeaders(token) }),
 
   guestReview: (id: string, token: string, payload: { text: string }) =>
-    api.post<ActionResponse>(`/bookings/${encode(id)}/guest/review`, payload, { headers: guestHeaders(token) })
-      .then(withoutGuestTimeChangeAction),
+    api.post<ActionResponse>(`/bookings/${encode(id)}/guest/review`, payload, { headers: guestHeaders(token) }),
 
   guestExternalReviewOpened: (id: string, token: string) =>
-    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/review/external-opened`, undefined, { headers: guestHeaders(token) })
-      .then(withoutGuestTimeChangeAction),
+    api.patch<ActionResponse>(`/bookings/${encode(id)}/guest/review/external-opened`, undefined, { headers: guestHeaders(token) }),
 
   getPendingReminders: () =>
     api.get<Booking[]>('/bookings/pending-reminders'),
