@@ -13,19 +13,6 @@ export class AdminAttentionController {
     return this.attention.dashboard();
   }
 
-  @Patch('reschedule/:requestId/approve')
-  approveReschedule(@Param('requestId') requestId: string) {
-    return this.attention.approveReschedule(requestId);
-  }
-
-  @Patch('reschedule/:requestId/reject')
-  rejectReschedule(
-    @Param('requestId') requestId: string,
-    @Body('adminComment') adminComment?: string,
-  ) {
-    return this.attention.rejectReschedule(requestId, adminComment);
-  }
-
   @Patch('table-change/:requestId/approve')
   approveTableChange(
     @Param('requestId') requestId: string,
