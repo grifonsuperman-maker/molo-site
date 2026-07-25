@@ -16,10 +16,6 @@ const TABLE_CHANGE_RESOLUTIONS = [
   'admin_approved_table_change',
   'admin_rejected_table_change',
 ] as const;
-const ADMIN_CALL_RESOLUTIONS = [
-  'admin_accepted_call',
-  'admin_completed_call',
-] as const;
 const DEFAULT_DURATION_MINUTES = 120;
 const CLEANUP_MINUTES = 15;
 
@@ -98,43 +94,6 @@ export class GuestRequestsService {
     });
 
     return { message: 'Запит на зміну столу надіслано Адміністратору' };
-  }
-
-  async callAdmin(bookingId: string, token: string) {
-    await this.dataSource.transaction(async (manager) => {
-      const booking = await this.findOwnedBooking(bookingId, token, manager, true);
-      if (booking.status !== 'approved' || !booking.checkedInAt) {
-        throw new BadRequestException('Виклик Адміністратора доступний після приходу гостей');
-      }
-
-      const existing = await this.findUnresolvedHistory(
-        manager,
-        booking.id,
-        'guest_called_admin',
-        ADMIN_CALL_RESOLUTIONS,
-      );
-      if (existing) {
-        throw new ConflictException('Виклик Адміністратора вже активний');
-      }
-
-      await manager.getRepository(BookingHistory).save(
-        manager.getRepository(BookingHistory).create({
-          booking,
-          action: 'guest_called_admin',
-          actorRole: 'guest',
-          actorStaffId: null,
-          actorName: null,
-          previousData: null,
-          newData: {
-            tableNumber: booking.table?.tableNumber || null,
-          },
-          reason: 'Гість викликав Адміністратора',
-          isManualMode: false,
-        }),
-      );
-    });
-
-    return { message: 'Адміністратора викликано' };
   }
 
   private async findOwnedBooking(
