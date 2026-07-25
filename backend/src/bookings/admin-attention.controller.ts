@@ -2,21 +2,23 @@ import { Body, Controller, Get, Param, Patch, Req } from '@nestjs/common';
 
 import { Roles } from '../common/decorators/roles.decorator';
 import { AdminAttentionService } from './admin-attention.service';
-import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
-import { BookingsService } from './bookings.service';
+import { AdminTableChangeApprovalService } from './admin-table-change-approval.service';
 
 @Roles('owner', 'admin')
 @Controller('bookings/admin-attention')
 export class AdminAttentionController {
   constructor(
     private readonly attention: AdminAttentionService,
-    private readonly rescheduleApproval: BookingRescheduleApprovalService,
-    private readonly bookings: BookingsService,
+    private readonly tableChangeApproval: AdminTableChangeApprovalService,
   ) {}
 
   @Get()
-  list() {
-    return this.attention.list();
+  async list() {
+    const items = await this.attention.list();
+    return items.filter(
+      (item: { kind?: string }) =>
+        item.kind !== 'admin_call' && item.kind !== 'reschedule',
+    );
   }
 
   @Patch(':requestId/acknowledge')
@@ -30,7 +32,7 @@ export class AdminAttentionController {
     @Body('tableId') tableId: string,
     @Req() request: any,
   ) {
-    return this.attention.approveTableChange(requestId, tableId, request.user);
+    return this.tableChangeApproval.approve(requestId, tableId, request.user);
   }
 
   @Patch('table-change/:requestId/reject')
@@ -42,37 +44,8 @@ export class AdminAttentionController {
     return this.attention.rejectTableChange(requestId, comment, request.user);
   }
 
-  @Patch('call/:requestId/accept')
-  acceptCall(@Param('requestId') requestId: string, @Req() request: any) {
-    return this.attention.acceptAdminCall(requestId, request.user);
-  }
-
-  @Patch('call/:requestId/complete')
-  completeCall(@Param('requestId') requestId: string, @Req() request: any) {
-    return this.attention.completeAdminCall(requestId, request.user);
-  }
-
   @Patch('review/:reviewId/acknowledge')
   acknowledgeReview(@Param('reviewId') reviewId: string, @Req() request: any) {
     return this.attention.acknowledgeReview(reviewId, request.user);
-  }
-
-  @Patch('reschedule/:requestId/approve')
-  async approveReschedule(@Param('requestId') requestId: string) {
-    const result = await this.rescheduleApproval.approve(requestId);
-    await this.attention.setRescheduleNotification(requestId, true);
-    return result;
-  }
-
-  @Patch('reschedule/:requestId/reject')
-  async rejectReschedule(
-    @Param('requestId') requestId: string,
-    @Body('comment') comment: string,
-  ) {
-    const result = await this.bookings.rejectReschedule(requestId, {
-      adminComment: String(comment || '').trim() || undefined,
-    });
-    await this.attention.setRescheduleNotification(requestId, false, comment);
-    return result;
   }
 }
