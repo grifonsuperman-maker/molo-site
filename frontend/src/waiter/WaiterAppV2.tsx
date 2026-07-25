@@ -18,6 +18,7 @@ import {
   type WaiterCall,
 } from '../api/waiterCalls';
 import type { Booking, TableItem } from '../api/types';
+import WaiterTablesByLocation from './WaiterTablesByLocation';
 
 const SESSION_KEY = 'molo_waiter_staff';
 const SHIFT_ENDED_KEY = 'molo_waiter_shift_ended_name';
@@ -148,6 +149,7 @@ export default function WaiterAppV2() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState('');
   const [transfer, setTransfer] = useState<TransferState | null>(null);
+  const [showTables, setShowTables] = useState(false);
 
   const logout = () => {
     localStorage.setItem(SHIFT_ENDED_KEY, staff?.fullName || '');
@@ -272,6 +274,7 @@ export default function WaiterAppV2() {
               <button key={key} type="button" onClick={() => setTab(key)} className={`rounded-2xl border px-3 py-3 font-black transition active:scale-[.98] ${tab === key ? 'border-amber-200/65 bg-amber-300/15 text-amber-100 shadow-[0_0_20px_rgba(250,204,21,.12)]' : 'border-white/10 bg-white/[.035] text-white/60'}`}>{label}{key === 'calls' && calls.length > 0 && <span className="ml-2 rounded-full border border-orange-300/60 px-2 py-1 text-xs text-orange-100">{calls.length}</span>}</button>
             ))}
           </nav>
+          <button type="button" onClick={() => setShowTables(true)} className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[.035] px-3 py-3 font-black text-white/60 transition active:scale-[.98]">Столи</button>
         </header>
 
         {(error || notice) && <div className={`mt-4 rounded-2xl border p-3 text-sm ${error ? 'border-red-300/30 bg-red-500/10 text-red-100' : 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100'}`}>{error || notice}</div>}
@@ -347,6 +350,8 @@ export default function WaiterAppV2() {
           </section>
         </div>
       )}
+
+      {showTables && <WaiterTablesByLocation onClose={() => setShowTables(false)} />}
     </main>
   );
 }
