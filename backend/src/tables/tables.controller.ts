@@ -4,6 +4,7 @@ import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
 import { TableStatus } from './entities/table.entity';
 import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('tables')
 export class TablesController {
@@ -25,6 +26,15 @@ export class TablesController {
   @Patch('number/:tableNumber/status')
   statusByNumber(@Param('tableNumber') tableNumber: string, @Body() body: { status: TableStatus }) {
     return this.service.setStatusByNumber(tableNumber, body.status);
+  }
+
+  @Roles('waiter', 'admin', 'owner')
+  @Patch(':id/waiter-status')
+  waiterStatus(
+    @Param('id') id: string,
+    @Body('status') status: 'occupied' | 'free',
+  ) {
+    return this.service.setWaiterStatus(id, status);
   }
 
   @Public()
