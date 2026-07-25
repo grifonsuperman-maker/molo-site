@@ -22,9 +22,12 @@ function publishGuestBookings(bookings: GuestBooking[]) {
 
 // GuestApp already owns the session device id, including its in-memory fallback
 // when localStorage is blocked. Observe that exact request instead of reading
-// browser storage a second time.
+// browser storage a second time. Guest self-service time changes are disabled.
 bookingsApi.guestList = async (guestDeviceId: string, tokens: string[] = []) => {
-  const bookings = await originalGuestList(guestDeviceId, tokens);
+  const bookings = (await originalGuestList(guestDeviceId, tokens)).map((booking) => ({
+    ...booking,
+    canGuestChangeTime: false,
+  }));
   publishGuestBookings(bookings);
   return bookings;
 };

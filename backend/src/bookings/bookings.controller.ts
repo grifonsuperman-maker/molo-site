@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
+import { Client } from '../clients/entities/client.entity';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -19,12 +20,22 @@ import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { GuestBookingsService } from './guest-bookings.service';
+import { GuestRequestsService } from './guest-requests.service';
+
+function normalizeUkrainianPhone(value: string | null | undefined) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.length === 9) return `380${digits}`;
+  if (digits.length === 10 && digits.startsWith('0')) return `38${digits}`;
+  if (digits.length === 11 && digits.startsWith('80')) return `3${digits}`;
+  return digits;
+}
 
 @Controller('bookings')
 export class BookingsController {
   constructor(
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
+    private readonly guestRequests: GuestRequestsService,
     private readonly tableLock: BookingTableLockService,
     private readonly availabilityBlocks: AvailabilityBlocksService,
     private readonly rescheduleApproval: BookingRescheduleApprovalService,
@@ -34,7 +45,21 @@ export class BookingsController {
 
   @Public()
   @Post()
-  create(@Body() dto: CreateBookingDto) {
+  async create(@Body() dto: CreateBookingDto) {
+    const normalizedPhone = normalizeUkrainianPhone(dto.phone);
+    const blacklistedClients = await this.dataSource.getRepository(Client).find({
+      where: { isBlacklisted: true },
+      take: 10000,
+    });
+    if (
+      normalizedPhone &&
+      blacklistedClients.some(
+        (client) => normalizeUkrainianPhone(client.phone) === normalizedPhone,
+      )
+    ) {
+      throw new BadRequestException('Бронювання з цього номера недоступне');
+    }
+
     return this.tableLock.withCreateLock(dto, async () => {
       await this.availabilityBlocks.assertBookable(dto);
       return this.service.create(dto);
@@ -167,7 +192,7 @@ export class BookingsController {
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestChangeTableDto,
   ) {
-    return this.guestService.changeTable(id, token, dto);
+    return this.guestRequests.requestTableChange(id, token, dto);
   }
 
   @Public()
