@@ -5,6 +5,7 @@ import { DataSource, QueryRunner, Repository } from 'typeorm';
 import { TableEntity } from '../tables/entities/table.entity';
 import { CreateAvailabilityBlockDto } from './dto/create-availability-block.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking } from './entities/booking.entity';
 
 type AdvisoryLock = readonly [key: string, scope: string];
@@ -17,6 +18,8 @@ export class BookingTableLockService {
     private readonly tables: Repository<TableEntity>,
     @InjectRepository(Booking)
     private readonly bookings: Repository<Booking>,
+    @InjectRepository(BookingTableChangeRequest)
+    private readonly tableChangeRequests: Repository<BookingTableChangeRequest>,
   ) {}
 
   async withCreateLock<T>(dto: CreateBookingDto, work: () => Promise<T>) {
@@ -81,6 +84,20 @@ export class BookingTableLockService {
         await runner.release();
       }
     }
+  }
+
+  async withTableChangeRequestLock<T>(
+    requestId: string,
+    tableId: string,
+    work: () => Promise<T>,
+  ) {
+    const request = await this.tableChangeRequests.findOne({
+      where: { id: requestId },
+      relations: ['booking'],
+    });
+
+    if (!request?.booking?.id) return work();
+    return this.withTransferLock(request.booking.id, tableId, work);
   }
 
   private async resolveTableKey(tableId?: string | null, tableNumber?: string | null) {
