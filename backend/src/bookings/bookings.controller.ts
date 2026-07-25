@@ -1,11 +1,9 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import { DataSource } from 'typeorm';
 
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { NotificationsService } from '../notifications/notifications.service';
+import { AdminAttentionService } from './admin-attention.service';
 import { AvailabilityBlocksService } from './availability-blocks.service';
-import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
@@ -15,9 +13,6 @@ import { GuestCancelBookingDto } from './dto/guest-cancel-booking.dto';
 import { GuestChangeTableDto } from './dto/guest-change-table.dto';
 import { GuestLatenessDto } from './dto/guest-lateness.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
-import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
-import { RequestRescheduleDto } from './dto/request-reschedule.dto';
-import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { GuestBookingsService } from './guest-bookings.service';
 
 @Controller('bookings')
@@ -27,9 +22,7 @@ export class BookingsController {
     private readonly guestService: GuestBookingsService,
     private readonly tableLock: BookingTableLockService,
     private readonly availabilityBlocks: AvailabilityBlocksService,
-    private readonly rescheduleApproval: BookingRescheduleApprovalService,
-    private readonly dataSource: DataSource,
-    private readonly notifications: NotificationsService,
+    private readonly adminAttention: AdminAttentionService,
   ) {}
 
   @Public()
@@ -95,12 +88,6 @@ export class BookingsController {
   }
 
   @Public()
-  @Get('reschedule/pending')
-  pendingReschedules() {
-    return this.service.getPendingReschedules();
-  }
-
-  @Public()
   @Get(':id/guest')
   guestBooking(
     @Param('id') id: string,
@@ -130,44 +117,13 @@ export class BookingsController {
   }
 
   @Public()
-  @Patch(':id/guest/change-time')
-  async guestChangeTime(
-    @Param('id') id: string,
-    @Headers('x-guest-booking-token') token: string,
-    @Body() dto: RequestRescheduleDto,
-  ) {
-    const result = await this.guestService.requestTimeChange(id, token, dto);
-
-    try {
-      const request = await this.dataSource
-        .getRepository(BookingRescheduleRequest)
-        .findOne({
-          where: {
-            booking: { id },
-            status: 'pending',
-          } as any,
-          relations: ['booking', 'booking.table', 'booking.client'],
-          order: { createdAt: 'DESC' },
-        });
-
-      if (request) {
-        await this.notifications.notifyRescheduleRequest(request);
-      }
-    } catch (notificationError) {
-      console.error('Guest reschedule notification failed', notificationError);
-    }
-
-    return result;
-  }
-
-  @Public()
   @Patch(':id/guest/change-table')
   guestChangeTable(
     @Param('id') id: string,
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestChangeTableDto,
   ) {
-    return this.guestService.changeTable(id, token, dto);
+    return this.adminAttention.requestTableChange(id, token, dto);
   }
 
   @Public()
@@ -246,26 +202,5 @@ export class BookingsController {
     return this.tableLock.withTransferLock(id, tableId, () =>
       this.service.waiterTransfer(id, tableId, request.user),
     );
-  }
-
-  @Public()
-  @Post(':id/reschedule')
-  requestReschedule(@Param('id') id: string, @Body() dto: RequestRescheduleDto) {
-    return this.service.requestReschedule(id, dto);
-  }
-
-  @Public()
-  @Patch('reschedule/:requestId/approve')
-  approveReschedule(@Param('requestId') requestId: string) {
-    return this.rescheduleApproval.approve(requestId);
-  }
-
-  @Public()
-  @Patch('reschedule/:requestId/reject')
-  rejectReschedule(
-    @Param('requestId') requestId: string,
-    @Body() dto: RejectRescheduleDto,
-  ) {
-    return this.service.rejectReschedule(requestId, dto);
   }
 }
