@@ -22,6 +22,14 @@ import { BookingRescheduleRequest } from './entities/booking-reschedule-request.
 import { GuestBookingsService } from './guest-bookings.service';
 import { GuestRequestsService } from './guest-requests.service';
 
+function normalizeUkrainianPhone(value: string | null | undefined) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.length === 9) return `380${digits}`;
+  if (digits.length === 10 && digits.startsWith('0')) return `38${digits}`;
+  if (digits.length === 11 && digits.startsWith('80')) return `3${digits}`;
+  return digits;
+}
+
 @Controller('bookings')
 export class BookingsController {
   constructor(
@@ -38,7 +46,7 @@ export class BookingsController {
   @Public()
   @Post()
   async create(@Body() dto: CreateBookingDto) {
-    const normalizedPhone = String(dto.phone || '').replace(/\D/g, '');
+    const normalizedPhone = normalizeUkrainianPhone(dto.phone);
     const blacklistedClients = await this.dataSource.getRepository(Client).find({
       where: { isBlacklisted: true },
       take: 10000,
@@ -46,7 +54,7 @@ export class BookingsController {
     if (
       normalizedPhone &&
       blacklistedClients.some(
-        (client) => String(client.phone || '').replace(/\D/g, '') === normalizedPhone,
+        (client) => normalizeUkrainianPhone(client.phone) === normalizedPhone,
       )
     ) {
       throw new BadRequestException('Бронювання з цього номера недоступне');
