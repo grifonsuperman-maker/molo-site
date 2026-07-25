@@ -27,6 +27,7 @@ export class ClientsController {
     return this.service.findOne(id);
   }
 
+  @Roles('owner')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateClientDto) {
     return this.service.update(id, dto);
