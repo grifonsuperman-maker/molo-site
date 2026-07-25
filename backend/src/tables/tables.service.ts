@@ -1,16 +1,21 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { TableEntity, TableStatus } from './entities/table.entity';
-import { Zone } from '../zones/entities/zone.entity';
+import { In, Repository } from 'typeorm';
+
+import { Booking } from '../bookings/entities/booking.entity';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
+import { TableEntity, TableStatus } from './entities/table.entity';
+import { Zone } from '../zones/entities/zone.entity';
+
+const ACTIVE_BOOKING_STATUSES = ['pending', 'approved'] as const;
 
 @Injectable()
 export class TablesService {
   constructor(
     @InjectRepository(TableEntity) private readonly tables: Repository<TableEntity>,
     @InjectRepository(Zone) private readonly zones: Repository<Zone>,
+    @InjectRepository(Booking) private readonly bookings: Repository<Booking>,
   ) {}
 
   findAll() {
@@ -105,6 +110,48 @@ export class TablesService {
     return this.tables.save(table);
   }
 
+  async setWaiterStatus(id: string, status: 'occupied' | 'free') {
+    if (status !== 'occupied' && status !== 'free') {
+      throw new BadRequestException('Офіціант може встановити лише статус «Зайнятий» або «Вільний»');
+    }
+
+    const table = await this.tables.findOne({ where: { id }, relations: ['zone'] });
+    if (!table) throw new NotFoundException('Стіл не знайдено');
+
+    if (status === 'occupied') {
+      if (table.status === 'closed') {
+        throw new BadRequestException('Закритий Адміністратором стіл не можна позначити зайнятим');
+      }
+      if (table.status === 'reserved' || table.status === 'pending') {
+        throw new BadRequestException('На цей стіл уже є активне бронювання');
+      }
+
+      table.status = 'occupied';
+      return this.tables.save(table);
+    }
+
+    const activeBookings = await this.bookings.find({
+      where: {
+        table: { id: table.id },
+        bookingDate: this.kyivToday(),
+        status: In([...ACTIVE_BOOKING_STATUSES]),
+      } as any,
+      relations: ['table'],
+    });
+
+    if (activeBookings.some((booking) => booking.status === 'approved' && booking.checkedInAt)) {
+      table.status = 'occupied';
+    } else if (activeBookings.some((booking) => booking.status === 'approved')) {
+      table.status = 'reserved';
+    } else if (activeBookings.some((booking) => booking.status === 'pending')) {
+      table.status = 'pending';
+    } else {
+      table.status = 'free';
+    }
+
+    return this.tables.save(table);
+  }
+
   markOccupied(id: string) {
     return this.setStatus(id, 'occupied');
   }
@@ -131,5 +178,14 @@ export class TablesService {
 
     await this.tables.remove(table);
     return { message: 'Стіл видалено' };
+  }
+
+  private kyivToday() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Kyiv',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
   }
 }
