@@ -10,10 +10,8 @@ import { createHash } from 'crypto';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 
 import { TableEntity } from '../tables/entities/table.entity';
-import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { AvailabilityBlock } from './entities/availability-block.entity';
 import { BookingHistory } from './entities/booking-history.entity';
-import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
@@ -25,24 +23,15 @@ const CLEANUP_MINUTES = 15;
 @Injectable()
 export class AdminAttentionService {
   constructor(
-    @InjectRepository(BookingRescheduleRequest)
-    private readonly reschedules: Repository<BookingRescheduleRequest>,
     @InjectRepository(BookingTableChangeRequest)
     private readonly tableChanges: Repository<BookingTableChangeRequest>,
     @InjectRepository(GuestReview)
     private readonly reviews: Repository<GuestReview>,
     private readonly dataSource: DataSource,
-    private readonly rescheduleApproval: BookingRescheduleApprovalService,
   ) {}
 
   async dashboard() {
-    const [reschedules, tableChanges, reviews] = await Promise.all([
-      this.reschedules.find({
-        where: { status: 'pending' },
-        relations: ['booking', 'booking.table', 'booking.table.zone', 'booking.client'],
-        order: { createdAt: 'DESC' },
-        take: 100,
-      }),
+    const [tableChanges, reviews] = await Promise.all([
       this.tableChanges.find({
         where: { status: 'pending' },
         relations: ['booking', 'booking.table', 'booking.table.zone', 'booking.client', 'approvedTable'],
@@ -56,7 +45,7 @@ export class AdminAttentionService {
       }),
     ]);
 
-    return { reschedules, tableChanges, reviews };
+    return { tableChanges, reviews };
   }
 
   async requestTableChange(
@@ -257,99 +246,6 @@ export class AdminAttentionService {
     });
   }
 
-  async approveReschedule(requestId: string) {
-    const before = await this.reschedules.findOne({
-      where: { id: requestId },
-      relations: ['booking', 'booking.table', 'booking.client'],
-    });
-    if (!before) throw new NotFoundException('Запит на зміну часу не знайдено');
-    if (before.status !== 'pending') throw new ConflictException('Цей запит уже опрацьовано');
-
-    const previousDate = before.booking.bookingDate;
-    const previousTime = before.booking.bookingTime;
-    const result = await this.rescheduleApproval.approve(requestId);
-
-    await this.dataSource.transaction(async (manager) => {
-      const request = await manager.getRepository(BookingRescheduleRequest).findOne({
-        where: { id: requestId },
-        relations: ['booking', 'booking.table', 'booking.client'],
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!request) return;
-
-      const booking = request.booking;
-      booking.guestNotification = {
-        type: 'booking_updated',
-        title: 'Новий час підтверджено',
-        message: `Бронювання перенесено з ${previousDate} ${this.timeLabel(previousTime)} на ${booking.bookingDate} ${this.timeLabel(booking.bookingTime)}.`,
-        createdAt: new Date().toISOString(),
-      };
-      await manager.getRepository(Booking).save(booking);
-      await manager.getRepository(BookingHistory).save(
-        manager.getRepository(BookingHistory).create({
-          booking,
-          action: 'admin_approved_time_change',
-          actorRole: 'admin',
-          actorStaffId: null,
-          actorName: null,
-          previousData: { bookingDate: previousDate, bookingTime: previousTime },
-          newData: this.bookingSnapshot(booking),
-          reason: `Новий час: ${booking.bookingDate} ${this.timeLabel(booking.bookingTime)}`,
-          isManualMode: true,
-        }),
-      );
-    });
-
-    return result;
-  }
-
-  async rejectReschedule(requestId: string, adminComment?: string) {
-    return this.dataSource.transaction(async (manager) => {
-      const repository = manager.getRepository(BookingRescheduleRequest);
-      const request = await repository.findOne({
-        where: { id: requestId },
-        relations: ['booking', 'booking.table', 'booking.client'],
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!request) throw new NotFoundException('Запит на зміну часу не знайдено');
-      if (request.status !== 'pending') throw new ConflictException('Цей запит уже опрацьовано');
-
-      const comment = String(adminComment || '').trim() || null;
-      request.status = 'rejected';
-      request.adminComment = comment;
-      request.resolvedAt = new Date();
-      await repository.save(request);
-
-      const booking = request.booking;
-      booking.guestNotification = {
-        type: 'booking_updated',
-        title: 'Поточний час залишено',
-        message: comment || `Запит на ${request.requestedDate} ${this.timeLabel(request.requestedTime)} не підтверджено.`,
-        createdAt: new Date().toISOString(),
-      };
-      await manager.getRepository(Booking).save(booking);
-      await manager.getRepository(BookingHistory).save(
-        manager.getRepository(BookingHistory).create({
-          booking,
-          action: 'admin_rejected_time_change',
-          actorRole: 'admin',
-          actorStaffId: null,
-          actorName: null,
-          previousData: this.bookingSnapshot(booking),
-          newData: {
-            ...this.bookingSnapshot(booking),
-            rejectedRequestedDate: request.requestedDate,
-            rejectedRequestedTime: request.requestedTime,
-          },
-          reason: comment,
-          isManualMode: true,
-        }),
-      );
-
-      return { message: 'Запит на зміну часу відхилено' };
-    });
-  }
-
   private async findOwnedBooking(manager: EntityManager, bookingId: string, token: string) {
     const normalizedToken = String(token || '').trim();
     if (!normalizedToken || normalizedToken.length > 256) {
@@ -513,11 +409,6 @@ export class AdminAttentionService {
       throw new BadRequestException('Невірний формат часу');
     }
     return hours * 60 + minutes;
-  }
-
-  private timeLabel(value: string) {
-    const [hours = '00', minutes = '00'] = String(value || '').split(':');
-    return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
   }
 
   private isToday(date: string) {
