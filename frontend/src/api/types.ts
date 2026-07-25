@@ -19,6 +19,10 @@ export type Restaurant = {
   adminCanManageRestaurant?: boolean;
   adminCanChangeSiteMode?: boolean;
   adminCanEditRestaurantSettings?: boolean;
+  adminCanManageBlacklist?: boolean;
+  adminCanRespondReviews?: boolean;
+  adminCanManageStaffShifts?: boolean;
+  adminCanSendBroadcasts?: boolean;
   menuUrl: string | null;
   status: RestaurantStatus;
   siteMode?: SiteMode;
@@ -68,6 +72,8 @@ export type Client = {
   totalGuests: number;
   isRegular: boolean;
   isBlacklisted: boolean;
+  blacklistReason?: string | null;
+  blacklistedAt?: string | null;
 };
 
 export type Booking = {
