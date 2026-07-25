@@ -61,14 +61,7 @@ export class AdminAttentionService {
 
       const requestedTableNumber = await this.resolveRequestedTableNumber(manager, requested);
       const repository = manager.getRepository(BookingTableChangeRequest);
-      let request = await repository.findOne({
-        where: {
-          booking: { id: booking.id },
-          status: 'pending',
-        } as any,
-        relations: ['booking'],
-        lock: { mode: 'pessimistic_write' },
-      });
+      let request = await this.findPendingTableChangeForUpdate(manager, booking.id);
 
       if (request) {
         request.requestedTableNumber = requestedTableNumber;
@@ -119,43 +112,26 @@ export class AdminAttentionService {
 
     return this.dataSource.transaction(async (manager) => {
       const requestRepository = manager.getRepository(BookingTableChangeRequest);
-      const request = await requestRepository.findOne({
-        where: { id: requestId },
-        relations: ['booking', 'booking.table', 'booking.table.zone', 'booking.client'],
-        lock: { mode: 'pessimistic_write' },
-      });
+      const request = await this.findTableChangeForUpdate(manager, requestId);
       if (!request) throw new NotFoundException('Запит на зміну столу не знайдено');
       if (request.status !== 'pending') throw new ConflictException('Цей запит уже опрацьовано');
 
       const bookingRepository = manager.getRepository(Booking);
-      const booking = await bookingRepository.findOne({
-        where: { id: request.booking.id },
-        relations: ['table', 'table.zone', 'client'],
-        lock: { mode: 'pessimistic_write' },
-      });
+      const booking = await this.findBookingForUpdate(manager, request.booking.id);
       if (!booking) throw new NotFoundException('Бронювання не знайдено');
       if (!ACTIVE_BOOKING_STATUSES.includes(booking.status) || booking.checkedInAt) {
         throw new BadRequestException('Зміна столу для цієї броні вже недоступна');
       }
       if (!booking.table) throw new BadRequestException('Для бронювання не призначено поточний стіл');
 
-      const tableRepository = manager.getRepository(TableEntity);
-      const nextTable = await tableRepository.findOne({
-        where: { id: normalizedTableId },
-        relations: ['zone'],
-        lock: { mode: 'pessimistic_write' },
-      });
+      const nextTable = await this.findTableForUpdate(manager, normalizedTableId);
       if (!nextTable) throw new NotFoundException('Новий стіл не знайдено');
       if (nextTable.id === booking.table.id) throw new BadRequestException('Оберіть інший стіл');
       this.assertTableCanReceiveBooking(nextTable, booking);
       await this.assertNoConflict(manager, nextTable, booking);
       await this.assertNoAvailabilityBlock(manager, nextTable, booking);
 
-      const oldTable = await tableRepository.findOne({
-        where: { id: booking.table.id },
-        relations: ['zone'],
-        lock: { mode: 'pessimistic_write' },
-      });
+      const oldTable = await this.findTableForUpdate(manager, booking.table.id);
       if (!oldTable) throw new NotFoundException('Поточний стіл не знайдено');
 
       const previousData = this.bookingSnapshot(booking);
@@ -203,11 +179,7 @@ export class AdminAttentionService {
   async rejectTableChange(requestId: string, adminComment?: string) {
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(BookingTableChangeRequest);
-      const request = await repository.findOne({
-        where: { id: requestId },
-        relations: ['booking', 'booking.table', 'booking.client'],
-        lock: { mode: 'pessimistic_write' },
-      });
+      const request = await this.findTableChangeForUpdate(manager, requestId);
       if (!request) throw new NotFoundException('Запит на зміну столу не знайдено');
       if (request.status !== 'pending') throw new ConflictException('Цей запит уже опрацьовано');
 
@@ -280,6 +252,52 @@ export class AdminAttentionService {
     if (!tableId) return null;
     const table = await manager.getRepository(TableEntity).findOne({ where: { id: tableId } });
     return table?.tableNumber || null;
+  }
+
+  private findPendingTableChangeForUpdate(manager: EntityManager, bookingId: string) {
+    return manager
+      .getRepository(BookingTableChangeRequest)
+      .createQueryBuilder('request')
+      .innerJoinAndSelect('request.booking', 'booking')
+      .where('booking.id = :bookingId', { bookingId })
+      .andWhere('request.status = :status', { status: 'pending' })
+      .setLock('pessimistic_write', undefined, ['request'])
+      .getOne();
+  }
+
+  private findTableChangeForUpdate(manager: EntityManager, requestId: string) {
+    return manager
+      .getRepository(BookingTableChangeRequest)
+      .createQueryBuilder('request')
+      .innerJoinAndSelect('request.booking', 'booking')
+      .leftJoinAndSelect('booking.table', 'currentTable')
+      .leftJoinAndSelect('currentTable.zone', 'currentZone')
+      .leftJoinAndSelect('booking.client', 'client')
+      .where('request.id = :requestId', { requestId })
+      .setLock('pessimistic_write', undefined, ['request'])
+      .getOne();
+  }
+
+  private findBookingForUpdate(manager: EntityManager, bookingId: string) {
+    return manager
+      .getRepository(Booking)
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.table', 'currentTable')
+      .leftJoinAndSelect('currentTable.zone', 'currentZone')
+      .leftJoinAndSelect('booking.client', 'client')
+      .where('booking.id = :bookingId', { bookingId })
+      .setLock('pessimistic_write', undefined, ['booking'])
+      .getOne();
+  }
+
+  private findTableForUpdate(manager: EntityManager, tableId: string) {
+    return manager
+      .getRepository(TableEntity)
+      .createQueryBuilder('lockedTable')
+      .leftJoinAndSelect('lockedTable.zone', 'zone')
+      .where('lockedTable.id = :tableId', { tableId })
+      .setLock('pessimistic_write', undefined, ['lockedTable'])
+      .getOne();
   }
 
   private assertTableCanReceiveBooking(table: TableEntity, booking: Booking) {

@@ -8,6 +8,9 @@ const {
   BookingTableLockService,
 } = require('../dist/bookings/booking-table-lock.service.js');
 const { Booking } = require('../dist/bookings/entities/booking.entity.js');
+const {
+  BookingTableChangeRequest,
+} = require('../dist/bookings/entities/booking-table-change-request.entity.js');
 const { TableEntity } = require('../dist/tables/entities/table.entity.js');
 
 function kyivDate() {
@@ -40,6 +43,35 @@ function buildStatusManager(table, activeBookings) {
         if (entity === Booking) return bookingRepository;
         throw new Error(`Unexpected repository: ${entity?.name || entity}`);
       },
+    },
+  };
+}
+
+function createRecordingQueryBuilder(result, calls) {
+  return {
+    innerJoinAndSelect(...args) {
+      calls.push(['innerJoinAndSelect', ...args]);
+      return this;
+    },
+    leftJoinAndSelect(...args) {
+      calls.push(['leftJoinAndSelect', ...args]);
+      return this;
+    },
+    where(...args) {
+      calls.push(['where', ...args]);
+      return this;
+    },
+    andWhere(...args) {
+      calls.push(['andWhere', ...args]);
+      return this;
+    },
+    setLock(...args) {
+      calls.push(['setLock', ...args]);
+      return this;
+    },
+    async getOne() {
+      calls.push(['getOne']);
+      return result;
     },
   };
 }
@@ -86,6 +118,62 @@ test('missing table-change request still reaches the guarded approval path', asy
 
   assert.equal(result, 'not-found-is-validated-by-service');
   assert.equal(workCalls, 1);
+});
+
+test('approval row locks target only base aliases while nullable relations are loaded', async () => {
+  const service = new AdminAttentionService({}, {}, {});
+  const requestCalls = [];
+  const bookingCalls = [];
+  const tableCalls = [];
+  const manager = {
+    getRepository(entity) {
+      if (entity === BookingTableChangeRequest) {
+        return {
+          createQueryBuilder(alias) {
+            requestCalls.push(['alias', alias]);
+            return createRecordingQueryBuilder({ id: 'request-1' }, requestCalls);
+          },
+        };
+      }
+      if (entity === Booking) {
+        return {
+          createQueryBuilder(alias) {
+            bookingCalls.push(['alias', alias]);
+            return createRecordingQueryBuilder({ id: 'booking-1' }, bookingCalls);
+          },
+        };
+      }
+      if (entity === TableEntity) {
+        return {
+          createQueryBuilder(alias) {
+            tableCalls.push(['alias', alias]);
+            return createRecordingQueryBuilder({ id: 'table-1' }, tableCalls);
+          },
+        };
+      }
+      throw new Error(`Unexpected repository: ${entity?.name || entity}`);
+    },
+  };
+
+  await service.findTableChangeForUpdate(manager, 'request-1');
+  await service.findBookingForUpdate(manager, 'booking-1');
+  await service.findTableForUpdate(manager, 'table-1');
+
+  assert.deepEqual(
+    requestCalls.find((call) => call[0] === 'setLock'),
+    ['setLock', 'pessimistic_write', undefined, ['request']],
+  );
+  assert.deepEqual(
+    bookingCalls.find((call) => call[0] === 'setLock'),
+    ['setLock', 'pessimistic_write', undefined, ['booking']],
+  );
+  assert.deepEqual(
+    tableCalls.find((call) => call[0] === 'setLock'),
+    ['setLock', 'pessimistic_write', undefined, ['lockedTable']],
+  );
+  assert.ok(requestCalls.some((call) => call[0] === 'leftJoinAndSelect'));
+  assert.ok(bookingCalls.some((call) => call[0] === 'leftJoinAndSelect'));
+  assert.ok(tableCalls.some((call) => call[0] === 'leftJoinAndSelect'));
 });
 
 test('old table stays reserved when another approved booking remains today', async () => {

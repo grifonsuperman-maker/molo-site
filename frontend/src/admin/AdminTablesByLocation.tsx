@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Clock3, MapPinned, RefreshCw, Table2, X } from 'lucide-react';
 
 import { bookingsApi, type TableStatusesResponse } from '../api/bookings';
@@ -55,11 +55,14 @@ function tableStatus(table: TableItem, statuses: TableStatusesResponse | null): 
 
 export default function AdminTablesByLocation({ onClose }: { onClose: () => void }) {
   const today = useMemo(kyivToday, []);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedTime, setSelectedTime] = useState('19:00');
   const [fullMap, setFullMap] = useState<FullMapResponse | null>(null);
   const [statuses, setStatuses] = useState<TableStatusesResponse | null>(null);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [actionTop, setActionTop] = useState(12);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -91,6 +94,33 @@ export default function AdminTablesByLocation({ onClose }: { onClose: () => void
     const timer = window.setInterval(() => void load(true), POLLING_MS);
     return () => window.clearInterval(timer);
   }, [selectedDate, selectedTime]);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const header = headerRef.current;
+    if (!scroller || !header) return;
+
+    let frame = 0;
+    const updateTop = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        setActionTop(Math.ceil(header.getBoundingClientRect().bottom + 8));
+      });
+    };
+
+    updateTop();
+    const observer = new ResizeObserver(updateTop);
+    observer.observe(header);
+    scroller.addEventListener('scroll', updateTop, { passive: true });
+    window.addEventListener('resize', updateTop);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      scroller.removeEventListener('scroll', updateTop);
+      window.removeEventListener('resize', updateTop);
+    };
+  }, []);
 
   const locationGroups = useMemo(() => LOCATIONS.map((location) => ({
     ...location,
@@ -149,10 +179,10 @@ export default function AdminTablesByLocation({ onClose }: { onClose: () => void
   }
 
   return (
-    <div className="fixed inset-0 z-[85] overflow-y-auto bg-[#050707] text-white">
+    <div ref={scrollRef} className="fixed inset-0 z-[85] overflow-y-auto bg-[#050707] text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(250,204,21,.12),transparent_32%),radial-gradient(circle_at_top_right,rgba(34,211,238,.11),transparent_35%),linear-gradient(180deg,#050707,#081010_55%,#050707)]" />
-      <main className={`relative mx-auto min-h-screen max-w-7xl px-3 pt-3 sm:px-5 ${selectedTable ? 'pb-64' : 'pb-28'}`}>
-        <header className="sticky top-0 z-40 rounded-[28px] border border-amber-200/35 bg-black/90 p-3 shadow-[0_0_36px_rgba(250,204,21,.12)] backdrop-blur-xl">
+      <main className="relative mx-auto min-h-screen max-w-7xl px-3 pb-28 pt-3 sm:px-5">
+        <header ref={headerRef} className="sticky top-0 z-40 rounded-[28px] border border-amber-200/35 bg-black/90 p-3 shadow-[0_0_36px_rgba(250,204,21,.12)] backdrop-blur-xl">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-amber-200/55 text-amber-100 shadow-[0_0_20px_rgba(250,204,21,.16)]"><Table2 size={22} /></span>
@@ -219,7 +249,7 @@ export default function AdminTablesByLocation({ onClose }: { onClose: () => void
       </main>
 
       {selectedTable && (
-        <div className="fixed inset-x-0 bottom-0 z-50 px-3 pb-3 sm:px-5">
+        <div className="fixed inset-x-0 z-[60] px-3 sm:px-5" style={{ top: actionTop }}>
           <section className="mx-auto max-w-7xl rounded-[28px] border border-amber-200/55 bg-black/95 p-4 shadow-[0_0_30px_rgba(250,204,21,.14)] backdrop-blur-xl">
             <div className="flex items-start justify-between gap-3">
               <div><p className="text-2xl font-black">Стіл №{selectedTable.tableNumber}</p><p className="mt-1 text-sm text-white/50">{selectedTable.zone?.name || 'Без локації'} · {selectedTable.seats} місць</p></div>
