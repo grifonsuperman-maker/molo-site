@@ -13,6 +13,7 @@ import { AdminAttentionService } from './admin-attention.service';
 import { AdminBookingEventsController } from './admin-booking-events.controller';
 import { AdminBookingEventsService } from './admin-booking-events.service';
 import { AdminReviewsController } from './admin-reviews.controller';
+import { AdminTableChangeApprovalService } from './admin-table-change-approval.service';
 import { AvailabilityBlocksController } from './availability-blocks.controller';
 import { AvailabilityBlocksService } from './availability-blocks.service';
 import { AvailabilityPermissionsService } from './availability-permissions.service';
@@ -64,6 +65,7 @@ import { GuestRequestsService } from './guest-requests.service';
     BookingTableLockService,
     AdminBookingEventsService,
     AdminAttentionService,
+    AdminTableChangeApprovalService,
     AvailabilityBlocksService,
     AvailabilityPermissionsService,
   ],
