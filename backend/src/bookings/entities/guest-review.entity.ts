@@ -31,6 +31,18 @@ export class GuestReview {
   @Column({ name: 'external_review_opened_at', type: 'timestamp', nullable: true })
   externalReviewOpenedAt: Date | null;
 
+  @Column({ name: 'response_text', type: 'text', nullable: true })
+  responseText: string | null;
+
+  @Column({ name: 'responded_at', type: 'timestamp', nullable: true })
+  respondedAt: Date | null;
+
+  @Column({ name: 'responded_by_name', type: 'varchar', length: 160, nullable: true })
+  respondedByName: string | null;
+
+  @Column({ name: 'responded_by_role', type: 'varchar', length: 32, nullable: true })
+  respondedByRole: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
