@@ -8,6 +8,7 @@ import WaiterCallAlertController from "./waiter/WaiterCallAlertController";
 import "./waiter/waiter-legacy-theme.css";
 import "./waiter/waiter-call-alert.css";
 import HookahApp from "./hookah/HookahApp";
+import AdminAttentionPanel from "./admin/AdminAttentionPanel";
 import AdminWorkspace from "./admin/AdminWorkspace";
 import "./admin/admin-neon-theme.css";
 import DirectorPanel from "./director/DirectorPanel";
@@ -135,6 +136,7 @@ export default function App() {
         <>
           <SiteModeSwitch role="admin" />
           <div className="molo-admin-neon-theme">
+            <AdminAttentionPanel />
             <AdminWorkspace />
           </div>
         </>
