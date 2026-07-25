@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { bookingsApi, type GuestBooking } from '../api/bookings';
+import { bookingsApi, type GuestBooking, type GuestBookingToken } from '../api/bookings';
+import { guestRequestsApi } from '../api/guestRequests';
 import {
   waiterCallsApi,
   type GuestWaiterCallStatus,
 } from '../api/waiterCalls';
 
 const POLLING_INTERVAL_MS = 15_000;
+const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
 
 type GuestBookingListener = (bookings: GuestBooking[]) => void;
 
@@ -48,10 +50,22 @@ function errorText(error: unknown) {
   return error instanceof Error ? error.message : 'Сталася невідома помилка';
 }
 
+function readGuestToken(bookingId: string) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(GUEST_BOOKINGS_STORAGE_KEY) || '[]');
+    if (!Array.isArray(parsed)) return null;
+    const access = (parsed as GuestBookingToken[]).find((item) => item.bookingId === bookingId);
+    return access?.token || null;
+  } catch {
+    return null;
+  }
+}
+
 function WaiterCallCard({ booking }: { booking: GuestBooking }) {
   const [status, setStatus] = useState<GuestWaiterCallStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [calling, setCalling] = useState(false);
+  const [adminCalling, setAdminCalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -107,12 +121,31 @@ function WaiterCallCard({ booking }: { booking: GuestBooking }) {
     }
   }
 
+  async function callAdmin() {
+    const token = readGuestToken(booking.bookingId);
+    if (!token) {
+      setError('Не вдалося підтвердити доступ до бронювання');
+      return;
+    }
+    try {
+      setAdminCalling(true);
+      setError(null);
+      setMessage(null);
+      const result = await guestRequestsApi.callAdmin(booking.bookingId, token);
+      setMessage(result.message || 'Адміністратора викликано');
+    } catch (callError) {
+      setError(errorText(callError));
+    } finally {
+      setAdminCalling(false);
+    }
+  }
+
   const activeCall = status?.activeCall || null;
   const tableNumber = status?.tableNumber || booking.tableNumber || '—';
 
   return (
     <section className="rounded-[24px] border border-amber-200/30 bg-black/35 p-4 text-left backdrop-blur">
-      <p className="text-sm font-black text-white">Потрібен офіціант?</p>
+      <p className="text-sm font-black text-white">Потрібна допомога?</p>
       <p className="mt-1 text-xs leading-5 text-white/55">
         {booking.bookingDate} · {String(booking.bookingTime).slice(0, 5)} · Стіл №{tableNumber}
       </p>
@@ -163,8 +196,19 @@ function WaiterCallCard({ booking }: { booking: GuestBooking }) {
 
       {!loading && status && !activeCall && !status.canCall && (
         <p className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-5 text-white/50">
-          Виклик стане доступним після того, як адміністратор або офіціант відмітить «Гість прийшов».
+          Виклик стане доступним після того, як Адміністратор або Офіціант відмітить «Гість прийшов».
         </p>
+      )}
+
+      {Boolean(booking.checkedInAt) && (
+        <button
+          type="button"
+          onClick={callAdmin}
+          disabled={adminCalling}
+          className="mt-3 w-full rounded-2xl border border-fuchsia-300/60 bg-black/45 px-4 py-3 text-sm font-black text-fuchsia-100 shadow-[0_0_22px_rgba(232,121,249,.16)] transition active:scale-[0.98] disabled:opacity-40"
+        >
+          {adminCalling ? 'Викликаємо…' : '📞 Викликати Адміністратора'}
+        </button>
       )}
     </section>
   );
@@ -205,7 +249,7 @@ export default function GuestWaiterCallController() {
   return createPortal(
     <div
       className="mt-4 space-y-3"
-      aria-label="Виклик офіціанта для активних бронювань"
+      aria-label="Виклики для активних бронювань"
     >
       {activeApprovedBookings.map((booking) => (
         <WaiterCallCard key={booking.bookingId} booking={booking} />

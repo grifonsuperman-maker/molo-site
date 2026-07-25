@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
 import { ClientsService } from './clients.service';
+import { BlacklistClientDto } from './dto/blacklist-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 
@@ -24,8 +25,8 @@ export class ClientsController {
   }
 
   @Patch(':id/blacklist')
-  blacklist(@Param('id') id: string) {
-    return this.service.blacklist(id);
+  blacklist(@Param('id') id: string, @Body() dto: BlacklistClientDto) {
+    return this.service.blacklist(id, dto.reason);
   }
 
   @Patch(':id/unblacklist')

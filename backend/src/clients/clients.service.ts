@@ -9,6 +9,6 @@ export class ClientsService {
   findAll(){ return this.repo.find({ order:{ visitsCount:'DESC', createdAt:'DESC' }}); }
   async findOne(id:string){ const c=await this.repo.findOne({where:{id}, relations:['bookings','bookings.table']}); if(!c) throw new NotFoundException('Клієнта не знайдено'); return c; }
   async update(id:string,dto:UpdateClientDto){ const c=await this.repo.findOne({where:{id}}); if(!c) throw new NotFoundException('Клієнта не знайдено'); Object.assign(c,dto); return this.repo.save(c); }
-  async blacklist(id:string){ return this.update(id,{isBlacklisted:true}); }
-  async unblacklist(id:string){ return this.update(id,{isBlacklisted:false}); }
+  async blacklist(id:string,reason?:string){ const c=await this.repo.findOne({where:{id}}); if(!c) throw new NotFoundException('Клієнта не знайдено'); c.isBlacklisted=true; c.blacklistReason=String(reason||'').trim()||null; c.blacklistedAt=new Date(); return this.repo.save(c); }
+  async unblacklist(id:string){ const c=await this.repo.findOne({where:{id}}); if(!c) throw new NotFoundException('Клієнта не знайдено'); c.isBlacklisted=false; c.blacklistReason=null; c.blacklistedAt=null; return this.repo.save(c); }
 }
