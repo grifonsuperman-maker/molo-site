@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { CalendarClock, Check, MessageSquareText, RefreshCw, Table2, X } from 'lucide-react';
+import { Check, MessageSquareText, RefreshCw, Table2, X } from 'lucide-react';
 
 import {
   adminAttentionApi,
   type AdminAttentionDashboard,
-  type AdminRescheduleRequest,
   type AdminTableChangeRequest,
 } from '../api/adminAttention';
 import { bookingsApi, type TableStatusesResponse } from '../api/bookings';
@@ -90,13 +89,6 @@ export default function AdminAttentionPanel() {
     }
   }
 
-  async function rejectReschedule(request: AdminRescheduleRequest) {
-    const adminComment = window.prompt('Причина відмови для гостя', '') || undefined;
-    await runAction(`reschedule:${request.id}:reject`, () =>
-      adminAttentionApi.rejectReschedule(request.id, adminComment),
-    );
-  }
-
   async function rejectTableChange(request: AdminTableChangeRequest) {
     const adminComment = window.prompt('Причина відмови для гостя', '') || undefined;
     await runAction(`table-change:${request.id}:reject`, () =>
@@ -151,7 +143,7 @@ export default function AdminAttentionPanel() {
 
   if (!dashboard) return null;
 
-  const pendingCount = dashboard.reschedules.length + dashboard.tableChanges.length;
+  const pendingCount = dashboard.tableChanges.length;
 
   return (
     <section className="mx-auto max-w-7xl px-3 pt-3 sm:px-4 lg:px-8" aria-label="Запити гостей для Адміністратора">
@@ -174,17 +166,6 @@ export default function AdminAttentionPanel() {
         )}
 
         <div className="mt-3 space-y-3">
-          {dashboard.reschedules.map((request) => (
-            <article key={request.id} className="rounded-[24px] border border-amber-200/50 bg-black/50 p-4 shadow-[0_0_26px_rgba(250,204,21,.12)]">
-              <h3 className="flex items-center gap-2 text-lg font-black"><CalendarClock size={19} />Гість просить інший час</h3>
-              <InfoGrid booking={request.booking} extraLabel="Запит" extraValue={`${formatDate(request.requestedDate)} · ${formatTime(request.requestedTime)}`} />
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <ActionButton label="Підтвердити" disabled={Boolean(busy)} tone="emerald" onClick={() => void runAction(`reschedule:${request.id}:approve`, () => adminAttentionApi.approveReschedule(request.id))} />
-                <ActionButton label="Відхилити" disabled={Boolean(busy)} tone="red" onClick={() => void rejectReschedule(request)} />
-              </div>
-            </article>
-          ))}
-
           {dashboard.tableChanges.map((request) => (
             <article key={request.id} className="rounded-[24px] border border-fuchsia-300/50 bg-black/50 p-4 shadow-[0_0_26px_rgba(217,70,239,.14)]">
               <h3 className="flex items-center gap-2 text-lg font-black"><Table2 size={19} />Гість просить інший стіл</h3>
@@ -200,7 +181,7 @@ export default function AdminAttentionPanel() {
           {!pendingCount && (
             <div className="flex items-center gap-3 rounded-[22px] border border-emerald-300/30 bg-black/40 p-4 text-emerald-100">
               <span className="grid h-10 w-10 place-items-center rounded-2xl border border-emerald-300/45"><Check size={20} /></span>
-              <div><p className="font-black">Запитів на час або пересадку немає</p><p className="text-xs text-white/45">Нові запити з’являться тут.</p></div>
+              <div><p className="font-black">Запитів на пересадку немає</p><p className="text-xs text-white/45">Нові запити з’являться тут.</p></div>
             </div>
           )}
         </div>
@@ -259,7 +240,7 @@ export default function AdminAttentionPanel() {
   );
 }
 
-function InfoGrid({ booking, extraLabel, extraValue }: { booking: AdminRescheduleRequest['booking']; extraLabel: string; extraValue: string }) {
+function InfoGrid({ booking, extraLabel, extraValue }: { booking: AdminTableChangeRequest['booking']; extraLabel: string; extraValue: string }) {
   return (
     <div className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
       <Info label="Гість" value={booking.client?.fullName || '—'} />
@@ -274,9 +255,8 @@ function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-2xl border border-white/15 bg-black/45 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-white/40">{label}</p><p className="mt-1 truncate font-black">{value}</p></div>;
 }
 
-function ActionButton({ label, disabled, tone, onClick }: { label: string; disabled: boolean; tone: 'emerald' | 'red' | 'fuchsia'; onClick: () => void }) {
+function ActionButton({ label, disabled, tone, onClick }: { label: string; disabled: boolean; tone: 'red' | 'fuchsia'; onClick: () => void }) {
   const classes: Record<string, string> = {
-    emerald: 'border-emerald-300/60 text-emerald-100 shadow-[0_0_20px_rgba(52,211,153,.16)]',
     red: 'border-red-300/55 text-red-100 shadow-[0_0_20px_rgba(248,113,113,.13)]',
     fuchsia: 'border-fuchsia-300/60 text-fuchsia-100 shadow-[0_0_20px_rgba(217,70,239,.16)]',
   };
