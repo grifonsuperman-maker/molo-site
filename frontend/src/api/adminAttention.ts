@@ -1,17 +1,6 @@
 import { api } from './client';
 import type { Booking, TableItem } from './types';
 
-export type AdminRescheduleRequest = {
-  id: string;
-  requestedDate: string;
-  requestedTime: string;
-  status: 'pending' | 'approved' | 'rejected';
-  adminComment: string | null;
-  createdAt: string;
-  resolvedAt: string | null;
-  booking: Booking;
-};
-
 export type AdminTableChangeRequest = {
   id: string;
   requestedTableNumber: string | null;
@@ -35,7 +24,6 @@ export type AdminGuestReview = {
 };
 
 export type AdminAttentionDashboard = {
-  reschedules: AdminRescheduleRequest[];
   tableChanges: AdminTableChangeRequest[];
   reviews: AdminGuestReview[];
 };
@@ -48,10 +36,6 @@ function encode(value: string) {
 
 export const adminAttentionApi = {
   get: () => api.get<AdminAttentionDashboard>('/admin-attention'),
-  approveReschedule: (requestId: string) =>
-    api.patch<ActionResponse>(`/admin-attention/reschedule/${encode(requestId)}/approve`),
-  rejectReschedule: (requestId: string, adminComment?: string) =>
-    api.patch<ActionResponse>(`/admin-attention/reschedule/${encode(requestId)}/reject`, { adminComment }),
   approveTableChange: (requestId: string, tableId: string) =>
     api.patch<ActionResponse>(`/admin-attention/table-change/${encode(requestId)}/approve`, { tableId }),
   rejectTableChange: (requestId: string, adminComment?: string) =>
