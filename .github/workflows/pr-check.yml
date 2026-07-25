@@ -35,22 +35,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Collect backend install result
-        id: backend_install
-        shell: bash
-        run: |
-          set +e
-          npm --prefix backend install --package-lock=false --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org > /tmp/backend-install.log 2>&1
-          status=$?
-          error=$(grep -E 'npm (ERR!|error)|ERESOLVE|ETARGET|EAI_AGAIN|ECONNRESET|ENOTFOUND' /tmp/backend-install.log | head -n 1 | tr '\n\r' '  ' | cut -c1-180)
-          if [ -z "$error" ]; then
-            error=$(head -n 1 /tmp/backend-install.log | tr '\n\r' '  ' | cut -c1-180)
-          fi
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          echo "error=$error" >> "$GITHUB_OUTPUT"
-          exit 0
-      - name: Backend install — ${{ steps.backend_install.outputs.error }}
-        run: test "${{ steps.backend_install.outputs.status }}" = "0"
+      - name: Install backend dependencies
+        run: npm --prefix backend install --package-lock=false --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
       - name: Build backend
         run: cd backend && npx --yes @nestjs/cli@10.4.9 build
       - name: Test table changes
