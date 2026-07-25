@@ -151,7 +151,7 @@ export default function AdminTablesByLocation({ onClose }: { onClose: () => void
   return (
     <div className="fixed inset-0 z-[85] overflow-y-auto bg-[#050707] text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(250,204,21,.12),transparent_32%),radial-gradient(circle_at_top_right,rgba(34,211,238,.11),transparent_35%),linear-gradient(180deg,#050707,#081010_55%,#050707)]" />
-      <main className="relative mx-auto min-h-screen max-w-7xl px-3 pb-28 pt-3 sm:px-5">
+      <main className={`relative mx-auto min-h-screen max-w-7xl px-3 pt-3 sm:px-5 ${selectedTable ? 'pb-64' : 'pb-28'}`}>
         <header className="sticky top-0 z-40 rounded-[28px] border border-amber-200/35 bg-black/90 p-3 shadow-[0_0_36px_rgba(250,204,21,.12)] backdrop-blur-xl">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
@@ -193,23 +193,6 @@ export default function AdminTablesByLocation({ onClose }: { onClose: () => void
           {selectedDate === today ? 'Сьогодні можна змінювати робочий статус столу.' : 'На майбутню дату показується стан бронювання без зміни фізичного статусу.'}
         </div>
 
-        {selectedTable && (
-          <section className="mt-3 rounded-[28px] border border-amber-200/55 bg-black/55 p-4 shadow-[0_0_30px_rgba(250,204,21,.14)]">
-            <div className="flex items-start justify-between gap-3">
-              <div><p className="text-2xl font-black">Стіл №{selectedTable.tableNumber}</p><p className="mt-1 text-sm text-white/50">{selectedTable.zone?.name || 'Без локації'} · {selectedTable.seats} місць</p></div>
-              <button type="button" onClick={() => setSelectedTableId(null)} className="rounded-xl border border-white/20 p-2 text-white/60"><X size={17} /></button>
-            </div>
-            {selectedDate === today ? (
-              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <button type="button" disabled={Boolean(busy)} onClick={() => void runTableAction(selectedTable, 'free')} className="rounded-2xl border border-white/45 bg-transparent p-3 font-black text-white/85">Вільний</button>
-                <button type="button" disabled={Boolean(busy)} onClick={() => void runTableAction(selectedTable, 'occupied')} className="rounded-2xl border border-red-400/65 bg-transparent p-3 font-black text-red-100 shadow-[0_0_14px_rgba(255,59,79,.14)]">Зайнятий</button>
-                <button type="button" disabled={Boolean(busy)} onClick={() => void runTableAction(selectedTable, 'cleaning')} className="rounded-2xl border border-cyan-200/65 bg-transparent p-3 font-black text-cyan-100 shadow-[0_0_14px_rgba(103,232,249,.14)]">Готується</button>
-                <button type="button" disabled={Boolean(busy)} onClick={() => void runTableAction(selectedTable, 'closed')} className="rounded-2xl border border-neutral-300/55 bg-transparent p-3 font-black text-neutral-200">Закрити</button>
-              </div>
-            ) : <p className="mt-4 text-sm text-white/50">Для майбутньої дати робочі статуси не змінюються.</p>}
-          </section>
-        )}
-
         <div className="mt-4 space-y-4">
           {locationGroups.map((location) => (
             <section id={`admin-location-${location.key}`} key={location.key} className="scroll-mt-44 rounded-[30px] border border-emerald-300/25 bg-black/50 p-4 shadow-[0_0_28px_rgba(16,185,129,.07)]">
@@ -234,6 +217,25 @@ export default function AdminTablesByLocation({ onClose }: { onClose: () => void
 
         <button type="button" onClick={onClose} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/25 bg-transparent p-4 font-black text-white/70"><ArrowLeft size={18} />Назад у пульт</button>
       </main>
+
+      {selectedTable && (
+        <div className="fixed inset-x-0 bottom-0 z-50 px-3 pb-3 sm:px-5">
+          <section className="mx-auto max-w-7xl rounded-[28px] border border-amber-200/55 bg-black/95 p-4 shadow-[0_0_30px_rgba(250,204,21,.14)] backdrop-blur-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div><p className="text-2xl font-black">Стіл №{selectedTable.tableNumber}</p><p className="mt-1 text-sm text-white/50">{selectedTable.zone?.name || 'Без локації'} · {selectedTable.seats} місць</p></div>
+              <button type="button" onClick={() => setSelectedTableId(null)} className="rounded-xl border border-white/20 p-2 text-white/60"><X size={17} /></button>
+            </div>
+            {selectedDate === today ? (
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <button type="button" disabled={Boolean(busy)} onClick={() => void runTableAction(selectedTable, 'free')} className="rounded-2xl border border-white/45 bg-transparent p-3 font-black text-white/85">Вільний</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void runTableAction(selectedTable, 'occupied')} className="rounded-2xl border border-red-400/65 bg-transparent p-3 font-black text-red-100 shadow-[0_0_14px_rgba(255,59,79,.14)]">Зайнятий</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void runTableAction(selectedTable, 'cleaning')} className="rounded-2xl border border-cyan-200/65 bg-transparent p-3 font-black text-cyan-100 shadow-[0_0_14px_rgba(103,232,249,.14)]">Готується</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void runTableAction(selectedTable, 'closed')} className="rounded-2xl border border-neutral-300/55 bg-transparent p-3 font-black text-neutral-200">Закрити</button>
+              </div>
+            ) : <p className="mt-4 text-sm text-white/50">Для майбутньої дати робочі статуси не змінюються.</p>}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
