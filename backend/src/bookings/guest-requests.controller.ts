@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Headers, Param, Patch } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
 import { GuestRequestsService } from './guest-requests.service';
@@ -15,14 +15,5 @@ export class GuestRequestsController {
     @Body() body: { tableId?: string; tableNumber?: string },
   ) {
     return this.requests.requestTableChange(id, token, body);
-  }
-
-  @Public()
-  @Post(':id/guest/call-admin')
-  callAdmin(
-    @Param('id') id: string,
-    @Headers('x-guest-booking-token') token: string,
-  ) {
-    return this.requests.callAdmin(id, token);
   }
 }
