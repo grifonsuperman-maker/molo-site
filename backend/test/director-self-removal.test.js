@@ -39,10 +39,10 @@ test('Director cannot delete own account', () => {
   assert.deepEqual(calls, []);
 });
 
-test('Director cannot archive own account', () => {
+test('Director cannot archive own account', async () => {
   const { controller, calls } = createController();
 
-  assert.throws(
+  await assert.rejects(
     () => controller.archive('director-1', {}, { user: directorUser }),
     /не може видалити власний обліковий запис/,
   );
