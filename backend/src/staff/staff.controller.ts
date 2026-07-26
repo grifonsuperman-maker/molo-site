@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Logger,
   Param,
@@ -21,6 +22,7 @@ import { StaffPinLoginDto } from './dto/staff-pin-login.dto';
 import { StaffShiftActionDto } from './dto/staff-shift-action.dto';
 import { UpdateDirectorAccessDto } from './dto/update-director-access.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
+import type { StaffRole } from './entities/staff.entity';
 import { StaffService } from './staff.service';
 
 @Controller('staff')
@@ -77,9 +79,13 @@ export class StaffController {
     return this.service.findAll();
   }
 
-  @Roles('owner')
+  @Roles('owner', 'admin')
   @Post()
-  create(@Body() dto: CreateStaffDto) {
+  async create(
+    @Body() dto: CreateStaffDto,
+    @Req() request: { user?: AuthUser },
+  ) {
+    await this.assertAdminCanCreateOrdinaryStaff(request.user, dto.role);
     return this.service.create(dto);
   }
 
@@ -95,9 +101,14 @@ export class StaffController {
     return this.service.findOne(id);
   }
 
-  @Roles('owner')
+  @Roles('owner', 'admin')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateStaffDto) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateStaffDto,
+    @Req() request: { user?: AuthUser },
+  ) {
+    await this.assertAdminCanManageOrdinaryStaff(request.user, id, dto.role);
     return this.service.update(id, dto);
   }
 
@@ -133,35 +144,46 @@ export class StaffController {
     }
   }
 
-  @Roles('owner')
+  @Roles('owner', 'admin')
   @Patch(':id/block')
-  block(@Param('id') id: string) {
+  async block(
+    @Param('id') id: string,
+    @Req() request: { user?: AuthUser },
+  ) {
+    await this.assertAdminCanManageOrdinaryStaff(request.user, id);
     return this.service.setActive(id, false);
   }
 
-  @Roles('owner')
+  @Roles('owner', 'admin')
   @Patch(':id/unblock')
-  unblock(@Param('id') id: string) {
+  async unblock(
+    @Param('id') id: string,
+    @Req() request: { user?: AuthUser },
+  ) {
+    await this.assertAdminCanManageOrdinaryStaff(request.user, id);
     return this.service.setActive(id, true);
   }
 
-  @Roles('owner')
+  @Roles('owner', 'admin')
   @Post(':id/archive')
-  archive(
+  async archive(
     @Param('id') id: string,
     @Body() dto: StaffShiftActionDto,
     @Req() request: { user?: AuthUser },
   ) {
     this.assertCannotRemoveSelf(request.user, id);
+    await this.assertAdminCanManageOrdinaryStaff(request.user, id);
     return this.service.archive(id, dto);
   }
 
-  @Roles('owner')
+  @Roles('owner', 'admin')
   @Post(':id/restore')
-  restore(
+  async restore(
     @Param('id') id: string,
     @Body() dto: StaffShiftActionDto,
+    @Req() request: { user?: AuthUser },
   ) {
+    await this.assertAdminCanManageOrdinaryStaff(request.user, id);
     return this.service.restore(id, dto);
   }
 
@@ -173,6 +195,40 @@ export class StaffController {
   ) {
     this.assertCannotRemoveSelf(request.user, id);
     return this.service.remove(id);
+  }
+
+  private async assertAdminCanCreateOrdinaryStaff(
+    user: AuthUser | undefined,
+    role: StaffRole,
+  ) {
+    if (user?.role !== 'admin') return;
+
+    await this.permissions.assert(user, 'adminCanManageStaffShifts');
+    this.assertOrdinaryStaffRole(role);
+  }
+
+  private async assertAdminCanManageOrdinaryStaff(
+    user: AuthUser | undefined,
+    targetId: string,
+    requestedRole?: StaffRole,
+  ) {
+    if (user?.role !== 'admin') return;
+
+    await this.permissions.assert(user, 'adminCanManageStaffShifts');
+    const target = await this.service.findOne(targetId);
+    this.assertOrdinaryStaffRole(target.role);
+
+    if (requestedRole !== undefined) {
+      this.assertOrdinaryStaffRole(requestedRole);
+    }
+  }
+
+  private assertOrdinaryStaffRole(role: StaffRole) {
+    if (role !== 'waiter' && role !== 'hookah') {
+      throw new ForbiddenException(
+        'Адміністратор може керувати лише офіціантами та кальянниками',
+      );
+    }
   }
 
   private async recoverShiftState(
