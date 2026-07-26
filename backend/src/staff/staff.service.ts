@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -10,8 +11,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { compare, hash } from 'bcryptjs';
 import { Repository } from 'typeorm';
 import { CreateStaffDto } from './dto/create-staff.dto';
+import { DirectorLoginDto } from './dto/director-login.dto';
 import { StaffPinLoginDto } from './dto/staff-pin-login.dto';
 import { StaffShiftActionDto } from './dto/staff-shift-action.dto';
+import { UpdateDirectorAccessDto } from './dto/update-director-access.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { Staff } from './entities/staff.entity';
 import {
@@ -19,6 +22,10 @@ import {
   StaffShiftEventType,
 } from './entities/staff-shift-event.entity';
 import type { AuthUser } from '../auth/types/auth-user.type';
+
+const TEMPORARY_DIRECTOR_PIN = '1111';
+const DIRECTOR_MAX_FAILED_ATTEMPTS = 5;
+const DIRECTOR_LOCK_MINUTES = 15;
 
 @Injectable()
 export class StaffService {
@@ -62,6 +69,166 @@ export class StaffService {
       role: employee.role,
       isOnShift: employee.isOnShift,
     }));
+  }
+
+  async getDirectorAccessStatus() {
+    const directors = await this.staffRepo.find({
+      where: {
+        role: 'owner',
+        active: true,
+        isArchived: false,
+      },
+      order: {
+        fullName: 'ASC',
+      },
+    });
+
+    return {
+      configured: directors.some((director) =>
+        this.hasConfiguredDirectorAccess(director),
+      ),
+      bootstrapAvailable: directors.some(
+        (director) => !this.hasConfiguredDirectorAccess(director),
+      ),
+      directors: directors.map((director) => ({
+        id: director.id,
+        fullName: director.fullName,
+        configured: this.hasConfiguredDirectorAccess(director),
+      })),
+    };
+  }
+
+  async loginDirector(dto: DirectorLoginDto) {
+    const temporaryPin = dto.temporaryPin?.trim();
+
+    if (temporaryPin !== undefined || dto.staffId) {
+      if (!dto.staffId || !temporaryPin) {
+        throw new BadRequestException('Оберіть Директора та введіть тимчасовий PIN');
+      }
+
+      const director = await this.staffRepo.findOne({
+        where: {
+          id: dto.staffId,
+          role: 'owner',
+          active: true,
+          isArchived: false,
+        },
+      });
+
+      if (!director || this.hasConfiguredDirectorAccess(director)) {
+        throw new UnauthorizedException('Тимчасовий доступ недоступний');
+      }
+
+      await this.assertDirectorNotLocked(director);
+
+      if (temporaryPin !== TEMPORARY_DIRECTOR_PIN) {
+        await this.registerDirectorLoginFailure(director);
+      }
+
+      await this.resetDirectorLoginProtection(director);
+      return this.issueStaffToken(director, true);
+    }
+
+    const loginName = this.normalizeDirectorLogin(dto.loginName);
+    const password = dto.password || '';
+
+    if (!loginName || !password) {
+      throw new BadRequestException('Введіть ім’я та пароль Директора');
+    }
+
+    const director = await this.staffRepo.findOne({
+      where: {
+        directorLoginName: loginName,
+        role: 'owner',
+        active: true,
+        isArchived: false,
+      },
+    });
+
+    if (!director || !director.directorPasswordHash) {
+      throw new UnauthorizedException('Невірне ім’я або пароль');
+    }
+
+    await this.assertDirectorNotLocked(director);
+
+    const passwordIsValid = await compare(
+      password,
+      director.directorPasswordHash,
+    );
+
+    if (!passwordIsValid) {
+      await this.registerDirectorLoginFailure(director);
+    }
+
+    await this.resetDirectorLoginProtection(director);
+    return this.issueStaffToken(director, false);
+  }
+
+  async getDirectorAccess(user?: AuthUser) {
+    const director = await this.getAuthenticatedDirector(user);
+
+    return {
+      fullName: director.fullName,
+      loginName: director.directorLoginName || '',
+      configured: this.hasConfiguredDirectorAccess(director),
+    };
+  }
+
+  async updateDirectorAccess(
+    user: AuthUser | undefined,
+    dto: UpdateDirectorAccessDto,
+  ) {
+    const director = await this.getAuthenticatedDirector(user);
+    const configured = this.hasConfiguredDirectorAccess(director);
+
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException('Новий пароль і підтвердження не збігаються');
+    }
+
+    if (configured) {
+      if (!dto.currentPassword || !director.directorPasswordHash) {
+        throw new BadRequestException('Введіть поточний пароль');
+      }
+
+      const currentPasswordIsValid = await compare(
+        dto.currentPassword,
+        director.directorPasswordHash,
+      );
+
+      if (!currentPasswordIsValid) {
+        throw new UnauthorizedException('Поточний пароль невірний');
+      }
+    }
+
+    const loginName = this.normalizeDirectorLogin(dto.loginName);
+    if (!loginName) {
+      throw new BadRequestException('Вкажіть ім’я для входу');
+    }
+
+    const duplicate = await this.staffRepo.findOne({
+      where: {
+        directorLoginName: loginName,
+      },
+    });
+
+    if (duplicate && duplicate.id !== director.id) {
+      throw new ConflictException('Це ім’я для входу вже використовується');
+    }
+
+    director.fullName = dto.fullName.trim();
+    director.directorLoginName = loginName;
+    director.directorPasswordHash = await hash(dto.newPassword, 10);
+    director.directorCredentialsConfiguredAt = new Date();
+    director.directorFailedLoginAttempts = 0;
+    director.directorLockedUntil = null;
+
+    const saved = await this.staffRepo.save(director);
+
+    return {
+      fullName: saved.fullName,
+      loginName: saved.directorLoginName || '',
+      configured: true,
+    };
   }
 
   async findOne(id: string) {
@@ -147,6 +314,12 @@ export class StaffService {
       throw new UnauthorizedException('Невірний працівник або PIN');
     }
 
+    if (staff.role === 'owner') {
+      throw new UnauthorizedException(
+        'Для Директора використовуйте окремий вхід',
+      );
+    }
+
     const pinIsValid = await compare(dto.pin, staff.pinHash);
 
     if (!pinIsValid) {
@@ -160,21 +333,7 @@ export class StaffService {
       throw new UnauthorizedException('Працівника не додано на зміну');
     }
 
-    const payload: AuthUser = {
-      sub: staff.id,
-      telegramId: staff.telegramId || `staff:${staff.id}`,
-      staffId: staff.id,
-      role: staff.role,
-      name: staff.fullName,
-    };
-
-    const accessToken = await this.jwtService.signAsync(payload);
-
-    return {
-      accessToken,
-      user: payload,
-      staff: this.toPublicStaff(staff),
-    };
+    return this.issueStaffToken(staff, false);
   }
 
   async startShift(id: string, dto: StaffShiftActionDto) {
@@ -336,7 +495,7 @@ export class StaffService {
     });
   }
 
-  @Cron('0 0 23 * * *', { timeZone: 'Europe/Kyiv', })
+  @Cron('0 0 23 * * *', { timeZone: 'Europe/Kyiv' })
   async autoEndShiftsAt23() {
     const kyivDate = this.getKyivDate();
     const staffOnShift = await this.staffRepo.find({
@@ -359,6 +518,117 @@ export class StaffService {
         'Зміну автоматично завершено о 23:00',
       );
     }
+  }
+
+  private async issueStaffToken(
+    staff: Staff,
+    mustConfigureDirectorAccess: boolean,
+  ) {
+    const payload: AuthUser = {
+      sub: staff.id,
+      telegramId: staff.telegramId || `staff:${staff.id}`,
+      staffId: staff.id,
+      role: staff.role,
+      name: staff.fullName,
+    };
+
+    const accessToken = await this.jwtService.signAsync(payload);
+
+    return {
+      accessToken,
+      user: payload,
+      staff: this.toPublicStaff(staff),
+      mustConfigureDirectorAccess,
+    };
+  }
+
+  private async assertDirectorNotLocked(director: Staff) {
+    if (!director.directorLockedUntil) return;
+
+    const lockedUntil = new Date(director.directorLockedUntil);
+    if (lockedUntil.getTime() <= Date.now()) {
+      director.directorFailedLoginAttempts = 0;
+      director.directorLockedUntil = null;
+      await this.staffRepo.save(director);
+      return;
+    }
+
+    const minutes = Math.max(
+      1,
+      Math.ceil((lockedUntil.getTime() - Date.now()) / 60_000),
+    );
+    throw new UnauthorizedException(
+      `Забагато невдалих спроб. Повторіть через ${minutes} хв.`,
+    );
+  }
+
+  private async registerDirectorLoginFailure(director: Staff): Promise<never> {
+    director.directorFailedLoginAttempts =
+      Number(director.directorFailedLoginAttempts || 0) + 1;
+
+    if (director.directorFailedLoginAttempts >= DIRECTOR_MAX_FAILED_ATTEMPTS) {
+      director.directorLockedUntil = new Date(
+        Date.now() + DIRECTOR_LOCK_MINUTES * 60_000,
+      );
+      await this.staffRepo.save(director);
+      throw new UnauthorizedException(
+        `Забагато невдалих спроб. Вхід заблоковано на ${DIRECTOR_LOCK_MINUTES} хв.`,
+      );
+    }
+
+    await this.staffRepo.save(director);
+    const attemptsLeft =
+      DIRECTOR_MAX_FAILED_ATTEMPTS - director.directorFailedLoginAttempts;
+    throw new UnauthorizedException(
+      `Невірні дані входу. Залишилось спроб: ${attemptsLeft}`,
+    );
+  }
+
+  private async resetDirectorLoginProtection(director: Staff) {
+    if (
+      !director.directorFailedLoginAttempts &&
+      !director.directorLockedUntil
+    ) {
+      return;
+    }
+
+    director.directorFailedLoginAttempts = 0;
+    director.directorLockedUntil = null;
+    await this.staffRepo.save(director);
+  }
+
+  private async getAuthenticatedDirector(user?: AuthUser) {
+    if (!user || user.role !== 'owner') {
+      throw new UnauthorizedException('Потрібен доступ Директора');
+    }
+
+    const id = user.staffId || user.sub;
+    const director = await this.staffRepo.findOne({
+      where: {
+        id,
+        role: 'owner',
+        active: true,
+        isArchived: false,
+      },
+    });
+
+    if (!director) {
+      throw new UnauthorizedException('Директора не знайдено');
+    }
+
+    return director;
+  }
+
+  private hasConfiguredDirectorAccess(director: Staff) {
+    return Boolean(
+      director.directorLoginName &&
+        director.directorPasswordHash &&
+        director.directorCredentialsConfiguredAt,
+    );
+  }
+
+  private normalizeDirectorLogin(value?: string) {
+    return value?.trim().toLowerCase() || '';
   }
 
   private async finishShift(
@@ -414,11 +684,24 @@ export class StaffService {
   }
 
   private toPublicStaff(staff: Staff) {
-    const { pinHash, ...publicStaff } = staff;
+    const {
+      pinHash,
+      directorPasswordHash,
+      directorLoginName,
+      directorCredentialsConfiguredAt,
+      directorFailedLoginAttempts,
+      directorLockedUntil,
+      ...publicStaff
+    } = staff;
 
     return {
       ...publicStaff,
       hasPin: Boolean(pinHash),
+      hasDirectorAccess: Boolean(
+        directorLoginName &&
+          directorPasswordHash &&
+          directorCredentialsConfiguredAt,
+      ),
     };
   }
 
