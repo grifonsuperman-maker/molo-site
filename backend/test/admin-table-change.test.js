@@ -120,7 +120,7 @@ test('missing table-change request still reaches the guarded approval path', asy
   assert.equal(workCalls, 1);
 });
 
-test('approval row locks target only base aliases while nullable relations are loaded', async () => {
+test('approval row locks target only safe lowercase base aliases while nullable relations are loaded', async () => {
   const service = new AdminAttentionService({}, {}, {});
   const requestCalls = [];
   const bookingCalls = [];
@@ -168,8 +168,12 @@ test('approval row locks target only base aliases while nullable relations are l
     ['setLock', 'pessimistic_write', undefined, ['booking']],
   );
   assert.deepEqual(
+    tableCalls.find((call) => call[0] === 'alias'),
+    ['alias', 'locked_table'],
+  );
+  assert.deepEqual(
     tableCalls.find((call) => call[0] === 'setLock'),
-    ['setLock', 'pessimistic_write', undefined, ['lockedTable']],
+    ['setLock', 'pessimistic_write', undefined, ['locked_table']],
   );
   assert.ok(requestCalls.some((call) => call[0] === 'leftJoinAndSelect'));
   assert.ok(bookingCalls.some((call) => call[0] === 'leftJoinAndSelect'));
