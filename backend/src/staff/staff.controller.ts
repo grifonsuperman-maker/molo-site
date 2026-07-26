@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -136,7 +137,9 @@ export class StaffController {
   archive(
     @Param('id') id: string,
     @Body() dto: StaffShiftActionDto,
+    @Req() request: { user?: AuthUser },
   ) {
+    this.assertCannotRemoveSelf(request.user, id);
     return this.service.archive(id, dto);
   }
 
@@ -151,7 +154,18 @@ export class StaffController {
 
   @Roles('owner')
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  remove(
+    @Param('id') id: string,
+    @Req() request: { user?: AuthUser },
+  ) {
+    this.assertCannotRemoveSelf(request.user, id);
     return this.service.remove(id);
+  }
+
+  private assertCannotRemoveSelf(user: AuthUser | undefined, targetId: string) {
+    const currentId = user?.staffId || user?.sub;
+    if (currentId && currentId === targetId) {
+      throw new BadRequestException('Директор не може видалити власний обліковий запис');
+    }
   }
 }
