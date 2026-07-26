@@ -20,6 +20,7 @@ export type StaffMember = {
   archivedAt: string | null;
   archivedBy: string | null;
   hasPin: boolean;
+  hasDirectorAccess?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -43,6 +44,41 @@ export type StaffPinLoginResponse = {
   accessToken: string;
   user: StaffAuthUser;
   staff: StaffMember;
+  mustConfigureDirectorAccess?: boolean;
+};
+
+export type DirectorAccessStatus = {
+  configured: boolean;
+  bootstrapAvailable: boolean;
+  directors: Array<{
+    id: string;
+    fullName: string;
+    configured: boolean;
+  }>;
+};
+
+export type DirectorAccessSettings = {
+  fullName: string;
+  loginName: string;
+  configured: boolean;
+};
+
+export type DirectorLoginPayload =
+  | {
+      staffId: string;
+      temporaryPin: string;
+    }
+  | {
+      loginName: string;
+      password: string;
+    };
+
+export type UpdateDirectorAccessPayload = {
+  fullName: string;
+  loginName: string;
+  currentPassword?: string;
+  newPassword: string;
+  confirmPassword: string;
 };
 
 export type CreateStaffPayload = {
@@ -77,6 +113,25 @@ export type StaffShiftEvent = {
 };
 
 export const staffApi = {
+  getDirectorAccessStatus: () =>
+    api.get<DirectorAccessStatus>('/staff/director-access/status'),
+
+  loginDirector: async (payload: DirectorLoginPayload) => {
+    const result = await api.post<StaffPinLoginResponse>(
+      '/staff/director-access/login',
+      payload,
+    );
+
+    setAccessToken(result.accessToken);
+    return result;
+  },
+
+  getDirectorAccess: () =>
+    api.get<DirectorAccessSettings>('/staff/director-access'),
+
+  updateDirectorAccess: (payload: UpdateDirectorAccessPayload) =>
+    api.patch<DirectorAccessSettings>('/staff/director-access', payload),
+
   getLoginOptions: () =>
     api.get<StaffLoginOption[]>('/staff/login-options'),
 

@@ -14,8 +14,10 @@ import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AdminPermissionsService } from '../restaurant/admin-permissions.service';
 import { CreateStaffDto } from './dto/create-staff.dto';
+import { DirectorLoginDto } from './dto/director-login.dto';
 import { StaffPinLoginDto } from './dto/staff-pin-login.dto';
 import { StaffShiftActionDto } from './dto/staff-shift-action.dto';
+import { UpdateDirectorAccessDto } from './dto/update-director-access.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { StaffService } from './staff.service';
 
@@ -25,6 +27,33 @@ export class StaffController {
     private readonly service: StaffService,
     private readonly permissions: AdminPermissionsService,
   ) {}
+
+  @Public()
+  @Get('director-access/status')
+  getDirectorAccessStatus() {
+    return this.service.getDirectorAccessStatus();
+  }
+
+  @Public()
+  @Post('director-access/login')
+  loginDirector(@Body() dto: DirectorLoginDto) {
+    return this.service.loginDirector(dto);
+  }
+
+  @Roles('owner')
+  @Get('director-access')
+  getDirectorAccess(@Req() request: { user?: AuthUser }) {
+    return this.service.getDirectorAccess(request.user);
+  }
+
+  @Roles('owner')
+  @Patch('director-access')
+  updateDirectorAccess(
+    @Req() request: { user?: AuthUser },
+    @Body() dto: UpdateDirectorAccessDto,
+  ) {
+    return this.service.updateDirectorAccess(request.user, dto);
+  }
 
   @Public()
   @Get('login-options')
