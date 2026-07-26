@@ -34,61 +34,61 @@ export class RestaurantController {
     return this.service.adminUpdateTheme(dto);
   }
 
-  @Public()
+  @Roles('owner')
   @Patch()
   update(@Body() dto: UpdateRestaurantDto) {
     return this.service.update(dto);
   }
 
-  @Public()
+  @Roles('owner')
   @Post('open')
   open() {
     return this.service.openRestaurant();
   }
 
-  @Public()
+  @Roles('owner')
   @Post('open-booking')
   openBooking() {
     return this.service.openBooking();
   }
 
-  @Public()
+  @Roles('owner')
   @Post('close-booking')
   closeBooking() {
     return this.service.closeBooking();
   }
 
-  @Public()
+  @Roles('owner')
   @Post('close')
   close(@Body() dto: CloseRestaurantDto) {
     return this.service.closeRestaurant(dto);
   }
 
-  @Public()
+  @Roles('admin')
   @Post('admin/open-booking')
   adminOpenBooking() {
     return this.service.adminOpenBooking();
   }
 
-  @Public()
+  @Roles('admin')
   @Post('admin/close-booking')
   adminCloseBooking() {
     return this.service.adminCloseBooking();
   }
 
-  @Public()
+  @Roles('admin')
   @Post('admin/open')
   adminOpenRestaurant() {
     return this.service.adminOpenRestaurant();
   }
 
-  @Public()
+  @Roles('admin')
   @Post('admin/close')
   adminCloseRestaurant(@Body() dto: CloseRestaurantDto) {
     return this.service.adminCloseRestaurant(dto);
   }
 
-  @Public()
+  @Roles('admin')
   @Patch('admin/site-mode')
   adminChangeSiteMode(@Body() dto: UpdateRestaurantDto) {
     return this.service.adminChangeSiteMode(
@@ -97,7 +97,7 @@ export class RestaurantController {
     );
   }
 
-  @Public()
+  @Roles('admin')
   @Patch('admin/settings')
   adminUpdateSettings(@Body() dto: UpdateRestaurantDto) {
     return this.service.adminUpdateSettings(dto);

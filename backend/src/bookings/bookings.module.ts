@@ -5,6 +5,7 @@ import { Client } from '../clients/entities/client.entity';
 import { LogsModule } from '../logs/logs.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
+import { RestaurantModule } from '../restaurant/restaurant.module';
 import { TableEntity } from '../tables/entities/table.entity';
 import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
 import { Zone } from '../zones/entities/zone.entity';
@@ -27,6 +28,7 @@ import { BookingTableChangeRequest } from './entities/booking-table-change-reque
 import { Booking } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
+import { GuestReviewsController } from './guest-reviews.controller';
 
 @Module({
   imports: [
@@ -45,12 +47,14 @@ import { GuestBookingsService } from './guest-bookings.service';
     LogsModule,
     NotificationsModule,
     WaiterCallsModule,
+    RestaurantModule,
   ],
   controllers: [
     BookingsController,
     AdminAttentionController,
     AdminBookingEventsController,
     AvailabilityBlocksController,
+    GuestReviewsController,
   ],
   providers: [
     BookingsService,

@@ -11,7 +11,7 @@ import "./waiter/waiter-call-alert.css";
 import HookahApp from "./hookah/HookahApp";
 import AdminWorkspace from "./admin/AdminWorkspace";
 import "./admin/admin-neon-theme.css";
-import DirectorPanel from "./director/DirectorPanel";
+import DirectorWorkspace from "./director/DirectorWorkspace";
 import SitePhotoController from "./theme/SitePhotoController";
 import SiteModeSwitch from "./theme/SiteModeSwitch";
 
@@ -141,12 +141,7 @@ export default function App() {
           </div>
         </>
       )}
-      {mode === "director" && (
-        <>
-          <SiteModeSwitch role="director" />
-          <DirectorPanel />
-        </>
-      )}
+      {mode === "director" && <DirectorWorkspace />}
     </main>
   );
 }

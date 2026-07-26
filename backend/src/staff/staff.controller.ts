@@ -6,9 +6,13 @@ import {
   Param,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common';
-import { Roles } from '../common/decorators/roles.decorator';
+
+import type { AuthUser } from '../auth/types/auth-user.type';
 import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
+import { AdminPermissionsService } from '../restaurant/admin-permissions.service';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { StaffPinLoginDto } from './dto/staff-pin-login.dto';
 import { StaffShiftActionDto } from './dto/staff-shift-action.dto';
@@ -17,7 +21,10 @@ import { StaffService } from './staff.service';
 
 @Controller('staff')
 export class StaffController {
-  constructor(private readonly service: StaffService) {}
+  constructor(
+    private readonly service: StaffService,
+    private readonly permissions: AdminPermissionsService,
+  ) {}
 
   @Public()
   @Get('login-options')
@@ -37,7 +44,7 @@ export class StaffController {
     return this.service.findAll();
   }
 
-  @Roles('owner', 'admin')
+  @Roles('owner')
   @Post()
   create(@Body() dto: CreateStaffDto) {
     return this.service.create(dto);
@@ -55,7 +62,7 @@ export class StaffController {
     return this.service.findOne(id);
   }
 
-  @Roles('owner', 'admin')
+  @Roles('owner')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateStaffDto) {
     return this.service.update(id, dto);
@@ -63,35 +70,39 @@ export class StaffController {
 
   @Roles('owner', 'admin')
   @Post(':id/shift/start')
-  startShift(
+  async startShift(
     @Param('id') id: string,
     @Body() dto: StaffShiftActionDto,
+    @Req() request: { user?: AuthUser },
   ) {
+    await this.permissions.assert(request.user, 'adminCanManageStaffShifts');
     return this.service.startShift(id, dto);
   }
 
   @Roles('owner', 'admin')
   @Post(':id/shift/end')
-  endShift(
+  async endShift(
     @Param('id') id: string,
     @Body() dto: StaffShiftActionDto,
+    @Req() request: { user?: AuthUser },
   ) {
+    await this.permissions.assert(request.user, 'adminCanManageStaffShifts');
     return this.service.endShift(id, dto);
   }
 
-  @Roles('owner', 'admin')
+  @Roles('owner')
   @Patch(':id/block')
   block(@Param('id') id: string) {
     return this.service.setActive(id, false);
   }
 
-  @Roles('owner', 'admin')
+  @Roles('owner')
   @Patch(':id/unblock')
   unblock(@Param('id') id: string) {
     return this.service.setActive(id, true);
   }
 
-  @Roles('owner', 'admin')
+  @Roles('owner')
   @Post(':id/archive')
   archive(
     @Param('id') id: string,
@@ -100,7 +111,7 @@ export class StaffController {
     return this.service.archive(id, dto);
   }
 
-  @Roles('owner', 'admin')
+  @Roles('owner')
   @Post(':id/restore')
   restore(
     @Param('id') id: string,
@@ -109,7 +120,7 @@ export class StaffController {
     return this.service.restore(id, dto);
   }
 
-  @Roles('owner', 'admin')
+  @Roles('owner')
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.service.remove(id);
