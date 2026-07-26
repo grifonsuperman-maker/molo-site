@@ -37,6 +37,35 @@ export class Staff {
   @Column({ name: 'pin_hash', type: 'text', nullable: true })
   pinHash: string | null;
 
+  @Column({
+    name: 'director_login_name',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+    unique: true,
+  })
+  directorLoginName: string | null;
+
+  @Column({ name: 'director_password_hash', type: 'text', nullable: true })
+  directorPasswordHash: string | null;
+
+  @Column({
+    name: 'director_credentials_configured_at',
+    type: 'timestamp',
+    nullable: true,
+  })
+  directorCredentialsConfiguredAt: Date | null;
+
+  @Column({
+    name: 'director_failed_login_attempts',
+    type: 'integer',
+    default: 0,
+  })
+  directorFailedLoginAttempts: number;
+
+  @Column({ name: 'director_locked_until', type: 'timestamp', nullable: true })
+  directorLockedUntil: Date | null;
+
   @Column({ type: 'text', nullable: true })
   note: string | null;
 
