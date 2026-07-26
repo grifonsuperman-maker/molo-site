@@ -4,12 +4,15 @@ import {
   Controller,
   Delete,
   Get,
+  HttpException,
+  InternalServerErrorException,
   Logger,
   Param,
   Patch,
   Post,
   Req,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { Public } from '../common/decorators/public.decorator';
@@ -113,7 +116,13 @@ export class StaffController {
     try {
       return await this.service.startShift(id, dto);
     } catch (cause) {
-      return this.recoverShiftState(id, true, cause, 'відкриття');
+      return this.recoverShiftState(
+        id,
+        true,
+        cause,
+        'start_shift',
+        'відкрити',
+      );
     }
   }
 
@@ -129,7 +138,13 @@ export class StaffController {
     try {
       return await this.service.endShift(id, dto);
     } catch (cause) {
-      return this.recoverShiftState(id, false, cause, 'закриття');
+      return this.recoverShiftState(
+        id,
+        false,
+        cause,
+        'end_shift',
+        'закрити',
+      );
     }
   }
 
@@ -179,25 +194,70 @@ export class StaffController {
     id: string,
     expectedOnShift: boolean,
     cause: unknown,
-    action: string,
+    stage: 'start_shift' | 'end_shift',
+    actionLabel: 'відкрити' | 'закрити',
   ) {
+    let actualOnShift: boolean | null = null;
+    let stateReadError: unknown = null;
+
     try {
       const current = await this.service.findOne(id);
-      if (current.isOnShift === expectedOnShift) {
+      actualOnShift = Boolean(current.isOnShift);
+
+      if (actualOnShift === expectedOnShift) {
         this.logger.error(
-          `Помилка журналу після ${action} зміни для ${id}; фактичний стан збережено`,
+          `Помилка після операції ${stage} для ${id}; фактичний стан збережено`,
           cause instanceof Error ? cause.stack : String(cause),
         );
         return current;
       }
     } catch (readError) {
-      this.logger.error(
-        `Не вдалося перевірити стан працівника ${id} після помилки зміни`,
-        readError instanceof Error ? readError.stack : String(readError),
-      );
+      stateReadError = readError;
     }
 
-    throw cause;
+    if (cause instanceof HttpException) throw cause;
+
+    const diagnosticId = `SHIFT-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const failure = this.describeFailure(cause);
+    const stateReadFailure = stateReadError
+      ? this.describeFailure(stateReadError)
+      : null;
+
+    this.logger.error(
+      JSON.stringify({
+        event: 'staff_shift_action_failed',
+        diagnosticId,
+        stage,
+        staffId: id,
+        expectedOnShift,
+        actualOnShift,
+        ...failure,
+        stateReadFailure,
+      }),
+      failure.stack || stateReadFailure?.stack || undefined,
+    );
+
+    throw new InternalServerErrorException(
+      `Не вдалося ${actionLabel} зміну. Код діагностики: ${diagnosticId}`,
+    );
+  }
+
+  private describeFailure(error: unknown) {
+    const value = error as any;
+    const driver = value?.driverError || value?.cause || null;
+
+    return {
+      errorName: value?.name || 'UnknownError',
+      errorMessage: value?.message || String(error),
+      postgresCode: value?.code || driver?.code || null,
+      postgresDetail: value?.detail || driver?.detail || null,
+      postgresConstraint: value?.constraint || driver?.constraint || null,
+      postgresTable: value?.table || driver?.table || null,
+      postgresColumn: value?.column || driver?.column || null,
+      query: value?.query || null,
+      parameters: Array.isArray(value?.parameters) ? value.parameters : null,
+      stack: value?.stack || null,
+    };
   }
 
   private assertCannotRemoveSelf(user: AuthUser | undefined, targetId: string) {

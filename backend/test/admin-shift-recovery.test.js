@@ -2,6 +2,7 @@ require('reflect-metadata');
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { BadRequestException } = require('@nestjs/common');
 
 const { StaffController } = require('../dist/staff/staff.controller.js');
 
@@ -27,6 +28,11 @@ function createController(serviceOverrides = {}, permissionError = null) {
   };
 
   return new StaffController(service, permissions);
+}
+
+function exceptionMessage(error) {
+  const response = error.getResponse();
+  return typeof response === 'string' ? response : response.message;
 }
 
 test('Admin gets persisted open shift when audit write failed after save', async () => {
@@ -63,8 +69,8 @@ test('Admin gets persisted closed shift when audit write failed after save', asy
   assert.equal(result.isOnShift, false);
 });
 
-test('Shift error is not hidden when requested state was not saved', async () => {
-  const originalError = new Error('staff save failed');
+test('Known shift validation error is preserved when requested state was not saved', async () => {
+  const originalError = new BadRequestException('Працівника не можна додати на зміну');
   const controller = createController({
     startShift: async () => {
       throw originalError;
@@ -76,6 +82,53 @@ test('Shift error is not hidden when requested state was not saved', async () =>
     () => controller.startShift('waiter-1', {}, { user: adminUser }),
     (error) => error === originalError,
   );
+});
+
+test('Unknown shift failure returns diagnostic code and logs PostgreSQL details', async () => {
+  const databaseError = Object.assign(new Error('column does not exist'), {
+    code: '42703',
+    constraint: 'staff_shift_events_staff_id_fkey',
+    table: 'staff_shift_events',
+    column: 'staff_id',
+    query: 'INSERT INTO staff_shift_events ...',
+    parameters: ['waiter-1'],
+  });
+  const controller = createController({
+    startShift: async () => {
+      throw databaseError;
+    },
+    findOne: async () => ({ id: 'waiter-1', isOnShift: false }),
+  });
+  const logs = [];
+  controller.logger.error = (...args) => logs.push(args);
+
+  let caught;
+  try {
+    await controller.startShift('waiter-1', {}, { user: adminUser });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught);
+  assert.equal(caught.getStatus(), 500);
+  const message = exceptionMessage(caught);
+  const diagnosticId = message.match(/SHIFT-[A-F0-9]{8}/)?.[0];
+  assert.ok(diagnosticId);
+
+  assert.equal(logs.length, 1);
+  const payload = JSON.parse(logs[0][0]);
+  assert.equal(payload.event, 'staff_shift_action_failed');
+  assert.equal(payload.diagnosticId, diagnosticId);
+  assert.equal(payload.stage, 'start_shift');
+  assert.equal(payload.staffId, 'waiter-1');
+  assert.equal(payload.expectedOnShift, true);
+  assert.equal(payload.actualOnShift, false);
+  assert.equal(payload.postgresCode, '42703');
+  assert.equal(payload.postgresConstraint, 'staff_shift_events_staff_id_fkey');
+  assert.equal(payload.postgresTable, 'staff_shift_events');
+  assert.equal(payload.postgresColumn, 'staff_id');
+  assert.equal(payload.query, 'INSERT INTO staff_shift_events ...');
+  assert.deepEqual(payload.parameters, ['waiter-1']);
 });
 
 test('Director permission denial is preserved before shift action', async () => {
