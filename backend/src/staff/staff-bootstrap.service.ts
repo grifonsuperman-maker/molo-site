@@ -9,9 +9,14 @@ import { Staff } from './entities/staff.entity';
 export class StaffBootstrapService implements OnModuleInit {
   private readonly logger = new Logger(StaffBootstrapService.name);
 
-  constructor( @InjectRepository(Staff) private readonly staffRepo: Repository<Staff>, ) {}
+  constructor(
+    @InjectRepository(Staff)
+    private readonly staffRepo: Repository<Staff>,
+  ) {}
 
   async onModuleInit() {
+    await this.ensureActiveDirector();
+
     const fullName = process.env.MOLO_BOOTSTRAP_ADMIN_NAME?.trim();
     const pin = process.env.MOLO_BOOTSTRAP_ADMIN_PIN?.trim();
 
@@ -71,6 +76,49 @@ export class StaffBootstrapService implements OnModuleInit {
 
     this.logger.log(
       `Початкового адміністратора "${fullName}" створено. Після першого входу змініть PIN і видаліть початкові змінні середовища.`,
+    );
+  }
+
+  private async ensureActiveDirector() {
+    const activeDirector = await this.staffRepo.findOne({
+      where: {
+        role: 'owner',
+        active: true,
+        isArchived: false,
+      },
+    });
+
+    if (activeDirector) {
+      return;
+    }
+
+    const director = this.staffRepo.create({
+      fullName: 'Директор MOLO',
+      phone: null,
+      telegramId: null,
+      role: 'owner',
+      pinHash: null,
+      directorLoginName: null,
+      directorPasswordHash: null,
+      directorCredentialsConfiguredAt: null,
+      directorFailedLoginAttempts: 0,
+      directorLockedUntil: null,
+      note: 'Стартовий Директор для першого входу за тимчасовим PIN',
+      active: true,
+      isArchived: false,
+      isOnShift: false,
+      shiftStartedAt: null,
+      shiftStartedBy: null,
+      shiftEndedAt: null,
+      shiftEndedBy: null,
+      lastAutoShiftEndDate: null,
+      archivedAt: null,
+      archivedBy: null,
+    });
+
+    await this.staffRepo.save(director);
+    this.logger.warn(
+      'Активного Директора не знайдено. Створено стартового Директора для входу за тимчасовим PIN 1111.',
     );
   }
 }
