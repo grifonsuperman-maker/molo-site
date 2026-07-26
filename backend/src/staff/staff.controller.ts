@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   Param,
   Patch,
   Post,
@@ -24,6 +25,8 @@ import { StaffService } from './staff.service';
 
 @Controller('staff')
 export class StaffController {
+  private readonly logger = new Logger(StaffController.name);
+
   constructor(
     private readonly service: StaffService,
     private readonly permissions: AdminPermissionsService,
@@ -106,7 +109,12 @@ export class StaffController {
     @Req() request: { user?: AuthUser },
   ) {
     await this.permissions.assert(request.user, 'adminCanManageStaffShifts');
-    return this.service.startShift(id, dto);
+
+    try {
+      return await this.service.startShift(id, dto);
+    } catch (cause) {
+      return this.recoverShiftState(id, true, cause, 'відкриття');
+    }
   }
 
   @Roles('owner', 'admin')
@@ -117,7 +125,12 @@ export class StaffController {
     @Req() request: { user?: AuthUser },
   ) {
     await this.permissions.assert(request.user, 'adminCanManageStaffShifts');
-    return this.service.endShift(id, dto);
+
+    try {
+      return await this.service.endShift(id, dto);
+    } catch (cause) {
+      return this.recoverShiftState(id, false, cause, 'закриття');
+    }
   }
 
   @Roles('owner')
@@ -160,6 +173,31 @@ export class StaffController {
   ) {
     this.assertCannotRemoveSelf(request.user, id);
     return this.service.remove(id);
+  }
+
+  private async recoverShiftState(
+    id: string,
+    expectedOnShift: boolean,
+    cause: unknown,
+    action: string,
+  ) {
+    try {
+      const current = await this.service.findOne(id);
+      if (current.isOnShift === expectedOnShift) {
+        this.logger.error(
+          `Помилка журналу після ${action} зміни для ${id}; фактичний стан збережено`,
+          cause instanceof Error ? cause.stack : String(cause),
+        );
+        return current;
+      }
+    } catch (readError) {
+      this.logger.error(
+        `Не вдалося перевірити стан працівника ${id} після помилки зміни`,
+        readError instanceof Error ? readError.stack : String(readError),
+      );
+    }
+
+    throw cause;
   }
 
   private assertCannotRemoveSelf(user: AuthUser | undefined, targetId: string) {
