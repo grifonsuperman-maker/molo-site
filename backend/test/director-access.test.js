@@ -90,6 +90,21 @@ test('temporary PIN 1111 opens Director panel before credentials are configured'
   assert.equal(result.mustConfigureDirectorAccess, true);
 });
 
+test('wrong temporary PIN is counted and does not open Director panel', async () => {
+  const { service, director } = createService();
+
+  await assert.rejects(
+    () =>
+      service.loginDirector({
+        staffId: director.id,
+        temporaryPin: '0000',
+      }),
+    /Залишилось спроб: 4/,
+  );
+
+  assert.equal(director.directorFailedLoginAttempts, 1);
+});
+
 test('saving Director name and password disables temporary PIN', async () => {
   const { service, director } = createService();
 
@@ -127,6 +142,61 @@ test('saving Director name and password disables temporary PIN', async () => {
     password: 'secure-123',
   });
   assert.equal(login.mustConfigureDirectorAccess, false);
+});
+
+test('legacy staff PIN route cannot be used by Director', async () => {
+  const director = createDirector({ pinHash: 'legacy-pin-hash' });
+  const { service } = createService(director);
+
+  await assert.rejects(
+    () =>
+      service.loginWithPin({
+        staffId: director.id,
+        pin: '1111',
+      }),
+    /Для Директора використовуйте окремий вхід/,
+  );
+});
+
+test('changing configured Director credentials requires current password', async () => {
+  const { service, director } = createService();
+  const user = {
+    sub: director.id,
+    staffId: director.id,
+    telegramId: `staff:${director.id}`,
+    role: 'owner',
+    name: director.fullName,
+  };
+
+  await service.updateDirectorAccess(user, {
+    fullName: director.fullName,
+    loginName: 'director',
+    newPassword: 'secure-123',
+    confirmPassword: 'secure-123',
+  });
+
+  await assert.rejects(
+    () =>
+      service.updateDirectorAccess(user, {
+        fullName: 'Новий Директор',
+        loginName: 'new-director',
+        currentPassword: 'wrong-password',
+        newPassword: 'secure-456',
+        confirmPassword: 'secure-456',
+      }),
+    /Поточний пароль невірний/,
+  );
+
+  const updated = await service.updateDirectorAccess(user, {
+    fullName: 'Новий Директор',
+    loginName: 'new-director',
+    currentPassword: 'secure-123',
+    newPassword: 'secure-456',
+    confirmPassword: 'secure-456',
+  });
+
+  assert.equal(updated.fullName, 'Новий Директор');
+  assert.equal(updated.loginName, 'new-director');
 });
 
 test('Director login is locked for 15 minutes after five wrong passwords', async () => {
