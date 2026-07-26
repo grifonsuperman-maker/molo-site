@@ -293,10 +293,10 @@ export class AdminAttentionService {
   private findTableForUpdate(manager: EntityManager, tableId: string) {
     return manager
       .getRepository(TableEntity)
-      .createQueryBuilder('lockedTable')
-      .leftJoinAndSelect('lockedTable.zone', 'zone')
-      .where('lockedTable.id = :tableId', { tableId })
-      .setLock('pessimistic_write', undefined, ['lockedTable'])
+      .createQueryBuilder('locked_table')
+      .leftJoinAndSelect('locked_table.zone', 'zone')
+      .where('locked_table.id = :tableId', { tableId })
+      .setLock('pessimistic_write', undefined, ['locked_table'])
       .getOne();
   }
 
