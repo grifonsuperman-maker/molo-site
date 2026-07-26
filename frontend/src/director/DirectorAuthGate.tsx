@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { KeyRound, LoaderCircle, ShieldCheck } from 'lucide-react';
+import {
+  Eye,
+  EyeOff,
+  KeyRound,
+  LoaderCircle,
+  ShieldCheck,
+  UserRound,
+} from 'lucide-react';
 
 import { clearAccessToken, getAccessToken } from '../api/client';
 import { staffApi } from '../api/staff';
-import type { StaffLoginOption } from '../api/staff';
+import type { DirectorAccessStatus } from '../api/staff';
 
 type Props = {
   children: ReactNode;
@@ -38,18 +45,22 @@ function hasValidOwnerToken(): boolean {
 }
 
 export default function DirectorAuthGate({ children }: Props) {
-  const [options, setOptions] = useState<StaffLoginOption[]>([]);
+  const [status, setStatus] = useState<DirectorAccessStatus | null>(null);
   const [selectedId, setSelectedId] = useState('');
-  const [pin, setPin] = useState('');
+  const [temporaryPin, setTemporaryPin] = useState('');
+  const [loginName, setLoginName] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [checking, setChecking] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const directors = useMemo(
-    () => options.filter((option) => option.role === 'owner'),
-    [options],
+  const bootstrapDirectors = useMemo(
+    () => status?.directors.filter((director) => !director.configured) || [],
+    [status],
   );
+  const bootstrapMode = Boolean(status && !status.configured);
 
   useEffect(() => {
     let active = true;
@@ -57,7 +68,7 @@ export default function DirectorAuthGate({ children }: Props) {
     async function initialize() {
       if (hasValidOwnerToken()) {
         try {
-          await staffApi.getAll();
+          await staffApi.getDirectorAccess();
           if (active) {
             setAuthenticated(true);
             setChecking(false);
@@ -71,10 +82,10 @@ export default function DirectorAuthGate({ children }: Props) {
       }
 
       try {
-        const values = await staffApi.getLoginOptions();
+        const value = await staffApi.getDirectorAccessStatus();
         if (!active) return;
-        setOptions(values);
-        const firstDirector = values.find((option) => option.role === 'owner');
+        setStatus(value);
+        const firstDirector = value.directors.find((director) => !director.configured);
         setSelectedId(firstDirector?.id || '');
       } catch (cause: any) {
         if (active) setError(cause?.message || 'Не вдалося завантажити вхід Директора');
@@ -91,8 +102,14 @@ export default function DirectorAuthGate({ children }: Props) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!selectedId || !pin.trim()) {
-      setError('Оберіть Директора та введіть PIN');
+
+    if (bootstrapMode && (!selectedId || !temporaryPin.trim())) {
+      setError('Оберіть Директора та введіть тимчасовий PIN');
+      return;
+    }
+
+    if (!bootstrapMode && (!loginName.trim() || !password)) {
+      setError('Введіть ім’я та пароль Директора');
       return;
     }
 
@@ -100,14 +117,24 @@ export default function DirectorAuthGate({ children }: Props) {
     setError(null);
 
     try {
-      const result = await staffApi.loginWithPin(selectedId, pin.trim());
+      const result = bootstrapMode
+        ? await staffApi.loginDirector({
+            staffId: selectedId,
+            temporaryPin: temporaryPin.trim(),
+          })
+        : await staffApi.loginDirector({
+            loginName: loginName.trim(),
+            password,
+          });
+
       if (result.user.role !== 'owner') {
         clearAccessToken();
         throw new Error('Цей доступ не належить Директору');
       }
+
       setAuthenticated(true);
     } catch (cause: any) {
-      setError(cause?.message || 'Невірний PIN');
+      setError(cause?.message || 'Невірні дані входу');
     } finally {
       setSubmitting(false);
     }
@@ -139,37 +166,86 @@ export default function DirectorAuthGate({ children }: Props) {
           </div>
         </div>
 
-        <label className="mt-6 block text-xs font-bold text-white/45">Директор</label>
-        <select
-          value={selectedId}
-          onChange={(event) => setSelectedId(event.target.value)}
-          className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/40 px-4 text-sm outline-none focus:border-amber-200/40"
-        >
-          <option value="">Оберіть Директора</option>
-          {directors.map((option) => (
-            <option key={option.id} value={option.id}>{option.fullName}</option>
-          ))}
-        </select>
+        {bootstrapMode ? (
+          <>
+            <div className="mt-5 rounded-2xl border border-amber-200/25 bg-amber-300/[0.07] p-4 text-sm text-amber-50/80">
+              Перший вхід виконується за тимчасовим PIN <strong>1111</strong>. Після входу створіть власне ім’я та пароль — тимчасовий PIN одразу вимкнеться.
+            </div>
 
-        <label className="mt-4 block text-xs font-bold text-white/45">Особистий PIN</label>
-        <div className="relative mt-2">
-          <KeyRound size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
-          <input
-            value={pin}
-            onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 12))}
-            inputMode="numeric"
-            type="password"
-            autoComplete="current-password"
-            placeholder="Введіть PIN"
-            className="h-12 w-full rounded-2xl border border-white/10 bg-black/40 pl-11 pr-4 text-sm outline-none focus:border-amber-200/40"
-          />
-        </div>
+            <label className="mt-5 block text-xs font-bold text-white/45">Директор</label>
+            <select
+              value={selectedId}
+              onChange={(event) => setSelectedId(event.target.value)}
+              className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/40 px-4 text-sm outline-none focus:border-amber-200/40"
+            >
+              <option value="">Оберіть Директора</option>
+              {bootstrapDirectors.map((director) => (
+                <option key={director.id} value={director.id}>{director.fullName}</option>
+              ))}
+            </select>
+
+            <label className="mt-4 block text-xs font-bold text-white/45">Тимчасовий PIN</label>
+            <div className="relative mt-2">
+              <KeyRound size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
+              <input
+                value={temporaryPin}
+                onChange={(event) => setTemporaryPin(event.target.value.replace(/\D/g, '').slice(0, 12))}
+                inputMode="numeric"
+                type="password"
+                autoComplete="one-time-code"
+                placeholder="1111"
+                className="h-12 w-full rounded-2xl border border-white/10 bg-black/40 pl-11 pr-4 text-sm outline-none focus:border-amber-200/40"
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <label className="mt-6 block text-xs font-bold text-white/45">Ім’я для входу</label>
+            <div className="relative mt-2">
+              <UserRound size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
+              <input
+                value={loginName}
+                onChange={(event) => setLoginName(event.target.value)}
+                autoComplete="username"
+                placeholder="Введіть ім’я"
+                className="h-12 w-full rounded-2xl border border-white/10 bg-black/40 pl-11 pr-4 text-sm outline-none focus:border-amber-200/40"
+              />
+            </div>
+
+            <label className="mt-4 block text-xs font-bold text-white/45">Пароль</label>
+            <div className="relative mt-2">
+              <KeyRound size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
+              <input
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                placeholder="Введіть пароль"
+                className="h-12 w-full rounded-2xl border border-white/10 bg-black/40 pl-11 pr-12 text-sm outline-none focus:border-amber-200/40"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((value) => !value)}
+                className="absolute right-2 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-xl text-white/35"
+                aria-label={showPassword ? 'Приховати пароль' : 'Показати пароль'}
+              >
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
+          </>
+        )}
+
+        {!status?.directors.length && (
+          <div className="mt-4 rounded-2xl border border-red-300/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+            Активного Директора не знайдено. Спочатку потрібно створити співробітника з роллю Директор.
+          </div>
+        )}
 
         {error && <div className="mt-4 rounded-2xl border border-red-300/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div>}
 
         <button
           type="submit"
-          disabled={submitting || directors.length === 0}
+          disabled={submitting || !status?.directors.length}
           className="mt-5 w-full rounded-2xl border border-amber-200/45 bg-amber-300/15 px-4 py-3 text-sm font-black text-amber-100 shadow-[0_0_24px_rgba(251,191,36,.1)] disabled:opacity-40"
         >
           {submitting ? 'Перевіряємо...' : 'Увійти до пульта'}
