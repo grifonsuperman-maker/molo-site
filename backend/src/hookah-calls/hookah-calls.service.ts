@@ -157,6 +157,16 @@ export class HookahCallsService {
 
       await this.expireOverdueCalls(callRepo, dto.bookingId);
 
+      const lockedBooking = await bookingRepo
+        .createQueryBuilder("booking")
+        .where("booking.id = :bookingId", { bookingId: dto.bookingId })
+        .setLock("pessimistic_write", undefined, ["booking"])
+        .getOne();
+
+      if (!lockedBooking) {
+        throw new NotFoundException("Бронювання не знайдено");
+      }
+
       const booking = await bookingRepo.findOne({
         where: {
           id: dto.bookingId,
@@ -167,7 +177,6 @@ export class HookahCallsService {
           },
           client: true,
         },
-        lock: { mode: "pessimistic_write" },
       });
 
       if (!booking) {

@@ -314,8 +314,9 @@ export default function AdminVisualTablePlanner({ onClose, mode = 'admin' }: { o
   }
   async function setPhysicalStatus(status: 'free' | 'occupied' | 'cleaning' | 'closed') {
     if (!selectedTable || date !== today) return;
+    if (mode === 'director' && status !== 'free' && status !== 'occupied') return;
     setBusy(`status:${status}`);
-    try { await tablesApi.setStatus(selectedTable.id, status); setNotice(status === 'free' ? 'Стіл вільний' : status === 'occupied' ? 'Стіл зайнятий' : status === 'cleaning' ? 'Стіл готується' : 'Стіл закритий'); await load(true); }
+    try { if (mode === 'director') await tablesApi.waiterStatus(selectedTable.id, status === 'occupied' ? 'occupied' : 'free'); else await tablesApi.setStatus(selectedTable.id, status); setNotice(status === 'free' ? 'Стіл вільний' : status === 'occupied' ? 'Стіл зайнятий' : status === 'cleaning' ? 'Стіл готується' : 'Стіл закритий'); await load(true); }
     catch (actionError: any) { setError(actionError?.message || 'Не вдалося змінити статус'); } finally { setBusy(''); }
   }
 

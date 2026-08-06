@@ -228,8 +228,10 @@ export default function PremiumDirectorPanel() {
     if (reviewsResult.status === 'fulfilled') setReviews(reviewsResult.value);
     if (logsResult.status === 'fulfilled') setLogs(logsResult.value);
     if (todayAnalyticsResult.status === 'fulfilled') setTodayAnalytics(todayAnalyticsResult.value);
+    else setTodayAnalytics(null);
     if (hourlyLoadResult.status === 'fulfilled') setHourlyLoad(hourlyLoadResult.value);
-    const failed = [restaurantResult, bookingsResult, mapResult].find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
+    else setHourlyLoad(null);
+    const failed = [restaurantResult, bookingsResult, mapResult, todayAnalyticsResult, hourlyLoadResult].find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
     if (failed) setError(failed.reason?.message || 'Не вдалося оновити пульт');
     if (!silent) setLoading(false);
   }

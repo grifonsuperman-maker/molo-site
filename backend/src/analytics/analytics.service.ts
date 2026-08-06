@@ -8,7 +8,7 @@ import { Zone } from '../zones/entities/zone.entity';
 @Injectable()
 export class AnalyticsService {
   constructor(@InjectRepository(Booking) private readonly bookings:Repository<Booking>, @InjectRepository(Client) private readonly clients:Repository<Client>, @InjectRepository(TableEntity) private readonly tables:Repository<TableEntity>, @InjectRepository(Zone) private readonly zones:Repository<Zone>) {}
-  todayStr(){ return new Date().toISOString().slice(0,10); }
+  todayStr(now = new Date()){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Kyiv',year:'numeric',month:'2-digit',day:'2-digit'}).format(now); }
   range(from?:string,to?:string){ const t=this.todayStr(); return {from:from||t,to:to||t}; }
   async getToday(){ const today=this.todayStr(); const bookings=await this.bookings.find({where:{bookingDate:today},relations:['table','client']}); return {date:today, bookingsCount:bookings.length, pendingCount:bookings.filter(b=>b.status==='pending').length, guestsCount:bookings.filter(b=>['approved','completed'].includes(b.status)).reduce((s,b)=>s+b.guestsCount,0), occupiedTables:await this.tables.count({where:{status:'occupied'}}), freeTables:await this.tables.count({where:{status:'free'}}), closedZones:await this.zones.count({where:{isClosed:true}})}; }
   async getSummary(from?:string,to?:string){ const r=this.range(from,to); const bookings=await this.bookings.find({where:{bookingDate:Between(r.from,r.to)}}); return {from:r.from,to:r.to,bookingsCount:bookings.length,guestsCount:bookings.filter(b=>['approved','completed'].includes(b.status)).reduce((s,b)=>s+b.guestsCount,0),cancelledCount:bookings.filter(b=>b.status==='cancelled').length}; }
