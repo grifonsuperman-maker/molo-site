@@ -28,10 +28,7 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
   const [error, setError] = useState('');
 
   const adminOptions = useMemo(
-    () =>
-      options.filter(
-        (option) => option.role === 'admin' || option.role === 'owner',
-      ),
+    () => options.filter((option) => option.role === 'admin'),
     [options],
   );
 
@@ -41,9 +38,7 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
 
     try {
       const result = await staffApi.getLoginOptions();
-      const managers = result.filter(
-        (option) => option.role === 'admin' || option.role === 'owner',
-      );
+      const managers = result.filter((option) => option.role === 'admin');
 
       setOptions(result);
       setStaffId((current) => {
@@ -81,13 +76,13 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
       try {
         const currentUser = await api.get<StaffAuthUser>('/auth/me');
 
-        if (currentUser.role !== 'admin' && currentUser.role !== 'owner') {
+        if (currentUser.role !== 'admin') {
           clearAccessToken();
 
           if (!cancelled) {
             setUser(null);
             setAuthState('guest');
-            setError('Для входу потрібні права адміністратора або власника');
+            setError('Для входу потрібні права адміністратора');
             await loadLoginOptions();
           }
           return;
@@ -134,9 +129,9 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
     try {
       const result = await staffApi.loginWithPin(staffId, pin);
 
-      if (result.user.role !== 'admin' && result.user.role !== 'owner') {
+      if (result.user.role !== 'admin') {
         clearAccessToken();
-        throw new Error('Для входу потрібні права адміністратора або власника');
+        throw new Error('Для входу потрібні права адміністратора');
       }
 
       setUser(result.user);
@@ -183,9 +178,7 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
               <p className="truncate text-sm font-black">
                 {user.name || 'Адміністратор'}
               </p>
-              <p className="text-xs text-white/50">
-                {user.role === 'owner' ? 'Власник' : 'Адміністратор'}
-              </p>
+              <p className="text-xs text-white/50">Адміністратор</p>
             </div>
 
             <button
@@ -241,7 +234,6 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
                 adminOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.fullName}
-                    {option.role === 'owner' ? ' — Власник' : ''}
                   </option>
                 ))
               )}
