@@ -19,6 +19,11 @@ type Mode = "guest" | "waiter" | "hookah" | "admin" | "director";
 
 const HOOKAH_STAFF_STORAGE_KEY = "molo_hookah_staff";
 
+function clearRoleSession() {
+  clearAccessToken();
+  window.localStorage.removeItem(HOOKAH_STAFF_STORAGE_KEY);
+}
+
 function getModeFromHash(): Mode {
   const value = window.location.hash.replace("#", "");
 
@@ -40,7 +45,15 @@ export default function App() {
 
   useEffect(() => {
     function handleHashChange() {
-      setMode(getModeFromHash());
+      const nextMode = getModeFromHash();
+
+      setMode((currentMode) => {
+        if (nextMode !== currentMode) {
+          clearRoleSession();
+        }
+
+        return nextMode;
+      });
     }
 
     window.addEventListener("hashchange", handleHashChange);
@@ -49,8 +62,7 @@ export default function App() {
 
   function changeMode(nextMode: Mode) {
     if (nextMode !== mode) {
-      clearAccessToken();
-      window.localStorage.removeItem(HOOKAH_STAFF_STORAGE_KEY);
+      clearRoleSession();
     }
 
     window.location.hash = nextMode;
