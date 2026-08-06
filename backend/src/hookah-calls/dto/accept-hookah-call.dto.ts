@@ -1,8 +1,7 @@
-import { IsInt, Max, Min } from 'class-validator';
+import { IsIn, IsInt } from "class-validator";
 
 export class AcceptHookahCallDto {
-  @IsInt({ message: 'Час очікування має бути цілим числом', })
-  @Min(1, { message: 'Мінімальний час очікування — 1 хвилина', })
-  @Max(120, { message: 'Максимальний час очікування — 120 хвилин', })
+  @IsInt({ message: "Час очікування має бути цілим числом" })
+  @IsIn([5, 10, 20, 30], { message: "Оберіть 5, 10, 20 або 30 хвилин" })
   etaMinutes: number;
 }

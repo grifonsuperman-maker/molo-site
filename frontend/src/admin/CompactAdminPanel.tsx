@@ -576,10 +576,10 @@ export default function CompactAdminPanel() {
       {tab === 'more' && (
         <section className="space-y-3">
           <button type="button" onClick={() => setShowAdvanced((current) => !current)} className="flex w-full items-center justify-between rounded-[24px] border border-white/10 bg-neutral-950 p-4 text-left">
-            <span className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-amber-300/10 text-amber-100"><Settings2 size={20} /></span><span><span className="block font-black">Розширене керування</span><span className="block text-xs text-white/45">Ресторан, локації, оформлення та додаткові права</span></span></span>
+            <span className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-amber-300/10 text-amber-100"><Settings2 size={20} /></span><span><span className="block font-black">Дозволені налаштування</span><span className="block text-xs text-white/45">Лише оформлення, меню та повідомлення без повтору броней і столів</span></span></span>
             <span className="text-xs text-white/40">{showAdvanced ? 'Сховати' : 'Відкрити'}</span>
           </button>
-          {showAdvanced && <AdminPanel />}
+          {showAdvanced && <AdminPanel settingsOnly />}
         </section>
       )}
 

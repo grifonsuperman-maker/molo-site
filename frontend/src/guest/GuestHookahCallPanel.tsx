@@ -1,16 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from "react";
 
-import {
-  hookahCallsApi,
-  type GuestHookahStatus,
-} from '../api/hookah-calls';
+import { hookahCallsApi, type GuestHookahStatus } from "../api/hookah-calls";
 
 type GuestHookahCallPanelProps = {
   bookingId: string;
 };
 
 function errorText(error: unknown) {
-  return error instanceof Error ? error.message : 'Сталася невідома помилка';
+  return error instanceof Error ? error.message : "Сталася невідома помилка";
 }
 
 export default function GuestHookahCallPanel({
@@ -21,20 +18,24 @@ export default function GuestHookahCallPanel({
   const [calling, setCalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
-  const loadStatus = useCallback(async (silent = false) => {
-    try {
-      if (!silent) setLoading(true);
+  const loadStatus = useCallback(
+    async (silent = false) => {
+      try {
+        if (!silent) setLoading(true);
 
-      const result = await hookahCallsApi.getGuestStatus(bookingId);
-      setStatus(result);
-      setError(null);
-    } catch (loadError) {
-      setError(errorText(loadError));
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [bookingId]);
+        const result = await hookahCallsApi.getGuestStatus(bookingId);
+        setStatus(result);
+        setError(null);
+      } catch (loadError) {
+        setError(errorText(loadError));
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [bookingId],
+  );
 
   useEffect(() => {
     void loadStatus();
@@ -46,6 +47,21 @@ export default function GuestHookahCallPanel({
     return () => window.clearInterval(interval);
   }, [loadStatus]);
 
+  useEffect(() => {
+    if (
+      status?.activeCall?.status !== "accepted" ||
+      !status.activeCall.etaDueAt
+    )
+      return;
+    const timer = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= new Date(status.activeCall!.etaDueAt!).getTime())
+        void loadStatus(true);
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [loadStatus, status?.activeCall?.etaDueAt, status?.activeCall?.status]);
+
   async function callHookahWorker() {
     try {
       setCalling(true);
@@ -56,11 +72,12 @@ export default function GuestHookahCallPanel({
 
       setStatus((current) => ({
         bookingId,
-        bookingStatus: current?.bookingStatus || 'approved',
-        tableStatus: current?.tableStatus || 'occupied',
+        bookingStatus: current?.bookingStatus || "approved",
+        tableStatus: current?.tableStatus || "occupied",
         tableNumber: result.call.tableNumber || current?.tableNumber || null,
         zoneName: result.call.zoneName || current?.zoneName || null,
         canCall: false,
+        hookahCallsAvailable: current?.hookahCallsAvailable !== false,
         activeCall: result.call,
       }));
 
@@ -91,18 +108,20 @@ export default function GuestHookahCallPanel({
   if (!status) return null;
 
   const call = status.activeCall;
+  const secondsLeft = call?.etaDueAt
+    ? Math.max(0, Math.ceil((new Date(call.etaDueAt).getTime() - now) / 1_000))
+    : 0;
+  const countdown = `${String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:${String(secondsLeft % 60).padStart(2, "0")}`;
 
   return (
     <section className="rounded-[24px] border border-amber-200/30 bg-black/35 p-4 backdrop-blur">
       <div>
-        <p className="text-sm font-black text-white">
-          Бажаєте кальян?
-        </p>
+        <p className="text-sm font-black text-white">Бажаєте кальян?</p>
 
         <p className="mt-1 text-xs leading-5 text-white/55">
           {status.tableNumber
-            ? `Стіл №${status.tableNumber}${status.zoneName ? ` · ${status.zoneName}` : ''}`
-            : 'Ваш стіл'}
+            ? `Стіл №${status.tableNumber}${status.zoneName ? ` · ${status.zoneName}` : ""}`
+            : "Ваш стіл"}
         </p>
       </div>
 
@@ -118,7 +137,7 @@ export default function GuestHookahCallPanel({
         </div>
       )}
 
-      {call?.status === 'new' && (
+      {call?.status === "new" && (
         <div className="mt-3 rounded-2xl border border-amber-200/30 bg-amber-300/10 px-4 py-3">
           <p className="text-sm font-black text-amber-100">
             Кальянника викликано
@@ -129,7 +148,7 @@ export default function GuestHookahCallPanel({
         </div>
       )}
 
-      {call?.status === 'accepted' && (
+      {call?.status === "accepted" && (
         <div className="mt-3 rounded-2xl border border-emerald-200/30 bg-emerald-300/10 px-4 py-3">
           <p className="text-sm font-black text-emerald-100">
             Кальянник уже прямує до вас
@@ -138,10 +157,25 @@ export default function GuestHookahCallPanel({
           <p className="mt-1 text-xs text-emerald-100/75">
             {call.acceptedByStaffName
               ? `${call.acceptedByStaffName} прийняв виклик.`
-              : 'Виклик прийнято.'}
+              : "Виклик прийнято."}
             {call.etaMinutes
               ? ` Орієнтовний час очікування — ${call.etaMinutes} хв.`
-              : ''}
+              : ""}
+          </p>
+          {call.etaDueAt && (
+            <p className="mt-2 font-mono text-lg font-black text-emerald-50">
+              Залишилось {countdown}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!call && !status.hookahCallsAvailable && (
+        <div className="mt-3 rounded-2xl border border-rose-300/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+          <p className="font-black">Наразі немає вільних кальянів</p>
+          <p className="mt-1 text-xs text-rose-100/70">
+            Кнопка знову стане доступною, щойно кальянник відкриє приймання
+            викликів.
           </p>
         </div>
       )}
@@ -153,13 +187,14 @@ export default function GuestHookahCallPanel({
           disabled={calling}
           className="mt-3 w-full rounded-2xl border border-amber-200/60 bg-amber-300/20 px-4 py-3 text-sm font-black text-amber-100 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {calling ? 'Викликаємо…' : 'Викликати кальянника'}
+          {calling ? "Викликаємо…" : "Викликати кальянника"}
         </button>
       )}
 
-      {!call && !status.canCall && (
+      {!call && !status.canCall && status.hookahCallsAvailable && (
         <p className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-5 text-white/50">
-          Виклик кальянника стане доступним після підтвердження бронювання та вашого приходу за стіл.
+          Виклик кальянника стане доступним після підтвердження бронювання та
+          вашого приходу за стіл.
         </p>
       )}
     </section>

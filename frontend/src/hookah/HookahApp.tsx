@@ -1,19 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { clearAccessToken } from '../api/client';
-import {
-  hookahCallsApi,
-  type HookahCall,
-} from '../api/hookah-calls';
+import { clearAccessToken } from "../api/client";
+import { hookahCallsApi, type HookahCall } from "../api/hookah-calls";
 import {
   staffApi,
   type StaffLoginOption,
   type StaffMember,
-} from '../api/staff';
+} from "../api/staff";
 
-type Tab = 'new' | 'mine';
+type Tab = "new" | "mine";
 
-const STAFF_STORAGE_KEY = 'molo_hookah_staff';
+const STAFF_STORAGE_KEY = "molo_hookah_staff";
 
 function readSavedStaff(): StaffMember | null {
   try {
@@ -40,22 +37,24 @@ function minutesSince(value: string) {
 }
 
 function formatTime(value: string | null) {
-  if (!value) return '—';
+  if (!value) return "—";
 
-  return new Intl.DateTimeFormat('uk-UA', {
-    timeZone: 'Europe/Kyiv',
-    hour: '2-digit',
-    minute: '2-digit',
+  return new Intl.DateTimeFormat("uk-UA", {
+    timeZone: "Europe/Kyiv",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(new Date(value));
 }
 
 function callLocation(call: HookahCall) {
-  const table = call.tableNumber ? `Стіл ${call.tableNumber}` : 'Стіл не вказано';
+  const table = call.tableNumber
+    ? `Стіл ${call.tableNumber}`
+    : "Стіл не вказано";
   return call.zoneName ? `${table} · ${call.zoneName}` : table;
 }
 
 function errorText(error: unknown) {
-  return error instanceof Error ? error.message : 'Сталася невідома помилка';
+  return error instanceof Error ? error.message : "Сталася невідома помилка";
 }
 
 function EmptyState({ children }: { children: string }) {
@@ -72,8 +71,8 @@ function LoginScreen({
   onLoggedIn: (staff: StaffMember) => void;
 }) {
   const [options, setOptions] = useState<StaffLoginOption[]>([]);
-  const [selectedId, setSelectedId] = useState('');
-  const [pin, setPin] = useState('');
+  const [selectedId, setSelectedId] = useState("");
+  const [pin, setPin] = useState("");
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,12 +86,12 @@ function LoginScreen({
         setError(null);
 
         const result = await staffApi.getLoginOptions();
-        const hookahWorkers = result.filter((item) => item.role === 'hookah');
+        const hookahWorkers = result.filter((item) => item.role === "hookah");
 
         if (!active) return;
 
         setOptions(hookahWorkers);
-        setSelectedId((current) => current || hookahWorkers[0]?.id || '');
+        setSelectedId((current) => current || hookahWorkers[0]?.id || "");
       } catch (loadError) {
         if (active) setError(errorText(loadError));
       } finally {
@@ -111,12 +110,12 @@ function LoginScreen({
     event.preventDefault();
 
     if (!selectedId) {
-      setError('Оберіть кальянника');
+      setError("Оберіть кальянника");
       return;
     }
 
     if (!/^\d{4,6}$/.test(pin)) {
-      setError('PIN має містити від 4 до 6 цифр');
+      setError("PIN має містити від 4 до 6 цифр");
       return;
     }
 
@@ -126,9 +125,9 @@ function LoginScreen({
 
       const result = await staffApi.loginWithPin(selectedId, pin);
 
-      if (result.staff.role !== 'hookah') {
+      if (result.staff.role !== "hookah") {
         clearAccessToken();
-        throw new Error('Цей профіль не є профілем кальянника');
+        throw new Error("Цей профіль не є профілем кальянника");
       }
 
       saveStaff(result.staff);
@@ -174,16 +173,14 @@ function LoginScreen({
           >
             {options.length === 0 && (
               <option value="">
-                {loadingOptions
-                  ? 'Завантаження…'
-                  : 'Немає доступних профілів'}
+                {loadingOptions ? "Завантаження…" : "Немає доступних профілів"}
               </option>
             )}
 
             {options.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.fullName}
-                {option.isOnShift ? ' · на зміні' : ' · не на зміні'}
+                {option.isOnShift ? " · на зміні" : " · не на зміні"}
               </option>
             ))}
           </select>
@@ -197,7 +194,7 @@ function LoginScreen({
             autoComplete="one-time-code"
             value={pin}
             onChange={(event) =>
-              setPin(event.target.value.replace(/\D/g, '').slice(0, 6))
+              setPin(event.target.value.replace(/\D/g, "").slice(0, 6))
             }
             placeholder="••••"
             disabled={submitting}
@@ -208,14 +205,11 @@ function LoginScreen({
         <button
           type="submit"
           disabled={
-            submitting ||
-            loadingOptions ||
-            options.length === 0 ||
-            !selectedId
+            submitting || loadingOptions || options.length === 0 || !selectedId
           }
-          className="mt-5 w-full rounded-2xl bg-amber-300 px-4 py-3 font-black text-neutral-950 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+          className="mt-5 w-full rounded-2xl border border-amber-100/70 bg-black/80 px-4 py-3 font-black text-amber-50 shadow-[0_0_24px_rgba(251,191,36,.32)] transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {submitting ? 'Вхід…' : 'Увійти'}
+          {submitting ? "Вхід…" : "Увійти"}
         </button>
       </form>
     </section>
@@ -231,17 +225,17 @@ function NewCallCard({
   busy: boolean;
   onAccept: (call: HookahCall, etaMinutes: number) => void;
 }) {
-  const [eta, setEta] = useState(15);
+  const [eta, setEta] = useState(5);
 
   return (
-    <article className="rounded-[28px] border border-amber-300/25 bg-amber-300/[0.06] p-4 shadow-lg">
+    <article className="relative animate-pulse rounded-[28px] border border-amber-200/70 bg-black/80 p-4 shadow-[0_0_24px_rgba(251,191,36,.38),0_0_70px_rgba(251,191,36,.16)]">
+      <span className="pointer-events-none absolute -inset-2 -z-10 rounded-[32px] bg-amber-300/10 blur-xl" />
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-lg font-black text-white">
-            {callLocation(call)}
-          </p>
+          <p className="text-lg font-black text-white">{callLocation(call)}</p>
           <p className="mt-1 text-sm text-white/55">
-            Очікує {minutesSince(call.createdAt)} хв · з {formatTime(call.createdAt)}
+            Очікує {minutesSince(call.createdAt)} хв · з{" "}
+            {formatTime(call.createdAt)}
           </p>
         </div>
 
@@ -256,13 +250,20 @@ function NewCallCard({
         </p>
       )}
 
+      <p className="mt-2 text-sm text-cyan-100/80">
+        Офіціант:{" "}
+        <span className="font-bold text-cyan-50">
+          {call.waiterName || "не закріплений"}
+        </span>
+      </p>
+
       <div className="mt-4">
         <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-white/45">
           Час очікування
         </p>
 
         <div className="grid grid-cols-4 gap-2">
-          {[10, 15, 20, 30].map((value) => (
+          {[5, 10, 20, 30].map((value) => (
             <button
               key={value}
               type="button"
@@ -270,8 +271,8 @@ function NewCallCard({
               disabled={busy}
               className={`rounded-xl border px-2 py-2 text-sm font-black transition ${
                 eta === value
-                  ? 'border-amber-200 bg-amber-300 text-neutral-950'
-                  : 'border-white/10 bg-white/5 text-white/70'
+                  ? "border-amber-100 bg-black text-amber-50 shadow-[0_0_18px_rgba(251,191,36,.42),inset_0_0_16px_rgba(251,191,36,.10)]"
+                  : "border-white/20 bg-black/70 text-white/70"
               }`}
             >
               {value} хв
@@ -284,9 +285,9 @@ function NewCallCard({
         type="button"
         onClick={() => onAccept(call, eta)}
         disabled={busy}
-        className="mt-4 w-full rounded-2xl bg-amber-300 px-4 py-3 font-black text-neutral-950 transition active:scale-[0.98] disabled:opacity-40"
+        className="mt-4 w-full rounded-2xl border border-amber-100/75 bg-black/80 px-4 py-3 font-black text-amber-50 shadow-[0_0_24px_rgba(251,191,36,.36),inset_0_0_20px_rgba(251,191,36,.08)] transition active:scale-[0.98] disabled:opacity-40"
       >
-        {busy ? 'Приймаю…' : `Прийняти · ${eta} хв`}
+        {busy ? "Приймаю…" : `Буду через ${eta} хв`}
       </button>
     </article>
   );
@@ -301,20 +302,29 @@ function MyCallCard({
   busy: boolean;
   onComplete: (call: HookahCall) => void;
 }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!call.etaDueAt) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [call.etaDueAt]);
+  const seconds = call.etaDueAt
+    ? Math.max(0, Math.ceil((new Date(call.etaDueAt).getTime() - now) / 1_000))
+    : 0;
+  const countdown = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+
   return (
-    <article className="rounded-[28px] border border-emerald-300/20 bg-emerald-300/[0.05] p-4 shadow-lg">
+    <article className="rounded-[28px] border border-emerald-200/55 bg-black/80 p-4 shadow-[0_0_28px_rgba(52,211,153,.24),inset_0_0_22px_rgba(52,211,153,.05)]">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-lg font-black text-white">
-            {callLocation(call)}
-          </p>
+          <p className="text-lg font-black text-white">{callLocation(call)}</p>
           <p className="mt-1 text-sm text-white/55">
             Прийнято о {formatTime(call.acceptedAt)}
           </p>
         </div>
 
         <span className="rounded-full border border-emerald-200/30 bg-emerald-300/10 px-3 py-1 text-xs font-black text-emerald-100">
-          {call.etaMinutes ? `${call.etaMinutes} хв` : 'У роботі'}
+          {call.etaMinutes ? `${call.etaMinutes} хв` : "У роботі"}
         </span>
       </div>
 
@@ -323,31 +333,47 @@ function MyCallCard({
           Гість: <span className="font-bold text-white">{call.clientName}</span>
         </p>
       )}
+      <p className="mt-2 text-sm text-cyan-100/80">
+        Офіціант:{" "}
+        <span className="font-bold text-cyan-50">
+          {call.waiterName || "не закріплений"}
+        </span>
+      </p>
+      {call.etaDueAt && (
+        <p className="mt-3 font-mono text-xl font-black text-emerald-50">
+          Залишилось {countdown}
+        </p>
+      )}
 
       <button
         type="button"
         onClick={() => onComplete(call)}
         disabled={busy}
-        className="mt-4 w-full rounded-2xl border border-emerald-200/40 bg-emerald-300/15 px-4 py-3 font-black text-emerald-100 transition active:scale-[0.98] disabled:opacity-40"
+        className="mt-4 w-full rounded-2xl border border-emerald-100/70 bg-black/70 px-4 py-3 font-black text-emerald-50 shadow-[0_0_22px_rgba(52,211,153,.28)] transition active:scale-[0.98] disabled:opacity-40"
       >
-        {busy ? 'Завершення…' : 'Виконано'}
+        {busy ? "Завершення…" : "Виконано"}
       </button>
     </article>
   );
 }
 
 export default function HookahApp() {
-  const [staff, setStaff] = useState<StaffMember | null>(() => readSavedStaff());
-  const [tab, setTab] = useState<Tab>('new');
+  const [staff, setStaff] = useState<StaffMember | null>(() =>
+    readSavedStaff(),
+  );
+  const [tab, setTab] = useState<Tab>("new");
   const [activeCalls, setActiveCalls] = useState<HookahCall[]>([]);
   const [myCalls, setMyCalls] = useState<HookahCall[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [callsAvailable, setCallsAvailable] = useState(true);
+  const [availabilityBusy, setAvailabilityBusy] = useState(false);
+  const knownNewCalls = useRef<Set<string>>(new Set());
 
   const newCalls = useMemo(
-    () => activeCalls.filter((call) => call.status === 'new'),
+    () => activeCalls.filter((call) => call.status === "new"),
     [activeCalls],
   );
 
@@ -356,13 +382,15 @@ export default function HookahApp() {
       if (!silent) setLoading(true);
       setError(null);
 
-      const [active, mine] = await Promise.all([
+      const [active, mine, availability] = await Promise.all([
         hookahCallsApi.getActive(),
         hookahCallsApi.getMine(),
+        hookahCallsApi.getAvailability(),
       ]);
 
       setActiveCalls(active);
       setMyCalls(mine);
+      setCallsAvailable(availability.available);
     } catch (loadError) {
       setError(errorText(loadError));
     } finally {
@@ -381,6 +409,41 @@ export default function HookahApp() {
 
     return () => window.clearInterval(interval);
   }, [loadCalls, staff]);
+
+  useEffect(() => {
+    if (!staff || newCalls.length === 0) return;
+    const unseen = newCalls.filter(
+      (call) => !knownNewCalls.current.has(call.id),
+    );
+    newCalls.forEach((call) => knownNewCalls.current.add(call.id));
+    if (!unseen.length) return;
+    setTab("new");
+    try {
+      const AudioContextClass =
+        window.AudioContext || (window as any).webkitAudioContext;
+      const context = new AudioContextClass();
+      [0, 0.22, 0.44].forEach((delay) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.frequency.value = 880;
+        gain.gain.setValueAtTime(0.0001, context.currentTime + delay);
+        gain.gain.exponentialRampToValueAtTime(
+          0.22,
+          context.currentTime + delay + 0.02,
+        );
+        gain.gain.exponentialRampToValueAtTime(
+          0.0001,
+          context.currentTime + delay + 0.16,
+        );
+        oscillator.connect(gain).connect(context.destination);
+        oscillator.start(context.currentTime + delay);
+        oscillator.stop(context.currentTime + delay + 0.18);
+      });
+      window.setTimeout(() => void context.close(), 900);
+    } catch {
+      // Браузер може блокувати звук до першої взаємодії користувача.
+    }
+  }, [newCalls, staff]);
 
   useEffect(() => {
     if (!success) return;
@@ -406,7 +469,7 @@ export default function HookahApp() {
 
       const result = await hookahCallsApi.accept(call.id, etaMinutes);
       setSuccess(result.message);
-      setTab('mine');
+      setTab("mine");
       await loadCalls(true);
     } catch (acceptError) {
       setError(errorText(acceptError));
@@ -431,6 +494,23 @@ export default function HookahApp() {
     }
   }
 
+  async function toggleAvailability() {
+    try {
+      setAvailabilityBusy(true);
+      setError(null);
+      const result = await hookahCallsApi.setAvailability(!callsAvailable);
+      setCallsAvailable(result.available);
+      setSuccess(
+        result.message ||
+          (result.available ? "Кальяни доступні" : "Нові виклики заблоковано"),
+      );
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setAvailabilityBusy(false);
+    }
+  }
+
   if (!staff) {
     return <LoginScreen onLoggedIn={setStaff} />;
   }
@@ -447,14 +527,14 @@ export default function HookahApp() {
               {staff.fullName}
             </h1>
             <p className="mt-1 text-sm text-white/50">
-              {staff.isOnShift ? 'Зміна активна' : 'Зміна не активна'}
+              {staff.isOnShift ? "Зміна активна" : "Зміна не активна"}
             </p>
           </div>
 
           <button
             type="button"
             onClick={logout}
-            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-white/65"
+            className="rounded-xl border border-white/25 bg-black/70 px-3 py-2 text-xs font-bold text-white/70 shadow-[0_0_14px_rgba(255,255,255,.08)]"
           >
             Вийти
           </button>
@@ -467,14 +547,27 @@ export default function HookahApp() {
         )}
       </header>
 
+      <button
+        type="button"
+        onClick={() => void toggleAvailability()}
+        disabled={!staff.isOnShift || availabilityBusy}
+        className={`mt-4 w-full rounded-2xl border bg-black/80 px-4 py-4 font-black transition active:scale-[0.98] disabled:opacity-40 ${callsAvailable ? "border-rose-200/65 text-rose-100 shadow-[0_0_24px_rgba(244,63,94,.24)]" : "border-emerald-200/70 text-emerald-50 shadow-[0_0_26px_rgba(52,211,153,.30)]"}`}
+      >
+        {availabilityBusy
+          ? "Зберігаємо…"
+          : callsAvailable
+            ? "Немає вільних кальянів"
+            : "Кальяни доступні"}
+      </button>
+
       <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-neutral-950/80 p-2">
         <button
           type="button"
-          onClick={() => setTab('new')}
+          onClick={() => setTab("new")}
           className={`rounded-xl px-3 py-3 text-sm font-black ${
-            tab === 'new'
-              ? 'bg-amber-300 text-neutral-950'
-              : 'bg-white/5 text-white/65'
+            tab === "new"
+              ? "border border-amber-100/70 bg-black text-amber-50 shadow-[0_0_20px_rgba(251,191,36,.32)]"
+              : "border border-white/15 bg-black text-white/65"
           }`}
         >
           Нові виклики · {newCalls.length}
@@ -482,11 +575,11 @@ export default function HookahApp() {
 
         <button
           type="button"
-          onClick={() => setTab('mine')}
+          onClick={() => setTab("mine")}
           className={`rounded-xl px-3 py-3 text-sm font-black ${
-            tab === 'mine'
-              ? 'bg-emerald-300 text-neutral-950'
-              : 'bg-white/5 text-white/65'
+            tab === "mine"
+              ? "border border-emerald-100/70 bg-black text-emerald-50 shadow-[0_0_20px_rgba(52,211,153,.30)]"
+              : "border border-white/15 bg-black text-white/65"
           }`}
         >
           Мої виклики · {myCalls.length}
@@ -508,7 +601,7 @@ export default function HookahApp() {
       <div className="mt-4 space-y-3">
         {loading ? (
           <EmptyState>Завантаження викликів…</EmptyState>
-        ) : tab === 'new' ? (
+        ) : tab === "new" ? (
           newCalls.length > 0 ? (
             newCalls.map((call) => (
               <NewCallCard
@@ -539,7 +632,7 @@ export default function HookahApp() {
         type="button"
         onClick={() => void loadCalls()}
         disabled={loading}
-        className="mt-4 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white/65 transition active:scale-[0.98] disabled:opacity-40"
+        className="mt-4 w-full rounded-2xl border border-cyan-200/40 bg-black/75 px-4 py-3 text-sm font-bold text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,.14)] transition active:scale-[0.98] disabled:opacity-40"
       >
         Оновити
       </button>

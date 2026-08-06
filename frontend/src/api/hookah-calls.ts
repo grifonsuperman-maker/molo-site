@@ -1,10 +1,6 @@
-import { api } from './client';
+import { api } from "./client";
 
-export type HookahCallStatus =
-  | 'new'
-  | 'accepted'
-  | 'completed'
-  | 'cancelled';
+export type HookahCallStatus = "new" | "accepted" | "completed" | "cancelled";
 
 export type HookahCall = {
   id: string;
@@ -17,6 +13,8 @@ export type HookahCall = {
   acceptedByStaffId: string | null;
   acceptedByStaffName: string | null;
   etaMinutes: number | null;
+  etaDueAt: string | null;
+  waiterName: string | null;
   createdAt: string;
   acceptedAt: string | null;
   completedAt: string | null;
@@ -31,7 +29,14 @@ export type GuestHookahStatus = {
   tableNumber: string | null;
   zoneName: string | null;
   canCall: boolean;
+  hookahCallsAvailable: boolean;
   activeCall: HookahCall | null;
+};
+
+export type HookahAvailability = {
+  available: boolean;
+  changedAt: string | null;
+  message?: string;
 };
 
 export type HookahCallActionResponse = {
@@ -40,38 +45,32 @@ export type HookahCallActionResponse = {
 };
 
 export const hookahCallsApi = {
+  getAvailability: () =>
+    api.get<HookahAvailability>("/hookah-calls/availability"),
+
+  setAvailability: (available: boolean) =>
+    api.post<HookahAvailability>("/hookah-calls/availability", { available }),
+
   getGuestStatus: (bookingId: string) =>
-    api.get<GuestHookahStatus>(
-      `/hookah-calls/guest/${bookingId}/status`,
-    ),
+    api.get<GuestHookahStatus>(`/hookah-calls/guest/${bookingId}/status`),
 
   createFromGuest: (bookingId: string) =>
-    api.post<HookahCallActionResponse>(
-      '/hookah-calls/guest',
-      { bookingId },
-    ),
+    api.post<HookahCallActionResponse>("/hookah-calls/guest", { bookingId }),
 
-  getActive: () =>
-    api.get<HookahCall[]>('/hookah-calls/active'),
+  getActive: () => api.get<HookahCall[]>("/hookah-calls/active"),
 
-  getMine: () =>
-    api.get<HookahCall[]>('/hookah-calls/mine'),
+  getMine: () => api.get<HookahCall[]>("/hookah-calls/mine"),
 
   accept: (id: string, etaMinutes: number) =>
-    api.post<HookahCallActionResponse>(
-      `/hookah-calls/${id}/accept`,
-      { etaMinutes },
-    ),
+    api.post<HookahCallActionResponse>(`/hookah-calls/${id}/accept`, {
+      etaMinutes,
+    }),
 
   complete: (id: string) =>
-    api.post<HookahCallActionResponse>(
-      `/hookah-calls/${id}/complete`,
-      {},
-    ),
+    api.post<HookahCallActionResponse>(`/hookah-calls/${id}/complete`, {}),
 
   cancel: (id: string, reason: string) =>
-    api.post<HookahCallActionResponse>(
-      `/hookah-calls/${id}/cancel`,
-      { reason },
-    ),
+    api.post<HookahCallActionResponse>(`/hookah-calls/${id}/cancel`, {
+      reason,
+    }),
 };

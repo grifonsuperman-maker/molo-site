@@ -1,14 +1,25 @@
-export type RestaurantStatus = 'open' | 'booking_closed' | 'closed';
-export type SiteMode = 'day' | 'night' | 'holiday';
+export type RestaurantStatus = "open" | "booking_closed" | "closed";
+export type SiteMode = "day" | "night" | "holiday";
 export type HolidayKey =
-  | 'new-year'
-  | 'christmas'
-  | 'valentines'
-  | 'easter'
-  | 'halloween'
-  | 'march-8';
-export type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'cleaning' | 'closed';
-export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
+  | "new-year"
+  | "christmas"
+  | "valentines"
+  | "easter"
+  | "halloween"
+  | "march-8";
+export type TableStatus =
+  | "free"
+  | "pending"
+  | "reserved"
+  | "occupied"
+  | "cleaning"
+  | "closed";
+export type BookingStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "cancelled"
+  | "completed";
 
 export type Restaurant = {
   id: string;
@@ -23,6 +34,8 @@ export type Restaurant = {
   adminCanRespondReviews?: boolean;
   adminCanManageStaffShifts?: boolean;
   adminCanSendBroadcasts?: boolean;
+  hookahCallsAvailable?: boolean;
+  hookahCallsAvailabilityChangedAt?: string | null;
   menuUrl: string | null;
   status: RestaurantStatus;
   siteMode?: SiteMode;
@@ -96,7 +109,7 @@ export type Booking = {
   guestsCount: number;
   wishes: string | null;
   status: BookingStatus;
-  source: 'mini_app' | 'phone' | 'admin_manual';
+  source: "mini_app" | "phone" | "admin_manual";
   approvedAt?: string | null;
   rejectedAt?: string | null;
   cancelledAt?: string | null;
