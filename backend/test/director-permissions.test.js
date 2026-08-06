@@ -8,6 +8,20 @@ test('owner always has granular Director permissions', async () => {
   await service.assert({ role: 'owner' }, 'adminCanSendBroadcasts');
 });
 
+test('admin is blocked when restaurant permission settings are missing', async () => {
+  const service = new AdminPermissionsService({
+    find: async (options) => {
+      assert.deepEqual(options, { order: { createdAt: 'ASC' }, take: 1 });
+      return [];
+    },
+  });
+
+  await assert.rejects(
+    () => service.assert({ role: 'admin' }, 'adminCanManageStaffShifts'),
+    /Директор не надав це право/,
+  );
+});
+
 test('admin is blocked when Director did not grant permission', async () => {
   const service = new AdminPermissionsService({
     find: async (options) => {
