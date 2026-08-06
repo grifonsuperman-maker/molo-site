@@ -5,7 +5,7 @@ import type { HolidayKey, Restaurant, SiteMode } from '../api/types';
 
 const TITLE_ROTATION_MS = 20 * 60 * 1000;
 const TITLE_SYNC_MS = 30 * 1000;
-const TITLE_STORAGE_KEY = 'molo_title_rotation_v2';
+const TITLE_STORAGE_KEY = 'molo_title_rotation_v3';
 
 const TITLE_IMAGES = [
   '/hero-bg.jpg',
@@ -14,6 +14,13 @@ const TITLE_IMAGES = [
   '/maps/title/title-04.png',
   '/maps/title/title-05.png',
   '/maps/title/title-06.png',
+  '/maps/title/title-07.png',
+  '/maps/title/title-08.png',
+  '/maps/title/title-11.png',
+  '/maps/title/title-12.png',
+  '/maps/title/title-13.png',
+  '/maps/title/title-14.png',
+  '/maps/title/title-15.png',
 ];
 
 const DAY_TO_NIGHT: Record<string, string> = {

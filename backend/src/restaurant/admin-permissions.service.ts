@@ -23,7 +23,11 @@ export class AdminPermissionsService {
     if (user.role === 'owner') return;
     if (user.role !== 'admin') throw new ForbiddenException('Недостатньо прав');
 
-    const restaurant = await this.restaurants.findOne({ order: { createdAt: 'ASC' } });
+    const [restaurant] = await this.restaurants.find({
+      order: { createdAt: 'ASC' },
+      take: 1,
+    });
+
     if (!restaurant || !restaurant[permission]) {
       throw new ForbiddenException('Директор не надав це право Адміністратору');
     }
