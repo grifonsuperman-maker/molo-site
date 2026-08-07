@@ -369,6 +369,7 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
   const [menuUrl, setMenuUrl] = useState('');
   const [siteMode, setSiteMode] = useState<SiteMode>('night');
   const [holidayKey, setHolidayKey] = useState<HolidayKey | null>(null);
+  const [holidayPickerOpen, setHolidayPickerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1191,7 +1192,14 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => changeSiteMode(mode, mode === 'holiday' ? holidayKey || 'new-year' : null)}
+                    onClick={() => {
+                      if (mode === 'holiday') {
+                        setHolidayPickerOpen(true);
+                        return;
+                      }
+                      setHolidayPickerOpen(false);
+                      void changeSiteMode(mode);
+                    }}
                     disabled={busyAction === `site-mode:${mode}`}
                     className={`rounded-2xl border bg-black/70 px-3 py-4 text-sm font-black transition active:scale-[0.98] disabled:opacity-50 ${
                       siteMode === mode
@@ -1204,7 +1212,7 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
                 ))}
               </div>
 
-              {siteMode === 'holiday' && (
+              {(holidayPickerOpen || siteMode === 'holiday') && (
                 <div className="mt-5 border-t border-white/10 pt-4">
                   <p className="text-xs font-black uppercase tracking-[0.18em] text-white/45">Оберіть свято</p>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
