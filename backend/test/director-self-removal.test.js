@@ -16,6 +16,10 @@ function createController() {
       calls.push(['archive', id, dto]);
       return { id };
     },
+    deletePermanently: (id) => {
+      calls.push(['deletePermanently', id]);
+      return { id };
+    },
   };
   const permissions = { assert: async () => undefined };
   return { controller: new StaffController(service, permissions), calls };
@@ -56,4 +60,23 @@ test('Director can remove another employee', () => {
 
   assert.deepEqual(result, { id: 'waiter-1' });
   assert.deepEqual(calls, [['remove', 'waiter-1']]);
+});
+
+test('Director cannot permanently delete own account', () => {
+  const { controller, calls } = createController();
+
+  assert.throws(
+    () => controller.deletePermanently('director-1', { user: directorUser }),
+    /не може видалити власний обліковий запис/,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test('Director can permanently delete another employee', () => {
+  const { controller, calls } = createController();
+
+  const result = controller.deletePermanently('waiter-1', { user: directorUser });
+
+  assert.deepEqual(result, { id: 'waiter-1' });
+  assert.deepEqual(calls, [['deletePermanently', 'waiter-1']]);
 });
