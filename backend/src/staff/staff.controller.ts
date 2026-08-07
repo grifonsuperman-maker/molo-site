@@ -203,6 +203,16 @@ export class StaffController {
   }
 
   @Roles('owner')
+  @Delete(':id/permanent')
+  deletePermanently(
+    @Param('id') id: string,
+    @Req() request: { user?: AuthUser },
+  ) {
+    this.assertCannotRemoveSelf(request.user, id);
+    return this.service.deletePermanently(id);
+  }
+
+  @Roles('owner')
   @Delete(':id')
   remove(
     @Param('id') id: string,

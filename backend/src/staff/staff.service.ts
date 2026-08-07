@@ -493,6 +493,22 @@ export class StaffService implements OnModuleInit {
     return this.toPublicStaff(saved);
   }
 
+  async deletePermanently(id: string) {
+    const staff = await this.getStaffOrThrow(id);
+
+    if (staff.role === 'owner') {
+      throw new BadRequestException('Обліковий запис Директора не можна видалити назавжди');
+    }
+
+    if (!staff.isArchived) {
+      throw new BadRequestException('Спочатку перемістіть працівника до архіву');
+    }
+
+    const deletedId = staff.id;
+    await this.staffRepo.remove(staff);
+    return { id: deletedId };
+  }
+
   async remove(id: string) {
     return this.archive(id, {
       performedBy: 'system',
