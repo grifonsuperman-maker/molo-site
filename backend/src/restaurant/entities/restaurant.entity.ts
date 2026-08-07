@@ -55,6 +55,12 @@ export class Restaurant {
   @Column({ name: 'admin_can_send_broadcasts', default: false })
   adminCanSendBroadcasts: boolean;
 
+  @Column({ name: 'hookah_calls_available', default: true })
+  hookahCallsAvailable: boolean;
+
+  @Column({ name: 'hookah_calls_availability_changed_at', type: 'timestamp', nullable: true })
+  hookahCallsAvailabilityChangedAt: Date | null;
+
   @Column({ type: 'text', nullable: true })
   address: string | null;
 

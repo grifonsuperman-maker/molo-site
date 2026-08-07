@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import {
   Building2,
   Check,
-  ChevronRight,
   Cloud,
   Eye,
   EyeOff,
@@ -190,32 +189,13 @@ export default function SyrveIntegrationDock() {
     <>
       <button
         type="button"
+        title={connected ? `Syrve підключено · ${status.organizationName || 'організація'}` : 'Налаштувати підключення Syrve'}
+        aria-label={connected ? 'Syrve підключено. Відкрити налаштування' : 'Підключити Syrve'}
         onClick={() => connected ? setOpen(true) : start()}
-        className={`fixed bottom-24 right-3 z-50 w-[min(360px,calc(100vw-24px))] rounded-[26px] border p-4 text-left backdrop-blur-2xl transition active:scale-[0.985] sm:right-5 ${tone}`}
+        className={`fixed bottom-24 right-3 z-50 grid h-14 w-14 place-items-center rounded-2xl border bg-black/85 backdrop-blur-2xl transition active:scale-[0.95] sm:right-5 ${tone}`}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className={`grid h-12 w-12 place-items-center rounded-2xl border ${connected ? 'border-emerald-200/35 bg-emerald-400/10 text-emerald-100' : 'border-cyan-200/30 bg-cyan-400/10 text-cyan-100'}`}>
-              <Cloud size={23} />
-            </span>
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/40">Інтеграція</p>
-              <h2 className="mt-1 text-xl font-black">Syrve</h2>
-            </div>
-          </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black ${connected ? 'border-emerald-200/35 text-emerald-100' : status.status === 'error' ? 'border-red-200/35 text-red-100' : 'border-white/15 text-white/55'}`}>
-            {connected ? 'Підключено' : status.status === 'error' ? 'Помилка' : 'Не підключено'}
-          </span>
-        </div>
-        <p className="mt-3 text-sm text-white/55">
-          {connected
-            ? `${status.organizationName || 'Організація вибрана'} · останній зв’язок ${dateTime(status.lastCheckedAt)}`
-            : status.lastError || 'Інтеграція ще не налаштована'}
-        </p>
-        <div className="mt-3 flex items-center justify-between text-xs font-black text-white/70">
-          <span>{connected ? 'Відкрити налаштування' : 'Підключити Syrve'}</span>
-          <ChevronRight size={17} />
-        </div>
+        <Cloud size={24} className={connected ? 'text-emerald-100' : status.status === 'error' ? 'text-red-100' : 'text-cyan-100'} />
+        <span className={`absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full ${connected ? 'bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,.95)]' : status.status === 'error' ? 'bg-red-400 shadow-[0_0_10px_rgba(248,113,113,.9)]' : 'bg-cyan-300 shadow-[0_0_10px_rgba(103,232,249,.85)]'}`} />
       </button>
 
       {open && (

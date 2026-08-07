@@ -350,8 +350,8 @@ function isActiveBooking(booking: Booking) {
   return ACTIVE_BOOKING_STATUSES.has(booking.status) && !isNoShow(booking);
 }
 
-export default function AdminPanel() {
-  const [tab, setTab] = useState<Tab>('dashboard');
+export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: boolean }) {
+  const [tab, setTab] = useState<Tab>(settingsOnly ? 'settings' : 'dashboard');
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [fullMap, setFullMap] = useState<FullMapResponse | null>(null);
@@ -749,8 +749,8 @@ export default function AdminPanel() {
   }
 
   return (
-    <div className="min-h-screen bg-black p-4 pb-28 text-white lg:p-8">
-      <header className="mb-5 rounded-[32px] border border-white/10 bg-neutral-950/90 p-5 shadow-2xl">
+    <div className={settingsOnly ? 'text-white' : 'min-h-screen bg-black p-4 pb-28 text-white lg:p-8'}>
+      {!settingsOnly && <header className="mb-5 rounded-[32px] border border-white/10 bg-neutral-950/90 p-5 shadow-2xl">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-amber-100/55">MOLO Restaurant</p>
@@ -819,9 +819,9 @@ export default function AdminPanel() {
             {error || notice}
           </div>
         )}
-      </header>
+      </header>}
 
-      <nav className="mb-5 grid grid-cols-2 gap-2 md:grid-cols-5">
+      {!settingsOnly && <nav className="mb-5 grid grid-cols-2 gap-2 md:grid-cols-5">
         {(['dashboard', 'bookings', 'tables', 'clients', 'settings'] as Tab[]).map((item) => (
           <button
             key={item}
@@ -832,9 +832,9 @@ export default function AdminPanel() {
             {label(item)}
           </button>
         ))}
-      </nav>
+      </nav>}
 
-      {pendingReminders.length > 0 && (
+      {!settingsOnly && pendingReminders.length > 0 && (
         <section className="mb-5 rounded-[28px] border border-amber-200/35 bg-amber-300/10 p-4 text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.08)]">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>

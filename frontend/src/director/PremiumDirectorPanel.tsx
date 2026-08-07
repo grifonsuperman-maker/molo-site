@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Armchair,
+  BarChart3,
+  Ban,
   Bell,
   CalendarClock,
   CalendarDays,
@@ -11,6 +13,7 @@ import {
   KeyRound,
   LayoutDashboard,
   LockKeyhole,
+  LogOut,
   MapPin,
   MessageSquareText,
   MoreHorizontal,
@@ -27,19 +30,19 @@ import {
 } from 'lucide-react';
 
 import AdminVisualTablePlanner from '../admin/AdminVisualTablePlanner';
+import { analyticsApi, type HourlyLoad, type TodayAnalytics } from '../api/analytics';
 import { bookingsApi } from '../api/bookings';
 import { broadcastsApi } from '../api/broadcasts';
 import { clientsApi } from '../api/clients';
-import { getAccessToken } from '../api/client';
+import { clearAccessToken, getAccessToken } from '../api/client';
 import { logsApi, type LogRecord } from '../api/logs';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { reviewsApi, type GuestReviewRecord } from '../api/reviews';
 import { staffApi, type StaffMember } from '../api/staff';
-import { zonesApi } from '../api/zones';
-import type { Booking, Client, FullMapResponse, Restaurant, SiteMode, Zone } from '../api/types';
+import type { Booking, Client, FullMapResponse, Restaurant, SiteMode } from '../api/types';
 
-type Tab = 'overview' | 'bookings' | 'locations' | 'guests' | 'team' | 'site' | 'more';
+type Tab = 'overview' | 'bookings' | 'locations' | 'guests' | 'blacklist' | 'activity' | 'stats' | 'team' | 'site' | 'more';
 type BookingFilter = 'all' | 'pending' | 'approved' | 'completed' | 'cancelled' | 'no_show';
 type LocationKey = 'hall' | 'canopy' | 'gazebo' | 'rotang' | 'embankment' | 'glass' | 'water';
 type NoticeItem = { id: string; title: string; text: string; tone: 'gold' | 'red' | 'cyan' };
@@ -57,7 +60,7 @@ type AdminRights = {
 
 const TAB_STORAGE_KEY = 'molo:director:active-tab';
 const NOTICE_STORAGE_KEY = 'molo:director:last-read-notices';
-const VALID_TABS: Tab[] = ['overview', 'bookings', 'locations', 'guests', 'team', 'site', 'more'];
+const VALID_TABS: Tab[] = ['overview', 'bookings', 'locations', 'guests', 'blacklist', 'activity', 'stats', 'team', 'site', 'more'];
 const EMPTY_RIGHTS: AdminRights = {
   zones: false,
   onlineBooking: false,
@@ -177,6 +180,8 @@ export default function PremiumDirectorPanel() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [reviews, setReviews] = useState<GuestReviewRecord[]>([]);
   const [logs, setLogs] = useState<LogRecord[]>([]);
+  const [todayAnalytics, setTodayAnalytics] = useState<TodayAnalytics | null>(null);
+  const [hourlyLoad, setHourlyLoad] = useState<HourlyLoad | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -209,8 +214,9 @@ export default function PremiumDirectorPanel() {
       restaurantApi.get(),
       selectedDate === today ? bookingsApi.getToday() : bookingsApi.getByDate(selectedDate),
       mapApi.get(), clientsApi.getAll(), staffApi.getAll(), reviewsApi.getAll(), logsApi.getAll(),
+      analyticsApi.today(), analyticsApi.hourlyLoad(selectedDate),
     ]);
-    const [restaurantResult, bookingsResult, mapResult, clientsResult, staffResult, reviewsResult, logsResult] = results;
+    const [restaurantResult, bookingsResult, mapResult, clientsResult, staffResult, reviewsResult, logsResult, todayAnalyticsResult, hourlyLoadResult] = results;
     if (restaurantResult.status === 'fulfilled') {
       setRestaurant(restaurantResult.value);
       if (!rightsDirty) setAdminRights(rightsFromRestaurant(restaurantResult.value));
@@ -221,7 +227,11 @@ export default function PremiumDirectorPanel() {
     if (staffResult.status === 'fulfilled') setStaff(staffResult.value);
     if (reviewsResult.status === 'fulfilled') setReviews(reviewsResult.value);
     if (logsResult.status === 'fulfilled') setLogs(logsResult.value);
-    const failed = [restaurantResult, bookingsResult, mapResult].find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
+    if (todayAnalyticsResult.status === 'fulfilled') setTodayAnalytics(todayAnalyticsResult.value);
+    else setTodayAnalytics(null);
+    if (hourlyLoadResult.status === 'fulfilled') setHourlyLoad(hourlyLoadResult.value);
+    else setHourlyLoad(null);
+    const failed = [restaurantResult, bookingsResult, mapResult, todayAnalyticsResult, hourlyLoadResult].find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
     if (failed) setError(failed.reason?.message || 'Не вдалося оновити пульт');
     if (!silent) setLoading(false);
   }
@@ -334,16 +344,6 @@ export default function PremiumDirectorPanel() {
     setRightsDirty(true);
   }
 
-  async function changeZone(zone: Zone, close: boolean) {
-    setBusy(`zone:${zone.id}`);
-    try {
-      if (close) await zonesApi.close(zone.id); else await zonesApi.open(zone.id);
-      setNotice(close ? `Локацію «${zone.name}» закрито` : `Локацію «${zone.name}» відкрито`);
-      await load(true);
-    } catch (cause: any) { setError(cause?.message || 'Не вдалося змінити локацію'); }
-    finally { setBusy(null); }
-  }
-
   async function applyGuestReason() {
     if (!reasonTarget || !reasonText.trim()) return;
     setBusy(`client:${reasonTarget.id}`);
@@ -412,9 +412,16 @@ export default function PremiumDirectorPanel() {
     window.dispatchEvent(new Event('molo:open-director-access'));
   }
 
+  function logout() {
+    clearAccessToken();
+    window.location.hash = 'guest';
+  }
+
   const activeStaff = staff.filter((member) => !member.isArchived);
   const archivedStaff = staff.filter((member) => member.isArchived);
   const eligibleBroadcastClients = clients.filter((client) => !client.isBlacklisted);
+  const blacklistedClients = clients.filter((client) => client.isBlacklisted);
+  const hourlyEntries = Object.entries(hourlyLoad?.hours || {}).sort(([left], [right]) => left.localeCompare(right));
 
   return (
     <div className="min-h-screen bg-[#030403] pb-28 text-white [background-image:radial-gradient(circle_at_12%_0%,rgba(52,211,153,.055),transparent_30%),radial-gradient(circle_at_88%_8%,rgba(251,191,36,.07),transparent_28%)]">
@@ -430,11 +437,12 @@ export default function PremiumDirectorPanel() {
             </div>
             <div className="flex items-center gap-2">
               <IconButton label="Оновити" onClick={() => void load()} disabled={loading}><RefreshCcw size={18} className={loading ? 'animate-spin' : ''} /></IconButton>
-              <button type="button" onClick={openNotifications} aria-label="Повідомлення" className={`relative grid h-11 w-11 place-items-center rounded-2xl border bg-black/45 text-rose-100 transition active:scale-95 ${unreadCount ? 'border-rose-200/55 shadow-[0_0_22px_rgba(244,63,94,.35)]' : 'border-white/12'}`}>
-                {unreadCount > 0 && <><span className="absolute inset-0 rounded-2xl border border-rose-300/40 animate-ping" /><span className="absolute -inset-2 rounded-3xl bg-rose-500/10 blur-lg" /></>}
+              <button type="button" onClick={openNotifications} aria-label="Повідомлення" className={`relative grid h-11 w-11 place-items-center rounded-2xl border bg-black/45 text-rose-100 transition active:scale-95 ${unreadCount ? 'border-rose-100/80 shadow-[0_0_28px_rgba(244,63,94,.75),0_0_60px_rgba(244,63,94,.28)]' : 'border-white/12'}`}>
+                {unreadCount > 0 && <><span className="absolute inset-0 rounded-2xl border border-rose-200/70 animate-ping" /><span className="absolute -inset-3 rounded-3xl bg-rose-500/25 blur-xl" /></>}
                 <Bell size={18} className={unreadCount ? 'animate-pulse drop-shadow-[0_0_8px_rgba(251,113,133,.9)]' : ''} />
                 {unreadCount > 0 && <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full border border-rose-100/70 bg-rose-500 px-1 text-[10px] font-black shadow-[0_0_14px_rgba(244,63,94,.9)]">{unreadCount}</span>}
               </button>
+              <IconButton label="Вийти" onClick={logout}><LogOut size={18} /></IconButton>
             </div>
           </div>
           <nav className="mt-3 grid grid-cols-7 gap-1 overflow-x-auto">
@@ -452,6 +460,18 @@ export default function PremiumDirectorPanel() {
       <main className="mx-auto max-w-7xl space-y-4 p-3 sm:p-5 lg:p-6">
         {(notice || error) && <div className={`rounded-2xl border bg-black/55 px-4 py-3 text-sm shadow-[0_0_28px_rgba(0,0,0,.45)] ${error ? 'border-rose-300/35 text-rose-100' : 'border-emerald-200/35 text-emerald-100'}`}>{error || notice}</div>}
 
+        <section className="grid grid-cols-3 gap-2">
+          <QuickDirectorButton active={tab === 'blacklist'} label="Чорний список" count={blacklistedClients.length} icon={<Ban size={18} />} onClick={() => selectTab('blacklist')} tone="red" />
+          <QuickDirectorButton active={tab === 'activity'} label="Дії персоналу" count={logs.length} icon={<History size={18} />} onClick={() => selectTab('activity')} tone="cyan" />
+          <QuickDirectorButton active={tab === 'stats'} label="Статистика" icon={<BarChart3 size={18} />} onClick={() => selectTab('stats')} tone="gold" />
+        </section>
+
+        {tab === 'blacklist' && <section className="space-y-3"><Heading title="Чорний список" subtitle="Заблоковані гості без пошуку в загальній стрічці." /><div className="space-y-2">{blacklistedClients.map((client) => <PremiumCard key={client.id} className="border-rose-300/35"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-black">{client.fullName}</h3><p className="mt-1 text-sm text-amber-100">{client.phone}</p><p className="mt-2 text-xs text-white/45">{client.blacklistReason || 'Причину не вказано'}</p></div><OutlineAction label="Розблокувати" tone="green" disabled={Boolean(busy)} onClick={() => { setReasonTarget(client); setReasonText(''); }} /></div></PremiumCard>)}{!blacklistedClients.length && <Empty text="Чорний список порожній" />}</div></section>}
+
+        {tab === 'activity' && <section className="space-y-3"><Heading title="Дії персоналу" subtitle="Останні дії працівників доступні одразу, без прокручування пульта." /><PremiumCard><div className="space-y-2">{logs.map((log) => <div key={log.id} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-black/30 p-3"><History size={16} className="mt-0.5 shrink-0 text-cyan-200" /><div><p className="text-sm font-bold">{log.action}</p><p className="mt-1 text-xs text-white/40">{log.staff?.role === 'owner' ? 'Директор' : log.staff?.fullName || 'Система'} · {new Date(log.createdAt).toLocaleString('uk-UA')}</p></div></div>)}{!logs.length && <Empty text="Історія поки порожня" />}</div></PremiumCard></section>}
+
+        {tab === 'stats' && <section className="space-y-3"><Heading title="Статистика" subtitle="Відвідуваність, завантаженість столів і навантаження каси — без грошових сум." /><PremiumCard className="grid gap-2 sm:grid-cols-[auto_1fr]"><input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} className="h-12 rounded-2xl border border-white/12 bg-black/45 px-4 text-sm [color-scheme:dark] outline-none focus:border-amber-100/45" /><p className="self-center text-sm text-white/45">Оберіть дату статистики</p></PremiumCard><section className="grid grid-cols-2 gap-2 lg:grid-cols-4"><Metric label="Бронювань сьогодні" value={todayAnalytics?.bookingsCount || 0} tone="gold" /><Metric label="Гостей сьогодні" value={todayAnalytics?.guestsCount || 0} tone="violet" /><Metric label="Зайнятих столів" value={todayAnalytics?.occupiedTables || 0} tone="red" /><Metric label="Вільних столів" value={todayAnalytics?.freeTables || 0} tone="cyan" /></section><PremiumCard><Eyebrow>{dateLabel(selectedDate)}</Eyebrow><h2 className="mt-1 text-xl font-black">Навантаження каси за годинами</h2><p className="mt-2 text-sm text-white/45">Кількість бронювань і гостей. Фінансові показники не відображаються.</p><div className="mt-4 space-y-2">{hourlyEntries.map(([hour, load]) => <div key={hour} className="grid grid-cols-[64px_1fr_auto] items-center gap-3 rounded-2xl border border-cyan-200/20 bg-black/35 p-3"><span className="font-mono font-black text-cyan-100">{hour}</span><span className="h-2 overflow-hidden rounded-full bg-white/10"><span className="block h-full rounded-full bg-cyan-200 shadow-[0_0_14px_rgba(103,232,249,.7)]" style={{ width: `${Math.min(100, Math.max(8, load.bookingsCount * 12))}%` }} /></span><span className="text-xs text-white/55">{load.bookingsCount} броней · {load.guestsCount} гостей</span></div>)}{!hourlyEntries.length && <Empty text="На цю дату навантаження ще немає" />}</div></PremiumCard></section>}
+
         {tab === 'overview' && <>
           <PremiumCard className="border-amber-100/25 shadow-[0_0_45px_rgba(251,191,36,.08)]">
             <div className="flex items-center justify-between gap-3"><div><Eyebrow>Потребує уваги</Eyebrow><h1 className="mt-1 text-2xl font-black tracking-tight">Операційний центр</h1></div><OutlinePill>{dateLabel(selectedDate)}</OutlinePill></div>
@@ -466,7 +486,7 @@ export default function PremiumDirectorPanel() {
 
         {tab === 'bookings' && <section className="space-y-3"><Heading title="Бронювання" subtitle="Сьогодні, майбутні дати та архів через календар." /><PremiumCard className="grid gap-2 sm:grid-cols-[auto_1fr]"><input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} className="h-12 rounded-2xl border border-white/12 bg-black/45 px-4 text-sm [color-scheme:dark] outline-none focus:border-amber-100/45" /><SearchInput value={search} onChange={setSearch} placeholder="Ім’я, телефон, стіл або локація" /></PremiumCard><div className="flex gap-2 overflow-x-auto pb-1">{([['all','Усі'],['pending','Очікують'],['approved','Підтверджені'],['no_show','Гості не прийшли'],['completed','Завершені'],['cancelled','Скасовані']] as Array<[BookingFilter,string]>).map(([value,label]) => <FilterButton key={value} active={bookingFilter === value} onClick={() => setBookingFilter(value)}>{label}</FilterButton>)}</div><div className="space-y-2">{filteredBookings.map((booking) => <BookingLine key={booking.id} booking={booking} detailed />)}{!filteredBookings.length && <Empty text="Бронювань не знайдено" />}</div></section>}
 
-        {tab === 'locations' && <section className="space-y-3"><Heading title="Локації" subtitle="Стан зон і планування майбутніх дат без зміни карт та координат." /><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{locations.map((location) => <PremiumCard key={location.key}><div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${location.zone?.isClosed ? 'bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,.7)]' : 'bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,.75)]'}`} /><h3 className="font-black">{location.label}</h3></div><p className="mt-2 text-xs text-white/40">{location.bookings} бронювань · {location.occupied} зайнято · {location.cleaning} готується</p></div><Armchair size={19} className="text-amber-100/35" /></div>{location.zone && <OutlineAction className="mt-3 w-full" label={location.zone.isClosed ? 'Відкрити локацію' : 'Закрити локацію'} tone={location.zone.isClosed ? 'green' : 'red'} disabled={Boolean(busy)} onClick={() => void changeZone(location.zone as Zone, !location.zone?.isClosed)} />}</PremiumCard>)}</div><button type="button" onClick={() => setPlannerOpen(true)} className="flex w-full items-center justify-between rounded-[24px] border border-fuchsia-200/30 bg-black/45 p-4 text-left text-fuchsia-100 shadow-[0_0_26px_rgba(217,70,239,.09)] transition active:scale-[.995]"><div><p className="font-black">Планування на майбутні дати</p><p className="mt-1 text-xs text-white/45">Доступність столів і локацій за датою та часом</p></div><CalendarClock size={21} className="drop-shadow-[0_0_9px_rgba(232,121,249,.8)]" /></button></section>}
+        {tab === 'locations' && <section className="space-y-3"><Heading title="Локації" subtitle="Перегляд існуючих карт і лише два робочі стани столу: зайнятий або вільний." /><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{locations.map((location) => <PremiumCard key={location.key}><div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${location.zone?.isClosed ? 'bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,.7)]' : 'bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,.75)]'}`} /><h3 className="font-black">{location.label}</h3></div><p className="mt-2 text-xs text-white/40">{location.bookings} бронювань · {location.occupied} зайнято · {location.cleaning} готується</p></div><Armchair size={19} className="text-amber-100/35" /></div></PremiumCard>)}</div><button type="button" onClick={() => setPlannerOpen(true)} className="flex w-full items-center justify-between rounded-[24px] border border-fuchsia-200/30 bg-black/45 p-4 text-left text-fuchsia-100 shadow-[0_0_26px_rgba(217,70,239,.09)] transition active:scale-[.995]"><div><p className="font-black">Відкрити карти локацій</p><p className="mt-1 text-xs text-white/45">Натисніть на стіл і оберіть «зайнятий» або «вільний»</p></div><CalendarClock size={21} className="drop-shadow-[0_0_9px_rgba(232,121,249,.8)]" /></button></section>}
 
         {tab === 'guests' && <section className="space-y-3"><Heading title="База гостей" subtitle="Відвідування, чорний список і ручна розсилка." /><div className="grid gap-2 sm:grid-cols-[1fr_auto]"><SearchInput value={search} onChange={setSearch} placeholder="Ім’я або телефон" /><OutlineAction label="Обрати гостей" tone="violet" disabled={false} onClick={() => setBroadcastOpen(true)} icon={<Send size={16} />} /></div><div className="space-y-2">{filteredClients.map((client) => <PremiumCard key={client.id} className={client.isBlacklisted ? 'border-rose-300/30' : ''}><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-black">{client.fullName}</h3>{client.isRegular && <Badge text="Постійний гість" tone="violet" />}{client.isBlacklisted && <Badge text="Чорний список" tone="red" />}</div><p className="mt-1 text-sm text-amber-100">{client.phone}</p><p className="mt-2 text-xs text-white/40">{client.visitsCount} відвідувань · {client.totalGuests} гостей загалом</p></div><OutlineAction label={client.isBlacklisted ? 'Розблокувати' : 'Заблокувати'} tone={client.isBlacklisted ? 'green' : 'red'} disabled={Boolean(busy)} onClick={() => { setReasonTarget(client); setReasonText(''); }} /></div></PremiumCard>)}{!filteredClients.length && <Empty text="Гостей не знайдено" />}</div></section>}
 
@@ -477,7 +497,7 @@ export default function PremiumDirectorPanel() {
         {tab === 'more' && <section className="space-y-3"><Heading title="Ще" subtitle="Вхід, письмові відгуки, історія та інтеграції." /><button type="button" onClick={openAccessSettings} className="flex w-full items-center justify-between rounded-[24px] border border-amber-100/35 bg-black/50 p-4 text-left text-amber-50 shadow-[0_0_32px_rgba(251,191,36,.1)] transition active:scale-[.995]"><div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-100/35 bg-black/40"><LockKeyhole size={19} className="drop-shadow-[0_0_8px_rgba(253,230,138,.8)]" /></span><div><p className="font-black">Налаштування входу</p><p className="mt-1 text-xs text-white/45">Змінити ім’я, логін або пароль</p></div></div><KeyRound size={20} className="text-amber-100/60" /></button><PremiumCard><Eyebrow>{reviews.length} відгуків</Eyebrow><h2 className="mt-1 text-xl font-black">Письмові відгуки гостей</h2><div className="mt-4 space-y-2">{reviews.slice(0, 30).map((review) => <article key={review.id} className="rounded-2xl border border-white/10 bg-black/30 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{review.booking?.client?.fullName || 'Гість'}</p><p className="mt-1 text-xs text-white/40">{dateLabel(review.booking?.bookingDate)} · Стіл №{review.booking?.table?.tableNumber || '-'}</p></div><MessageSquareText size={18} className="text-violet-200" /></div><p className="mt-3 whitespace-pre-wrap text-sm text-white/70">{review.text}</p>{review.responseText ? <div className="mt-3 rounded-2xl border border-emerald-200/25 bg-black/30 p-3"><Eyebrow>Відповідь</Eyebrow><p className="mt-2 whitespace-pre-wrap text-sm text-emerald-50">{review.responseText}</p></div> : <div className="mt-3"><textarea value={reviewDrafts[review.id] || ''} onChange={(event) => setReviewDrafts((current) => ({ ...current, [review.id]: event.target.value }))} placeholder="Напишіть відповідь гостю" className="min-h-24 w-full resize-none rounded-2xl border border-white/12 bg-black/45 p-3 text-sm outline-none focus:border-violet-200/40" /><OutlineAction className="mt-2 w-full" label="Відповісти" tone="violet" disabled={busy === `review:${review.id}` || !String(reviewDrafts[review.id] || '').trim()} onClick={() => void respondToReview(review)} /></div>}</article>)}{!reviews.length && <Empty text="Письмових відгуків ще немає" />}</div></PremiumCard><PremiumCard><Eyebrow>Останні записи</Eyebrow><h2 className="mt-1 text-xl font-black">Історія дій</h2><div className="mt-4 space-y-2">{logs.slice(0, 30).map((log) => <div key={log.id} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-black/30 p-3"><History size={16} className="mt-0.5 shrink-0 text-cyan-200" /><div><p className="text-sm font-bold">{log.action}</p><p className="mt-1 text-xs text-white/40">{log.staff?.role === 'owner' ? 'Директор' : log.staff?.fullName || ''}{log.staff ? ' · ' : ''}{new Date(log.createdAt).toLocaleString('uk-UA')}</p></div></div>)}{!logs.length && <Empty text="Історія поки порожня" />}</div></PremiumCard><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"><SystemCard title="Syrve" status="Налаштовується окремою кнопкою" text="Підключення Cloud API доступне тільки Директору." tone="gold" /><SystemCard title="Expz" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /><SystemCard title="POS" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /></div></section>}
       </main>
 
-      {plannerOpen && <AdminVisualTablePlanner onClose={() => setPlannerOpen(false)} />}
+      {plannerOpen && <AdminVisualTablePlanner mode="director" onClose={() => setPlannerOpen(false)} />}
       {notificationsOpen && <NotificationsDrawer items={attention} onClose={() => setNotificationsOpen(false)} />}
       {broadcastOpen && <BroadcastModal clients={eligibleBroadcastClients} text={broadcastText} setText={setBroadcastText} selected={selectedClients} setSelected={setSelectedClients} all={sendToAll} setAll={setSendToAll} busy={busy === 'broadcast'} onClose={() => setBroadcastOpen(false)} onSend={() => void sendBroadcast()} />}
       {employeeToRemove && <ConfirmModal title="Видалити працівника?" text={`«${employeeToRemove.fullName}» зникне з активної команди, але історія змін збережеться.`} confirm="Видалити" tone="red" busy={busy === `remove:${employeeToRemove.id}`} onCancel={() => setEmployeeToRemove(null)} onConfirm={() => void removeEmployee()} />}
@@ -492,7 +512,7 @@ function roleLabel(role: StaffMember['role']): string {
 }
 
 function PremiumCard({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-[24px] border border-white/10 bg-black/45 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.025),0_18px_50px_rgba(0,0,0,.28)] backdrop-blur-xl ${className}`}>{children}</section>;
+  return <section className={`rounded-[24px] border border-amber-100/15 bg-black/45 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.035),0_0_28px_rgba(251,191,36,.055),0_18px_50px_rgba(0,0,0,.28)] backdrop-blur-xl ${className}`}>{children}</section>;
 }
 
 function Eyebrow({ children }: { children: ReactNode }) {
@@ -509,6 +529,11 @@ function Heading({ title, subtitle }: { title: string; subtitle: string }) {
 
 function IconButton({ label, children, onClick, disabled = false }: { label: string; children: ReactNode; onClick: () => void; disabled?: boolean }) {
   return <button type="button" aria-label={label} onClick={onClick} disabled={disabled} className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-100/30 bg-black/45 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.08)] transition active:scale-95 disabled:opacity-40">{children}</button>;
+}
+
+function QuickDirectorButton({ active, label, count, icon, onClick, tone }: { active: boolean; label: string; count?: number; icon: ReactNode; onClick: () => void; tone: 'red' | 'cyan' | 'gold' }) {
+  const style = tone === 'red' ? 'border-rose-300/45 text-rose-100 shadow-[0_0_24px_rgba(244,63,94,.16)]' : tone === 'cyan' ? 'border-cyan-200/45 text-cyan-100 shadow-[0_0_24px_rgba(34,211,238,.15)]' : 'border-amber-100/45 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,.16)]';
+  return <button type="button" onClick={onClick} className={`flex min-h-16 items-center justify-center gap-2 rounded-2xl border bg-black/55 px-2 text-xs font-black transition active:scale-[.98] ${style} ${active ? 'ring-1 ring-current' : 'opacity-85 hover:opacity-100'}`}>{icon}<span>{label}</span>{typeof count === 'number' && <span className="rounded-full border border-current/35 px-1.5 py-0.5 text-[10px]">{count}</span>}</button>;
 }
 
 function Nav({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {

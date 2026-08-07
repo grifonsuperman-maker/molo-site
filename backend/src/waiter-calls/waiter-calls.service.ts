@@ -122,6 +122,10 @@ export class WaiterCallsService {
     });
   }
 
+  async assignmentForBooking(booking: Booking) {
+    return this.resolveAssignment(booking);
+  }
+
   async assign(dto: {
     bookingId: string;
     tableId?: string | null;

@@ -208,7 +208,7 @@ function Shape({ shape, color, active, onClick, label }: { shape: VisualShape; c
   return <><path d={data.d} {...common} /><path d={data.d} {...hit} /></>;
 }
 
-export default function AdminVisualTablePlanner({ onClose }: { onClose: () => void }) {
+export default function AdminVisualTablePlanner({ onClose, mode = 'admin' }: { onClose: () => void; mode?: 'admin' | 'director' }) {
   const today = useMemo(kyivToday, []);
   const [date, setDate] = useState(today);
   const [time, setTime] = useState('18:00');
@@ -231,7 +231,7 @@ export default function AdminVisualTablePlanner({ onClose }: { onClose: () => vo
 
   const location = LOCATIONS.find((item) => item.key === locationKey) || LOCATIONS[0];
   const zone = useMemo(() => findZone(map?.zones || [], locationKey), [map, locationKey]);
-  const canManage = map?.restaurant.adminCanManageZones !== false;
+  const canManage = mode === 'director' || map?.restaurant.adminCanManageZones !== false;
   const activeBookings = useMemo(() => bookings.filter((booking) => ACTIVE_STATUSES.has(booking.status)), [bookings]);
   const selectedTable = target?.type === 'table' ? map?.tables.find((table) => table.id === target.id) || null : null;
   const selectedZone = target?.type === 'zone' ? map?.zones.find((item) => item.id === target.id) || null : selectedTable?.zone || null;
@@ -312,29 +312,31 @@ export default function AdminVisualTablePlanner({ onClose }: { onClose: () => vo
     try { await availabilityBlocksApi.transferBooking(booking.id, transferTableId, reason.trim() || 'Перенесення Адміністратором'); setNotice('Бронювання перенесено'); setTransferBookingId(null); setTransferTableId(''); await load(true); }
     catch (actionError: any) { setError(actionError?.message || 'Не вдалося перенести'); } finally { setBusy(''); }
   }
-  async function setPhysicalStatus(status: 'free' | 'cleaning' | 'closed') {
+  async function setPhysicalStatus(status: 'free' | 'occupied' | 'cleaning' | 'closed') {
     if (!selectedTable || date !== today) return;
+    if (mode === 'director' && status !== 'free' && status !== 'occupied') return;
     setBusy(`status:${status}`);
-    try { await tablesApi.setStatus(selectedTable.id, status); setNotice(status === 'free' ? 'Стіл вільний' : status === 'cleaning' ? 'Стіл готується' : 'Стіл закритий'); await load(true); }
+    try { if (mode === 'director') await tablesApi.waiterStatus(selectedTable.id, status === 'occupied' ? 'occupied' : 'free'); else await tablesApi.setStatus(selectedTable.id, status); setNotice(status === 'free' ? 'Стіл вільний' : status === 'occupied' ? 'Стіл зайнятий' : status === 'cleaning' ? 'Стіл готується' : 'Стіл закритий'); await load(true); }
     catch (actionError: any) { setError(actionError?.message || 'Не вдалося змінити статус'); } finally { setBusy(''); }
   }
 
   const selectedName = selectedTable ? `Стіл №${selectedTable.tableNumber}` : selectedZone ? `Локація «${selectedZone.name}»` : '';
 
   return (
-    <div className="fixed inset-0 z-[90] overflow-y-auto bg-[#050809] text-white">
+    <div className={`fixed inset-0 z-[90] overflow-y-auto bg-[#050809] text-white ${mode === 'director' ? 'director-readonly-map' : ''}`}>
+      {mode === 'director' && <style>{`.director-readonly-map [data-map-target] > :nth-child(n+3) { display: none; }`}</style>}
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,.12),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(168,85,247,.10),transparent_38%)]" />
       <div className="relative mx-auto min-h-screen max-w-6xl px-3 pb-28 pt-3 sm:px-5">
         <header className="sticky top-0 z-30 rounded-[26px] border border-emerald-300/20 bg-black/80 p-3 shadow-[0_0_38px_rgba(16,185,129,.08)] backdrop-blur-xl">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-emerald-300/30 bg-emerald-400/10 text-emerald-100"><MapPinned size={21} /></span><div><p className="font-black">План столів і локацій</p><p className="text-xs text-white/45">Натисніть на стіл прямо на фото</p></div></div>
+            <div className="flex min-w-0 items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-emerald-300/30 bg-emerald-400/10 text-emerald-100"><MapPinned size={21} /></span><div><p className="font-black">{mode === 'director' ? 'Карти локацій' : 'План столів і локацій'}</p><p className="text-xs text-white/45">{mode === 'director' ? 'Статус столу: зайнятий або вільний' : 'Натисніть на стіл прямо на фото'}</p></div></div>
             <div className="flex gap-2"><button type="button" onClick={() => void load()} className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/5"><RefreshCw size={18} className={loading ? 'animate-spin' : ''} /></button><button type="button" onClick={onClose} className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/5"><X size={19} /></button></div>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2"><label className="rounded-2xl border border-white/10 bg-white/[.04] px-3 py-2 text-xs text-white/45">Дата<input type="date" min={today} value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 block w-full bg-transparent text-base font-black text-white outline-none" /></label><label className="rounded-2xl border border-white/10 bg-white/[.04] px-3 py-2 text-xs text-white/45">Час<input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-1 block w-full bg-transparent text-base font-black text-white outline-none" /></label></div>
+          {mode === 'admin' && <div className="mt-3 grid grid-cols-2 gap-2"><label className="rounded-2xl border border-white/10 bg-white/[.04] px-3 py-2 text-xs text-white/45">Дата<input type="date" min={today} value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 block w-full bg-transparent text-base font-black text-white outline-none" /></label><label className="rounded-2xl border border-white/10 bg-white/[.04] px-3 py-2 text-xs text-white/45">Час<input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-1 block w-full bg-transparent text-base font-black text-white outline-none" /></label></div>}
           {(error || notice) && <div className={`mt-3 rounded-2xl border px-3 py-2 text-sm ${error ? 'border-red-300/30 bg-red-500/10 text-red-100' : 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100'}`}>{error || notice}</div>}
         </header>
 
-        {!canManage && <div className="mt-3 rounded-[24px] border border-amber-300/30 bg-amber-400/10 p-4 text-amber-100"><div className="flex gap-3"><ShieldAlert size={21} /><div><p className="font-black">Немає права на керування</p><p className="mt-1 text-sm opacity-70">Директор має увімкнути право керувати локаціями та столами.</p></div></div></div>}
+        {!canManage && mode === 'admin' && <div className="mt-3 rounded-[24px] border border-amber-300/30 bg-amber-400/10 p-4 text-amber-100"><div className="flex gap-3"><ShieldAlert size={21} /><div><p className="font-black">Немає права на керування</p><p className="mt-1 text-sm opacity-70">Директор має увімкнути право керувати локаціями та столами.</p></div></div></div>}
 
         <section className="mt-3 rounded-[26px] border border-white/10 bg-black/55 p-3 backdrop-blur-xl">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
@@ -343,7 +345,7 @@ export default function AdminVisualTablePlanner({ onClose }: { onClose: () => vo
         </section>
 
         <section className="mt-3 rounded-[28px] border border-emerald-300/20 bg-black/60 p-3 shadow-[0_0_35px_rgba(16,185,129,.08)]">
-          <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-[.18em] text-emerald-100/55">{location.description}</p><h2 className="text-2xl font-black">{location.label}</h2></div>{zone && <button type="button" disabled={!canManage} onClick={() => setTarget({ type: 'zone', id: zone.id })} className="rounded-2xl border border-fuchsia-300/35 bg-fuchsia-400/10 px-3 py-2 text-xs font-black text-fuchsia-100">Керувати локацією</button>}</div>
+          <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-[.18em] text-emerald-100/55">{location.description}</p><h2 className="text-2xl font-black">{location.label}</h2></div>{mode === 'admin' && zone && <button type="button" disabled={!canManage} onClick={() => setTarget({ type: 'zone', id: zone.id })} className="rounded-2xl border border-fuchsia-300/35 bg-fuchsia-400/10 px-3 py-2 text-xs font-black text-fuchsia-100">Керувати локацією</button>}</div>
           <div className="relative overflow-hidden rounded-[22px] border border-white/10 bg-black">
             <img src={location.background} alt={location.label} className="block w-full" draggable={false} />
             <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${location.width} ${location.height}`} preserveAspectRatio="none">
@@ -356,10 +358,10 @@ export default function AdminVisualTablePlanner({ onClose }: { onClose: () => vo
           <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/55"><span>🟢 Вільний</span><span>🔵 Очікує</span><span>🟠 Заброньований</span><span>🔴 Зайнятий</span><span>🩵 Готується</span><span>⚪ Закритий</span></div>
         </section>
 
-        {target && <section className="mt-3 rounded-[28px] border border-amber-300/30 bg-amber-300/[.06] p-4 shadow-[0_0_38px_rgba(251,191,36,.09)]">
+        {target && <section data-map-target className="mt-3 rounded-[28px] border border-amber-300/30 bg-amber-300/[.06] p-4 shadow-[0_0_38px_rgba(251,191,36,.09)]">
           <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[.16em] text-amber-100/50">Обрано</p><h2 className="mt-1 text-2xl font-black">{selectedName}</h2>{selectedTable && <p className="mt-1 text-sm text-white/50">{selectedTable.seats} місць · {selectedTable.zone?.name || location.label}</p>}</div><button type="button" onClick={() => setTarget(null)} className="rounded-xl border border-white/10 p-2"><X size={17} /></button></div>
 
-          {selectedTable && date === today && <div className="mt-4"><p className="mb-2 text-xs font-black uppercase tracking-[.14em] text-white/40">Статус зараз</p><div className="grid grid-cols-3 gap-2"><button type="button" onClick={() => void setPhysicalStatus('free')} className="rounded-2xl border border-emerald-300/35 bg-emerald-400/10 px-3 py-3 text-xs font-black text-emerald-100">Вільний</button><button type="button" onClick={() => void setPhysicalStatus('cleaning')} className="rounded-2xl border border-cyan-300/35 bg-cyan-400/10 px-3 py-3 text-xs font-black text-cyan-100">Готується</button><button type="button" onClick={() => void setPhysicalStatus('closed')} className="rounded-2xl border border-red-300/35 bg-red-400/10 px-3 py-3 text-xs font-black text-red-100">Закрити</button></div></div>}
+          {selectedTable && date === today && <div className="mt-4"><p className="mb-2 text-xs font-black uppercase tracking-[.14em] text-white/40">Статус зараз</p>{mode === 'director' ? <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => void setPhysicalStatus('free')} className="rounded-2xl border border-emerald-200/65 bg-black/60 px-3 py-3 text-sm font-black text-emerald-50 shadow-[0_0_20px_rgba(52,211,153,.18)]">Стіл вільний</button><button type="button" onClick={() => void setPhysicalStatus('occupied')} className="rounded-2xl border border-rose-200/65 bg-black/60 px-3 py-3 text-sm font-black text-rose-50 shadow-[0_0_20px_rgba(244,63,94,.18)]">Стіл зайнятий</button></div> : <div className="grid grid-cols-3 gap-2"><button type="button" onClick={() => void setPhysicalStatus('free')} className="rounded-2xl border border-emerald-300/35 bg-emerald-400/10 px-3 py-3 text-xs font-black text-emerald-100">Вільний</button><button type="button" onClick={() => void setPhysicalStatus('cleaning')} className="rounded-2xl border border-cyan-300/35 bg-cyan-400/10 px-3 py-3 text-xs font-black text-cyan-100">Готується</button><button type="button" onClick={() => void setPhysicalStatus('closed')} className="rounded-2xl border border-red-300/35 bg-red-400/10 px-3 py-3 text-xs font-black text-red-100">Закрити</button></div>}</div>}
 
           {targetBlocks.length > 0 && <div className="mt-4 space-y-2"><p className="text-xs font-black uppercase tracking-[.14em] text-fuchsia-100/55">Заплановано</p>{targetBlocks.map((block) => <div key={block.id} className="flex items-center justify-between gap-3 rounded-2xl border border-fuchsia-300/25 bg-fuchsia-500/[.08] p-3"><div><p className="font-bold">{block.startTime && block.endTime ? `${block.startTime.slice(0, 5)}–${block.endTime.slice(0, 5)}` : 'Увесь день'}</p><p className="text-xs text-white/45">{block.reason}</p></div><button type="button" disabled={busy === `remove:${block.id}`} onClick={() => void removeBlock(block)} className="rounded-xl border border-red-300/25 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100"><Trash2 size={14} className="inline" /> Відкрити</button></div>)}</div>}
 
@@ -371,8 +373,8 @@ export default function AdminVisualTablePlanner({ onClose }: { onClose: () => vo
           <button type="button" disabled={!canManage || !reason.trim() || conflicts.length > 0 || busy === 'create' || (!fullDay && timeToMinutes(startTime) >= timeToMinutes(endTime))} onClick={() => void createBlock()} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-300 px-4 py-4 font-black text-neutral-950 disabled:opacity-35"><CalendarClock size={19} />Запланувати недоступність</button>
         </section>}
 
-        {!target && <div className="mt-3 rounded-[24px] border border-dashed border-white/10 bg-white/[.02] p-7 text-center"><CheckCircle2 size={24} className="mx-auto text-emerald-200/70" /><p className="mt-3 font-black">Натисніть на стіл на фото</p><p className="mt-1 text-sm text-white/40">Або натисніть «Керувати локацією» для всієї зони.</p></div>}
-        <div className="mt-3 flex items-start gap-2 rounded-[22px] border border-white/10 bg-black/45 p-3 text-xs text-white/40"><Clock3 size={15} className="mt-0.5 shrink-0" /><p>На майбутню дату змінюється лише планова доступність. Фізичні статуси столу змінюються тільки для сьогодні.</p></div>
+        {!target && <div className="mt-3 rounded-[24px] border border-dashed border-white/10 bg-white/[.02] p-7 text-center"><CheckCircle2 size={24} className="mx-auto text-emerald-200/70" /><p className="mt-3 font-black">Натисніть на стіл на фото</p><p className="mt-1 text-sm text-white/40">{mode === 'director' ? 'Доступні лише два стани: зайнятий або вільний.' : 'Або натисніть «Керувати локацією» для всієї зони.'}</p></div>}
+        {mode === 'admin' && <div className="mt-3 flex items-start gap-2 rounded-[22px] border border-white/10 bg-black/45 p-3 text-xs text-white/40"><Clock3 size={15} className="mt-0.5 shrink-0" /><p>На майбутню дату змінюється лише планова доступність. Фізичні статуси столу змінюються тільки для сьогодні.</p></div>}
       </div>
     </div>
   );
