@@ -40,7 +40,7 @@ import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { reviewsApi, type GuestReviewRecord } from '../api/reviews';
 import { staffApi, type StaffMember } from '../api/staff';
-import type { Booking, Client, FullMapResponse, Restaurant, SiteMode } from '../api/types';
+import type { Booking, Client, FullMapResponse, HolidayKey, Restaurant, SiteMode } from '../api/types';
 
 type Tab = 'overview' | 'bookings' | 'locations' | 'guests' | 'blacklist' | 'activity' | 'stats' | 'team' | 'site' | 'more';
 type BookingFilter = 'all' | 'pending' | 'approved' | 'completed' | 'cancelled' | 'no_show';
@@ -61,6 +61,14 @@ type AdminRights = {
 const TAB_STORAGE_KEY = 'molo:director:active-tab';
 const NOTICE_STORAGE_KEY = 'molo:director:last-read-notices';
 const VALID_TABS: Tab[] = ['overview', 'bookings', 'locations', 'guests', 'blacklist', 'activity', 'stats', 'team', 'site', 'more'];
+const HOLIDAYS: Array<{ key: HolidayKey; label: string }> = [
+  { key: 'new-year', label: 'Новий рік' },
+  { key: 'christmas', label: 'Різдво' },
+  { key: 'valentines', label: 'День закоханих' },
+  { key: 'easter', label: 'Великдень' },
+  { key: 'halloween', label: 'Геловін' },
+  { key: 'march-8', label: '8 Березня' },
+];
 const EMPTY_RIGHTS: AdminRights = {
   zones: false,
   onlineBooking: false,
@@ -194,6 +202,9 @@ export default function PremiumDirectorPanel() {
   const [sendToAll, setSendToAll] = useState(false);
   const [adminRights, setAdminRights] = useState<AdminRights>(EMPTY_RIGHTS);
   const [rightsDirty, setRightsDirty] = useState(false);
+  const [menuUrl, setMenuUrl] = useState('');
+  const [menuDirty, setMenuDirty] = useState(false);
+  const [holidayPickerOpen, setHolidayPickerOpen] = useState(false);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [employeeToRemove, setEmployeeToRemove] = useState<StaffMember | null>(null);
   const [employeeToRestore, setEmployeeToRestore] = useState<StaffMember | null>(null);
@@ -220,6 +231,7 @@ export default function PremiumDirectorPanel() {
     if (restaurantResult.status === 'fulfilled') {
       setRestaurant(restaurantResult.value);
       if (!rightsDirty) setAdminRights(rightsFromRestaurant(restaurantResult.value));
+      if (!menuDirty) setMenuUrl(restaurantResult.value.menuUrl || '');
     }
     if (bookingsResult.status === 'fulfilled') setBookings(bookingsResult.value);
     if (mapResult.status === 'fulfilled') setMap(mapResult.value);
@@ -240,7 +252,7 @@ export default function PremiumDirectorPanel() {
     void load();
     const interval = window.setInterval(() => void load(true), 15_000);
     return () => window.clearInterval(interval);
-  }, [selectedDate, rightsDirty]);
+  }, [selectedDate, rightsDirty, menuDirty]);
 
   useEffect(() => {
     window.sessionStorage.setItem(TAB_STORAGE_KEY, tab);
@@ -309,13 +321,24 @@ export default function PremiumDirectorPanel() {
     } finally { setBusy(null); }
   }
 
-  async function changeMode(mode: SiteMode) {
+  async function changeMode(mode: SiteMode, holidayKey: HolidayKey | null = null) {
     setBusy(`mode:${mode}`);
     try {
-      await restaurantApi.update({ siteMode: mode, holidayKey: mode === 'holiday' ? restaurant?.holidayKey || 'new-year' : null });
+      await restaurantApi.update({ siteMode: mode, holidayKey: mode === 'holiday' ? holidayKey : null });
       setNotice(mode === 'day' ? 'Увімкнено денний режим' : mode === 'night' ? 'Увімкнено нічний режим' : 'Увімкнено святковий режим');
       await load(true);
     } catch (cause: any) { setError(cause?.message || 'Не вдалося змінити оформлення'); }
+    finally { setBusy(null); }
+  }
+
+  async function saveMenu() {
+    setBusy('menu');
+    try {
+      await restaurantApi.update({ menuUrl: menuUrl.trim() || null });
+      setMenuDirty(false);
+      setNotice('Посилання на меню збережено');
+      await load(true);
+    } catch (cause: any) { setError(cause?.message || 'Не вдалося зберегти меню'); }
     finally { setBusy(null); }
   }
 
@@ -492,9 +515,61 @@ export default function PremiumDirectorPanel() {
 
         {tab === 'team' && <section className="space-y-3"><Heading title="Команда" subtitle="Працівники, зміни, видалення та права Адміністратора." /><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{activeStaff.map((member) => <EmployeeCard key={member.id} member={member} isSelf={member.id === selfId} onRemove={() => setEmployeeToRemove(member)} />)}</div>{archivedStaff.length > 0 && <PremiumCard><Eyebrow>Архів</Eyebrow><h2 className="mt-1 text-xl font-black">Видалені працівники</h2><div className="mt-4 grid gap-2 sm:grid-cols-2">{archivedStaff.map((member) => <div key={member.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/30 p-3"><div><p className="text-sm font-black">{member.fullName}</p><p className="mt-1 text-xs text-white/35">{roleLabel(member.role)}</p></div><button type="button" onClick={() => setEmployeeToRestore(member)} className="grid h-10 w-10 place-items-center rounded-xl border border-emerald-200/30 text-emerald-100 shadow-[0_0_14px_rgba(52,211,153,.08)]"><RotateCcw size={16} /></button></div>)}</div></PremiumCard>}<PremiumCard><Eyebrow>Директор керує доступом</Eyebrow><h2 className="mt-1 text-xl font-black">Права Адміністратора</h2><div className="mt-4 grid gap-2 sm:grid-cols-2"><RightToggle label="Керувати локаціями" value={adminRights.zones} onChange={(value) => updateRight('zones', value)} /><RightToggle label="Керувати онлайн-бронюванням" value={adminRights.onlineBooking} onChange={(value) => updateRight('onlineBooking', value)} /><RightToggle label="Відкривати та закривати ресторан" value={adminRights.restaurant} onChange={(value) => updateRight('restaurant', value)} /><RightToggle label="Перемикати День / Ніч / Свято" value={adminRights.siteMode} onChange={(value) => updateRight('siteMode', value)} /><RightToggle label="Змінювати меню та повідомлення" value={adminRights.settings} onChange={(value) => updateRight('settings', value)} /><RightToggle label="Керувати чорним списком" value={adminRights.blacklist} onChange={(value) => updateRight('blacklist', value)} /><RightToggle label="Відповідати на відгуки" value={adminRights.reviews} onChange={(value) => updateRight('reviews', value)} /><RightToggle label="Керувати змінами персоналу" value={adminRights.shifts} onChange={(value) => updateRight('shifts', value)} /><RightToggle label="Створювати ручні розсилки" value={adminRights.broadcasts} onChange={(value) => updateRight('broadcasts', value)} /></div><OutlineAction className="mt-3 w-full" label={rightsDirty ? 'Зберегти змінені права' : 'Права збережено'} tone="gold" disabled={busy === 'rights' || !rightsDirty} onClick={() => void saveRights()} icon={rightsDirty ? <Check size={16} /> : undefined} /></PremiumCard></section>}
 
-        {tab === 'site' && <section className="space-y-3"><Heading title="Сайт" subtitle="Режим оформлення без зміни фотографій, SVG і карт столів." /><PremiumCard><Eyebrow>День · Ніч · Свято</Eyebrow><h2 className="mt-1 text-xl font-black">Оформлення</h2><div className="mt-4 grid gap-2 sm:grid-cols-3"><OutlineAction label="День" tone="green" disabled={Boolean(busy)} onClick={() => void changeMode('day')} /><OutlineAction label="Ніч" tone="gold" disabled={Boolean(busy)} onClick={() => void changeMode('night')} /><OutlineAction label="Свято" tone="violet" disabled={Boolean(busy)} onClick={() => void changeMode('holiday')} /></div></PremiumCard></section>}
+        {tab === 'site' && (
+          <section className="space-y-3">
+            <Heading title="Сайт" subtitle="Режим оформлення та посилання на меню без зміни фотографій, SVG і карт столів." />
+            <PremiumCard>
+              <Eyebrow>День · Ніч · Свято</Eyebrow>
+              <h2 className="mt-1 text-xl font-black">Оформлення</h2>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <OutlineAction label="День" tone="green" disabled={Boolean(busy)} onClick={() => { setHolidayPickerOpen(false); void changeMode('day'); }} />
+                <OutlineAction label="Ніч" tone="gold" disabled={Boolean(busy)} onClick={() => { setHolidayPickerOpen(false); void changeMode('night'); }} />
+                <OutlineAction label="Свято" tone="violet" disabled={Boolean(busy)} onClick={() => setHolidayPickerOpen(true)} />
+              </div>
+              {(holidayPickerOpen || restaurant?.siteMode === 'holiday') && (
+                <div className="mt-5 border-t border-white/10 pt-4">
+                  <Eyebrow>Оберіть свято</Eyebrow>
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {HOLIDAYS.map((holiday) => (
+                      <button
+                        key={holiday.key}
+                        type="button"
+                        onClick={() => void changeMode('holiday', holiday.key)}
+                        disabled={Boolean(busy)}
+                        className={`rounded-2xl border bg-black/40 px-3 py-3 text-sm font-bold transition active:scale-[.98] disabled:opacity-40 ${
+                          restaurant.holidayKey === holiday.key
+                            ? 'border-rose-200/65 text-rose-50 shadow-[0_0_22px_rgba(251,113,133,.22)]'
+                            : 'border-white/12 text-white/60'
+                        }`}
+                      >
+                        {holiday.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </PremiumCard>
+            <PremiumCard>
+              <Eyebrow>Меню ресторану</Eyebrow>
+              <h2 className="mt-1 text-xl font-black">Посилання на меню</h2>
+              <input
+                value={menuUrl}
+                onChange={(event) => { setMenuUrl(event.target.value); setMenuDirty(true); }}
+                placeholder="https://..."
+                className="mt-4 h-12 w-full rounded-2xl border border-white/12 bg-black/45 px-4 text-sm outline-none focus:border-amber-100/40"
+              />
+              <OutlineAction
+                className="mt-3 w-full"
+                label={busy === 'menu' ? 'Зберігаємо...' : menuDirty ? 'Зберегти посилання' : 'Посилання збережено'}
+                tone="gold"
+                disabled={busy === 'menu' || !menuDirty}
+                onClick={() => void saveMenu()}
+              />
+            </PremiumCard>
+          </section>
+        )}
 
-        {tab === 'more' && <section className="space-y-3"><Heading title="Ще" subtitle="Вхід, письмові відгуки, історія та інтеграції." /><button type="button" onClick={openAccessSettings} className="flex w-full items-center justify-between rounded-[24px] border border-amber-100/35 bg-black/50 p-4 text-left text-amber-50 shadow-[0_0_32px_rgba(251,191,36,.1)] transition active:scale-[.995]"><div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-100/35 bg-black/40"><LockKeyhole size={19} className="drop-shadow-[0_0_8px_rgba(253,230,138,.8)]" /></span><div><p className="font-black">Налаштування входу</p><p className="mt-1 text-xs text-white/45">Змінити ім’я, логін або пароль</p></div></div><KeyRound size={20} className="text-amber-100/60" /></button><PremiumCard><Eyebrow>{reviews.length} відгуків</Eyebrow><h2 className="mt-1 text-xl font-black">Письмові відгуки гостей</h2><div className="mt-4 space-y-2">{reviews.slice(0, 30).map((review) => <article key={review.id} className="rounded-2xl border border-white/10 bg-black/30 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{review.booking?.client?.fullName || 'Гість'}</p><p className="mt-1 text-xs text-white/40">{dateLabel(review.booking?.bookingDate)} · Стіл №{review.booking?.table?.tableNumber || '-'}</p></div><MessageSquareText size={18} className="text-violet-200" /></div><p className="mt-3 whitespace-pre-wrap text-sm text-white/70">{review.text}</p>{review.responseText ? <div className="mt-3 rounded-2xl border border-emerald-200/25 bg-black/30 p-3"><Eyebrow>Відповідь</Eyebrow><p className="mt-2 whitespace-pre-wrap text-sm text-emerald-50">{review.responseText}</p></div> : <div className="mt-3"><textarea value={reviewDrafts[review.id] || ''} onChange={(event) => setReviewDrafts((current) => ({ ...current, [review.id]: event.target.value }))} placeholder="Напишіть відповідь гостю" className="min-h-24 w-full resize-none rounded-2xl border border-white/12 bg-black/45 p-3 text-sm outline-none focus:border-violet-200/40" /><OutlineAction className="mt-2 w-full" label="Відповісти" tone="violet" disabled={busy === `review:${review.id}` || !String(reviewDrafts[review.id] || '').trim()} onClick={() => void respondToReview(review)} /></div>}</article>)}{!reviews.length && <Empty text="Письмових відгуків ще немає" />}</div></PremiumCard><PremiumCard><Eyebrow>Останні записи</Eyebrow><h2 className="mt-1 text-xl font-black">Історія дій</h2><div className="mt-4 space-y-2">{logs.slice(0, 30).map((log) => <div key={log.id} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-black/30 p-3"><History size={16} className="mt-0.5 shrink-0 text-cyan-200" /><div><p className="text-sm font-bold">{log.action}</p><p className="mt-1 text-xs text-white/40">{log.staff?.role === 'owner' ? 'Директор' : log.staff?.fullName || ''}{log.staff ? ' · ' : ''}{new Date(log.createdAt).toLocaleString('uk-UA')}</p></div></div>)}{!logs.length && <Empty text="Історія поки порожня" />}</div></PremiumCard><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"><SystemCard title="Syrve" status="Налаштовується окремою кнопкою" text="Підключення Cloud API доступне тільки Директору." tone="gold" /><SystemCard title="Expz" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /><SystemCard title="POS" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /></div></section>}
+        {tab === 'more' && <section className="space-y-3"><Heading title="Ще" subtitle="Вхід, письмові відгуки, історія та інтеграції." /><button type="button" onClick={openAccessSettings} className="flex w-full items-center justify-between rounded-[24px] border border-amber-100/35 bg-black/50 p-4 text-left text-amber-50 shadow-[0_0_32px_rgba(251,191,36,.1)] transition active:scale-[.995]"><div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-100/35 bg-black/40"><LockKeyhole size={19} className="drop-shadow-[0_0_8px_rgba(253,230,138,.8)]" /></span><div><p className="font-black">Налаштування входу</p><p className="mt-1 text-xs text-white/45">Змінити ім’я, логін або пароль</p></div></div><KeyRound size={20} className="text-amber-100/60" /></button><PremiumCard><Eyebrow>{reviews.length} відгуків</Eyebrow><h2 className="mt-1 text-xl font-black">Письмові відгуки гостей</h2><div className="mt-4 space-y-2">{reviews.slice(0, 30).map((review) => <article key={review.id} className="rounded-2xl border border-white/10 bg-black/30 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{review.booking?.client?.fullName || 'Гість'}</p><p className="mt-1 text-xs text-white/40">{dateLabel(review.booking?.bookingDate)} · Стіл №{review.booking?.table?.tableNumber || '-'}</p></div><MessageSquareText size={18} className="text-violet-200" /></div><p className="mt-3 whitespace-pre-wrap text-sm text-white/70">{review.text}</p>{review.responseText ? <div className="mt-3 rounded-2xl border border-emerald-200/25 bg-black/30 p-3"><Eyebrow>Відповідь</Eyebrow><p className="mt-2 whitespace-pre-wrap text-sm text-emerald-50">{review.responseText}</p></div> : <div className="mt-3"><textarea value={reviewDrafts[review.id] || ''} onChange={(event) => setReviewDrafts((current) => ({ ...current, [review.id]: event.target.value }))} placeholder="Напишіть відповідь гостю" className="min-h-24 w-full resize-none rounded-2xl border border-white/12 bg-black/45 p-3 text-sm outline-none focus:border-violet-200/40" /><OutlineAction className="mt-2 w-full" label="Відповісти" tone="violet" disabled={busy === `review:${review.id}` || !String(reviewDrafts[review.id] || '').trim()} onClick={() => void respondToReview(review)} /></div>}</article>)}{!reviews.length && <Empty text="Письмових відгуків ще немає" />}</div></PremiumCard><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"><SystemCard title="Syrve" status="Налаштовується окремою кнопкою" text="Підключення Cloud API доступне тільки Директору." tone="gold" /><SystemCard title="Expz" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /><SystemCard title="POS" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /></div></section>}
       </main>
 
       {plannerOpen && <AdminVisualTablePlanner mode="director" onClose={() => setPlannerOpen(false)} />}

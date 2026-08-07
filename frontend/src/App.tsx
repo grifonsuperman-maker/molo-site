@@ -13,7 +13,6 @@ import AdminWorkspace from "./admin/AdminWorkspace";
 import "./admin/admin-neon-theme.css";
 import DirectorWorkspace from "./director/DirectorWorkspace";
 import SitePhotoController from "./theme/SitePhotoController";
-import SiteModeSwitch from "./theme/SiteModeSwitch";
 
 type Mode = "guest" | "waiter" | "hookah" | "admin" | "director";
 
@@ -146,12 +145,9 @@ export default function App() {
       )}
       {mode === "hookah" && <HookahApp />}
       {mode === "admin" && (
-        <>
-          <SiteModeSwitch role="admin" />
-          <div className="molo-admin-neon-theme">
-            <AdminWorkspace />
-          </div>
-        </>
+        <div className="molo-admin-neon-theme">
+          <AdminWorkspace />
+        </div>
       )}
       {mode === "director" && <DirectorWorkspace />}
     </main>
