@@ -204,6 +204,7 @@ export default function PremiumDirectorPanel() {
   const [rightsDirty, setRightsDirty] = useState(false);
   const [menuUrl, setMenuUrl] = useState('');
   const [menuDirty, setMenuDirty] = useState(false);
+  const [holidayPickerOpen, setHolidayPickerOpen] = useState(false);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [employeeToRemove, setEmployeeToRemove] = useState<StaffMember | null>(null);
   const [employeeToRestore, setEmployeeToRestore] = useState<StaffMember | null>(null);
@@ -521,11 +522,11 @@ export default function PremiumDirectorPanel() {
               <Eyebrow>День · Ніч · Свято</Eyebrow>
               <h2 className="mt-1 text-xl font-black">Оформлення</h2>
               <div className="mt-4 grid grid-cols-3 gap-2">
-                <OutlineAction label="День" tone="green" disabled={Boolean(busy)} onClick={() => void changeMode('day')} />
-                <OutlineAction label="Ніч" tone="gold" disabled={Boolean(busy)} onClick={() => void changeMode('night')} />
-                <OutlineAction label="Свято" tone="violet" disabled={Boolean(busy)} onClick={() => void changeMode('holiday', restaurant?.holidayKey || 'new-year')} />
+                <OutlineAction label="День" tone="green" disabled={Boolean(busy)} onClick={() => { setHolidayPickerOpen(false); void changeMode('day'); }} />
+                <OutlineAction label="Ніч" tone="gold" disabled={Boolean(busy)} onClick={() => { setHolidayPickerOpen(false); void changeMode('night'); }} />
+                <OutlineAction label="Свято" tone="violet" disabled={Boolean(busy)} onClick={() => setHolidayPickerOpen(true)} />
               </div>
-              {restaurant?.siteMode === 'holiday' && (
+              {(holidayPickerOpen || restaurant?.siteMode === 'holiday') && (
                 <div className="mt-5 border-t border-white/10 pt-4">
                   <Eyebrow>Оберіть свято</Eyebrow>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
