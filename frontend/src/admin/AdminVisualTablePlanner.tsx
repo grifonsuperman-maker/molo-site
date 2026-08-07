@@ -208,11 +208,23 @@ function Shape({ shape, color, active, onClick, label }: { shape: VisualShape; c
   return <><path d={data.d} {...common} /><path d={data.d} {...hit} /></>;
 }
 
-export default function AdminVisualTablePlanner({ onClose, mode = 'admin' }: { onClose: () => void; mode?: 'admin' | 'director' }) {
+export default function AdminVisualTablePlanner({
+  onClose,
+  mode = 'admin',
+  initialLocationKey = 'hall',
+}: {
+  onClose: () => void;
+  mode?: 'admin' | 'director';
+  initialLocationKey?: string;
+}) {
   const today = useMemo(kyivToday, []);
   const [date, setDate] = useState(today);
   const [time, setTime] = useState('18:00');
-  const [locationKey, setLocationKey] = useState('hall');
+  const [locationKey, setLocationKey] = useState(() =>
+    LOCATIONS.some((item) => item.key === initialLocationKey)
+      ? initialLocationKey
+      : 'hall',
+  );
   const [map, setMap] = useState<FullMapResponse | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [blocks, setBlocks] = useState<AvailabilityBlock[]>([]);
