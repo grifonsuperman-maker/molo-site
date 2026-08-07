@@ -6,7 +6,7 @@ import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { tablesApi } from '../api/tables';
 import { zonesApi } from '../api/zones';
-import type { Booking, FullMapResponse, Restaurant, SiteMode, TableItem, TableStatus, Zone } from '../api/types';
+import type { Booking, FullMapResponse, HolidayKey, Restaurant, SiteMode, TableItem, TableStatus, Zone } from '../api/types';
 
 type Tab = 'dashboard' | 'bookings' | 'tables' | 'clients' | 'settings';
 type BookingAction = 'approve' | 'reject' | 'cancel' | 'checkIn' | 'complete' | 'noShow' | 'prepareTable';
@@ -15,6 +15,15 @@ type AdminTable = TableItem & { isVirtual?: boolean };
 type LocationKey = 'hall' | 'canopy' | 'gazebo' | 'rotang' | 'embankment' | 'glass_gazebo' | 'water_gazebo' | 'other';
 type BookingView = 'locations' | 'all' | 'pending' | 'long_pending' | LocationKey;
 type TableView = 'locations' | 'all' | LocationKey;
+
+const HOLIDAYS: Array<{ key: HolidayKey; label: string }> = [
+  { key: 'new-year', label: 'Новий рік' },
+  { key: 'christmas', label: 'Різдво' },
+  { key: 'valentines', label: 'День закоханих' },
+  { key: 'easter', label: 'Великдень' },
+  { key: 'halloween', label: 'Геловін' },
+  { key: 'march-8', label: '8 Березня' },
+];
 
 type LocationInfo = {
   key: LocationKey;
@@ -359,6 +368,7 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
   const [bookingClosedMessage, setBookingClosedMessage] = useState('');
   const [menuUrl, setMenuUrl] = useState('');
   const [siteMode, setSiteMode] = useState<SiteMode>('night');
+  const [holidayKey, setHolidayKey] = useState<HolidayKey | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -391,6 +401,7 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
       setBookingClosedMessage(value?.bookingClosedMessage || '');
       setMenuUrl(value?.menuUrl || '');
       setSiteMode(value?.siteMode || 'night');
+      setHolidayKey(value?.holidayKey || null);
     }
 
     if (mapResult.status === 'fulfilled') {
@@ -637,15 +648,20 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
     }
   }
 
-  async function changeSiteMode(nextMode: SiteMode) {
+  async function changeSiteMode(nextMode: SiteMode, nextHolidayKey: HolidayKey | null = null) {
     setBusyAction(`site-mode:${nextMode}`);
     setNotice(null);
     setError(null);
 
     try {
-      await restaurantApi.adminSetSiteMode(nextMode);
+      await restaurantApi.adminSetSiteMode(nextMode, nextMode === 'holiday' ? nextHolidayKey : null);
       setSiteMode(nextMode);
-      setRestaurant((current) => (current ? { ...current, siteMode: nextMode } : current));
+      setHolidayKey(nextMode === 'holiday' ? nextHolidayKey : null);
+      setRestaurant((current) =>
+        current
+          ? { ...current, siteMode: nextMode, holidayKey: nextMode === 'holiday' ? nextHolidayKey : null }
+          : current,
+      );
       setNotice(`Увімкнено режим: ${siteModeLabel(nextMode)}`);
     } catch (err: any) {
       setError(err?.message || 'Не вдалося змінити режим сайту');
@@ -814,12 +830,13 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
           </button>
         </div>
 
-        {(notice || error) && (
-          <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${error ? 'border-red-300/30 bg-red-500/10 text-red-100' : 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100'}`}>
-            {error || notice}
-          </div>
-        )}
       </header>}
+
+      {(notice || error) && (
+        <div className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${error ? 'border-red-300/30 bg-red-500/10 text-red-100' : 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100'}`}>
+          {error || notice}
+        </div>
+      )}
 
       {!settingsOnly && <nav className="mb-5 grid grid-cols-2 gap-2 md:grid-cols-5">
         {(['dashboard', 'bookings', 'tables', 'clients', 'settings'] as Tab[]).map((item) => (
@@ -1139,33 +1156,76 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
             </div>
           </div>
 
+          {restaurant?.adminCanManageRestaurant && (
+            <div className="rounded-[28px] border border-emerald-200/25 bg-neutral-950 p-5 shadow-[0_0_28px_rgba(52,211,153,.08)]">
+              <p className="text-xs uppercase tracking-[0.18em] text-emerald-100/55">Керування рестораном</p>
+              <h3 className="mt-1 text-xl font-black">Відкрити або закрити ресторан</h3>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <RestaurantButton
+                  label="Відкрити ресторан"
+                  tone="green"
+                  busy={busyAction === 'restaurant:open'}
+                  onClick={() => runRestaurantAction('open')}
+                />
+                <RestaurantButton
+                  label="Закрити ресторан"
+                  tone="red"
+                  busy={busyAction === 'restaurant:close'}
+                  onClick={() => runRestaurantAction('close')}
+                />
+              </div>
+            </div>
+          )}
+
           {restaurant?.adminCanChangeSiteMode && (
-            <div className="rounded-[28px] border border-white/10 bg-neutral-950 p-5">
-              <p className="text-xs uppercase tracking-[0.18em] text-white/40">Оформлення гостьового сайту</p>
+            <div className="rounded-[28px] border border-amber-100/25 bg-neutral-950 p-5 shadow-[0_0_34px_rgba(251,191,36,.09)]">
+              <p className="text-xs uppercase tracking-[0.18em] text-amber-100/55">Оформлення гостьового сайту</p>
               <h3 className="mt-1 text-xl font-black">Режим: {siteModeLabel(siteMode)}</h3>
 
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <div className="mt-4 grid grid-cols-3 gap-2">
                 {([
-                  ['day', 'День', 'Світле денне оформлення'],
-                  ['night', 'Ніч', 'Темне вечірнє оформлення'],
-                  ['holiday', 'Свято', 'Святкове оформлення'],
-                ] as Array<[SiteMode, string, string]>).map(([mode, labelText, description]) => (
+                  ['day', 'День'],
+                  ['night', 'Ніч'],
+                  ['holiday', 'Свято'],
+                ] as Array<[SiteMode, string]>).map(([mode, labelText]) => (
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => changeSiteMode(mode)}
+                    onClick={() => changeSiteMode(mode, mode === 'holiday' ? holidayKey || 'new-year' : null)}
                     disabled={busyAction === `site-mode:${mode}`}
-                    className={`rounded-2xl border p-4 text-left transition active:scale-[0.98] disabled:opacity-50 ${
+                    className={`rounded-2xl border bg-black/70 px-3 py-4 text-sm font-black transition active:scale-[0.98] disabled:opacity-50 ${
                       siteMode === mode
-                        ? 'border-amber-200/60 bg-amber-300/15 text-amber-100'
-                        : 'border-white/10 bg-white/[0.03] text-white/70'
+                        ? 'border-amber-100/75 text-amber-50 shadow-[0_0_24px_rgba(251,191,36,.32),inset_0_0_18px_rgba(251,191,36,.08)]'
+                        : 'border-white/15 text-white/60'
                     }`}
                   >
-                    <p className="font-black">{labelText}</p>
-                    <p className="mt-1 text-xs opacity-65">{description}</p>
+                    {labelText}
                   </button>
                 ))}
               </div>
+
+              {siteMode === 'holiday' && (
+                <div className="mt-5 border-t border-white/10 pt-4">
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-white/45">Оберіть свято</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {HOLIDAYS.map((holiday) => (
+                      <button
+                        key={holiday.key}
+                        type="button"
+                        onClick={() => changeSiteMode('holiday', holiday.key)}
+                        disabled={busyAction === 'site-mode:holiday'}
+                        className={`rounded-2xl border bg-black/60 px-3 py-3 text-sm font-bold transition active:scale-[0.98] disabled:opacity-50 ${
+                          holidayKey === holiday.key
+                            ? 'border-rose-200/70 text-rose-50 shadow-[0_0_22px_rgba(251,113,133,.26)]'
+                            : 'border-white/15 text-white/65'
+                        }`}
+                      >
+                        {holiday.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1218,7 +1278,7 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
             </div>
           )}
 
-          {!restaurant?.adminCanChangeSiteMode && !restaurant?.adminCanEditRestaurantSettings && (
+          {!restaurant?.adminCanManageRestaurant && !restaurant?.adminCanChangeSiteMode && !restaurant?.adminCanEditRestaurantSettings && (
             <div className="rounded-[28px] border border-dashed border-white/10 bg-white/[0.02] p-6 text-center text-white/45">
               Директор поки не додав права на режими сайту або налаштування ресторану.
             </div>
