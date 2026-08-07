@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
@@ -28,7 +29,7 @@ const DIRECTOR_MAX_FAILED_ATTEMPTS = 5;
 const DIRECTOR_LOCK_MINUTES = 15;
 
 @Injectable()
-export class StaffService {
+export class StaffService implements OnModuleInit {
   constructor(
     @InjectRepository(Staff)
     private readonly staffRepo: Repository<Staff>,
@@ -38,6 +39,10 @@ export class StaffService {
 
     private readonly jwtService: JwtService,
   ) {}
+
+  async onModuleInit() {
+    await this.closeMissedShifts(new Date());
+  }
 
   async findAll() {
     const staff = await this.staffRepo.find({
@@ -495,9 +500,15 @@ export class StaffService {
     });
   }
 
-  @Cron('0 0 23 * * *', { timeZone: 'Europe/Kyiv' })
-  async autoEndShiftsAt23() {
-    const kyivDate = this.getKyivDate();
+  @Cron('0 * 23 * * *', { timeZone: 'Europe/Kyiv' })
+  async autoEndShiftsAfter2301() {
+    await this.closeMissedShifts(new Date());
+  }
+
+  async closeMissedShifts(now = new Date()) {
+    const current = this.getKyivDateTime(now);
+    const afterClosingTime =
+      current.hour > 23 || (current.hour === 23 && current.minute >= 1);
     const staffOnShift = await this.staffRepo.find({
       where: {
         isOnShift: true,
@@ -505,17 +516,22 @@ export class StaffService {
     });
 
     for (const staff of staffOnShift) {
-      if (staff.lastAutoShiftEndDate === kyivDate) {
+      const shiftDate = staff.shiftStartedAt
+        ? this.getKyivDate(staff.shiftStartedAt)
+        : null;
+      const carriedOver = !shiftDate || shiftDate < current.date;
+
+      if (!afterClosingTime && !carriedOver) {
         continue;
       }
 
-      staff.lastAutoShiftEndDate = kyivDate;
+      staff.lastAutoShiftEndDate = current.date;
 
       await this.finishShift(
         staff,
         'shift_auto_ended',
         'system',
-        'Зміну автоматично завершено о 23:00',
+        'Зміну автоматично завершено після 23:01',
       );
     }
   }
@@ -705,12 +721,32 @@ export class StaffService {
     };
   }
 
-  private getKyivDate() {
+  private getKyivDate(now = new Date()) {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Europe/Kyiv',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-    }).format(new Date());
+    }).format(now);
+  }
+
+  private getKyivDateTime(now = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Kyiv',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(now);
+    const value = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((part) => part.type === type)?.value || '';
+
+    return {
+      date: `${value('year')}-${value('month')}-${value('day')}`,
+      hour: Number(value('hour')),
+      minute: Number(value('minute')),
+    };
   }
 }
