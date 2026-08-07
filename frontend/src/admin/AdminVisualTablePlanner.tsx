@@ -263,12 +263,12 @@ export default function AdminVisualTablePlanner({ onClose, mode = 'admin' }: { o
     const table = realTable(number);
     if (target?.type === 'table' && target.id === table?.id) return '#facc15';
     const status = statuses[String(number)]?.status || table?.status || 'free';
-    if (status === 'closed') return '#a3a3a3';
-    if (status === 'occupied') return '#fb7185';
+    if (status === 'closed') return '#bdbdbd';
+    if (status === 'occupied') return '#ff3b4f';
     if (status === 'cleaning') return '#67e8f9';
     if (status === 'reserved') return '#fb923c';
     if (status === 'pending') return '#38bdf8';
-    return '#34d399';
+    return 'transparent';
   }
   function availableDestinations(booking: Booking) {
     const bookingStart = timeToMinutes(booking.bookingTime); const bookingEnd = bookingStart + bookingDuration(booking) + CLEANUP_MINUTES;
@@ -355,7 +355,7 @@ export default function AdminVisualTablePlanner({ onClose, mode = 'admin' }: { o
               })}
             </svg>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/55"><span>🟢 Вільний</span><span>🔵 Очікує</span><span>🟠 Заброньований</span><span>🔴 Зайнятий</span><span>🩵 Готується</span><span>⚪ Закритий</span></div>
+          <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/55"><span>Вільний — без контуру</span><span>🔵 Очікує</span><span>🟠 Заброньований</span><span>🔴 Зайнятий</span><span>🩵 Готується</span><span>⚪ Закритий</span></div>
         </section>
 
         {target && <section data-map-target className="mt-3 rounded-[28px] border border-amber-300/30 bg-amber-300/[.06] p-4 shadow-[0_0_38px_rgba(251,191,36,.09)]">
