@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Armchair,
+  Archive,
   BarChart3,
   Ban,
   Bell,
@@ -80,14 +81,14 @@ const EMPTY_RIGHTS: AdminRights = {
   shifts: false,
   broadcasts: false,
 };
-const LOCATIONS: Array<{ key: LocationKey; label: string; from: number; to: number }> = [
-  { key: 'hall', label: 'Зал ресторану', from: 1, to: 14 },
-  { key: 'canopy', label: 'Навіс', from: 15, to: 20 },
-  { key: 'gazebo', label: 'Велика альтанка', from: 21, to: 36 },
-  { key: 'rotang', label: 'Ротанг', from: 37, to: 39 },
-  { key: 'embankment', label: 'Набережна', from: 40, to: 44 },
-  { key: 'glass', label: 'Скляна альтанка', from: 45, to: 50 },
-  { key: 'water', label: 'Альтанка на воді', from: 100, to: 109 },
+const LOCATIONS: Array<{ key: LocationKey; mapKey: string; label: string; from: number; to: number }> = [
+  { key: 'hall', mapKey: 'hall', label: 'Зал ресторану', from: 1, to: 14 },
+  { key: 'canopy', mapKey: 'canopy', label: 'Навіс', from: 15, to: 20 },
+  { key: 'gazebo', mapKey: 'gazebo', label: 'Велика альтанка', from: 21, to: 36 },
+  { key: 'rotang', mapKey: 'rotang', label: 'Ротанг', from: 37, to: 39 },
+  { key: 'embankment', mapKey: 'embankment', label: 'Набережна', from: 40, to: 44 },
+  { key: 'glass', mapKey: 'glass_gazebo', label: 'Скляна альтанка', from: 45, to: 50 },
+  { key: 'water', mapKey: 'water_gazebo', label: 'Альтанка на воді', from: 100, to: 109 },
 ];
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Очікує',
@@ -195,6 +196,8 @@ export default function PremiumDirectorPanel() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [plannerOpen, setPlannerOpen] = useState(false);
+  const [plannerLocationKey, setPlannerLocationKey] = useState('hall');
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [broadcastText, setBroadcastText] = useState('');
@@ -208,6 +211,7 @@ export default function PremiumDirectorPanel() {
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [employeeToRemove, setEmployeeToRemove] = useState<StaffMember | null>(null);
   const [employeeToRestore, setEmployeeToRestore] = useState<StaffMember | null>(null);
+  const [employeeToDeletePermanently, setEmployeeToDeletePermanently] = useState<StaffMember | null>(null);
   const [reasonTarget, setReasonTarget] = useState<Client | null>(null);
   const [reasonText, setReasonText] = useState('');
   const [lastReadSignature, setLastReadSignature] = useState(() => window.localStorage.getItem(NOTICE_STORAGE_KEY) || '');
@@ -411,7 +415,7 @@ export default function PremiumDirectorPanel() {
     if (!employeeToRemove || employeeToRemove.id === selfId) return;
     setBusy(`remove:${employeeToRemove.id}`);
     try {
-      await staffApi.remove(employeeToRemove.id);
+      await staffApi.archive(employeeToRemove.id, { performedBy: 'Директор', comment: 'Переміщено до архіву з Пульта Директора' });
       setNotice(`Працівника «${employeeToRemove.fullName}» видалено з активної команди`);
       setEmployeeToRemove(null);
       await load(true);
@@ -429,6 +433,23 @@ export default function PremiumDirectorPanel() {
       await load(true);
     } catch (cause: any) { setError(cause?.message || 'Не вдалося відновити працівника'); }
     finally { setBusy(null); }
+  }
+
+  async function deleteEmployeePermanently() {
+    if (!employeeToDeletePermanently || employeeToDeletePermanently.id === selfId) return;
+    setBusy(`delete-permanently:${employeeToDeletePermanently.id}`);
+    try {
+      await staffApi.deletePermanently(employeeToDeletePermanently.id);
+      setNotice(`Працівника «${employeeToDeletePermanently.fullName}» видалено назавжди`);
+      setEmployeeToDeletePermanently(null);
+      await load(true);
+    } catch (cause: any) { setError(cause?.message || 'Не вдалося видалити працівника назавжди'); }
+    finally { setBusy(null); }
+  }
+
+  function openPlanner(mapKey: string) {
+    setPlannerLocationKey(mapKey);
+    setPlannerOpen(true);
   }
 
   function openAccessSettings() {
@@ -509,11 +530,60 @@ export default function PremiumDirectorPanel() {
 
         {tab === 'bookings' && <section className="space-y-3"><Heading title="Бронювання" subtitle="Сьогодні, майбутні дати та архів через календар." /><PremiumCard className="grid gap-2 sm:grid-cols-[auto_1fr]"><input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} className="h-12 rounded-2xl border border-white/12 bg-black/45 px-4 text-sm [color-scheme:dark] outline-none focus:border-amber-100/45" /><SearchInput value={search} onChange={setSearch} placeholder="Ім’я, телефон, стіл або локація" /></PremiumCard><div className="flex gap-2 overflow-x-auto pb-1">{([['all','Усі'],['pending','Очікують'],['approved','Підтверджені'],['no_show','Гості не прийшли'],['completed','Завершені'],['cancelled','Скасовані']] as Array<[BookingFilter,string]>).map(([value,label]) => <FilterButton key={value} active={bookingFilter === value} onClick={() => setBookingFilter(value)}>{label}</FilterButton>)}</div><div className="space-y-2">{filteredBookings.map((booking) => <BookingLine key={booking.id} booking={booking} detailed />)}{!filteredBookings.length && <Empty text="Бронювань не знайдено" />}</div></section>}
 
-        {tab === 'locations' && <section className="space-y-3"><Heading title="Локації" subtitle="Перегляд існуючих карт і лише два робочі стани столу: зайнятий або вільний." /><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{locations.map((location) => <PremiumCard key={location.key}><div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${location.zone?.isClosed ? 'bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,.7)]' : 'bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,.75)]'}`} /><h3 className="font-black">{location.label}</h3></div><p className="mt-2 text-xs text-white/40">{location.bookings} бронювань · {location.occupied} зайнято · {location.cleaning} готується</p></div><Armchair size={19} className="text-amber-100/35" /></div></PremiumCard>)}</div><button type="button" onClick={() => setPlannerOpen(true)} className="flex w-full items-center justify-between rounded-[24px] border border-fuchsia-200/30 bg-black/45 p-4 text-left text-fuchsia-100 shadow-[0_0_26px_rgba(217,70,239,.09)] transition active:scale-[.995]"><div><p className="font-black">Відкрити карти локацій</p><p className="mt-1 text-xs text-white/45">Натисніть на стіл і оберіть «зайнятий» або «вільний»</p></div><CalendarClock size={21} className="drop-shadow-[0_0_9px_rgba(232,121,249,.8)]" /></button></section>}
+        {tab === 'locations' && (
+          <section className="space-y-3">
+            <Heading title="Локації" subtitle="Кожна локація відкриває власну карту з правильними столами." />
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {locations.map((location) => (
+                <button
+                  key={location.key}
+                  type="button"
+                  onClick={() => openPlanner(location.mapKey)}
+                  className="rounded-[24px] border border-amber-100/15 bg-black/45 p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,.035),0_0_28px_rgba(251,191,36,.055),0_18px_50px_rgba(0,0,0,.28)] transition hover:border-fuchsia-200/30 active:scale-[.99]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2.5 w-2.5 rounded-full ${location.zone?.isClosed ? 'bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,.7)]' : 'bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,.75)]'}`} />
+                        <h3 className="font-black">{location.label}</h3>
+                      </div>
+                      <p className="mt-2 text-xs text-white/40">{location.bookings} бронювань · {location.occupied} зайнято · {location.cleaning} готується</p>
+                      <p className="mt-3 text-xs font-black text-fuchsia-100">Відкрити карту</p>
+                    </div>
+                    <Armchair size={19} className="text-amber-100/35" />
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={() => openPlanner('hall')} className="flex w-full items-center justify-between rounded-[24px] border border-fuchsia-200/30 bg-black/45 p-4 text-left text-fuchsia-100 shadow-[0_0_26px_rgba(217,70,239,.09)] transition active:scale-[.995]">
+              <div><p className="font-black">Відкрити всі карти локацій</p><p className="mt-1 text-xs text-white/45">Почати із залу та перемикатися між усіма картами</p></div>
+              <CalendarClock size={21} className="drop-shadow-[0_0_9px_rgba(232,121,249,.8)]" />
+            </button>
+          </section>
+        )}
 
         {tab === 'guests' && <section className="space-y-3"><Heading title="База гостей" subtitle="Відвідування, чорний список і ручна розсилка." /><div className="grid gap-2 sm:grid-cols-[1fr_auto]"><SearchInput value={search} onChange={setSearch} placeholder="Ім’я або телефон" /><OutlineAction label="Обрати гостей" tone="violet" disabled={false} onClick={() => setBroadcastOpen(true)} icon={<Send size={16} />} /></div><div className="space-y-2">{filteredClients.map((client) => <PremiumCard key={client.id} className={client.isBlacklisted ? 'border-rose-300/30' : ''}><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-black">{client.fullName}</h3>{client.isRegular && <Badge text="Постійний гість" tone="violet" />}{client.isBlacklisted && <Badge text="Чорний список" tone="red" />}</div><p className="mt-1 text-sm text-amber-100">{client.phone}</p><p className="mt-2 text-xs text-white/40">{client.visitsCount} відвідувань · {client.totalGuests} гостей загалом</p></div><OutlineAction label={client.isBlacklisted ? 'Розблокувати' : 'Заблокувати'} tone={client.isBlacklisted ? 'green' : 'red'} disabled={Boolean(busy)} onClick={() => { setReasonTarget(client); setReasonText(''); }} /></div></PremiumCard>)}{!filteredClients.length && <Empty text="Гостей не знайдено" />}</div></section>}
 
-        {tab === 'team' && <section className="space-y-3"><Heading title="Команда" subtitle="Працівники, зміни, видалення та права Адміністратора." /><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{activeStaff.map((member) => <EmployeeCard key={member.id} member={member} isSelf={member.id === selfId} onRemove={() => setEmployeeToRemove(member)} />)}</div>{archivedStaff.length > 0 && <PremiumCard><Eyebrow>Архів</Eyebrow><h2 className="mt-1 text-xl font-black">Видалені працівники</h2><div className="mt-4 grid gap-2 sm:grid-cols-2">{archivedStaff.map((member) => <div key={member.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/30 p-3"><div><p className="text-sm font-black">{member.fullName}</p><p className="mt-1 text-xs text-white/35">{roleLabel(member.role)}</p></div><button type="button" onClick={() => setEmployeeToRestore(member)} className="grid h-10 w-10 place-items-center rounded-xl border border-emerald-200/30 text-emerald-100 shadow-[0_0_14px_rgba(52,211,153,.08)]"><RotateCcw size={16} /></button></div>)}</div></PremiumCard>}<PremiumCard><Eyebrow>Директор керує доступом</Eyebrow><h2 className="mt-1 text-xl font-black">Права Адміністратора</h2><div className="mt-4 grid gap-2 sm:grid-cols-2"><RightToggle label="Керувати локаціями" value={adminRights.zones} onChange={(value) => updateRight('zones', value)} /><RightToggle label="Керувати онлайн-бронюванням" value={adminRights.onlineBooking} onChange={(value) => updateRight('onlineBooking', value)} /><RightToggle label="Відкривати та закривати ресторан" value={adminRights.restaurant} onChange={(value) => updateRight('restaurant', value)} /><RightToggle label="Перемикати День / Ніч / Свято" value={adminRights.siteMode} onChange={(value) => updateRight('siteMode', value)} /><RightToggle label="Змінювати меню та повідомлення" value={adminRights.settings} onChange={(value) => updateRight('settings', value)} /><RightToggle label="Керувати чорним списком" value={adminRights.blacklist} onChange={(value) => updateRight('blacklist', value)} /><RightToggle label="Відповідати на відгуки" value={adminRights.reviews} onChange={(value) => updateRight('reviews', value)} /><RightToggle label="Керувати змінами персоналу" value={adminRights.shifts} onChange={(value) => updateRight('shifts', value)} /><RightToggle label="Створювати ручні розсилки" value={adminRights.broadcasts} onChange={(value) => updateRight('broadcasts', value)} /></div><OutlineAction className="mt-3 w-full" label={rightsDirty ? 'Зберегти змінені права' : 'Права збережено'} tone="gold" disabled={busy === 'rights' || !rightsDirty} onClick={() => void saveRights()} icon={rightsDirty ? <Check size={16} /> : undefined} /></PremiumCard></section>}
+        {tab === 'team' && (
+          <section className="space-y-3">
+            <Heading title="Команда" subtitle="Активні працівники, архів і права Адміністратора." />
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {activeStaff.map((member) => <EmployeeCard key={member.id} member={member} isSelf={member.id === selfId} onRemove={() => setEmployeeToRemove(member)} />)}
+            </div>
+            <button
+              type="button"
+              onClick={() => setArchiveOpen(true)}
+              className="flex w-full items-center justify-between rounded-[24px] border border-white/15 bg-black/45 p-4 text-left transition hover:border-amber-100/30 active:scale-[.995]"
+            >
+              <div className="flex items-center gap-3">
+                <span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-100/25 text-amber-100"><Archive size={19} /></span>
+                <div><p className="font-black">Архів працівників</p><p className="mt-1 text-xs text-white/40">Відновлення або остаточне видалення</p></div>
+              </div>
+              <span className="rounded-full border border-white/15 px-2.5 py-1 text-xs font-black text-white/55">{archivedStaff.length}</span>
+            </button>
+            <PremiumCard><Eyebrow>Директор керує доступом</Eyebrow><h2 className="mt-1 text-xl font-black">Права Адміністратора</h2><div className="mt-4 grid gap-2 sm:grid-cols-2"><RightToggle label="Керувати локаціями" value={adminRights.zones} onChange={(value) => updateRight('zones', value)} /><RightToggle label="Керувати онлайн-бронюванням" value={adminRights.onlineBooking} onChange={(value) => updateRight('onlineBooking', value)} /><RightToggle label="Відкривати та закривати ресторан" value={adminRights.restaurant} onChange={(value) => updateRight('restaurant', value)} /><RightToggle label="Перемикати День / Ніч / Свято" value={adminRights.siteMode} onChange={(value) => updateRight('siteMode', value)} /><RightToggle label="Змінювати меню та повідомлення" value={adminRights.settings} onChange={(value) => updateRight('settings', value)} /><RightToggle label="Керувати чорним списком" value={adminRights.blacklist} onChange={(value) => updateRight('blacklist', value)} /><RightToggle label="Відповідати на відгуки" value={adminRights.reviews} onChange={(value) => updateRight('reviews', value)} /><RightToggle label="Керувати змінами персоналу" value={adminRights.shifts} onChange={(value) => updateRight('shifts', value)} /><RightToggle label="Створювати ручні розсилки" value={adminRights.broadcasts} onChange={(value) => updateRight('broadcasts', value)} /></div><OutlineAction className="mt-3 w-full" label={rightsDirty ? 'Зберегти змінені права' : 'Права збережено'} tone="gold" disabled={busy === 'rights' || !rightsDirty} onClick={() => void saveRights()} icon={rightsDirty ? <Check size={16} /> : undefined} /></PremiumCard>
+          </section>
+        )}
 
         {tab === 'site' && (
           <section className="space-y-3">
@@ -572,11 +642,13 @@ export default function PremiumDirectorPanel() {
         {tab === 'more' && <section className="space-y-3"><Heading title="Ще" subtitle="Вхід, письмові відгуки, історія та інтеграції." /><button type="button" onClick={openAccessSettings} className="flex w-full items-center justify-between rounded-[24px] border border-amber-100/35 bg-black/50 p-4 text-left text-amber-50 shadow-[0_0_32px_rgba(251,191,36,.1)] transition active:scale-[.995]"><div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-100/35 bg-black/40"><LockKeyhole size={19} className="drop-shadow-[0_0_8px_rgba(253,230,138,.8)]" /></span><div><p className="font-black">Налаштування входу</p><p className="mt-1 text-xs text-white/45">Змінити ім’я, логін або пароль</p></div></div><KeyRound size={20} className="text-amber-100/60" /></button><PremiumCard><Eyebrow>{reviews.length} відгуків</Eyebrow><h2 className="mt-1 text-xl font-black">Письмові відгуки гостей</h2><div className="mt-4 space-y-2">{reviews.slice(0, 30).map((review) => <article key={review.id} className="rounded-2xl border border-white/10 bg-black/30 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{review.booking?.client?.fullName || 'Гість'}</p><p className="mt-1 text-xs text-white/40">{dateLabel(review.booking?.bookingDate)} · Стіл №{review.booking?.table?.tableNumber || '-'}</p></div><MessageSquareText size={18} className="text-violet-200" /></div><p className="mt-3 whitespace-pre-wrap text-sm text-white/70">{review.text}</p>{review.responseText ? <div className="mt-3 rounded-2xl border border-emerald-200/25 bg-black/30 p-3"><Eyebrow>Відповідь</Eyebrow><p className="mt-2 whitespace-pre-wrap text-sm text-emerald-50">{review.responseText}</p></div> : <div className="mt-3"><textarea value={reviewDrafts[review.id] || ''} onChange={(event) => setReviewDrafts((current) => ({ ...current, [review.id]: event.target.value }))} placeholder="Напишіть відповідь гостю" className="min-h-24 w-full resize-none rounded-2xl border border-white/12 bg-black/45 p-3 text-sm outline-none focus:border-violet-200/40" /><OutlineAction className="mt-2 w-full" label="Відповісти" tone="violet" disabled={busy === `review:${review.id}` || !String(reviewDrafts[review.id] || '').trim()} onClick={() => void respondToReview(review)} /></div>}</article>)}{!reviews.length && <Empty text="Письмових відгуків ще немає" />}</div></PremiumCard><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"><SystemCard title="Syrve" status="Налаштовується окремою кнопкою" text="Підключення Cloud API доступне тільки Директору." tone="gold" /><SystemCard title="Expz" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /><SystemCard title="POS" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /></div></section>}
       </main>
 
-      {plannerOpen && <AdminVisualTablePlanner mode="director" onClose={() => setPlannerOpen(false)} />}
+      {plannerOpen && <AdminVisualTablePlanner key={plannerLocationKey} mode="director" initialLocationKey={plannerLocationKey} onClose={() => setPlannerOpen(false)} />}
       {notificationsOpen && <NotificationsDrawer items={attention} onClose={() => setNotificationsOpen(false)} />}
       {broadcastOpen && <BroadcastModal clients={eligibleBroadcastClients} text={broadcastText} setText={setBroadcastText} selected={selectedClients} setSelected={setSelectedClients} all={sendToAll} setAll={setSendToAll} busy={busy === 'broadcast'} onClose={() => setBroadcastOpen(false)} onSend={() => void sendBroadcast()} />}
+      {archiveOpen && <StaffArchiveModal staff={archivedStaff} onClose={() => setArchiveOpen(false)} onRestore={setEmployeeToRestore} onDeletePermanently={setEmployeeToDeletePermanently} />}
       {employeeToRemove && <ConfirmModal title="Видалити працівника?" text={`«${employeeToRemove.fullName}» зникне з активної команди, але історія змін збережеться.`} confirm="Видалити" tone="red" busy={busy === `remove:${employeeToRemove.id}`} onCancel={() => setEmployeeToRemove(null)} onConfirm={() => void removeEmployee()} />}
       {employeeToRestore && <ConfirmModal title="Відновити працівника?" text={`«${employeeToRestore.fullName}» знову з’явиться в активній команді.`} confirm="Відновити" tone="green" busy={busy === `restore:${employeeToRestore.id}`} onCancel={() => setEmployeeToRestore(null)} onConfirm={() => void restoreEmployee()} />}
+      {employeeToDeletePermanently && <ConfirmModal title="Видалити працівника назавжди?" text={`«${employeeToDeletePermanently.fullName}» і вся історія його змін будуть видалені без можливості відновлення.`} confirm="Видалити назавжди" tone="red" busy={busy === `delete-permanently:${employeeToDeletePermanently.id}`} onCancel={() => setEmployeeToDeletePermanently(null)} onConfirm={() => void deleteEmployeePermanently()} />}
       {reasonTarget && <ReasonModal client={reasonTarget} value={reasonText} setValue={setReasonText} busy={busy === `client:${reasonTarget.id}`} onCancel={() => { setReasonTarget(null); setReasonText(''); }} onConfirm={() => void applyGuestReason()} />}
     </div>
   );
@@ -666,6 +738,64 @@ function Empty({ text }: { text: string }) {
 
 function NotificationsDrawer({ items, onClose }: { items: NoticeItem[]; onClose: () => void }) {
   return <div className="fixed inset-0 z-[90] bg-black/75 p-3 backdrop-blur-xl" onMouseDown={onClose}><aside className="ml-auto h-full w-full max-w-md overflow-y-auto rounded-[28px] border border-rose-100/25 bg-[#050505]/95 p-4 shadow-[0_0_70px_rgba(244,63,94,.12)]" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-center justify-between"><div><Eyebrow>Центр подій</Eyebrow><h2 className="mt-1 text-2xl font-black">Повідомлення</h2></div><IconButton label="Закрити" onClick={onClose}><X size={18} /></IconButton></div><div className="mt-5 space-y-2">{items.map((item) => <Attention key={item.id} item={item} />)}{!items.length && <Empty text="Нових подій немає" />}</div></aside></div>;
+}
+
+function StaffArchiveModal({
+  staff,
+  onClose,
+  onRestore,
+  onDeletePermanently,
+}: {
+  staff: StaffMember[];
+  onClose: () => void;
+  onRestore: (member: StaffMember) => void;
+  onDeletePermanently: (member: StaffMember) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [role, setRole] = useState<'all' | StaffMember['role']>('all');
+  const [shown, setShown] = useState(10);
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return staff.filter((member) =>
+      (role === 'all' || member.role === role)
+      && (!needle || `${member.fullName} ${roleLabel(member.role)}`.toLowerCase().includes(needle)),
+    );
+  }, [staff, query, role]);
+
+  return (
+    <div className="fixed inset-0 z-[90] bg-black/80 p-3 backdrop-blur-xl" onMouseDown={onClose}>
+      <aside className="ml-auto flex h-full w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-amber-100/20 bg-[#050505]/95 shadow-[0_0_70px_rgba(251,191,36,.08)]" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-white/10 p-4">
+          <div><Eyebrow>Команда</Eyebrow><h2 className="mt-1 text-2xl font-black">Архів працівників</h2></div>
+          <IconButton label="Закрити" onClick={onClose}><X size={18} /></IconButton>
+        </div>
+        <div className="grid gap-2 border-b border-white/10 p-4 sm:grid-cols-[1fr_auto]">
+          <SearchInput value={query} onChange={(value) => { setQuery(value); setShown(10); }} placeholder="Пошук за ім’ям" />
+          <select value={role} onChange={(event) => { setRole(event.target.value as 'all' | StaffMember['role']); setShown(10); }} className="h-12 rounded-2xl border border-white/12 bg-neutral-950 px-4 text-sm font-bold text-white outline-none focus:border-amber-100/40">
+            <option value="all">Усі ролі</option>
+            <option value="admin">Адміністратори</option>
+            <option value="waiter">Офіціанти</option>
+            <option value="hookah">Кальянники</option>
+          </select>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="space-y-2">
+            {filtered.slice(0, shown).map((member) => (
+              <article key={member.id} className="rounded-2xl border border-white/10 bg-black/35 p-4">
+                <div><p className="font-black">{member.fullName}</p><p className="mt-1 text-xs text-white/40">{roleLabel(member.role)}</p></div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => onRestore(member)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200/35 px-3 py-2.5 text-xs font-black text-emerald-100"><RotateCcw size={15} />Відновити</button>
+                  <button type="button" onClick={() => onDeletePermanently(member)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200/35 px-3 py-2.5 text-xs font-black text-rose-100"><Trash2 size={15} />Видалити назавжди</button>
+                </div>
+              </article>
+            ))}
+            {!filtered.length && <Empty text="В архіві нікого немає" />}
+          </div>
+          {shown < filtered.length && <OutlineAction className="mt-3 w-full" label={`Показати ще · ${filtered.length - shown}`} tone="gold" disabled={false} onClick={() => setShown((value) => value + 10)} />}
+        </div>
+      </aside>
+    </div>
+  );
 }
 
 function ConfirmModal({ title, text, confirm, tone, busy, onCancel, onConfirm }: { title: string; text: string; confirm: string; tone: 'red' | 'green'; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
