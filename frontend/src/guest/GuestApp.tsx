@@ -360,6 +360,20 @@ const LOCATIONS: LocationMap[] = [
 const WATERFRONT_LOCATION_KEYS = ['canopy', 'gazebo', 'rotang', 'embankment', 'glass_gazebo', 'water_gazebo'];
 
 const CLEANUP_MINUTES = 15;
+const KYIV_TIME_ZONE = 'Europe/Kyiv';
+
+function getKyivDateValue(value = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: KYIV_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value || '';
+
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
 
 function normalizeTableStatus(status: unknown): TableStatus {
   if (status === 'pending' || status === 'awaiting_confirmation') return 'pending';
@@ -617,7 +631,8 @@ export default function GuestApp() {
   );
   const [activeTableNumber, setActiveTableNumber] = useState<number | null>(null);
 
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [today, setToday] = useState(getKyivDateValue);
+  const [date, setDate] = useState(getKyivDateValue);
   const [time, setTime] = useState('19:00');
   const [durationMinutes, setDurationMinutes] = useState(120);
   const [customDurationHours, setCustomDurationHours] = useState('3');
@@ -661,6 +676,33 @@ export default function GuestApp() {
       // Бронювання продовжує працювати, навіть якщо сховище браузера недоступне.
     }
   }, [lastBookingId]);
+
+  useEffect(() => {
+    let timer: number | undefined;
+
+    function syncKyivDate() {
+      const nextToday = getKyivDateValue();
+      setToday(nextToday);
+      setDate((current) => current < nextToday ? nextToday : current);
+
+      window.clearTimeout(timer);
+      timer = window.setTimeout(syncKyivDate, 60_000 - (Date.now() % 60_000) + 100);
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') syncKyivDate();
+    }
+
+    syncKyivDate();
+    window.addEventListener('focus', syncKyivDate);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('focus', syncKyivDate);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (step === 'form' && !selectedTable) {
@@ -782,9 +824,8 @@ export default function GuestApp() {
   const activeBookingTableNumber =
     bookingStatus?.tableNumber || selectedTable?.tableNumber || null;
   const activeGuestBooking = guestBookings.find((booking) => booking.bookingId === lastBookingId) || null;
-  const kyivToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv' }).format(new Date());
   const activeMyBookings = myBookings.filter((booking) =>
-    (booking.status === 'pending' || booking.status === 'approved') && booking.bookingDate >= kyivToday,
+    (booking.status === 'pending' || booking.status === 'approved') && booking.bookingDate >= today,
   );
   const unreadNotificationBookings = myBookings.filter((booking) =>
     booking.status === 'cancelled' &&
@@ -1151,6 +1192,15 @@ export default function GuestApp() {
 
   async function submit() {
     if (!selectedTable) return;
+
+    const currentKyivDate = getKyivDateValue();
+    if (date < currentKyivDate) {
+      setToday(currentKyivDate);
+      setDate(currentKyivDate);
+      setStep('map');
+      alert('Оберіть сьогоднішню або майбутню дату.');
+      return;
+    }
 
     const bookingGuestDeviceId = guestDeviceId || getGuestDeviceId();
     if (!bookingGuestDeviceId) {
@@ -1578,8 +1628,8 @@ export default function GuestApp() {
 
                 <input
                   value={date}
-                  onChange={(event) => setDate(event.target.value)}
-                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(event) => setDate(event.target.value < today ? today : event.target.value)}
+                  min={today}
                   type="date"
                   className="mt-1.5 w-full bg-transparent text-[13px] outline-none sm:mt-2 sm:text-sm"
                 />
