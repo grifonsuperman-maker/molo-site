@@ -359,7 +359,7 @@ export default function AdminVisualTablePlanner({
         <section className="mt-3 rounded-[28px] border border-emerald-300/20 bg-black/60 p-3 shadow-[0_0_35px_rgba(16,185,129,.08)]">
           <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-[.18em] text-emerald-100/55">{location.description}</p><h2 className="text-2xl font-black">{location.label}</h2></div>{mode === 'admin' && zone && <button type="button" disabled={!canManage} onClick={() => setTarget({ type: 'zone', id: zone.id })} className="rounded-2xl border border-fuchsia-300/35 bg-fuchsia-400/10 px-3 py-2 text-xs font-black text-fuchsia-100">Керувати локацією</button>}</div>
           <div className="relative overflow-hidden rounded-[22px] border border-white/10 bg-black">
-            <img src={location.background} alt={location.label} className="block w-full" draggable={false} />
+            <img key={location.key} src={location.background} alt={location.label} className="block w-full" draggable={false} />
             <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${location.width} ${location.height}`} preserveAspectRatio="none">
               {location.tables.map((visual) => {
                 const table = realTable(visual.number); if (!table) return null;
