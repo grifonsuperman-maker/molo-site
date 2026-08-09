@@ -6,6 +6,7 @@ import {
   waiterCallsApi,
   type GuestWaiterCallStatus,
 } from '../api/waiterCalls';
+import { isWaiterCallBookingForToday } from './waiterCallVisibility';
 
 const POLLING_INTERVAL_MS = 15_000;
 
@@ -194,9 +195,8 @@ export default function GuestWaiterCallController() {
 
   const activeApprovedBookings = useMemo(() => {
     const today = kyivDate();
-    return bookings.filter(
-      (booking) =>
-        booking.status === 'approved' && booking.bookingDate >= today,
+    return bookings.filter((booking) =>
+      isWaiterCallBookingForToday(booking, today),
     );
   }, [bookings]);
 
