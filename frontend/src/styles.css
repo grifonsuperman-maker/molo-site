@@ -66,3 +66,62 @@ html,body,#root{min-height:100%;margin:0;background:#10100f;}*{box-sizing:border
     animation: none;
   }
 }
+
+.molo-service-action {
+  isolation: isolate;
+  overflow: visible;
+}
+
+.molo-service-action::before,
+.molo-service-action::after {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0;
+}
+
+.molo-service-action::before {
+  inset: -30px;
+  border-radius: 38px;
+  background: repeating-conic-gradient(
+    from 8deg,
+    currentColor 0deg 3deg,
+    transparent 3deg 30deg
+  );
+  -webkit-mask: radial-gradient(circle, transparent 0 42%, #000 44% 66%, transparent 68%);
+  mask: radial-gradient(circle, transparent 0 42%, #000 44% 66%, transparent 68%);
+}
+
+.molo-service-action::after {
+  inset: -3px;
+  border: 2px solid currentColor;
+  border-radius: 26px;
+  box-shadow: 0 0 18px currentColor;
+}
+
+.molo-service-action--burst::before {
+  animation: moloServiceBurstRays 700ms cubic-bezier(.18, .75, .22, 1) both;
+}
+
+.molo-service-action--burst::after {
+  animation: moloServiceBurstRing 620ms ease-out both;
+}
+
+@keyframes moloServiceBurstRays {
+  0% { opacity: 0; transform: scale(.3) rotate(-10deg); }
+  18% { opacity: .95; }
+  100% { opacity: 0; transform: scale(1.22) rotate(12deg); }
+}
+
+@keyframes moloServiceBurstRing {
+  0% { opacity: .95; transform: scale(.86); }
+  100% { opacity: 0; transform: scale(1.28); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .molo-service-action--burst::before,
+  .molo-service-action--burst::after {
+    animation: none;
+  }
+}

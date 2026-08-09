@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
 import GuestBookingDecisionController from "./guest/GuestBookingDecisionController";
-import GuestWaiterCallController from "./guest/GuestWaiterCallController";
 import GuestReviewDismissController from "./guest/GuestReviewDismissController";
 import WaiterApp from "./waiter/WaiterAppV2";
 import WaiterCallAlertController from "./waiter/WaiterCallAlertController";
@@ -135,7 +134,6 @@ export default function App() {
         <>
           <GuestApp />
           <GuestBookingDecisionController />
-          <GuestWaiterCallController />
           <GuestReviewDismissController />
         </>
       )}
