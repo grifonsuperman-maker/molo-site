@@ -13,6 +13,7 @@ import AdminWorkspace from "./admin/AdminWorkspace";
 import "./admin/admin-neon-theme.css";
 import DirectorWorkspace from "./director/DirectorWorkspace";
 import SitePhotoController from "./theme/SitePhotoController";
+import MoloSplash from "./theme/MoloSplash";
 
 type Mode = "guest" | "waiter" | "hookah" | "admin" | "director";
 
@@ -70,6 +71,7 @@ export default function App() {
 
   return (
     <main className="min-h-screen bg-[#10100f] text-white">
+      <MoloSplash />
       <SitePhotoController />
 
       <div className="fixed bottom-4 left-1/2 z-50 grid w-[calc(100%-24px)] max-w-xl -translate-x-1/2 grid-cols-5 gap-1.5 rounded-2xl border border-neutral-800 bg-neutral-950/95 p-2 shadow-2xl">

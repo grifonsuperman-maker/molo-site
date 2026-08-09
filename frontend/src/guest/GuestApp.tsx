@@ -1443,6 +1443,22 @@ export default function GuestApp() {
 
           <div className="molo-mode-overlay absolute inset-0" />
 
+          <a
+            href="https://t.me/AlexUlqiora"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Telegram розробника Alex Ulquiorra"
+            title="Розробник: Alex Ulquiorra"
+            className="absolute bottom-[76px] right-2 z-20 rounded-2xl border border-white/10 bg-black/25 p-1 opacity-65 shadow-[0_0_22px_rgba(217,70,239,.16)] backdrop-blur-sm transition hover:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 active:scale-95 sm:bottom-20 sm:right-4"
+          >
+            <img
+              src="/branding/neon-reaper.webp"
+              alt="ALEX ULQUIORRA · NEON REAPER"
+              className="h-[58px] w-[70px] object-contain mix-blend-screen sm:h-[68px] sm:w-[82px]"
+              draggable={false}
+            />
+          </a>
+
           <div className="relative flex h-[100dvh] w-full flex-col items-center justify-center px-4 pb-[112px] pt-6 text-center">
             <img
               src="/logo.png"

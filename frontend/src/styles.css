@@ -2,3 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 html,body,#root{min-height:100%;margin:0;background:#10100f;}*{box-sizing:border-box;}
+
+.molo-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at center, rgba(24, 24, 27, .92) 0%, #050505 62%, #000 100%);
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 450ms ease, visibility 450ms ease;
+}
+
+.molo-splash--leaving {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.molo-splash__halo {
+  position: absolute;
+  width: min(78vw, 430px);
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(250, 204, 21, .18), transparent 68%);
+  animation: moloSplashHalo 4s linear infinite;
+}
+
+.molo-splash__logo {
+  position: relative;
+  width: min(68vw, 330px);
+  height: min(68vw, 330px);
+  object-fit: contain;
+  mix-blend-mode: screen;
+  animation:
+    moloSplashLogoIn 650ms cubic-bezier(.2, .8, .2, 1) both,
+    moloSplashNeon 4s linear infinite;
+}
+
+@keyframes moloSplashLogoIn {
+  from { opacity: 0; transform: scale(.88); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes moloSplashNeon {
+  0%, 100% { filter: drop-shadow(0 0 10px rgba(250, 204, 21, .9)) drop-shadow(0 0 28px rgba(245, 158, 11, .5)); }
+  20% { filter: drop-shadow(0 0 10px rgba(248, 113, 113, .9)) drop-shadow(0 0 28px rgba(239, 68, 68, .5)); }
+  40% { filter: drop-shadow(0 0 10px rgba(74, 222, 128, .9)) drop-shadow(0 0 28px rgba(34, 197, 94, .5)); }
+  60% { filter: drop-shadow(0 0 10px rgba(96, 165, 250, .95)) drop-shadow(0 0 28px rgba(59, 130, 246, .55)); }
+  80% { filter: drop-shadow(0 0 10px rgba(216, 180, 254, .95)) drop-shadow(0 0 28px rgba(168, 85, 247, .55)); }
+}
+
+@keyframes moloSplashHalo {
+  0%, 100% { transform: scale(.9); filter: hue-rotate(0deg); opacity: .7; }
+  50% { transform: scale(1.08); filter: hue-rotate(220deg); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .molo-splash__halo,
+  .molo-splash__logo {
+    animation: none;
+  }
+}
