@@ -21,6 +21,7 @@ import { waiterCallsApi } from '../api/waiterCalls';
 import type { GuestWaiterCallStatus } from '../api/waiterCalls';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { usePersistentState } from '../hooks/usePersistentState';
+import GuestBookingServiceActions from './GuestBookingServiceActions';
 import GuestHookahCallPanel from './GuestHookahCallPanel';
 const FALLBACK_MENU =
   'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
@@ -2133,7 +2134,9 @@ export default function GuestApp() {
                       )}
                     </div>
                   )}
-                  {booking.status === 'approved' && <div className="mt-4"><GuestHookahCallPanel bookingId={booking.bookingId} /></div>}
+                  {booking.status === 'approved' && (
+                    <GuestBookingServiceActions booking={booking} />
+                  )}
                 </article>
               ))}
             </div>
