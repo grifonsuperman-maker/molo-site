@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clearAccessToken } from "./api/client";
 import GuestApp from "./guest/GuestApp";
 import GuestBookingDecisionController from "./guest/GuestBookingDecisionController";
@@ -13,13 +13,15 @@ import "./admin/admin-neon-theme.css";
 import DirectorWorkspace from "./director/DirectorWorkspace";
 import SitePhotoController from "./theme/SitePhotoController";
 import MoloSplash from "./theme/MoloSplash";
+import { useTelegramAuth } from "./auth/useTelegramAuth";
+import { resolveTelegramMode } from "./telegram/telegramRuntime";
 
 type Mode = "guest" | "waiter" | "hookah" | "admin" | "director";
 
 const HOOKAH_STAFF_STORAGE_KEY = "molo_hookah_staff";
 
-function clearRoleSession() {
-  clearAccessToken();
+function clearRoleSession(preserveTelegramToken = false) {
+  if (!preserveTelegramToken) clearAccessToken();
   window.localStorage.removeItem(HOOKAH_STAFF_STORAGE_KEY);
 }
 
@@ -41,6 +43,30 @@ function getModeFromHash(): Mode {
 
 export default function App() {
   const [mode, setMode] = useState<Mode>(() => getModeFromHash());
+  const telegramAuth = useTelegramAuth();
+  const telegramRoleRouted = useRef(false);
+
+  useEffect(() => {
+    if (
+      telegramRoleRouted.current ||
+      !telegramAuth.isTelegram ||
+      !telegramAuth.user
+    ) {
+      return;
+    }
+
+    telegramRoleRouted.current = true;
+
+    const nextMode = resolveTelegramMode(
+      telegramAuth.user.role,
+      window.location.hash,
+    );
+
+    if (nextMode && nextMode !== mode) {
+      window.location.hash = nextMode;
+      setMode(nextMode);
+    }
+  }, [mode, telegramAuth.isTelegram, telegramAuth.user]);
 
   useEffect(() => {
     function handleHashChange() {
@@ -48,7 +74,7 @@ export default function App() {
 
       setMode((currentMode) => {
         if (nextMode !== currentMode) {
-          clearRoleSession();
+          clearRoleSession(telegramAuth.isTelegram);
         }
 
         return nextMode;
@@ -57,11 +83,11 @@ export default function App() {
 
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
-  }, []);
+  }, [telegramAuth.isTelegram]);
 
   function changeMode(nextMode: Mode) {
     if (nextMode !== mode) {
-      clearRoleSession();
+      clearRoleSession(telegramAuth.isTelegram);
     }
 
     window.location.hash = nextMode;
@@ -72,6 +98,12 @@ export default function App() {
     <main className="min-h-screen bg-[#10100f] text-white">
       <MoloSplash />
       <SitePhotoController />
+
+      {telegramAuth.isTelegram && telegramAuth.error && (
+        <div className="fixed left-3 right-3 top-3 z-[70] rounded-2xl border border-red-400/40 bg-red-950/95 px-4 py-3 text-center text-sm text-red-100 shadow-2xl">
+          Не вдалося увійти через Telegram. Закрийте та відкрийте застосунок повторно.
+        </div>
+      )}
 
       <div className="fixed bottom-4 left-1/2 z-50 grid w-[calc(100%-24px)] max-w-xl -translate-x-1/2 grid-cols-5 gap-1.5 rounded-2xl border border-neutral-800 bg-neutral-950/95 p-2 shadow-2xl">
         <button

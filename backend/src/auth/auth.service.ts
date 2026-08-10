@@ -5,7 +5,10 @@ import { Repository } from 'typeorm';
 import { Staff } from '../staff/entities/staff.entity';
 import { TelegramAuthDto } from './dto/telegram-auth.dto';
 import { AuthRole, AuthUser } from './types/auth-user.type';
-import { verifyTelegramInitData } from './telegram-init-data';
+import {
+  DEFAULT_TELEGRAM_INIT_DATA_MAX_AGE_SECONDS,
+  verifyTelegramInitData,
+} from './telegram-init-data';
 
 @Injectable()
 export class AuthService {
@@ -74,7 +77,16 @@ export class AuthService {
       }
 
       try {
-        const user = verifyTelegramInitData(dto.initData, botToken);
+        const configuredMaxAge = Number(
+          process.env.TELEGRAM_INIT_DATA_MAX_AGE_SECONDS,
+        );
+        const maxAgeSeconds =
+          Number.isFinite(configuredMaxAge) && configuredMaxAge > 0
+            ? configuredMaxAge
+            : DEFAULT_TELEGRAM_INIT_DATA_MAX_AGE_SECONDS;
+        const user = verifyTelegramInitData(dto.initData, botToken, {
+          maxAgeSeconds,
+        });
         const name = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username || null;
 
         return {
