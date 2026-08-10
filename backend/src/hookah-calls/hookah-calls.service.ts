@@ -36,6 +36,15 @@ export class HookahCallsService {
     private readonly dataSource: DataSource,
   ) {}
 
+  private kyivDate(now = new Date()) {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Kyiv",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now);
+  }
+
   private async getRestaurant(
     repository: Repository<Restaurant> = this.restaurantRepo,
   ) {
@@ -140,6 +149,7 @@ export class HookahCallsService {
       zoneName: booking.table?.zone?.name || null,
       canCall:
         booking.status === "approved" &&
+        booking.bookingDate === this.kyivDate() &&
         booking.table?.status === "occupied" &&
         availability.available &&
         !activeCall,
@@ -181,6 +191,12 @@ export class HookahCallsService {
 
       if (!booking) {
         throw new NotFoundException("Бронювання не знайдено");
+      }
+
+      if (booking.bookingDate !== this.kyivDate()) {
+        throw new BadRequestException(
+          "Виклик кальянника доступний тільки у день візиту",
+        );
       }
 
       if (
