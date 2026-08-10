@@ -7,6 +7,19 @@ const {
   HookahCallsService,
 } = require("../dist/hookah-calls/hookah-calls.service.js");
 
+function kyivDate(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Kyiv",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function futureKyivDate() {
+  return kyivDate(new Date(Date.now() + 48 * 60 * 60 * 1_000));
+}
+
 function createService(overrides = {}) {
   const restaurant = {
     id: "restaurant-1",
@@ -23,6 +36,7 @@ function createService(overrides = {}) {
     findOne: async () => ({
       id: "booking-1",
       status: "approved",
+      bookingDate: kyivDate(),
       table: {
         id: "table-1",
         tableNumber: "8",
@@ -31,6 +45,7 @@ function createService(overrides = {}) {
       },
       client: { fullName: "Гість" },
     }),
+    ...overrides.bookingsRepo,
   };
   const staffRepo = {
     findOne: async () => ({ id: "hookah-1", role: "hookah", isOnShift: true }),
@@ -99,10 +114,34 @@ test("expired accepted call automatically releases the guest button", async () =
   assert.equal(status.canCall, true);
 });
 
+test("guest status blocks a hookah call for a future booking", async () => {
+  const { service } = createService({
+    bookingsRepo: {
+      findOne: async () => ({
+        id: "booking-future",
+        status: "approved",
+        bookingDate: futureKyivDate(),
+        table: {
+          id: "table-8",
+          tableNumber: "8",
+          status: "occupied",
+          zone: { name: "Зал ресторану" },
+        },
+        client: { fullName: "Гість" },
+      }),
+    },
+  });
+
+  const status = await service.guestStatus("booking-future");
+
+  assert.equal(status.canCall, false);
+});
+
 test("guest call locks only the booking row before nullable relations are loaded", async () => {
   const booking = {
     id: "booking-1",
     status: "approved",
+    bookingDate: kyivDate(),
     table: {
       id: "table-1",
       tableNumber: "8",
@@ -182,4 +221,69 @@ test("guest call locks only the booking row before nullable relations are loaded
     table: { zone: true },
     client: true,
   });
+});
+
+test("guest request rejects a hookah call for a future booking", async () => {
+  const booking = {
+    id: "booking-future",
+    status: "approved",
+    bookingDate: futureKyivDate(),
+    table: {
+      id: "table-8",
+      tableNumber: "8",
+      status: "occupied",
+      zone: { name: "Зал ресторану" },
+    },
+    client: { fullName: "Гість" },
+  };
+  const queryBuilder = {
+    where() {
+      return this;
+    },
+    setLock() {
+      return this;
+    },
+    async getOne() {
+      return { id: booking.id };
+    },
+  };
+  const bookingRepo = {
+    createQueryBuilder: () => queryBuilder,
+    findOne: async () => booking,
+  };
+  const callRepo = {
+    find: async () => [],
+  };
+  const staffRepo = {};
+  const restaurantRepo = {};
+  const repositories = {
+    Booking: bookingRepo,
+    HookahCall: callRepo,
+    Staff: staffRepo,
+    Restaurant: restaurantRepo,
+  };
+  const dataSource = {
+    transaction: async (work) => work({
+      getRepository: (entity) => repositories[entity.name],
+    }),
+  };
+  const service = new HookahCallsService(
+    callRepo,
+    bookingRepo,
+    staffRepo,
+    restaurantRepo,
+    { assignmentForBooking: async () => null },
+    dataSource,
+  );
+
+  await assert.rejects(
+    () => service.createFromGuest({ bookingId: booking.id }),
+    (error) => {
+      assert.equal(
+        error.message,
+        "Виклик кальянника доступний тільки у день візиту",
+      );
+      return true;
+    },
+  );
 });
