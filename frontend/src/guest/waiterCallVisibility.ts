@@ -1,11 +1,13 @@
-type WaiterCallBooking = {
+type GuestServiceBooking = {
   status: string;
   bookingDate: string;
 };
 
-export function isWaiterCallBookingForToday(
-  booking: WaiterCallBooking,
+export function isGuestServiceBookingForToday(
+  booking: GuestServiceBooking,
   today: string,
 ) {
   return booking.status === 'approved' && booking.bookingDate === today;
 }
+
+export const isWaiterCallBookingForToday = isGuestServiceBookingForToday;
