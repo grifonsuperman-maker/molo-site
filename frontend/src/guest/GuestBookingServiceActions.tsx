@@ -10,7 +10,7 @@ import {
   waiterCallsApi,
   type GuestWaiterCallStatus,
 } from '../api/waiterCalls';
-import { isWaiterCallBookingForToday } from './waiterCallVisibility';
+import { isGuestServiceBookingForToday } from './waiterCallVisibility';
 
 const POLLING_INTERVAL_MS = 15_000;
 const BURST_DURATION_MS = 720;
@@ -32,16 +32,16 @@ export default function GuestBookingServiceActions({
 }: {
   booking: GuestBooking;
 }) {
-  const waiterBookingIsToday = useMemo(
-    () => isWaiterCallBookingForToday(booking, kyivDate()),
+  const bookingIsToday = useMemo(
+    () => isGuestServiceBookingForToday(booking, kyivDate()),
     [booking],
   );
   const [waiterStatus, setWaiterStatus] =
     useState<GuestWaiterCallStatus | null>(null);
   const [hookahStatus, setHookahStatus] =
     useState<GuestHookahStatus | null>(null);
-  const [waiterLoading, setWaiterLoading] = useState(waiterBookingIsToday);
-  const [hookahLoading, setHookahLoading] = useState(true);
+  const [waiterLoading, setWaiterLoading] = useState(bookingIsToday);
+  const [hookahLoading, setHookahLoading] = useState(bookingIsToday);
   const [waiterCalling, setWaiterCalling] = useState(false);
   const [hookahCalling, setHookahCalling] = useState(false);
   const [waiterError, setWaiterError] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export default function GuestBookingServiceActions({
   const burstTimer = useRef<number | null>(null);
 
   const loadWaiterStatus = useCallback(async (silent = false) => {
-    if (!waiterBookingIsToday) {
+    if (!bookingIsToday) {
       setWaiterStatus(null);
       setWaiterLoading(false);
       return;
@@ -69,9 +69,15 @@ export default function GuestBookingServiceActions({
     } finally {
       if (!silent) setWaiterLoading(false);
     }
-  }, [booking.bookingId, waiterBookingIsToday]);
+  }, [booking.bookingId, bookingIsToday]);
 
   const loadHookahStatus = useCallback(async (silent = false) => {
+    if (!bookingIsToday) {
+      setHookahStatus(null);
+      setHookahLoading(false);
+      return;
+    }
+
     try {
       if (!silent) setHookahLoading(true);
       const result = await hookahCallsApi.getGuestStatus(booking.bookingId);
@@ -82,27 +88,29 @@ export default function GuestBookingServiceActions({
     } finally {
       if (!silent) setHookahLoading(false);
     }
-  }, [booking.bookingId]);
+  }, [booking.bookingId, bookingIsToday]);
 
   useEffect(() => {
     void loadWaiterStatus();
-    if (!waiterBookingIsToday) return;
+    if (!bookingIsToday) return;
 
     const interval = window.setInterval(() => {
       void loadWaiterStatus(true);
     }, POLLING_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
-  }, [loadWaiterStatus, waiterBookingIsToday]);
+  }, [bookingIsToday, loadWaiterStatus]);
 
   useEffect(() => {
     void loadHookahStatus();
+    if (!bookingIsToday) return;
+
     const interval = window.setInterval(() => {
       void loadHookahStatus(true);
     }, POLLING_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
-  }, [loadHookahStatus]);
+  }, [bookingIsToday, loadHookahStatus]);
 
   useEffect(() => {
     if (
@@ -134,7 +142,9 @@ export default function GuestBookingServiceActions({
   }
 
   async function callWaiter() {
-    if (!waiterStatus?.canCall || waiterStatus.activeCall) return;
+    if (!bookingIsToday || !waiterStatus?.canCall || waiterStatus.activeCall) {
+      return;
+    }
     showBurst('waiter');
 
     try {
@@ -162,7 +172,9 @@ export default function GuestBookingServiceActions({
   }
 
   async function callHookahWorker() {
-    if (!hookahStatus?.canCall || hookahStatus.activeCall) return;
+    if (!bookingIsToday || !hookahStatus?.canCall || hookahStatus.activeCall) {
+      return;
+    }
     showBurst('hookah');
 
     try {
@@ -191,13 +203,14 @@ export default function GuestBookingServiceActions({
   const waiterCall = waiterStatus?.activeCall || null;
   const hookahCall = hookahStatus?.activeCall || null;
   const waiterEnabled = Boolean(
-    waiterBookingIsToday &&
+    bookingIsToday &&
     !waiterLoading &&
     waiterStatus?.canCall &&
     !waiterCall &&
     !waiterCalling,
   );
   const hookahEnabled = Boolean(
+    bookingIsToday &&
     !hookahLoading &&
     hookahStatus?.canCall &&
     hookahStatus.hookahCallsAvailable &&
@@ -205,10 +218,10 @@ export default function GuestBookingServiceActions({
     !hookahCalling,
   );
 
-  const waiterSubtitle = waiterLoading
-    ? 'Перевіряємо…'
-    : !waiterBookingIsToday
-      ? 'У день візиту'
+  const waiterSubtitle = !bookingIsToday
+    ? 'У день візиту'
+    : waiterLoading
+      ? 'Перевіряємо…'
       : waiterCall?.status === 'accepted'
         ? 'Виклик прийнято'
         : waiterCall
@@ -217,17 +230,19 @@ export default function GuestBookingServiceActions({
             ? waiterCalling ? 'Викликаємо…' : 'Викликати'
             : 'Після приходу';
 
-  const hookahSubtitle = hookahLoading
-    ? 'Перевіряємо…'
-    : hookahCall?.status === 'accepted'
-      ? 'Уже прямує'
-      : hookahCall
-        ? 'Виклик надіслано'
-        : hookahStatus?.hookahCallsAvailable === false
-          ? 'Немає вільних'
-          : hookahStatus?.canCall
-            ? hookahCalling ? 'Викликаємо…' : 'Викликати'
-            : 'Після приходу';
+  const hookahSubtitle = !bookingIsToday
+    ? 'У день візиту'
+    : hookahLoading
+      ? 'Перевіряємо…'
+      : hookahCall?.status === 'accepted'
+        ? 'Уже прямує'
+        : hookahCall
+          ? 'Виклик надіслано'
+          : hookahStatus?.hookahCallsAvailable === false
+            ? 'Немає вільних'
+            : hookahStatus?.canCall
+              ? hookahCalling ? 'Викликаємо…' : 'Викликати'
+              : 'Після приходу';
 
   const secondsLeft = hookahCall?.etaDueAt
     ? Math.max(
@@ -249,7 +264,7 @@ export default function GuestBookingServiceActions({
           disabled={!waiterEnabled}
           aria-label={`Офіціант: ${waiterSubtitle}`}
           title={
-            waiterBookingIsToday
+            bookingIsToday
               ? 'Викликати офіціанта після приходу за стіл'
               : 'Виклик офіціанта стане доступним у день візиту'
           }
@@ -269,7 +284,11 @@ export default function GuestBookingServiceActions({
           onClick={() => void callHookahWorker()}
           disabled={!hookahEnabled}
           aria-label={`Кальянник: ${hookahSubtitle}`}
-          title="Викликати кальянника після приходу за стіл"
+          title={
+            bookingIsToday
+              ? 'Викликати кальянника після приходу за стіл'
+              : 'Виклик кальянника стане доступним у день візиту'
+          }
           className={`molo-service-action molo-service-action--hookah relative aspect-square min-h-[112px] rounded-[24px] border border-fuchsia-200/55 bg-fuchsia-300/10 p-3 text-fuchsia-50 shadow-[0_0_24px_rgba(232,121,249,.16)] transition duration-200 enabled:active:scale-[0.97] disabled:cursor-not-allowed ${!hookahEnabled && !hookahCall ? 'opacity-55' : ''} ${burst === 'hookah' ? 'molo-service-action--burst' : ''}`}
         >
           <span className="relative z-[1] flex h-full flex-col items-center justify-center">
