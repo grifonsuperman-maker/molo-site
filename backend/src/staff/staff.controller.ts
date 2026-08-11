@@ -23,10 +23,15 @@ import { CreateStaffDto } from './dto/create-staff.dto';
 import { DirectorLoginDto } from './dto/director-login.dto';
 import { StaffPinLoginDto } from './dto/staff-pin-login.dto';
 import { StaffShiftActionDto } from './dto/staff-shift-action.dto';
+import {
+  ConfirmTelegramStaffLinkDto,
+  TelegramStaffLinkTokenDto,
+} from './dto/telegram-staff-link.dto';
 import { UpdateDirectorAccessDto } from './dto/update-director-access.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import type { StaffRole } from './entities/staff.entity';
 import { StaffService } from './staff.service';
+import { TelegramStaffLinkService } from './telegram-staff-link.service';
 
 @Controller('staff')
 export class StaffController {
@@ -35,6 +40,7 @@ export class StaffController {
   constructor(
     private readonly service: StaffService,
     private readonly permissions: AdminPermissionsService,
+    private readonly telegramLinks: TelegramStaffLinkService,
   ) {}
 
   @Public()
@@ -76,6 +82,18 @@ export class StaffController {
     return this.service.loginWithPin(dto);
   }
 
+  @Public()
+  @Post('telegram-link/info')
+  getTelegramLinkInfo(@Body() dto: TelegramStaffLinkTokenDto) {
+    return this.telegramLinks.getInviteInfo(dto.token);
+  }
+
+  @Public()
+  @Post('telegram-link/confirm')
+  confirmTelegramLink(@Body() dto: ConfirmTelegramStaffLinkDto) {
+    return this.telegramLinks.confirmInvite(dto);
+  }
+
   @Roles('owner', 'admin')
   @Get()
   findAll() {
@@ -90,6 +108,16 @@ export class StaffController {
   ) {
     await this.assertAdminCanCreateOrdinaryStaff(request.user, dto.role);
     return this.service.create(dto);
+  }
+
+  @Roles('owner', 'admin')
+  @Post(':id/telegram-invite')
+  async createTelegramInvite(
+    @Param('id') id: string,
+    @Req() request: { user?: AuthUser },
+  ) {
+    await this.assertAdminCanManageOrdinaryStaff(request.user, id);
+    return this.telegramLinks.createInvite(id);
   }
 
   @Roles('owner', 'admin')
