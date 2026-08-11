@@ -7,6 +7,7 @@ import AdminStaffPanel from './AdminStaffPanel';
 import CompactAdminPanel from './CompactAdminPanel';
 import AdminTablesByLocation from './AdminTablesByLocation';
 import AdminVisualTablePlanner from './AdminVisualTablePlanner';
+import TelegramStaffInvitePanel from '../staff/TelegramStaffInvitePanel';
 import './admin-table-planner-fix.css';
 
 type AdminSection = 'panel' | 'staff';
@@ -203,6 +204,7 @@ export default function AdminWorkspace() {
                 </div>
               </div>
               <AdminStaffPanel />
+              <TelegramStaffInvitePanel audience="admin" />
             </section>
           </main>
         )}
