@@ -4,5 +4,16 @@ import { TelegramWebhookService } from './telegram-webhook.service';
 import { BookingsModule } from '../bookings/bookings.module';
 import { RestaurantModule } from '../restaurant/restaurant.module';
 import { NotificationsModule } from '../notifications/notifications.module';
-@Module({ imports:[BookingsModule,RestaurantModule,NotificationsModule], controllers:[TelegramWebhookController], providers:[TelegramWebhookService] })
+import { StaffModule } from '../staff/staff.module';
+
+@Module({
+  imports: [
+    BookingsModule,
+    RestaurantModule,
+    NotificationsModule,
+    StaffModule,
+  ],
+  controllers: [TelegramWebhookController],
+  providers: [TelegramWebhookService],
+})
 export class TelegramModule {}
