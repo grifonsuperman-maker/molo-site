@@ -3,6 +3,7 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 @Injectable()
 export class TelegramService {
   private readonly botToken = process.env.TELEGRAM_BOT_TOKEN;
+  private botUsername: string | null = null;
 
   private get apiUrl() {
     if (!this.botToken) {
@@ -51,6 +52,29 @@ export class TelegramService {
     }
 
     return { configured: true, webhookUrl };
+  }
+
+  async getBotUsername() {
+    const configured = String(process.env.TELEGRAM_BOT_USERNAME || '')
+      .trim()
+      .replace(/^@/, '');
+
+    if (configured) return configured;
+    if (this.botUsername) return this.botUsername;
+
+    const payload = await this.call('getMe', {});
+    const username = String(payload?.result?.username || '')
+      .trim()
+      .replace(/^@/, '');
+
+    if (!username) {
+      throw new InternalServerErrorException(
+        'Не вдалося визначити username Telegram-бота',
+      );
+    }
+
+    this.botUsername = username;
+    return username;
   }
 
   async sendMessage(
