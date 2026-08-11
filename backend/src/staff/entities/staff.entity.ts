@@ -21,7 +21,12 @@ export class Staff {
   })
   telegramId: string | null;
 
-  @Column({ name: 'telegram_invite_token_hash', type: 'text', nullable: true })
+  @Column({
+    name: 'telegram_invite_token_hash',
+    type: 'text',
+    nullable: true,
+    select: false,
+  })
   telegramInviteTokenHash: string | null;
 
   @Column({ name: 'telegram_invite_expires_at', type: 'timestamp', nullable: true })
