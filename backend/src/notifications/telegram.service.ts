@@ -14,6 +14,45 @@ export class TelegramService {
     return `https://api.telegram.org/bot${this.botToken}`;
   }
 
+  async registerWebhook() {
+    const baseUrl = String(process.env.RENDER_EXTERNAL_URL || '').trim();
+    const webhookSecret = String(
+      process.env.TELEGRAM_WEBHOOK_SECRET || '',
+    ).trim();
+
+    if (!this.botToken) {
+      return { configured: false, reason: 'TELEGRAM_BOT_TOKEN відсутній' };
+    }
+
+    if (!baseUrl) {
+      return { configured: false, reason: 'RENDER_EXTERNAL_URL відсутній' };
+    }
+
+    if (!webhookSecret) {
+      return { configured: false, reason: 'TELEGRAM_WEBHOOK_SECRET відсутній' };
+    }
+
+    const webhookUrl = new URL('/api/telegram/webhook', baseUrl).toString();
+    const response = await fetch(`${this.apiUrl}/setWebhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: webhookUrl,
+        secret_token: webhookSecret,
+        allowed_updates: ['message', 'callback_query'],
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok || !payload?.ok) {
+      throw new InternalServerErrorException(
+        `Telegram setWebhook error: ${JSON.stringify(payload)}`,
+      );
+    }
+
+    return { configured: true, webhookUrl };
+  }
+
   async sendMessage(
     chatId: string | number,
     text: string,
