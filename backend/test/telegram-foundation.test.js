@@ -14,6 +14,9 @@ const {
 const {
   TelegramWebhookService,
 } = require('../dist/telegram/telegram-webhook.service.js');
+const {
+  TelegramService,
+} = require('../dist/notifications/telegram.service.js');
 
 function createInitData({ botToken, authDate, user }) {
   const params = new URLSearchParams({
@@ -85,6 +88,53 @@ test('Telegram webhook secret is checked after it is configured', () => {
     UnauthorizedException,
   );
   assert.doesNotThrow(() => assertTelegramWebhookSecret(undefined, undefined));
+});
+
+test('Telegram webhook registration uses Render URL and webhook secret', async () => {
+  const previousToken = process.env.TELEGRAM_BOT_TOKEN;
+  const previousUrl = process.env.RENDER_EXTERNAL_URL;
+  const previousSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.TELEGRAM_BOT_TOKEN = '123456:test-token';
+  process.env.RENDER_EXTERNAL_URL = 'https://molo-backend.example';
+  process.env.TELEGRAM_WEBHOOK_SECRET = 'secret_123';
+  global.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    return {
+      ok: true,
+      json: async () => ({ ok: true, result: true }),
+    };
+  };
+
+  try {
+    const service = new TelegramService();
+    const result = await service.registerWebhook();
+
+    assert.deepEqual(result, {
+      configured: true,
+      webhookUrl: 'https://molo-backend.example/api/telegram/webhook',
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0].url,
+      'https://api.telegram.org/bot123456:test-token/setWebhook',
+    );
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      url: 'https://molo-backend.example/api/telegram/webhook',
+      secret_token: 'secret_123',
+      allowed_updates: ['message', 'callback_query'],
+    });
+  } finally {
+    if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = previousToken;
+    if (previousUrl === undefined) delete process.env.RENDER_EXTERNAL_URL;
+    else process.env.RENDER_EXTERNAL_URL = previousUrl;
+    if (previousSecret === undefined) delete process.env.TELEGRAM_WEBHOOK_SECRET;
+    else process.env.TELEGRAM_WEBHOOK_SECRET = previousSecret;
+    global.fetch = previousFetch;
+  }
 });
 
 test('/start includes a Telegram Mini App button when its URL is configured', async () => {
