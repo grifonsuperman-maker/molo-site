@@ -26,14 +26,28 @@ export class TelegramWebhookService {
     if (!chatId || !text) return { ok: true };
 
     if (text === '/start') {
+      const keyboard: Array<Array<Record<string, unknown>>> = [];
+      const guestAppUrl = this.getWebAppUrl('guest');
+
+      if (guestAppUrl) {
+        keyboard.push([
+          {
+            text: '🍽 Відкрити застосунок MOLO',
+            web_app: { url: guestAppUrl },
+          },
+        ]);
+      }
+
+      keyboard.push(
+        [{ text: '👔 Панель адміністратора', callback_data: 'menu:admin' }],
+        [{ text: '👨‍🍳 Панель офіціанта', callback_data: 'menu:waiter' }],
+      );
+
       await this.telegram.sendMessage(
         chatId,
         'Вітаємо в MOLO Restaurant 👋\n\nОберіть дію:',
         {
-          inline_keyboard: [
-            [{ text: '👔 Панель адміністратора', callback_data: 'menu:admin' }],
-            [{ text: '👨‍🍳 Панель офіціанта', callback_data: 'menu:waiter' }],
-          ],
+          inline_keyboard: keyboard,
         },
       );
     }
@@ -46,24 +60,66 @@ export class TelegramWebhookService {
     const data = cb.data as string;
     if (!chatId || !data) return { ok: true };
 
+    if (cb.id) {
+      await this.telegram.answerCallbackQuery(cb.id).catch(() => undefined);
+    }
+
     const [type, action, id] = data.split(':');
 
     try {
       if (type === 'menu' && action === 'admin') {
-        await this.telegram.sendMessage(chatId, '👔 Панель адміністратора', {
-          inline_keyboard: [
-            [{ text: '🟢 Відкрити ресторан', callback_data: 'restaurant:open' }],
-            [{ text: '🔒 Закрити бронювання', callback_data: 'restaurant:close_booking' }],
-            [{ text: '🔴 Закрити ресторан', callback_data: 'restaurant:close_full' }],
+        const keyboard: Array<Array<Record<string, unknown>>> = [];
+        const adminAppUrl = this.getWebAppUrl('admin');
+
+        if (adminAppUrl) {
+          keyboard.push([
+            {
+              text: '👔 Відкрити панель адміністратора',
+              web_app: { url: adminAppUrl },
+            },
+          ]);
+        }
+
+        keyboard.push(
+          [{ text: '🟢 Відкрити ресторан', callback_data: 'restaurant:open' }],
+          [
+            {
+              text: '🔒 Закрити бронювання',
+              callback_data: 'restaurant:close_booking',
+            },
           ],
+          [
+            {
+              text: '🔴 Закрити ресторан',
+              callback_data: 'restaurant:close_full',
+            },
+          ],
+        );
+
+        await this.telegram.sendMessage(chatId, '👔 Панель адміністратора', {
+          inline_keyboard: keyboard,
         });
         return { ok: true };
       }
 
       if (type === 'menu' && action === 'waiter') {
+        const waiterAppUrl = this.getWebAppUrl('waiter');
+
         await this.telegram.sendMessage(
           chatId,
           '👨‍🍳 Панель офіціанта\n\nБронювання на сьогодні доступні в Mini App.',
+          waiterAppUrl
+            ? {
+                inline_keyboard: [
+                  [
+                    {
+                      text: '👨‍🍳 Відкрити панель офіціанта',
+                      web_app: { url: waiterAppUrl },
+                    },
+                  ],
+                ],
+              }
+            : undefined,
         );
         return { ok: true };
       }
@@ -136,6 +192,24 @@ export class TelegramWebhookService {
         `⚠️ Помилка: ${error?.message || 'невідома помилка'}`,
       );
       return { ok: false };
+    }
+  }
+
+  private getWebAppUrl(mode: 'guest' | 'waiter' | 'admin') {
+    const configuredUrl = process.env.TELEGRAM_WEB_APP_URL?.trim();
+    if (!configuredUrl) return null;
+
+    try {
+      const url = new URL(configuredUrl);
+      const isLocalhost =
+        url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+
+      if (url.protocol !== 'https:' && !isLocalhost) return null;
+
+      url.hash = mode;
+      return url.toString();
+    } catch {
+      return null;
     }
   }
 }

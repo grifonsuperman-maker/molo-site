@@ -1,30 +1,39 @@
 import { useEffect, useState } from 'react';
 import { authApi, AuthUser } from '../api/auth';
+import { getTelegramWebApp } from '../telegram/telegramRuntime';
 
 export function useTelegramAuth() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isTelegram, setIsTelegram] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function run() {
       try {
-        const telegram = (window as any).Telegram?.WebApp;
+        const telegram = getTelegramWebApp();
         const initData = telegram?.initData;
 
         if (initData) {
+          setIsTelegram(true);
           telegram.ready?.();
+          telegram.expand?.();
+          telegram.setHeaderColor?.('#10100f');
+          telegram.setBackgroundColor?.('#10100f');
           const result = await authApi.telegram(initData);
           if (!cancelled) setUser(result.user);
           return;
         }
 
-        // Локальна розробка без Telegram Mini App.
-        // Працює тільки якщо backend ALLOW_DEV_AUTH=true.
-        const result = await authApi.devLogin('111111111', 'Local Test');
-        if (!cancelled) setUser(result.user);
+        if (
+          import.meta.env.DEV &&
+          import.meta.env.VITE_ALLOW_DEV_TELEGRAM_AUTH === 'true'
+        ) {
+          const result = await authApi.devLogin('111111111', 'Local Test');
+          if (!cancelled) setUser(result.user);
+        }
       } catch (err: any) {
         if (!cancelled) setError(err?.message || 'Помилка авторизації');
       } finally {
@@ -39,5 +48,5 @@ export function useTelegramAuth() {
     };
   }, []);
 
-  return { user, loading, error };
+  return { user, loading, error, isTelegram };
 }

@@ -7,7 +7,18 @@ export type ParsedTelegramUser = {
   username?: string;
 };
 
-export function verifyTelegramInitData(initData: string, botToken: string): ParsedTelegramUser {
+export const DEFAULT_TELEGRAM_INIT_DATA_MAX_AGE_SECONDS = 60 * 60;
+
+type TelegramInitDataVerificationOptions = {
+  maxAgeSeconds?: number;
+  nowSeconds?: number;
+};
+
+export function verifyTelegramInitData(
+  initData: string,
+  botToken: string,
+  options: TelegramInitDataVerificationOptions = {},
+): ParsedTelegramUser {
   const params = new URLSearchParams(initData);
   const receivedHash = params.get('hash');
 
@@ -42,18 +53,45 @@ export function verifyTelegramInitData(initData: string, botToken: string): Pars
     throw new Error('Telegram initData не пройшов перевірку');
   }
 
+  const authDate = Number(params.get('auth_date'));
+  const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1000);
+  const maxAgeSeconds =
+    options.maxAgeSeconds ?? DEFAULT_TELEGRAM_INIT_DATA_MAX_AGE_SECONDS;
+
+  if (!Number.isInteger(authDate) || authDate <= 0) {
+    throw new Error('Telegram auth_date відсутній або некоректний');
+  }
+
+  if (authDate > nowSeconds + 30) {
+    throw new Error('Telegram initData має некоректний час');
+  }
+
+  if (nowSeconds - authDate > maxAgeSeconds) {
+    throw new Error('Telegram initData застарів, відкрийте застосунок повторно');
+  }
+
   const userRaw = params.get('user');
 
   if (!userRaw) {
     throw new Error('Telegram user відсутній');
   }
 
-  const user = JSON.parse(userRaw);
+  let user: Record<string, unknown>;
+
+  try {
+    user = JSON.parse(userRaw);
+  } catch {
+    throw new Error('Telegram user має некоректний формат');
+  }
+
+  if (!user.id) {
+    throw new Error('Telegram user id відсутній');
+  }
 
   return {
     id: String(user.id),
-    firstName: user.first_name,
-    lastName: user.last_name,
-    username: user.username,
+    firstName: typeof user.first_name === 'string' ? user.first_name : undefined,
+    lastName: typeof user.last_name === 'string' ? user.last_name : undefined,
+    username: typeof user.username === 'string' ? user.username : undefined,
   };
 }
