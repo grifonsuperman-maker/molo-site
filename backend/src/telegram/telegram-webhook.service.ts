@@ -4,6 +4,8 @@ import { BookingRescheduleApprovalService } from '../bookings/booking-reschedule
 import { BookingsService } from '../bookings/bookings.service';
 import { TelegramService } from '../notifications/telegram.service';
 import { RestaurantService } from '../restaurant/restaurant.service';
+import { TelegramStaffLinkService } from '../staff/telegram-staff-link.service';
+import type { StaffRole } from '../staff/entities/staff.entity';
 
 @Injectable()
 export class TelegramWebhookService {
@@ -12,6 +14,7 @@ export class TelegramWebhookService {
     private readonly rescheduleApproval: BookingRescheduleApprovalService,
     private readonly restaurant: RestaurantService,
     private readonly telegram: TelegramService,
+    private readonly telegramStaff: TelegramStaffLinkService,
   ) {}
 
   async handleUpdate(update: any) {
@@ -25,31 +28,56 @@ export class TelegramWebhookService {
     const text = message.text;
     if (!chatId || !text) return { ok: true };
 
-    if (text === '/start') {
-      const keyboard: Array<Array<Record<string, unknown>>> = [];
-      const guestAppUrl = this.getWebAppUrl('guest');
+    if (text === '/start' || text.startsWith('/start ')) {
+      const telegramId = String(message.from?.id || '');
+      const staff = telegramId
+        ? await this.telegramStaff.findActiveStaffByTelegramId(telegramId)
+        : null;
 
-      if (guestAppUrl) {
-        keyboard.push([
-          {
-            text: '🍽 Відкрити застосунок MOLO',
-            web_app: { url: guestAppUrl },
-          },
-        ]);
+      if (!staff) {
+        const guestAppUrl = this.getWebAppUrl('guest');
+        const keyboard = guestAppUrl
+          ? {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🍽 Відкрити застосунок MOLO',
+                    web_app: { url: guestAppUrl },
+                  },
+                ],
+              ],
+            }
+          : undefined;
+
+        await this.telegram.sendMessage(
+          chatId,
+          'Вітаємо в MOLO Restaurant 👋',
+          keyboard,
+        );
+        return { ok: true };
       }
 
-      keyboard.push(
-        [{ text: '👔 Панель адміністратора', callback_data: 'menu:admin' }],
-        [{ text: '👨‍🍳 Панель офіціанта', callback_data: 'menu:waiter' }],
-      );
+      const roleMenu = this.staffRoleMenu(staff.role);
+      const appUrl = this.getWebAppUrl(roleMenu.mode);
+      const keyboard = appUrl
+        ? {
+            inline_keyboard: [
+              [
+                {
+                  text: roleMenu.button,
+                  web_app: { url: appUrl },
+                },
+              ],
+            ],
+          }
+        : undefined;
 
       await this.telegram.sendMessage(
         chatId,
-        'Вітаємо в MOLO Restaurant 👋\n\nОберіть дію:',
-        {
-          inline_keyboard: keyboard,
-        },
+        `Вітаємо, ${staff.fullName} 👋\n\n${roleMenu.title}`,
+        keyboard,
       );
+      return { ok: true };
     }
 
     return { ok: true };
@@ -195,7 +223,45 @@ export class TelegramWebhookService {
     }
   }
 
-  private getWebAppUrl(mode: 'guest' | 'waiter' | 'admin') {
+  private staffRoleMenu(role: StaffRole): {
+    mode: 'waiter' | 'hookah' | 'admin' | 'director';
+    title: string;
+    button: string;
+  } {
+    if (role === 'owner') {
+      return {
+        mode: 'director',
+        title: '📊 Панель директора',
+        button: '📊 Відкрити панель директора',
+      };
+    }
+
+    if (role === 'admin') {
+      return {
+        mode: 'admin',
+        title: '👔 Панель адміністратора',
+        button: '👔 Відкрити панель адміністратора',
+      };
+    }
+
+    if (role === 'hookah') {
+      return {
+        mode: 'hookah',
+        title: '💨 Панель кальянника',
+        button: '💨 Відкрити панель кальянника',
+      };
+    }
+
+    return {
+      mode: 'waiter',
+      title: '👨‍🍳 Панель офіціанта',
+      button: '👨‍🍳 Відкрити панель офіціанта',
+    };
+  }
+
+  private getWebAppUrl(
+    mode: 'guest' | 'waiter' | 'hookah' | 'admin' | 'director',
+  ) {
     const configuredUrl = process.env.TELEGRAM_WEB_APP_URL?.trim();
     if (!configuredUrl) return null;
 
