@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { clearAccessToken } from "./api/client";
+import type { StaffAuthUser } from "./api/staff";
 import GuestApp from "./guest/GuestApp";
 import GuestBookingDecisionController from "./guest/GuestBookingDecisionController";
 import GuestReviewDismissController from "./guest/GuestReviewDismissController";
@@ -14,6 +15,9 @@ import DirectorWorkspace from "./director/DirectorWorkspace";
 import SitePhotoController from "./theme/SitePhotoController";
 import MoloSplash from "./theme/MoloSplash";
 import { useTelegramAuth } from "./auth/useTelegramAuth";
+import TelegramStaffLinkGate, {
+  readTelegramStaffInviteToken,
+} from "./telegram/TelegramStaffLinkGate";
 import { resolveTelegramMode } from "./telegram/telegramRuntime";
 
 type Mode = "guest" | "waiter" | "hookah" | "admin" | "director";
@@ -43,11 +47,15 @@ function getModeFromHash(): Mode {
 
 export default function App() {
   const [mode, setMode] = useState<Mode>(() => getModeFromHash());
+  const [telegramInviteToken, setTelegramInviteToken] = useState<string | null>(
+    () => readTelegramStaffInviteToken(),
+  );
   const telegramAuth = useTelegramAuth();
   const telegramRoleRouted = useRef(false);
 
   useEffect(() => {
     if (
+      telegramInviteToken ||
       telegramRoleRouted.current ||
       !telegramAuth.isTelegram ||
       !telegramAuth.user
@@ -66,7 +74,7 @@ export default function App() {
       window.location.hash = nextMode;
       setMode(nextMode);
     }
-  }, [mode, telegramAuth.isTelegram, telegramAuth.user]);
+  }, [mode, telegramAuth.isTelegram, telegramAuth.user, telegramInviteToken]);
 
   useEffect(() => {
     function handleHashChange() {
@@ -94,12 +102,35 @@ export default function App() {
     setMode(nextMode);
   }
 
+  function handleTelegramLinked(user: StaffAuthUser) {
+    const nextMode = resolveTelegramMode(user.role, "#guest") || "guest";
+    const url = new URL(window.location.href);
+    url.searchParams.delete("tgWebAppStartParam");
+    window.history.replaceState(
+      {},
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+
+    telegramRoleRouted.current = true;
+    setTelegramInviteToken(null);
+    window.location.hash = nextMode;
+    setMode(nextMode);
+  }
+
   return (
     <main className="min-h-screen bg-[#10100f] text-white">
       <MoloSplash />
       <SitePhotoController />
 
-      {telegramAuth.isTelegram && telegramAuth.error && (
+      {telegramInviteToken && (
+        <TelegramStaffLinkGate
+          token={telegramInviteToken}
+          onLinked={handleTelegramLinked}
+        />
+      )}
+
+      {telegramAuth.isTelegram && telegramAuth.error && !telegramInviteToken && (
         <div className="fixed left-3 right-3 top-3 z-[70] rounded-2xl border border-red-400/40 bg-red-950/95 px-4 py-3 text-center text-sm text-red-100 shadow-2xl">
           Не вдалося увійти через Telegram. Закрийте та відкрийте застосунок повторно.
         </div>
