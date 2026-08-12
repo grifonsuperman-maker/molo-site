@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { resolveJwtSecret } from '../config/runtime-secrets';
 import { Staff } from '../staff/entities/staff.entity';
 import { TelegramAuthDto } from './dto/telegram-auth.dto';
 import { AuthRole, AuthUser } from './types/auth-user.type';
@@ -47,7 +48,7 @@ export class AuthService {
   async verifyToken(token: string): Promise<AuthUser> {
     try {
       const payload = await this.jwtService.verifyAsync<AuthUser>(token, {
-        secret: process.env.JWT_SECRET || 'dev-secret-change-me',
+        secret: resolveJwtSecret(),
       });
       if (!payload.staffId) return payload;
 

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Staff } from '../staff/entities/staff.entity';
+import { resolveJwtSecret } from '../config/runtime-secrets';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 
@@ -9,7 +10,7 @@ import { AuthService } from './auth.service';
   imports: [
     TypeOrmModule.forFeature([Staff]),
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'dev-secret-change-me',
+      secret: resolveJwtSecret(),
       signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '30d' },
     }),
   ],
