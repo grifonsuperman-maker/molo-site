@@ -42,6 +42,15 @@ function createHarness(actor) {
     async closeRestaurant() {
       calls.push(['restaurant-close-full']);
     },
+    async adminOpenRestaurant() {
+      calls.push(['admin-restaurant-open']);
+    },
+    async adminCloseBooking() {
+      calls.push(['admin-restaurant-close-booking']);
+    },
+    async adminCloseRestaurant() {
+      calls.push(['admin-restaurant-close-full']);
+    },
   };
   const telegram = {
     async answerCallbackQuery(id) {
@@ -129,7 +138,7 @@ test('authorization uses callback sender id, not chat id', async () => {
   );
 });
 
-test('Admin can execute admin booking, reschedule and restaurant callbacks', async () => {
+test('Admin can execute admin booking and reschedule callbacks', async () => {
   const actor = {
     role: 'admin',
     active: true,
@@ -142,15 +151,37 @@ test('Admin can execute admin booking, reschedule and restaurant callbacks', asy
     ['booking:cancel:booking-1', 'cancel'],
     ['reschedule:approve:request-1', 'reschedule-approve'],
     ['reschedule:reject:request-1', 'reschedule-reject'],
-    ['restaurant:open', 'restaurant-open'],
-    ['restaurant:close_booking', 'restaurant-close-booking'],
-    ['restaurant:close_full', 'restaurant-close-full'],
   ];
 
   for (const [data, expectedCall] of cases) {
     const { service, calls } = createHarness(actor);
     assert.deepEqual(await service.handleCallback(callback(data)), { ok: true });
     assert.equal(calls.some((entry) => entry[0] === expectedCall), true);
+  }
+});
+
+test('Admin restaurant callbacks dispatch through permission-checking admin methods', async () => {
+  const actor = {
+    role: 'admin',
+    active: true,
+    isArchived: false,
+    isOnShift: false,
+  };
+  const cases = [
+    ['restaurant:open', 'admin-restaurant-open', 'restaurant-open'],
+    [
+      'restaurant:close_booking',
+      'admin-restaurant-close-booking',
+      'restaurant-close-booking',
+    ],
+    ['restaurant:close_full', 'admin-restaurant-close-full', 'restaurant-close-full'],
+  ];
+
+  for (const [data, guardedCall, directorCall] of cases) {
+    const { service, calls } = createHarness(actor);
+    assert.deepEqual(await service.handleCallback(callback(data)), { ok: true });
+    assert.equal(calls.some((entry) => entry[0] === guardedCall), true);
+    assert.equal(calls.some((entry) => entry[0] === directorCall), false);
   }
 });
 
@@ -168,6 +199,10 @@ test('Director can execute protected admin callbacks without shift requirement',
 
   assert.deepEqual(result, { ok: true });
   assert.equal(calls.some((entry) => entry[0] === 'restaurant-close-full'), true);
+  assert.equal(
+    calls.some((entry) => entry[0] === 'admin-restaurant-close-full'),
+    false,
+  );
 });
 
 test('Waiter on shift can check in and complete but cannot approve', async () => {
