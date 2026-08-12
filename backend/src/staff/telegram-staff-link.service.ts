@@ -22,6 +22,8 @@ import { Staff } from './entities/staff.entity';
 
 const TELEGRAM_INVITE_TTL_MS = 30 * 60 * 1000;
 const TELEGRAM_INVITE_PREFIX = 'staff_';
+const DIRECTOR_MAX_FAILED_ATTEMPTS = 5;
+const DIRECTOR_LOCK_MINUTES = 15;
 
 @Injectable()
 export class TelegramStaffLinkService {
@@ -33,28 +35,38 @@ export class TelegramStaffLinkService {
   ) {}
 
   async createInvite(staffId: string) {
-    const staff = await this.getStaffOrThrow(staffId);
-
-    if (!staff.active || staff.isArchived) {
-      throw new BadRequestException(
-        'Telegram можна прив’язати лише активному працівнику',
-      );
-    }
-
-    if (staff.telegramId) {
-      throw new BadRequestException(
-        'Telegram уже прив’язаний до цього працівника',
-      );
-    }
-
+    const botUsername = await this.telegram.getBotUsername();
     const token = randomBytes(24).toString('base64url');
     const expiresAt = new Date(Date.now() + TELEGRAM_INVITE_TTL_MS);
 
-    staff.telegramInviteTokenHash = this.hashToken(token);
-    staff.telegramInviteExpiresAt = expiresAt;
-    await this.staffRepo.save(staff);
+    const staff = await this.staffRepo.manager.transaction(async (manager) => {
+      const lockedStaff = await manager
+        .getRepository(Staff)
+        .createQueryBuilder('staff')
+        .setLock('pessimistic_write')
+        .where('staff.id = :staffId', { staffId })
+        .getOne();
 
-    const botUsername = await this.telegram.getBotUsername();
+      if (!lockedStaff) {
+        throw new NotFoundException('Співробітника не знайдено');
+      }
+
+      if (!lockedStaff.active || lockedStaff.isArchived) {
+        throw new BadRequestException(
+          'Telegram можна прив’язати лише активному працівнику',
+        );
+      }
+
+      if (lockedStaff.telegramId) {
+        throw new BadRequestException(
+          'Telegram уже прив’язаний до цього працівника',
+        );
+      }
+
+      lockedStaff.telegramInviteTokenHash = this.hashToken(token);
+      lockedStaff.telegramInviteExpiresAt = expiresAt;
+      return manager.getRepository(Staff).save(lockedStaff);
+    });
 
     return {
       inviteUrl: `https://t.me/${botUsername}?startapp=${TELEGRAM_INVITE_PREFIX}${token}`,
@@ -234,14 +246,18 @@ export class TelegramStaffLinkService {
         throw new BadRequestException('Введіть пароль Директора');
       }
 
+      await this.assertDirectorNotLocked(staff);
+
       const passwordIsValid = await compare(
         dto.password,
         staff.directorPasswordHash,
       );
 
       if (!passwordIsValid) {
-        throw new UnauthorizedException('Невірний пароль Директора');
+        await this.registerDirectorLoginFailure(staff);
       }
+
+      await this.resetDirectorLoginProtection(staff);
       return;
     }
 
@@ -258,6 +274,61 @@ export class TelegramStaffLinkService {
     if (!pinIsValid) {
       throw new UnauthorizedException('Невірний PIN');
     }
+  }
+
+  private async assertDirectorNotLocked(director: Staff) {
+    if (!director.directorLockedUntil) return;
+
+    const lockedUntil = new Date(director.directorLockedUntil);
+    if (lockedUntil.getTime() <= Date.now()) {
+      director.directorFailedLoginAttempts = 0;
+      director.directorLockedUntil = null;
+      await this.staffRepo.save(director);
+      return;
+    }
+
+    const minutes = Math.max(
+      1,
+      Math.ceil((lockedUntil.getTime() - Date.now()) / 60_000),
+    );
+    throw new UnauthorizedException(
+      `Забагато невдалих спроб. Повторіть через ${minutes} хв.`,
+    );
+  }
+
+  private async registerDirectorLoginFailure(director: Staff): Promise<never> {
+    director.directorFailedLoginAttempts =
+      Number(director.directorFailedLoginAttempts || 0) + 1;
+
+    if (director.directorFailedLoginAttempts >= DIRECTOR_MAX_FAILED_ATTEMPTS) {
+      director.directorLockedUntil = new Date(
+        Date.now() + DIRECTOR_LOCK_MINUTES * 60_000,
+      );
+      await this.staffRepo.save(director);
+      throw new UnauthorizedException(
+        `Забагато невдалих спроб. Вхід заблоковано на ${DIRECTOR_LOCK_MINUTES} хв.`,
+      );
+    }
+
+    await this.staffRepo.save(director);
+    const attemptsLeft =
+      DIRECTOR_MAX_FAILED_ATTEMPTS - director.directorFailedLoginAttempts;
+    throw new UnauthorizedException(
+      `Невірні дані входу. Залишилось спроб: ${attemptsLeft}`,
+    );
+  }
+
+  private async resetDirectorLoginProtection(director: Staff) {
+    if (
+      !director.directorFailedLoginAttempts &&
+      !director.directorLockedUntil
+    ) {
+      return;
+    }
+
+    director.directorFailedLoginAttempts = 0;
+    director.directorLockedUntil = null;
+    await this.staffRepo.save(director);
   }
 
   private verifyTelegramUser(initData: string) {
