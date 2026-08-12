@@ -3,6 +3,7 @@ import { ZonesService } from './zones.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
 import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('zones')
 export class ZonesController {
@@ -14,44 +15,44 @@ export class ZonesController {
     return this.service.findAll();
   }
 
-  @Public()
   @Post()
+  @Roles('owner')
   create(@Body() dto: CreateZoneDto) {
     return this.service.create(dto);
   }
 
-  @Public()
   @Patch(':id')
+  @Roles('owner')
   update(@Param('id') id: string, @Body() dto: UpdateZoneDto) {
     return this.service.update(id, dto);
   }
 
-  @Public()
   @Patch(':id/close')
+  @Roles('owner')
   close(@Param('id') id: string) {
     return this.service.close(id);
   }
 
-  @Public()
   @Patch(':id/open')
+  @Roles('owner')
   open(@Param('id') id: string) {
     return this.service.open(id);
   }
 
-  @Public()
   @Patch(':id/admin/close')
+  @Roles('admin', 'owner')
   adminClose(@Param('id') id: string) {
     return this.service.adminClose(id);
   }
 
-  @Public()
   @Patch(':id/admin/open')
+  @Roles('admin', 'owner')
   adminOpen(@Param('id') id: string) {
     return this.service.adminOpen(id);
   }
 
-  @Public()
   @Delete(':id')
+  @Roles('owner')
   remove(@Param('id') id: string) {
     return this.service.remove(id);
   }
