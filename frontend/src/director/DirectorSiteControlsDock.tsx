@@ -14,6 +14,12 @@ function findSiteSection(): HTMLElement | null {
   return siteSection?.tagName === 'SECTION' ? siteSection : null;
 }
 
+function refreshDirectorPanel() {
+  document
+    .querySelector<HTMLButtonElement>('button[aria-label="Оновити"]')
+    ?.click();
+}
+
 export default function DirectorSiteControlsDock() {
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
@@ -99,6 +105,7 @@ export default function DirectorSiteControlsDock() {
 
       const updated = await restaurantApi.get();
       setRestaurant(updated);
+      refreshDirectorPanel();
       setNotice(
         updated.status === 'closed'
           ? 'Сайт закрито для гостей'
