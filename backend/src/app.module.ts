@@ -11,9 +11,9 @@ import { RolesGuard } from './auth/guards/roles.guard';
 import { BookingsModule } from './bookings/bookings.module';
 import { BroadcastsModule } from './broadcasts/broadcasts.module';
 import { ClientsModule } from './clients/clients.module';
-import { ConstructorModule } from './constructor/constructor.module';
 import { HookahCallsModule } from './hookah-calls/hookah-calls.module';
 import { LogsModule } from './logs/logs.module';
+import { MapModule } from './map/map.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -69,7 +69,7 @@ import { ZonesModule } from './zones/zones.module';
     ClientsModule,
     StaffModule,
     BookingsModule,
-    ConstructorModule,
+    MapModule,
     AnalyticsModule,
     BroadcastsModule,
     TelegramModule,

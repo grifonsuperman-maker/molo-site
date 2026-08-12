@@ -1,13 +1,27 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 import { Restaurant } from '../../restaurant/entities/restaurant.entity';
 import { Zone } from '../../zones/entities/zone.entity';
+
 @Entity('map_objects')
 export class MapObject {
   @PrimaryGeneratedColumn('uuid') id: string;
+
   @ManyToOne(() => Restaurant, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'restaurant_id' }) restaurant: Restaurant;
+  @JoinColumn({ name: 'restaurant_id' })
+  restaurant: Restaurant;
+
   @ManyToOne(() => Zone, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'zone_id' }) zone: Zone | null;
+  @JoinColumn({ name: 'zone_id' })
+  zone: Zone | null;
+
   @Column({ name: 'object_type' }) objectType: string;
   @Column({ nullable: true }) name: string | null;
   @Column({ type: 'numeric', default: 0 }) x: number;
