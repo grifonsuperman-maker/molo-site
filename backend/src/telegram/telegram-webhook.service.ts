@@ -4,8 +4,37 @@ import { BookingRescheduleApprovalService } from '../bookings/booking-reschedule
 import { BookingsService } from '../bookings/bookings.service';
 import { TelegramService } from '../notifications/telegram.service';
 import { RestaurantService } from '../restaurant/restaurant.service';
-import { TelegramStaffLinkService } from '../staff/telegram-staff-link.service';
 import type { StaffRole } from '../staff/entities/staff.entity';
+import { TelegramStaffLinkService } from '../staff/telegram-staff-link.service';
+
+type CallbackRoleRule = {
+  roles: StaffRole[];
+  requiresShift?: boolean;
+};
+
+const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
+  'menu:admin': { roles: ['admin', 'owner'] },
+  'menu:waiter': {
+    roles: ['waiter', 'admin', 'owner'],
+    requiresShift: true,
+  },
+  'booking:approve': { roles: ['admin', 'owner'] },
+  'booking:reject': { roles: ['admin', 'owner'] },
+  'booking:cancel': { roles: ['admin', 'owner'] },
+  'booking:checkin': {
+    roles: ['waiter', 'admin', 'owner'],
+    requiresShift: true,
+  },
+  'booking:complete': {
+    roles: ['waiter', 'admin', 'owner'],
+    requiresShift: true,
+  },
+  'reschedule:approve': { roles: ['admin', 'owner'] },
+  'reschedule:reject': { roles: ['admin', 'owner'] },
+  'restaurant:open': { roles: ['admin', 'owner'] },
+  'restaurant:close_booking': { roles: ['admin', 'owner'] },
+  'restaurant:close_full': { roles: ['admin', 'owner'] },
+};
 
 @Injectable()
 export class TelegramWebhookService {
@@ -95,6 +124,20 @@ export class TelegramWebhookService {
     const [type, action, id] = data.split(':');
 
     try {
+      const accessAllowed = await this.isCallbackAllowed(
+        cb.from?.id,
+        type,
+        action,
+      );
+
+      if (!accessAllowed) {
+        await this.telegram.sendMessage(
+          chatId,
+          '⛔ Недостатньо прав для цієї команди. Відкрийте робочий профіль MOLO.',
+        );
+        return { ok: false };
+      }
+
       if (type === 'menu' && action === 'admin') {
         const keyboard: Array<Array<Record<string, unknown>>> = [];
         const adminAppUrl = this.getWebAppUrl('admin');
@@ -221,6 +264,33 @@ export class TelegramWebhookService {
       );
       return { ok: false };
     }
+  }
+
+  private async isCallbackAllowed(
+    telegramUserId: string | number | undefined,
+    type: string,
+    action: string,
+  ) {
+    const rule = CALLBACK_ROLE_RULES[`${type}:${action}`];
+
+    if (!rule) return true;
+    if (!telegramUserId) return false;
+
+    const actor = await this.telegramStaff.findActiveStaffByTelegramId(
+      String(telegramUserId),
+    );
+
+    if (!actor || !rule.roles.includes(actor.role)) return false;
+
+    if (
+      rule.requiresShift &&
+      (actor.role === 'waiter' || actor.role === 'hookah') &&
+      !actor.isOnShift
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   private staffRoleMenu(role: StaffRole): {
