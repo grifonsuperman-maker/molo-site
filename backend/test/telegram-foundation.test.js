@@ -44,6 +44,62 @@ function createInitData({ botToken, authDate, user }) {
   return params.toString();
 }
 
+function createSingleStaffRepository(staff, lockCalls, transactionState) {
+  const repo = {
+    async findOne({ where }) {
+      if (where.id) return where.id === staff.id ? staff : null;
+      if (Object.prototype.hasOwnProperty.call(where, 'telegramInviteTokenHash')) {
+        return staff.telegramInviteTokenHash === where.telegramInviteTokenHash
+          ? staff
+          : null;
+      }
+      if (Object.prototype.hasOwnProperty.call(where, 'telegramId')) {
+        return staff.telegramId === where.telegramId ? staff : null;
+      }
+      return null;
+    },
+    async save(value) {
+      return value;
+    },
+    createQueryBuilder() {
+      let expectedStaffId = null;
+      let expectedHash = null;
+      return {
+        setLock(value) {
+          lockCalls.push(value);
+          return this;
+        },
+        where(_sql, params) {
+          if (params.staffId !== undefined) expectedStaffId = params.staffId;
+          if (params.tokenHash !== undefined) expectedHash = params.tokenHash;
+          return this;
+        },
+        async getOne() {
+          if (expectedStaffId !== null) {
+            return staff.id === expectedStaffId ? staff : null;
+          }
+          return staff.telegramInviteTokenHash === expectedHash ? staff : null;
+        },
+      };
+    },
+  };
+
+  const manager = {
+    getRepository() {
+      return repo;
+    },
+  };
+
+  repo.manager = {
+    async transaction(callback) {
+      transactionState.count += 1;
+      return callback(manager);
+    },
+  };
+
+  return repo;
+}
+
 test('Telegram initData accepts a fresh correctly signed user', () => {
   const botToken = '123456:test-token';
   const initData = createInitData({
@@ -282,11 +338,11 @@ test('/start uses the director panel label without a crown', async () => {
   ]);
 });
 
-test('staff Telegram invite expires in 30 minutes, locks the row and binds once', async () => {
+test('staff Telegram invite creation and consumption both lock the staff row', async () => {
   const previousToken = process.env.TELEGRAM_BOT_TOKEN;
   process.env.TELEGRAM_BOT_TOKEN = '123456:test-token';
   const lockCalls = [];
-  let transactionCalls = 0;
+  const transactionState = { count: 0 };
 
   const staff = {
     id: '11111111-1111-4111-8111-111111111111',
@@ -301,52 +357,11 @@ test('staff Telegram invite expires in 30 minutes, locks the row and binds once'
     directorPasswordHash: null,
   };
 
-  const repo = {
-    async findOne({ where }) {
-      if (where.id) return where.id === staff.id ? staff : null;
-      if (Object.prototype.hasOwnProperty.call(where, 'telegramInviteTokenHash')) {
-        return staff.telegramInviteTokenHash === where.telegramInviteTokenHash
-          ? staff
-          : null;
-      }
-      if (Object.prototype.hasOwnProperty.call(where, 'telegramId')) {
-        return staff.telegramId === where.telegramId ? staff : null;
-      }
-      return null;
-    },
-    async save(value) {
-      return value;
-    },
-    createQueryBuilder() {
-      let expectedHash = null;
-      return {
-        setLock(value) {
-          lockCalls.push(value);
-          return this;
-        },
-        where(_sql, params) {
-          expectedHash = params.tokenHash;
-          return this;
-        },
-        async getOne() {
-          return staff.telegramInviteTokenHash === expectedHash ? staff : null;
-        },
-      };
-    },
-  };
-
-  const manager = {
-    getRepository() {
-      return repo;
-    },
-  };
-  repo.manager = {
-    async transaction(callback) {
-      transactionCalls += 1;
-      return callback(manager);
-    },
-  };
-
+  const repo = createSingleStaffRepository(
+    staff,
+    lockCalls,
+    transactionState,
+  );
   const jwt = {
     async signAsync(payload) {
       assert.equal(payload.telegramId, '777');
@@ -366,6 +381,8 @@ test('staff Telegram invite expires in 30 minutes, locks the row and binds once'
     const expiryMs = new Date(invite.expiresAt).getTime() - before;
     assert.ok(expiryMs > 29 * 60 * 1000);
     assert.ok(expiryMs <= 30 * 60 * 1000 + 1000);
+    assert.equal(transactionState.count, 1);
+    assert.deepEqual(lockCalls, ['pessimistic_write']);
 
     const startParam = new URL(invite.inviteUrl).searchParams.get('startapp');
     assert.match(startParam, /^staff_[A-Za-z0-9_-]+$/);
@@ -392,13 +409,97 @@ test('staff Telegram invite expires in 30 minutes, locks the row and binds once'
     assert.equal(staff.telegramId, '777');
     assert.equal(staff.telegramInviteTokenHash, null);
     assert.equal(staff.telegramInviteExpiresAt, null);
-    assert.equal(transactionCalls, 1);
-    assert.deepEqual(lockCalls, ['pessimistic_write']);
+    assert.equal(transactionState.count, 2);
+    assert.deepEqual(lockCalls, ['pessimistic_write', 'pessimistic_write']);
 
     await assert.rejects(
       () => service.getInviteInfo(startParam),
       /вже використане|недійсне/,
     );
+  } finally {
+    if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = previousToken;
+  }
+});
+
+test('director Telegram invite enforces the existing five-attempt lockout state', async () => {
+  const previousToken = process.env.TELEGRAM_BOT_TOKEN;
+  process.env.TELEGRAM_BOT_TOKEN = '123456:test-token';
+  const lockCalls = [];
+  const transactionState = { count: 0 };
+
+  const director = {
+    id: '22222222-2222-4222-8222-222222222222',
+    fullName: 'Директор',
+    role: 'owner',
+    active: true,
+    isArchived: false,
+    telegramId: null,
+    telegramInviteTokenHash: null,
+    telegramInviteExpiresAt: null,
+    pinHash: null,
+    directorPasswordHash: await hash('correct-password', 4),
+    directorFailedLoginAttempts: 0,
+    directorLockedUntil: null,
+  };
+
+  const repo = createSingleStaffRepository(
+    director,
+    lockCalls,
+    transactionState,
+  );
+  const telegram = {
+    async getBotUsername() {
+      return 'molo_restaurant_bot';
+    },
+  };
+  const service = new TelegramStaffLinkService(repo, { signAsync() {} }, telegram);
+
+  try {
+    const invite = await service.createInvite(director.id);
+    const startParam = new URL(invite.inviteUrl).searchParams.get('startapp');
+    const initData = createInitData({
+      botToken: '123456:test-token',
+      authDate: Math.floor(Date.now() / 1000),
+      user: { id: 888, first_name: 'Director' },
+    });
+
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      await assert.rejects(
+        () =>
+          service.confirmInvite({
+            token: startParam,
+            initData,
+            password: 'wrong-password',
+          }),
+        new RegExp(`Залишилось спроб: ${5 - attempt}`),
+      );
+    }
+
+    await assert.rejects(
+      () =>
+        service.confirmInvite({
+          token: startParam,
+          initData,
+          password: 'wrong-password',
+        }),
+      /заблоковано на 15 хв/,
+    );
+
+    assert.equal(director.directorFailedLoginAttempts, 5);
+    assert.ok(new Date(director.directorLockedUntil).getTime() > Date.now());
+    assert.equal(director.telegramId, null);
+
+    await assert.rejects(
+      () =>
+        service.confirmInvite({
+          token: startParam,
+          initData,
+          password: 'correct-password',
+        }),
+      /Повторіть через/,
+    );
+    assert.equal(director.telegramId, null);
   } finally {
     if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
     else process.env.TELEGRAM_BOT_TOKEN = previousToken;
