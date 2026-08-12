@@ -236,28 +236,7 @@ export class TelegramStaffLinkService {
     dto: ConfirmTelegramStaffLinkDto,
   ) {
     if (staff.role === 'owner') {
-      if (!staff.directorPasswordHash) {
-        throw new BadRequestException(
-          'Спочатку налаштуйте пароль Директора на сайті',
-        );
-      }
-
-      if (!dto.password) {
-        throw new BadRequestException('Введіть пароль Директора');
-      }
-
-      await this.assertDirectorNotLocked(staff);
-
-      const passwordIsValid = await compare(
-        dto.password,
-        staff.directorPasswordHash,
-      );
-
-      if (!passwordIsValid) {
-        await this.registerDirectorLoginFailure(staff);
-      }
-
-      await this.resetDirectorLoginProtection(staff);
+      await this.assertDirectorCredentialAtomically(dto.token, dto.password);
       return;
     }
 
@@ -276,59 +255,104 @@ export class TelegramStaffLinkService {
     }
   }
 
-  private async assertDirectorNotLocked(director: Staff) {
-    if (!director.directorLockedUntil) return;
+  private async assertDirectorCredentialAtomically(
+    rawToken: string,
+    password?: string,
+  ) {
+    const token = this.normalizeToken(rawToken);
+    const tokenHash = this.hashToken(token);
 
-    const lockedUntil = new Date(director.directorLockedUntil);
-    if (lockedUntil.getTime() <= Date.now()) {
-      director.directorFailedLoginAttempts = 0;
-      director.directorLockedUntil = null;
-      await this.staffRepo.save(director);
-      return;
-    }
+    const result = await this.staffRepo.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(Staff);
+      const director = await repository
+        .createQueryBuilder('staff')
+        .setLock('pessimistic_write')
+        .where('staff.telegram_invite_token_hash = :tokenHash', { tokenHash })
+        .getOne();
 
-    const minutes = Math.max(
-      1,
-      Math.ceil((lockedUntil.getTime() - Date.now()) / 60_000),
-    );
-    throw new UnauthorizedException(
-      `Забагато невдалих спроб. Повторіть через ${minutes} хв.`,
-    );
-  }
+      this.assertInviteUsable(director);
 
-  private async registerDirectorLoginFailure(director: Staff): Promise<never> {
-    director.directorFailedLoginAttempts =
-      Number(director.directorFailedLoginAttempts || 0) + 1;
+      if (director.role !== 'owner') {
+        return { error: new UnauthorizedException('Потрібен доступ Директора') };
+      }
 
-    if (director.directorFailedLoginAttempts >= DIRECTOR_MAX_FAILED_ATTEMPTS) {
-      director.directorLockedUntil = new Date(
-        Date.now() + DIRECTOR_LOCK_MINUTES * 60_000,
+      if (!director.directorPasswordHash) {
+        return {
+          error: new BadRequestException(
+            'Спочатку налаштуйте пароль Директора на сайті',
+          ),
+        };
+      }
+
+      if (!password) {
+        return { error: new BadRequestException('Введіть пароль Директора') };
+      }
+
+      if (director.directorLockedUntil) {
+        const lockedUntil = new Date(director.directorLockedUntil);
+
+        if (lockedUntil.getTime() > Date.now()) {
+          const minutes = Math.max(
+            1,
+            Math.ceil((lockedUntil.getTime() - Date.now()) / 60_000),
+          );
+          return {
+            error: new UnauthorizedException(
+              `Забагато невдалих спроб. Повторіть через ${minutes} хв.`,
+            ),
+          };
+        }
+
+        director.directorFailedLoginAttempts = 0;
+        director.directorLockedUntil = null;
+      }
+
+      const passwordIsValid = await compare(
+        password,
+        director.directorPasswordHash,
       );
-      await this.staffRepo.save(director);
-      throw new UnauthorizedException(
-        `Забагато невдалих спроб. Вхід заблоковано на ${DIRECTOR_LOCK_MINUTES} хв.`,
-      );
-    }
 
-    await this.staffRepo.save(director);
-    const attemptsLeft =
-      DIRECTOR_MAX_FAILED_ATTEMPTS - director.directorFailedLoginAttempts;
-    throw new UnauthorizedException(
-      `Невірні дані входу. Залишилось спроб: ${attemptsLeft}`,
-    );
-  }
+      if (!passwordIsValid) {
+        director.directorFailedLoginAttempts =
+          Number(director.directorFailedLoginAttempts || 0) + 1;
 
-  private async resetDirectorLoginProtection(director: Staff) {
-    if (
-      !director.directorFailedLoginAttempts &&
-      !director.directorLockedUntil
-    ) {
-      return;
-    }
+        if (
+          director.directorFailedLoginAttempts >= DIRECTOR_MAX_FAILED_ATTEMPTS
+        ) {
+          director.directorLockedUntil = new Date(
+            Date.now() + DIRECTOR_LOCK_MINUTES * 60_000,
+          );
+          await repository.save(director);
+          return {
+            error: new UnauthorizedException(
+              `Забагато невдалих спроб. Вхід заблоковано на ${DIRECTOR_LOCK_MINUTES} хв.`,
+            ),
+          };
+        }
 
-    director.directorFailedLoginAttempts = 0;
-    director.directorLockedUntil = null;
-    await this.staffRepo.save(director);
+        await repository.save(director);
+        const attemptsLeft =
+          DIRECTOR_MAX_FAILED_ATTEMPTS - director.directorFailedLoginAttempts;
+        return {
+          error: new UnauthorizedException(
+            `Невірні дані входу. Залишилось спроб: ${attemptsLeft}`,
+          ),
+        };
+      }
+
+      if (
+        director.directorFailedLoginAttempts ||
+        director.directorLockedUntil
+      ) {
+        director.directorFailedLoginAttempts = 0;
+        director.directorLockedUntil = null;
+        await repository.save(director);
+      }
+
+      return { error: null };
+    });
+
+    if (result.error) throw result.error;
   }
 
   private verifyTelegramUser(initData: string) {
@@ -364,15 +388,5 @@ export class TelegramStaffLinkService {
 
   private hashToken(token: string) {
     return createHash('sha256').update(token).digest('hex');
-  }
-
-  private async getStaffOrThrow(id: string) {
-    const staff = await this.staffRepo.findOne({ where: { id } });
-
-    if (!staff) {
-      throw new NotFoundException('Співробітника не знайдено');
-    }
-
-    return staff;
   }
 }
