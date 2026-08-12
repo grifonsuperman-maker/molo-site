@@ -112,6 +112,35 @@ export type StaffShiftEvent = {
   createdAt: string;
 };
 
+export type TelegramStaffInvite = {
+  inviteUrl: string;
+  expiresAt: string;
+  staff: {
+    id: string;
+    fullName: string;
+    role: StaffRole;
+  };
+};
+
+export type TelegramStaffInviteInfo = {
+  fullName: string;
+  role: StaffRole;
+  authType: 'pin' | 'director_password';
+  expiresAt: string | null;
+};
+
+export type ConfirmTelegramStaffInvitePayload = {
+  token: string;
+  initData: string;
+  pin?: string;
+  password?: string;
+};
+
+export type TelegramStaffLinkResponse = {
+  accessToken: string;
+  user: StaffAuthUser;
+};
+
 export const staffApi = {
   getDirectorAccessStatus: () =>
     api.get<DirectorAccessStatus>('/staff/director-access/status'),
@@ -156,6 +185,21 @@ export const staffApi = {
 
   update: (id: string, payload: UpdateStaffPayload) =>
     api.patch<StaffMember>(`/staff/${id}`, payload),
+
+  createTelegramInvite: (id: string) =>
+    api.post<TelegramStaffInvite>(`/staff/${id}/telegram-invite`, {}),
+
+  getTelegramInviteInfo: (token: string) =>
+    api.post<TelegramStaffInviteInfo>('/staff/telegram-link/info', { token }),
+
+  confirmTelegramInvite: async (payload: ConfirmTelegramStaffInvitePayload) => {
+    const result = await api.post<TelegramStaffLinkResponse>(
+      '/staff/telegram-link/confirm',
+      payload,
+    );
+    setAccessToken(result.accessToken);
+    return result;
+  },
 
   getHistory: (id: string) =>
     api.get<StaffShiftEvent[]>(`/staff/${id}/history`),
