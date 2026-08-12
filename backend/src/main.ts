@@ -1,9 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { assertProductionSecrets } from './config/runtime-secrets';
 import { TelegramService } from './notifications/telegram.service';
 
 async function bootstrap() {
+  assertProductionSecrets();
+
   const app = await NestFactory.create(AppModule);
   app.enableCors({ origin: true, credentials: true });
   app.setGlobalPrefix('api');
