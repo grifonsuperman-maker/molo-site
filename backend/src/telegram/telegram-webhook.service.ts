@@ -1,9 +1,33 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
 import { BookingRescheduleApprovalService } from '../bookings/booking-reschedule-approval.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { TelegramService } from '../notifications/telegram.service';
 import { RestaurantService } from '../restaurant/restaurant.service';
+import { Staff, StaffRole } from '../staff/entities/staff.entity';
+
+type CallbackRoleRule = {
+  type: string;
+  action: string;
+  roles: StaffRole[];
+};
+
+const CALLBACK_ROLE_RULES: CallbackRoleRule[] = [
+  { type: 'menu', action: 'admin', roles: ['admin', 'owner'] },
+  { type: 'menu', action: 'waiter', roles: ['waiter', 'admin', 'owner'] },
+  { type: 'booking', action: 'approve', roles: ['admin', 'owner'] },
+  { type: 'booking', action: 'reject', roles: ['admin', 'owner'] },
+  { type: 'booking', action: 'cancel', roles: ['admin', 'owner'] },
+  { type: 'booking', action: 'checkin', roles: ['waiter', 'admin', 'owner'] },
+  { type: 'booking', action: 'complete', roles: ['waiter', 'admin', 'owner'] },
+  { type: 'reschedule', action: 'approve', roles: ['admin', 'owner'] },
+  { type: 'reschedule', action: 'reject', roles: ['admin', 'owner'] },
+  { type: 'restaurant', action: 'open', roles: ['admin', 'owner'] },
+  { type: 'restaurant', action: 'close_booking', roles: ['admin', 'owner'] },
+  { type: 'restaurant', action: 'close_full', roles: ['admin', 'owner'] },
+];
 
 @Injectable()
 export class TelegramWebhookService {
@@ -12,6 +36,8 @@ export class TelegramWebhookService {
     private readonly rescheduleApproval: BookingRescheduleApprovalService,
     private readonly restaurant: RestaurantService,
     private readonly telegram: TelegramService,
+    @InjectRepository(Staff)
+    private readonly staffRepo: Repository<Staff>,
   ) {}
 
   async handleUpdate(update: any) {
@@ -67,6 +93,15 @@ export class TelegramWebhookService {
     const [type, action, id] = data.split(':');
 
     try {
+      const accessAllowed = await this.isCallbackAllowed(cb.from?.id, type, action);
+      if (!accessAllowed) {
+        await this.telegram.sendMessage(
+          chatId,
+          '⛔ Недостатньо прав для цієї команди. Відкрийте робочий профіль MOLO.',
+        );
+        return { ok: false };
+      }
+
       if (type === 'menu' && action === 'admin') {
         const keyboard: Array<Array<Record<string, unknown>>> = [];
         const adminAppUrl = this.getWebAppUrl('admin');
@@ -193,6 +228,38 @@ export class TelegramWebhookService {
       );
       return { ok: false };
     }
+  }
+
+  private async isCallbackAllowed(
+    telegramUserId: string | number | undefined,
+    type: string,
+    action: string,
+  ) {
+    const rule = CALLBACK_ROLE_RULES.find(
+      (candidate) => candidate.type === type && candidate.action === action,
+    );
+
+    if (!rule) return true;
+    if (!telegramUserId || !this.staffRepo) return false;
+
+    const actor = await this.staffRepo.findOne({
+      where: {
+        telegramId: String(telegramUserId),
+        active: true,
+        isArchived: false,
+      },
+    });
+
+    if (!actor || !rule.roles.includes(actor.role)) return false;
+
+    if (
+      (actor.role === 'waiter' || actor.role === 'hookah') &&
+      !actor.isOnShift
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   private getWebAppUrl(mode: 'guest' | 'waiter' | 'admin') {
