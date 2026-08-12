@@ -9,7 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { compare } from 'bcryptjs';
 import { createHash, randomBytes } from 'crypto';
-import { EntityManager, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import {
   DEFAULT_TELEGRAM_INIT_DATA_MAX_AGE_SECONDS,
