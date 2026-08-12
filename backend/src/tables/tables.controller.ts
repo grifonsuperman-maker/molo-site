@@ -16,20 +16,20 @@ export class TablesController {
     return this.service.findAll();
   }
 
-  @Public()
   @Post()
+  @Roles('owner')
   create(@Body() dto: CreateTableDto) {
     return this.service.create(dto);
   }
 
-  @Public()
   @Patch('number/:tableNumber/status')
+  @Roles('admin', 'owner')
   statusByNumber(@Param('tableNumber') tableNumber: string, @Body() body: { status: TableStatus }) {
     return this.service.setStatusByNumber(tableNumber, body.status);
   }
 
-  @Roles('waiter', 'admin', 'owner')
   @Patch(':id/waiter-status')
+  @Roles('waiter', 'admin', 'owner')
   waiterStatus(
     @Param('id') id: string,
     @Body('status') status: 'occupied' | 'free',
@@ -37,50 +37,50 @@ export class TablesController {
     return this.service.setWaiterStatus(id, status);
   }
 
-  @Public()
   @Patch(':id')
+  @Roles('owner')
   update(@Param('id') id: string, @Body() dto: UpdateTableDto) {
     return this.service.update(id, dto);
   }
 
-  @Public()
   @Patch(':id/status')
+  @Roles('admin', 'owner')
   status(@Param('id') id: string, @Body() body: { status: TableStatus }) {
     return this.service.setStatus(id, body.status);
   }
 
-  @Public()
   @Patch(':id/occupied')
+  @Roles('waiter', 'admin', 'owner')
   occupied(@Param('id') id: string) {
     return this.service.markOccupied(id);
   }
 
-  @Public()
   @Patch(':id/cleaning')
+  @Roles('waiter', 'admin', 'owner')
   cleaning(@Param('id') id: string) {
     return this.service.markCleaning(id);
   }
 
-  @Public()
   @Patch(':id/free')
+  @Roles('waiter', 'admin', 'owner')
   free(@Param('id') id: string) {
     return this.service.markFree(id);
   }
 
-  @Public()
   @Patch(':id/open')
+  @Roles('admin', 'owner')
   open(@Param('id') id: string) {
     return this.service.open(id);
   }
 
-  @Public()
   @Patch(':id/close')
+  @Roles('admin', 'owner')
   close(@Param('id') id: string) {
     return this.service.close(id);
   }
 
-  @Public()
   @Delete(':id')
+  @Roles('owner')
   remove(@Param('id') id: string) {
     return this.service.remove(id);
   }
