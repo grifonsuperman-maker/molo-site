@@ -124,13 +124,13 @@ export class TelegramWebhookService {
     const [type, action, id] = data.split(':');
 
     try {
-      const accessAllowed = await this.isCallbackAllowed(
+      const actorRole = await this.getCallbackActorRole(
         cb.from?.id,
         type,
         action,
       );
 
-      if (!accessAllowed) {
+      if (!actorRole) {
         await this.telegram.sendMessage(
           chatId,
           '⛔ Недостатньо прав для цієї команди. Відкрийте робочий профіль MOLO.',
@@ -238,19 +238,22 @@ export class TelegramWebhookService {
       }
 
       if (type === 'restaurant' && action === 'open') {
-        await this.restaurant.openRestaurant();
+        if (actorRole === 'admin') await this.restaurant.adminOpenRestaurant();
+        else await this.restaurant.openRestaurant();
         await this.telegram.sendMessage(chatId, '🟢 Ресторан відкрито');
         return { ok: true };
       }
 
       if (type === 'restaurant' && action === 'close_booking') {
-        await this.restaurant.closeBooking();
+        if (actorRole === 'admin') await this.restaurant.adminCloseBooking();
+        else await this.restaurant.closeBooking();
         await this.telegram.sendMessage(chatId, '🔒 Онлайн-бронювання закрито');
         return { ok: true };
       }
 
       if (type === 'restaurant' && action === 'close_full') {
-        await this.restaurant.closeRestaurant({});
+        if (actorRole === 'admin') await this.restaurant.adminCloseRestaurant({});
+        else await this.restaurant.closeRestaurant({});
         await this.telegram.sendMessage(chatId, '🔴 Ресторан повністю закрито');
         return { ok: true };
       }
@@ -266,31 +269,31 @@ export class TelegramWebhookService {
     }
   }
 
-  private async isCallbackAllowed(
+  private async getCallbackActorRole(
     telegramUserId: string | number | undefined,
     type: string,
     action: string,
-  ) {
+  ): Promise<StaffRole | 'unprotected' | null> {
     const rule = CALLBACK_ROLE_RULES[`${type}:${action}`];
 
-    if (!rule) return true;
-    if (!telegramUserId) return false;
+    if (!rule) return 'unprotected';
+    if (!telegramUserId) return null;
 
     const actor = await this.telegramStaff.findActiveStaffByTelegramId(
       String(telegramUserId),
     );
 
-    if (!actor || !rule.roles.includes(actor.role)) return false;
+    if (!actor || !rule.roles.includes(actor.role)) return null;
 
     if (
       rule.requiresShift &&
       (actor.role === 'waiter' || actor.role === 'hookah') &&
       !actor.isOnShift
     ) {
-      return false;
+      return null;
     }
 
-    return true;
+    return actor.role;
   }
 
   private staffRoleMenu(role: StaffRole): {
