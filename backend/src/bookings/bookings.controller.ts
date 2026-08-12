@@ -54,35 +54,32 @@ export class BookingsController {
     return this.guestService.list(dto);
   }
 
-  @Public()
   @Get('pending-reminders')
+  @Roles('admin', 'owner')
   pendingRemindersList() {
     return this.service.getPendingReminders();
   }
 
-  // Тимчасово відкрито для тестових панелей.
-  // Після впровадження авторизації повернемо перевірку ролей.
-  @Public()
   @Get('today')
   @Roles('waiter', 'admin', 'owner')
   today() {
     return this.service.getToday();
   }
 
-  @Public()
   @Get('by-date')
+  @Roles('admin', 'owner')
   byDate(@Query('date') date: string) {
     return this.service.getByDate(date);
   }
 
-  @Public()
   @Get('archive')
+  @Roles('admin', 'owner')
   archive(@Query('date') date?: string, @Query('limit') limit?: string) {
     return this.service.getArchive(date, Number(limit));
   }
 
-  @Public()
   @Get('stats')
+  @Roles('admin', 'owner')
   stats() {
     return this.service.getStats();
   }
@@ -160,26 +157,26 @@ export class BookingsController {
     return this.service.getPublicStatus(id);
   }
 
-  @Public()
   @Patch(':id/approve')
+  @Roles('admin', 'owner')
   approve(@Param('id') id: string) {
     return this.service.approve(id);
   }
 
-  @Public()
   @Patch(':id/reject')
+  @Roles('admin', 'owner')
   reject(@Param('id') id: string) {
     return this.service.reject(id);
   }
 
-  @Public()
   @Patch(':id/cancel')
+  @Roles('admin', 'owner')
   cancel(@Param('id') id: string) {
     return this.service.cancel(id);
   }
 
-  @Public()
   @Patch(':id/no-show')
+  @Roles('admin', 'owner')
   noShow(@Param('id') id: string) {
     return this.service.noShow(id);
   }
