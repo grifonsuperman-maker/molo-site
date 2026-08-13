@@ -92,7 +92,7 @@ export class StaffController {
   @Public()
   @Post('pin-login')
   async loginWithPin(@Body() dto: StaffPinLoginDto) {
-    const key = this.pinAttemptKey('pin-login', dto.staffId);
+    const key = this.pinAttemptKey('pin-login', dto.staffId.toLowerCase());
 
     return this.withPinAttemptLock(key, async () => {
       this.ensurePinAttemptCapacity(key);
@@ -370,10 +370,10 @@ export class StaffController {
     }
 
     if (this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
-      throw new HttpException(
-        'Забагато спроб входу. Повторіть пізніше.',
-        429,
-      );
+      const oldestKey = this.pinAttempts.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.pinAttempts.delete(oldestKey);
+      }
     }
   }
 

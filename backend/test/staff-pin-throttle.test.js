@@ -59,8 +59,37 @@ test('concurrent PIN guesses are serialized per employee', async () => {
   assert.equal(getLoginCalls(), 5);
 });
 
-test('full attempt map rejects unseen keys instead of failing open', async () => {
+test('staff UUID casing cannot create separate PIN attempt buckets', async () => {
   const { controller, getLoginCalls } = createController();
+  const lowerCaseId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+  const upperCaseId = lowerCaseId.toUpperCase();
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await assert.rejects(
+      () =>
+        controller.loginWithPin({
+          staffId: attempt % 2 ? lowerCaseId : upperCaseId,
+          pin: '0000',
+        }),
+      /Невірний працівник або PIN/,
+    );
+  }
+
+  await assert.rejects(
+    () => controller.loginWithPin({ staffId: upperCaseId, pin: '0000' }),
+    /заблоковано на 15 хв/,
+  );
+  await assert.rejects(
+    () => controller.loginWithPin({ staffId: lowerCaseId, pin: '0000' }),
+    /Повторіть через/,
+  );
+  assert.equal(getLoginCalls(), 5);
+});
+
+test('full attempt map admits an unseen employee without growing', async () => {
+  const { controller, getLoginCalls } = createController({
+    loginWithPin: async () => ({ accessToken: 'test-token' }),
+  });
   const now = Date.now();
 
   for (let index = 0; index < 10_000; index += 1) {
@@ -71,11 +100,10 @@ test('full attempt map rejects unseen keys instead of failing open', async () =>
     });
   }
 
-  await assert.rejects(
-    () => controller.loginWithPin({ staffId: STAFF_ID, pin: '0000' }),
-    /Забагато спроб входу/,
-  );
-  assert.equal(getLoginCalls(), 0);
+  await controller.loginWithPin({ staffId: STAFF_ID, pin: '0000' });
+
+  assert.equal(getLoginCalls(), 1);
+  assert.equal(controller.pinAttempts.size, 9_999);
 });
 
 test('Telegram staff-link PIN uses the same five-attempt lockout', async () => {
