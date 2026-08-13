@@ -4,6 +4,7 @@ const test = require('node:test');
 const { AuthService } = require('../dist/auth/auth.service.js');
 const {
   assertProductionSecrets,
+  isDevAuthAllowed,
   isProductionRuntime,
   resolveJwtSecret,
 } = require('../dist/config/runtime-secrets.js');
@@ -42,6 +43,72 @@ test('production startup accepts configured JWT and Telegram webhook secrets', (
 
   assert.equal(resolveJwtSecret(env), 'jwt-secret');
   assert.doesNotThrow(() => assertProductionSecrets(env));
+});
+
+test('development Telegram dev auth requires the explicit flag', () => {
+  assert.equal(
+    isDevAuthAllowed({ NODE_ENV: 'development', ALLOW_DEV_AUTH: 'true' }),
+    true,
+  );
+  assert.equal(
+    isDevAuthAllowed({ NODE_ENV: 'development', ALLOW_DEV_AUTH: 'false' }),
+    false,
+  );
+});
+
+test('production and Render always disable Telegram dev auth', () => {
+  assert.equal(
+    isDevAuthAllowed({ NODE_ENV: 'production', ALLOW_DEV_AUTH: 'true' }),
+    false,
+  );
+  assert.equal(
+    isDevAuthAllowed({
+      RENDER_EXTERNAL_URL: 'https://molo-backend.example',
+      ALLOW_DEV_AUTH: 'true',
+    }),
+    false,
+  );
+});
+
+test('AuthService rejects devTelegramId on Render even when ALLOW_DEV_AUTH is true', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousRenderExternalUrl = process.env.RENDER_EXTERNAL_URL;
+  const previousAllowDevAuth = process.env.ALLOW_DEV_AUTH;
+
+  delete process.env.NODE_ENV;
+  process.env.RENDER_EXTERNAL_URL = 'https://molo-backend.example';
+  process.env.ALLOW_DEV_AUTH = 'true';
+
+  const staffRepo = {
+    findOne: async () => {
+      throw new Error('staff lookup must not run for rejected dev auth');
+    },
+  };
+  const jwtService = {
+    signAsync: async () => {
+      throw new Error('token signing must not run for rejected dev auth');
+    },
+  };
+
+  try {
+    const service = new AuthService(staffRepo, jwtService);
+    await assert.rejects(
+      () => service.authenticateTelegram({ devTelegramId: '123456' }),
+      /initData Telegram відсутній/,
+    );
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+
+    if (previousRenderExternalUrl === undefined) {
+      delete process.env.RENDER_EXTERNAL_URL;
+    } else {
+      process.env.RENDER_EXTERNAL_URL = previousRenderExternalUrl;
+    }
+
+    if (previousAllowDevAuth === undefined) delete process.env.ALLOW_DEV_AUTH;
+    else process.env.ALLOW_DEV_AUTH = previousAllowDevAuth;
+  }
 });
 
 test('JWT verification uses the same resolved secret as token signing', async () => {
