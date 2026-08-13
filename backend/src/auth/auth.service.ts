@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { resolveJwtSecret } from '../config/runtime-secrets';
+import { isDevAuthAllowed, resolveJwtSecret } from '../config/runtime-secrets';
 import { Staff } from '../staff/entities/staff.entity';
 import { TelegramAuthDto } from './dto/telegram-auth.dto';
 import { AuthRole, AuthUser } from './types/auth-user.type';
@@ -99,7 +99,7 @@ export class AuthService {
       }
     }
 
-    if (process.env.ALLOW_DEV_AUTH === 'true' && dto.devTelegramId) {
+    if (isDevAuthAllowed() && dto.devTelegramId) {
       return {
         telegramId: dto.devTelegramId,
         name: dto.devName || 'Dev User',

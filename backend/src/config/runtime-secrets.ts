@@ -10,6 +10,14 @@ export function isProductionRuntime(env: RuntimeEnv = process.env): boolean {
   return read(env, 'NODE_ENV') === 'production' || Boolean(read(env, 'RENDER_EXTERNAL_URL'));
 }
 
+export function isDevAuthAllowed(env: RuntimeEnv = process.env): boolean {
+  return (
+    read(env, 'NODE_ENV') === 'development' &&
+    !isProductionRuntime(env) &&
+    read(env, 'ALLOW_DEV_AUTH') === 'true'
+  );
+}
+
 export function resolveJwtSecret(env: RuntimeEnv = process.env): string {
   const configured = read(env, 'JWT_SECRET');
   if (configured) return configured;
