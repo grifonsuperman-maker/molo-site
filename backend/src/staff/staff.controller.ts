@@ -13,7 +13,7 @@ import {
   Post,
   Req,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { Public } from '../common/decorators/public.decorator';
@@ -33,9 +33,21 @@ import type { StaffRole } from './entities/staff.entity';
 import { StaffService } from './staff.service';
 import { TelegramStaffLinkService } from './telegram-staff-link.service';
 
+const PIN_MAX_FAILED_ATTEMPTS = 5;
+const PIN_WINDOW_MS = 15 * 60 * 1000;
+const PIN_LOCK_MS = 15 * 60 * 1000;
+const PIN_ATTEMPT_MAX_ENTRIES = 10_000;
+
+type PinAttemptState = {
+  failedAttempts: number;
+  windowStartedAt: number;
+  lockedUntil: number | null;
+};
+
 @Controller('staff')
 export class StaffController {
   private readonly logger = new Logger(StaffController.name);
+  private readonly pinAttempts = new Map<string, PinAttemptState>();
 
   constructor(
     private readonly service: StaffService,
@@ -78,8 +90,23 @@ export class StaffController {
 
   @Public()
   @Post('pin-login')
-  loginWithPin(@Body() dto: StaffPinLoginDto) {
-    return this.service.loginWithPin(dto);
+  async loginWithPin(
+    @Body() dto: StaffPinLoginDto,
+    @Req() request: any,
+  ) {
+    const key = this.pinAttemptKey('pin-login', dto.staffId, request);
+    this.assertPinAttemptAllowed(key);
+
+    try {
+      const result = await this.service.loginWithPin(dto);
+      this.resetPinAttempts(key);
+      return result;
+    } catch (error) {
+      if (this.isCredentialFailure(error, 'Невірний працівник або PIN')) {
+        this.registerPinFailure(key);
+      }
+      throw error;
+    }
   }
 
   @Public()
@@ -90,8 +117,30 @@ export class StaffController {
 
   @Public()
   @Post('telegram-link/confirm')
-  confirmTelegramLink(@Body() dto: ConfirmTelegramStaffLinkDto) {
-    return this.telegramLinks.confirmInvite(dto);
+  async confirmTelegramLink(
+    @Body() dto: ConfirmTelegramStaffLinkDto,
+    @Req() request: any,
+  ) {
+    const tokenFingerprint = createHash('sha256')
+      .update(String(dto.token || ''))
+      .digest('hex');
+    const key = this.pinAttemptKey(
+      'telegram-link',
+      tokenFingerprint,
+      request,
+    );
+    this.assertPinAttemptAllowed(key);
+
+    try {
+      const result = await this.telegramLinks.confirmInvite(dto);
+      this.resetPinAttempts(key);
+      return result;
+    } catch (error) {
+      if (this.isCredentialFailure(error, 'Невірний PIN')) {
+        this.registerPinFailure(key);
+      }
+      throw error;
+    }
   }
 
   @Roles('owner', 'admin')
@@ -282,6 +331,115 @@ export class StaffController {
         'Адміністратор може керувати лише офіціантами та кальянниками',
       );
     }
+  }
+
+  private pinAttemptKey(scope: string, subject: string, request: any) {
+    const clientIp = this.getClientIp(request);
+    return createHash('sha256')
+      .update(`${scope}|${subject}|${clientIp}`)
+      .digest('hex');
+  }
+
+  private getClientIp(request: any) {
+    const forwarded = request?.headers?.['x-forwarded-for'];
+    const forwardedValue = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const forwardedIp =
+      typeof forwardedValue === 'string'
+        ? forwardedValue.split(',')[0]?.trim()
+        : '';
+
+    return (
+      forwardedIp ||
+      String(request?.ip || request?.socket?.remoteAddress || 'unknown').trim()
+    );
+  }
+
+  private assertPinAttemptAllowed(key: string) {
+    const state = this.pinAttempts.get(key);
+    if (!state) return;
+
+    const now = Date.now();
+    if (state.lockedUntil && state.lockedUntil > now) {
+      const minutes = Math.max(
+        1,
+        Math.ceil((state.lockedUntil - now) / 60_000),
+      );
+      throw new HttpException(
+        `Забагато невдалих спроб. Повторіть через ${minutes} хв.`,
+        429,
+      );
+    }
+
+    if (
+      (state.lockedUntil && state.lockedUntil <= now) ||
+      now - state.windowStartedAt >= PIN_WINDOW_MS
+    ) {
+      this.pinAttempts.delete(key);
+    }
+  }
+
+  private registerPinFailure(key: string) {
+    const now = Date.now();
+    let state = this.pinAttempts.get(key);
+
+    if (!state || now - state.windowStartedAt >= PIN_WINDOW_MS) {
+      if (!state && this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
+        this.cleanupPinAttempts(now);
+      }
+
+      if (!state && this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
+        return;
+      }
+
+      state = {
+        failedAttempts: 0,
+        windowStartedAt: now,
+        lockedUntil: null,
+      };
+    }
+
+    state.failedAttempts += 1;
+
+    if (state.failedAttempts >= PIN_MAX_FAILED_ATTEMPTS) {
+      state.lockedUntil = now + PIN_LOCK_MS;
+      this.pinAttempts.set(key, state);
+      throw new HttpException(
+        'Забагато невдалих спроб. Вхід заблоковано на 15 хв.',
+        429,
+      );
+    }
+
+    this.pinAttempts.set(key, state);
+  }
+
+  private resetPinAttempts(key: string) {
+    this.pinAttempts.delete(key);
+  }
+
+  private cleanupPinAttempts(now = Date.now()) {
+    for (const [key, state] of this.pinAttempts) {
+      const lockExpired = !state.lockedUntil || state.lockedUntil <= now;
+      const windowExpired = now - state.windowStartedAt >= PIN_WINDOW_MS;
+      if (lockExpired && windowExpired) {
+        this.pinAttempts.delete(key);
+      }
+    }
+  }
+
+  private isCredentialFailure(error: unknown, expectedMessage: string) {
+    if (!(error instanceof HttpException) || error.getStatus() !== 401) {
+      return false;
+    }
+
+    const response = error.getResponse() as any;
+    const message =
+      typeof response === 'string'
+        ? response
+        : Array.isArray(response?.message)
+          ? response.message.join(' ')
+          : response?.message;
+
+    return message === expectedMessage;
   }
 
   private async recoverShiftState(
