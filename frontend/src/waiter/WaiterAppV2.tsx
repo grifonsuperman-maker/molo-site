@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  ArrowLeft,
-  CheckCircle2,
-  MapPinned,
-  RefreshCw,
-  Sparkles,
-  X,
-} from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 
 import { bookingsApi } from '../api/bookings';
 import { clearAccessToken } from '../api/client';
@@ -17,7 +10,7 @@ import {
   type WaiterAssignment,
   type WaiterCall,
 } from '../api/waiterCalls';
-import type { Booking, TableItem } from '../api/types';
+import type { Booking } from '../api/types';
 import WaiterTablesByLocation from './WaiterTablesByLocation';
 
 const SESSION_KEY = 'molo_waiter_staff';
@@ -124,18 +117,6 @@ function Login({ onLogin }: { onLogin: (staff: StaffMember) => void }) {
   );
 }
 
-type TransferStep = 'locations' | 'tables' | 'confirm' | 'success';
-
-type TransferState = {
-  booking: Booking;
-  tables: TableItem[];
-  step: TransferStep;
-  locationKey: string | null;
-  destination: TableItem | null;
-  oldTableNumber: string;
-  successText: string;
-};
-
 export default function WaiterAppV2() {
   const [staff, setStaff] = useState<StaffMember | null>(() => {
     try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }
@@ -148,7 +129,6 @@ export default function WaiterAppV2() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState('');
-  const [transfer, setTransfer] = useState<TransferState | null>(null);
   const [showTables, setShowTables] = useState(false);
 
   const logout = () => {
@@ -201,64 +181,9 @@ export default function WaiterAppV2() {
     }
   }
 
-  async function openTransfer(booking: Booking) {
-    setBusy(`open-transfer:${booking.id}`);
-    setError('');
-    try {
-      const allTables = await tablesApi.getAll();
-      const candidates = allTables
-        .filter((table) => table.isVisible && table.id !== booking.table?.id)
-        .filter((table) => table.status === 'free')
-        .filter((table) => Number(table.seats) >= Number(booking.guestsCount))
-        .sort((left, right) => Number(left.tableNumber) - Number(right.tableNumber));
-
-      setTransfer({
-        booking,
-        tables: candidates,
-        step: 'locations',
-        locationKey: null,
-        destination: null,
-        oldTableNumber: booking.table?.tableNumber || '—',
-        successText: '',
-      });
-    } catch (loadError: any) {
-      setError(loadError?.message || 'Не вдалося завантажити столи.');
-    } finally {
-      setBusy('');
-    }
-  }
-
-  async function confirmTransfer() {
-    if (!transfer?.destination || !transfer.booking.table) return;
-    const booking = transfer.booking;
-    const destination = transfer.destination;
-
-    setBusy(`transfer:${booking.id}`);
-    setError('');
-    try {
-      await bookingsApi.waiterTransfer(booking.id, destination.id);
-
-      setTransfer((current) => current ? {
-        ...current,
-        step: 'success',
-        successText: `Стіл №${current.oldTableNumber} → Стіл №${destination.tableNumber}`,
-      } : null);
-      await load();
-    } catch (actionError: any) {
-      setError(actionError?.message || 'Цей стіл уже недоступний. Оберіть інший.');
-      setTransfer((current) => current ? { ...current, step: 'tables', destination: null } : null);
-    } finally {
-      setBusy('');
-    }
-  }
-
   if (!staff) return <Login onLogin={setStaff} />;
 
   const cards = tab === 'mine' ? mine : tab === 'history' ? bookings.filter((booking) => !ACTIVE.has(booking.status)) : active;
-  const transferLocation = transfer?.locationKey ? LOCATIONS.find((location) => location.key === transfer.locationKey) || null : null;
-  const transferTables = transfer && transferLocation
-    ? transfer.tables.filter((table) => transferLocation.accepts(Number(table.tableNumber)))
-    : [];
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#020607] px-4 py-5 pb-28 text-white">
@@ -306,7 +231,7 @@ export default function WaiterAppV2() {
                 <article key={booking.id} className="rounded-[28px] border border-white/12 bg-black/50 p-4 shadow-[0_0_30px_rgba(255,255,255,.03)] backdrop-blur-xl">
                   <div className="flex justify-between gap-3"><div><h2 className="text-2xl font-black">Стіл №{booking.table?.tableNumber || '—'}</h2><p className="mt-1 text-lg">{time(booking.bookingTime)} · {booking.client?.fullName || 'Гість'}</p><p className="text-sm text-white/50">{locationForTable(booking.table?.tableNumber)?.label || booking.table?.zone?.name || 'Без локації'} · {booking.guestsCount} гостей</p></div><span className="h-fit rounded-full border border-white/15 bg-white/[.04] px-3 py-1 text-sm text-white/65">{STATUS_LABELS[displayStatus || ''] || displayStatus}</span></div>
                   {booking.wishes && <p className="mt-3 rounded-xl border border-white/8 bg-white/[.025] p-3 text-sm text-white/55">{booking.wishes}</p>}
-                  {(primaryAction || booking.status === 'approved') && <div className="mt-4 grid gap-2">{primaryAction && <button type="button" disabled={Boolean(busy)} onClick={() => window.confirm(`${primaryAction.label}?`) && void act(`primary:${booking.id}`, primaryAction.run, 'Статус столу оновлено')} className={`rounded-2xl border bg-white/[.03] p-3 font-black transition active:scale-[.98] ${primaryAction.tone === 'gold' ? 'border-amber-200/60 text-amber-100' : primaryAction.tone === 'cyan' ? 'border-cyan-200/55 text-cyan-100' : 'border-emerald-200/55 text-emerald-100'}`}>{primaryAction.label}</button>}{booking.status === 'approved' && <button type="button" disabled={Boolean(busy)} onClick={() => void openTransfer(booking)} className="rounded-2xl border border-fuchsia-300/45 bg-fuchsia-400/10 p-3 font-black text-fuchsia-100 shadow-[0_0_22px_rgba(217,70,239,.10)] transition active:scale-[.98]">Змінити стіл</button>}</div>}
+                  {primaryAction && <div className="mt-4 grid gap-2"><button type="button" disabled={Boolean(busy)} onClick={() => window.confirm(`${primaryAction.label}?`) && void act(`primary:${booking.id}`, primaryAction.run, 'Статус столу оновлено')} className={`rounded-2xl border bg-white/[.03] p-3 font-black transition active:scale-[.98] ${primaryAction.tone === 'gold' ? 'border-amber-200/60 text-amber-100' : primaryAction.tone === 'cyan' ? 'border-cyan-200/55 text-cyan-100' : 'border-emerald-200/55 text-emerald-100'}`}>{primaryAction.label}</button></div>}
                 </article>
               );
             }) : <p className="rounded-[24px] border border-white/10 bg-black/45 p-6 text-center text-white/50">Бронювань немає.</p>}
@@ -315,41 +240,6 @@ export default function WaiterAppV2() {
 
         <button type="button" onClick={logout} className="mt-5 w-full rounded-2xl border border-white/10 bg-white/[.03] p-3 text-sm font-bold text-white/45">Завершити зміну</button>
       </div>
-
-      {transfer && (
-        <div className="fixed inset-0 z-[80] overflow-y-auto bg-[#020607]/96 px-3 py-4 backdrop-blur-xl">
-          <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,rgba(217,70,239,.18),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(34,211,238,.13),transparent_40%)]" />
-          <section className="relative mx-auto min-h-[calc(100dvh-32px)] max-w-2xl rounded-[30px] border border-fuchsia-300/25 bg-black/60 p-4 shadow-[0_0_50px_rgba(217,70,239,.12)] backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-[.20em] text-fuchsia-100/55">Пересадка гостей</p><h2 className="mt-1 text-3xl font-black">Змінити стіл</h2></div><button type="button" onClick={() => setTransfer(null)} className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/[.04]"><X size={19} /></button></div>
-
-            {transfer.step === 'locations' && <>
-              <p className="mt-3 text-white/55">Оберіть локацію. Далі будуть лише вільні столи.</p>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">{LOCATIONS.map((location) => {
-                const locationTables = transfer.tables.filter((table) => location.accepts(Number(table.tableNumber)));
-                const freeCount = locationTables.length;
-                return <button key={location.key} type="button" onClick={() => setTransfer((current) => current ? { ...current, locationKey: location.key, step: 'tables' } : null)} className="rounded-[24px] border border-fuchsia-300/30 bg-fuchsia-400/[.08] p-4 text-left shadow-[0_0_26px_rgba(217,70,239,.10)] transition active:scale-[.98]"><div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-fuchsia-300/25 bg-fuchsia-400/10 text-fuchsia-100"><MapPinned size={20} /></span><div><p className="text-lg font-black text-fuchsia-50">{location.label}</p><p className="text-xs text-white/40">Столи {location.range}</p></div></div><div className="mt-3 flex gap-2 text-xs"><span className="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-2 py-1 text-emerald-100">Вільні: {freeCount}</span></div></button>;
-              })}</div>
-            </>}
-
-            {transfer.step === 'tables' && transferLocation && <>
-              <button type="button" onClick={() => setTransfer((current) => current ? { ...current, step: 'locations', locationKey: null } : null)} className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[.04] px-3 py-2 text-sm text-white/65"><ArrowLeft size={16} />Локації</button>
-              <div className="mt-4"><p className="text-xs uppercase tracking-[.18em] text-cyan-100/50">{transferLocation.range}</p><h3 className="text-2xl font-black">{transferLocation.label}</h3></div>
-              <div className="mt-4 grid grid-cols-2 gap-3">{transferTables.map((table) => (
-                <button key={table.id} type="button" onClick={() => setTransfer((current) => current ? { ...current, destination: table, step: 'confirm' } : null)} className="rounded-[22px] border border-emerald-300/50 bg-emerald-400/10 p-4 text-left text-emerald-50 shadow-[0_0_24px_rgba(52,211,153,.14)] transition active:scale-[.98]"><p className="text-xl font-black">Стіл №{table.tableNumber}</p><p className="mt-1 text-sm">Вільний</p><p className="mt-1 text-xs opacity-55">{table.seats} місць</p></button>
-              ))}</div>
-              {transferTables.length === 0 && <div className="mt-5 rounded-[22px] border border-dashed border-white/12 p-6 text-center text-white/45">У цій локації немає вільних столів.</div>}
-            </>}
-
-            {transfer.step === 'confirm' && transfer.destination && <div className="mt-6">
-              <button type="button" onClick={() => setTransfer((current) => current ? { ...current, step: 'tables', destination: null } : null)} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[.04] px-3 py-2 text-sm text-white/65"><ArrowLeft size={16} />Назад</button>
-              <div className="mt-5 rounded-[26px] border border-amber-200/30 bg-amber-300/[.07] p-5 shadow-[0_0_32px_rgba(250,204,21,.08)]"><p className="text-xs uppercase tracking-[.18em] text-amber-100/55">Підтвердження</p><h3 className="mt-1 text-2xl font-black">Пересадити гостей?</h3><div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2"><div className="rounded-2xl border border-white/10 bg-black/35 p-3"><p className="text-xs text-white/40">Було</p><p className="text-xl font-black">№{transfer.oldTableNumber}</p></div><span className="text-amber-200">→</span><div className="rounded-2xl border border-emerald-300/25 bg-emerald-400/10 p-3"><p className="text-xs text-emerald-100/55">Буде</p><p className="text-xl font-black text-emerald-50">№{transfer.destination.tableNumber}</p></div></div><div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-3"><p className="font-bold">{transfer.booking.client?.fullName || 'Гість'}</p><p className="text-sm text-white/50">{transfer.booking.guestsCount} гостей · {locationForTable(transfer.destination.tableNumber)?.label}</p></div></div>
-              <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => setTransfer((current) => current ? { ...current, step: 'tables', destination: null } : null)} className="rounded-2xl border border-white/12 bg-white/[.03] p-4 font-black text-white/60">Назад</button><button type="button" disabled={busy === `transfer:${transfer.booking.id}`} onClick={() => void confirmTransfer()} className="rounded-2xl border border-emerald-200/55 bg-emerald-300/20 p-4 font-black text-emerald-50 shadow-[0_0_28px_rgba(52,211,153,.15)] disabled:opacity-40">{busy ? 'Пересаджуємо…' : 'Пересадити'}</button></div>
-            </div>}
-
-            {transfer.step === 'success' && <div className="flex min-h-[65dvh] flex-col items-center justify-center text-center"><span className="grid h-20 w-20 place-items-center rounded-full border border-emerald-300/40 bg-emerald-400/10 text-emerald-100 shadow-[0_0_38px_rgba(52,211,153,.18)]"><CheckCircle2 size={42} /></span><h3 className="mt-5 text-3xl font-black">Гостей пересаджено</h3><p className="mt-3 text-xl text-emerald-100">{transfer.successText}</p><p className="mt-2 max-w-sm text-sm text-white/45">Поточний офіціант залишається призначеним до нового столу. Виклик гостя доступний без повторного check-in.</p><button type="button" onClick={() => { setTransfer(null); setTab('mine'); }} className="mt-6 inline-flex w-full max-w-sm items-center justify-center gap-2 rounded-2xl border border-emerald-200/55 bg-emerald-300/20 p-4 font-black text-emerald-50 shadow-[0_0_28px_rgba(52,211,153,.15)]"><Sparkles size={18} />Готово</button></div>}
-          </section>
-        </div>
-      )}
 
       {showTables && <WaiterTablesByLocation onClose={() => setShowTables(false)} />}
     </main>
