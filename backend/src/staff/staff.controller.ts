@@ -48,6 +48,7 @@ type PinAttemptState = {
 export class StaffController {
   private readonly logger = new Logger(StaffController.name);
   private readonly pinAttempts = new Map<string, PinAttemptState>();
+  private readonly pinAttemptQueues = new Map<string, Promise<void>>();
 
   constructor(
     private readonly service: StaffService,
@@ -90,23 +91,24 @@ export class StaffController {
 
   @Public()
   @Post('pin-login')
-  async loginWithPin(
-    @Body() dto: StaffPinLoginDto,
-    @Req() request: any,
-  ) {
-    const key = this.pinAttemptKey('pin-login', dto.staffId, request);
-    this.assertPinAttemptAllowed(key);
+  async loginWithPin(@Body() dto: StaffPinLoginDto) {
+    const key = this.pinAttemptKey('pin-login', dto.staffId);
 
-    try {
-      const result = await this.service.loginWithPin(dto);
-      this.resetPinAttempts(key);
-      return result;
-    } catch (error) {
-      if (this.isCredentialFailure(error, 'Невірний працівник або PIN')) {
-        this.registerPinFailure(key);
+    return this.withPinAttemptLock(key, async () => {
+      this.ensurePinAttemptCapacity(key);
+      this.assertPinAttemptAllowed(key);
+
+      try {
+        const result = await this.service.loginWithPin(dto);
+        this.resetPinAttempts(key);
+        return result;
+      } catch (error) {
+        if (this.isCredentialFailure(error, 'Невірний працівник або PIN')) {
+          this.registerPinFailure(key);
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
   }
 
   @Public()
@@ -117,30 +119,27 @@ export class StaffController {
 
   @Public()
   @Post('telegram-link/confirm')
-  async confirmTelegramLink(
-    @Body() dto: ConfirmTelegramStaffLinkDto,
-    @Req() request: any,
-  ) {
+  async confirmTelegramLink(@Body() dto: ConfirmTelegramStaffLinkDto) {
     const tokenFingerprint = createHash('sha256')
       .update(String(dto.token || ''))
       .digest('hex');
-    const key = this.pinAttemptKey(
-      'telegram-link',
-      tokenFingerprint,
-      request,
-    );
-    this.assertPinAttemptAllowed(key);
+    const key = this.pinAttemptKey('telegram-link', tokenFingerprint);
 
-    try {
-      const result = await this.telegramLinks.confirmInvite(dto);
-      this.resetPinAttempts(key);
-      return result;
-    } catch (error) {
-      if (this.isCredentialFailure(error, 'Невірний PIN')) {
-        this.registerPinFailure(key);
+    return this.withPinAttemptLock(key, async () => {
+      this.ensurePinAttemptCapacity(key);
+      this.assertPinAttemptAllowed(key);
+
+      try {
+        const result = await this.telegramLinks.confirmInvite(dto);
+        this.resetPinAttempts(key);
+        return result;
+      } catch (error) {
+        if (this.isCredentialFailure(error, 'Невірний PIN')) {
+          this.registerPinFailure(key);
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
   }
 
   @Roles('owner', 'admin')
@@ -333,25 +332,49 @@ export class StaffController {
     }
   }
 
-  private pinAttemptKey(scope: string, subject: string, request: any) {
-    const clientIp = this.getClientIp(request);
+  private pinAttemptKey(scope: string, subject: string) {
     return createHash('sha256')
-      .update(`${scope}|${subject}|${clientIp}`)
+      .update(`${scope}|${subject}`)
       .digest('hex');
   }
 
-  private getClientIp(request: any) {
-    const forwarded = request?.headers?.['x-forwarded-for'];
-    const forwardedValue = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-    const forwardedIp =
-      typeof forwardedValue === 'string'
-        ? forwardedValue.split(',')[0]?.trim()
-        : '';
+  private async withPinAttemptLock<T>(
+    key: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.pinAttemptQueues.get(key) || Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queued = previous.catch(() => undefined).then(() => current);
+    this.pinAttemptQueues.set(key, queued);
 
-    return (
-      forwardedIp ||
-      String(request?.ip || request?.socket?.remoteAddress || 'unknown').trim()
-    );
+    await previous.catch(() => undefined);
+    try {
+      return await action();
+    } finally {
+      release();
+      if (this.pinAttemptQueues.get(key) === queued) {
+        this.pinAttemptQueues.delete(key);
+      }
+    }
+  }
+
+  private ensurePinAttemptCapacity(key: string) {
+    if (this.pinAttempts.has(key)) return;
+
+    const now = Date.now();
+    if (this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
+      this.cleanupPinAttempts(now);
+    }
+
+    if (this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
+      throw new HttpException(
+        'Забагато спроб входу. Повторіть пізніше.',
+        429,
+      );
+    }
   }
 
   private assertPinAttemptAllowed(key: string) {
@@ -383,14 +406,6 @@ export class StaffController {
     let state = this.pinAttempts.get(key);
 
     if (!state || now - state.windowStartedAt >= PIN_WINDOW_MS) {
-      if (!state && this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
-        this.cleanupPinAttempts(now);
-      }
-
-      if (!state && this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
-        return;
-      }
-
       state = {
         failedAttempts: 0,
         windowStartedAt: now,
