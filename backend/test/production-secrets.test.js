@@ -45,13 +45,17 @@ test('production startup accepts configured JWT and Telegram webhook secrets', (
   assert.doesNotThrow(() => assertProductionSecrets(env));
 });
 
-test('development Telegram dev auth requires the explicit flag', () => {
+test('development Telegram dev auth requires an explicit development runtime and flag', () => {
   assert.equal(
     isDevAuthAllowed({ NODE_ENV: 'development', ALLOW_DEV_AUTH: 'true' }),
     true,
   );
   assert.equal(
     isDevAuthAllowed({ NODE_ENV: 'development', ALLOW_DEV_AUTH: 'false' }),
+    false,
+  );
+  assert.equal(
+    isDevAuthAllowed({ ALLOW_DEV_AUTH: 'true' }),
     false,
   );
 });
@@ -63,11 +67,98 @@ test('production and Render always disable Telegram dev auth', () => {
   );
   assert.equal(
     isDevAuthAllowed({
+      NODE_ENV: 'development',
       RENDER_EXTERNAL_URL: 'https://molo-backend.example',
       ALLOW_DEV_AUTH: 'true',
     }),
     false,
   );
+});
+
+test('AuthService allows devTelegramId only in explicit development runtime', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousRenderExternalUrl = process.env.RENDER_EXTERNAL_URL;
+  const previousAllowDevAuth = process.env.ALLOW_DEV_AUTH;
+
+  process.env.NODE_ENV = 'development';
+  delete process.env.RENDER_EXTERNAL_URL;
+  process.env.ALLOW_DEV_AUTH = 'true';
+
+  const staffRepo = {
+    findOne: async () => null,
+  };
+  const jwtService = {
+    signAsync: async (payload) => {
+      assert.equal(payload.telegramId, '123456');
+      assert.equal(payload.role, 'guest');
+      return 'dev-token';
+    },
+  };
+
+  try {
+    const service = new AuthService(staffRepo, jwtService);
+    const result = await service.authenticateTelegram({
+      devTelegramId: '123456',
+      devName: 'Local Dev',
+    });
+
+    assert.equal(result.accessToken, 'dev-token');
+    assert.equal(result.user.telegramId, '123456');
+    assert.equal(result.user.name, 'Local Dev');
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+
+    if (previousRenderExternalUrl === undefined) {
+      delete process.env.RENDER_EXTERNAL_URL;
+    } else {
+      process.env.RENDER_EXTERNAL_URL = previousRenderExternalUrl;
+    }
+
+    if (previousAllowDevAuth === undefined) delete process.env.ALLOW_DEV_AUTH;
+    else process.env.ALLOW_DEV_AUTH = previousAllowDevAuth;
+  }
+});
+
+test('AuthService rejects devTelegramId when runtime is not explicitly development', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousRenderExternalUrl = process.env.RENDER_EXTERNAL_URL;
+  const previousAllowDevAuth = process.env.ALLOW_DEV_AUTH;
+
+  delete process.env.NODE_ENV;
+  delete process.env.RENDER_EXTERNAL_URL;
+  process.env.ALLOW_DEV_AUTH = 'true';
+
+  const staffRepo = {
+    findOne: async () => {
+      throw new Error('staff lookup must not run for rejected dev auth');
+    },
+  };
+  const jwtService = {
+    signAsync: async () => {
+      throw new Error('token signing must not run for rejected dev auth');
+    },
+  };
+
+  try {
+    const service = new AuthService(staffRepo, jwtService);
+    await assert.rejects(
+      () => service.authenticateTelegram({ devTelegramId: '123456' }),
+      /initData Telegram відсутній/,
+    );
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+
+    if (previousRenderExternalUrl === undefined) {
+      delete process.env.RENDER_EXTERNAL_URL;
+    } else {
+      process.env.RENDER_EXTERNAL_URL = previousRenderExternalUrl;
+    }
+
+    if (previousAllowDevAuth === undefined) delete process.env.ALLOW_DEV_AUTH;
+    else process.env.ALLOW_DEV_AUTH = previousAllowDevAuth;
+  }
 });
 
 test('AuthService rejects devTelegramId on Render even when ALLOW_DEV_AUTH is true', async () => {
