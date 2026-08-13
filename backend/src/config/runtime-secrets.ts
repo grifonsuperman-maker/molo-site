@@ -11,7 +11,11 @@ export function isProductionRuntime(env: RuntimeEnv = process.env): boolean {
 }
 
 export function isDevAuthAllowed(env: RuntimeEnv = process.env): boolean {
-  return !isProductionRuntime(env) && read(env, 'ALLOW_DEV_AUTH') === 'true';
+  return (
+    read(env, 'NODE_ENV') === 'development' &&
+    !isProductionRuntime(env) &&
+    read(env, 'ALLOW_DEV_AUTH') === 'true'
+  );
 }
 
 export function resolveJwtSecret(env: RuntimeEnv = process.env): string {
