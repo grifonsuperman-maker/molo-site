@@ -106,6 +106,29 @@ test('full attempt map admits an unseen employee without growing', async () => {
   assert.equal(controller.pinAttempts.size, 9_999);
 });
 
+test('full attempt map never evicts an active lock', async () => {
+  const { controller, getLoginCalls } = createController();
+  const now = Date.now();
+  const lockedUntil = now + 15 * 60 * 1000;
+
+  for (let index = 0; index < 10_000; index += 1) {
+    controller.pinAttempts.set(`locked-key-${index}`, {
+      failedAttempts: 5,
+      windowStartedAt: now,
+      lockedUntil,
+    });
+  }
+
+  await assert.rejects(
+    () => controller.loginWithPin({ staffId: STAFF_ID, pin: '0000' }),
+    /Невірний працівник або PIN/,
+  );
+
+  assert.equal(getLoginCalls(), 1);
+  assert.equal(controller.pinAttempts.size, 10_000);
+  assert.equal(controller.pinAttempts.has('locked-key-0'), true);
+});
+
 test('Telegram staff-link PIN uses the same five-attempt lockout', async () => {
   const { controller, getTelegramCalls } = createController();
   const dto = { token: 'staff_test-token', initData: 'test', pin: '0000' };
@@ -115,5 +138,42 @@ test('Telegram staff-link PIN uses the same five-attempt lockout', async () => {
   }
 
   await assert.rejects(() => controller.confirmTelegramLink(dto), /заблоковано на 15 хв/);
+  assert.equal(getTelegramCalls(), 5);
+});
+
+test('equivalent Telegram invite token forms share one PIN attempt bucket', async () => {
+  const { controller, getTelegramCalls } = createController();
+  const tokenForms = [
+    'test-token',
+    ' staff_test-token',
+    'staff_test-token ',
+    ' test-token ',
+  ];
+
+  for (const token of tokenForms) {
+    await assert.rejects(
+      () => controller.confirmTelegramLink({ token, initData: 'test', pin: '0000' }),
+      /Невірний PIN/,
+    );
+  }
+
+  await assert.rejects(
+    () =>
+      controller.confirmTelegramLink({
+        token: 'staff_test-token',
+        initData: 'test',
+        pin: '0000',
+      }),
+    /заблоковано на 15 хв/,
+  );
+  await assert.rejects(
+    () =>
+      controller.confirmTelegramLink({
+        token: 'test-token',
+        initData: 'test',
+        pin: '0000',
+      }),
+    /Повторіть через/,
+  );
   assert.equal(getTelegramCalls(), 5);
 });
