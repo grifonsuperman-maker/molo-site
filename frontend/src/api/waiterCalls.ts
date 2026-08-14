@@ -43,11 +43,39 @@ type TransferTable = {
   tableNumber: string;
 };
 
+type StoredGuestBooking = {
+  bookingId?: unknown;
+  token?: unknown;
+};
+
 type PatchableBookingsApi = typeof bookingsApi & {
   __waiterAssignmentsPatched?: boolean;
 };
 
+const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
 const patchableBookingsApi = bookingsApi as PatchableBookingsApi;
+
+function guestBookingToken(bookingId: string): string {
+  if (typeof window === 'undefined') return '';
+
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(GUEST_BOOKINGS_STORAGE_KEY) || '[]',
+    );
+    if (!Array.isArray(parsed)) return '';
+
+    const booking = parsed.find(
+      (item: StoredGuestBooking) => item?.bookingId === bookingId,
+    );
+    return typeof booking?.token === 'string' ? booking.token : '';
+  } catch {
+    return '';
+  }
+}
+
+function guestHeaders(bookingId: string): HeadersInit {
+  return { 'x-guest-booking-token': guestBookingToken(bookingId) };
+}
 
 if (!patchableBookingsApi.__waiterAssignmentsPatched) {
   const originalGetToday = bookingsApi.getToday.bind(bookingsApi);
@@ -119,10 +147,17 @@ if (!patchableBookingsApi.__waiterAssignmentsPatched) {
 
 export const waiterCallsApi = {
   guestStatus: (bookingId: string) =>
-    api.get<GuestWaiterCallStatus>(`/waiter-calls/guest-status/${encodeURIComponent(bookingId)}`),
+    api.get<GuestWaiterCallStatus>(
+      `/waiter-calls/guest-status/${encodeURIComponent(bookingId)}`,
+      { headers: guestHeaders(bookingId) },
+    ),
 
   createFromGuest: (bookingId: string) =>
-    api.post<{ message: string; call: WaiterCall }>('/waiter-calls', { bookingId }),
+    api.post<{ message: string; call: WaiterCall }>(
+      '/waiter-calls',
+      { bookingId },
+      { headers: guestHeaders(bookingId) },
+    ),
 
   list: () => api.get<WaiterCall[]>('/waiter-calls'),
 
