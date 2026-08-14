@@ -30,8 +30,11 @@ import {
 import { UpdateDirectorAccessDto } from './dto/update-director-access.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import type { StaffRole } from './entities/staff.entity';
+import { StaffPinThrottleService } from './staff-pin-throttle.service';
 import { StaffService } from './staff.service';
 import { TelegramStaffLinkService } from './telegram-staff-link.service';
+
+const TELEGRAM_INVITE_PREFIX = 'staff_';
 
 @Controller('staff')
 export class StaffController {
@@ -41,6 +44,7 @@ export class StaffController {
     private readonly service: StaffService,
     private readonly permissions: AdminPermissionsService,
     private readonly telegramLinks: TelegramStaffLinkService,
+    private readonly pinThrottle: StaffPinThrottleService,
   ) {}
 
   @Public()
@@ -78,8 +82,26 @@ export class StaffController {
 
   @Public()
   @Post('pin-login')
-  loginWithPin(@Body() dto: StaffPinLoginDto) {
-    return this.service.loginWithPin(dto);
+  async loginWithPin(@Body() dto: StaffPinLoginDto) {
+    const normalizedStaffId = dto.staffId.toLowerCase();
+    const loginOptions = await this.service.findActiveForLogin();
+    const knownPinSubject = loginOptions.some(
+      (employee) =>
+        employee.role !== 'owner' &&
+        String(employee.id).toLowerCase() === normalizedStaffId,
+    );
+
+    if (!knownPinSubject) {
+      return this.service.loginWithPin(dto);
+    }
+
+    return this.pinThrottle.execute({
+      scope: 'pin-login',
+      subject: normalizedStaffId,
+      action: () => this.service.loginWithPin(dto),
+      credentialFailureMessage: 'Невірний працівник або PIN',
+      resetOnErrorMessage: 'Працівника не додано на зміну',
+    });
   }
 
   @Public()
@@ -90,8 +112,19 @@ export class StaffController {
 
   @Public()
   @Post('telegram-link/confirm')
-  confirmTelegramLink(@Body() dto: ConfirmTelegramStaffLinkDto) {
-    return this.telegramLinks.confirmInvite(dto);
+  async confirmTelegramLink(@Body() dto: ConfirmTelegramStaffLinkDto) {
+    const invite = await this.telegramLinks.getInviteInfo(dto.token);
+
+    if (invite.authType !== 'pin') {
+      return this.telegramLinks.confirmInvite(dto);
+    }
+
+    return this.pinThrottle.execute({
+      scope: 'telegram-link',
+      subject: this.normalizeTelegramInviteToken(dto.token),
+      action: () => this.telegramLinks.confirmInvite(dto),
+      credentialFailureMessage: 'Невірний PIN',
+    });
   }
 
   @Roles('owner', 'admin')
@@ -282,6 +315,13 @@ export class StaffController {
         'Адміністратор може керувати лише офіціантами та кальянниками',
       );
     }
+  }
+
+  private normalizeTelegramInviteToken(value: string) {
+    const token = String(value || '').trim();
+    return token.startsWith(TELEGRAM_INVITE_PREFIX)
+      ? token.slice(TELEGRAM_INVITE_PREFIX.length)
+      : token;
   }
 
   private async recoverShiftState(
