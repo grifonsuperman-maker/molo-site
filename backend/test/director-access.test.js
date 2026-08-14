@@ -34,10 +34,12 @@ function createDirector(overrides = {}) {
 }
 
 function createService(director = createDirector()) {
+  const snapshot = () => ({ ...director });
+
   const repository = {
     find: async ({ where } = {}) => {
-      if (where?.role === 'owner') return [director];
-      return [director];
+      if (where?.role === 'owner') return [snapshot()];
+      return [snapshot()];
     },
     findOne: async ({ where }) => {
       if (where.id && where.id !== director.id) return null;
@@ -55,7 +57,7 @@ function createService(director = createDirector()) {
       ) {
         return null;
       }
-      return director;
+      return snapshot();
     },
     query: async (sql) => {
       const normalized = sql.replace(/\s+/g, ' ').trim();
@@ -120,7 +122,10 @@ function createService(director = createDirector()) {
 
       throw new Error(`Unexpected query in test: ${normalized}`);
     },
-    save: async (value) => value,
+    save: async (value) => {
+      Object.assign(director, value);
+      return snapshot();
+    },
     create: (value) => value,
   };
 
