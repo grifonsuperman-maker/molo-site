@@ -158,6 +158,37 @@ test('different known employees keep isolated PIN counters', async () => {
   assert.equal(getLoginCalls(), 10);
 });
 
+test('correct PIN outside shift clears prior failed attempts', async () => {
+  const { controller, getLoginCalls } = createController({
+    loginWithPin: async (dto) => {
+      if (dto.pin === '1234') {
+        throw new UnauthorizedException('Працівника не додано на зміну');
+      }
+      throw new UnauthorizedException('Невірний працівник або PIN');
+    },
+  });
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await assert.rejects(
+      () => controller.loginWithPin({ staffId: STAFF_ID, pin: '0000' }),
+      /Невірний працівник або PIN/,
+    );
+  }
+
+  await assert.rejects(
+    () => controller.loginWithPin({ staffId: STAFF_ID, pin: '1234' }),
+    /Працівника не додано на зміну/,
+  );
+
+  await assert.rejects(
+    () => controller.loginWithPin({ staffId: STAFF_ID, pin: '0000' }),
+    /Невірний працівник або PIN/,
+  );
+
+  assert.equal(getLoginCalls(), 6);
+  assert.equal(controller.pinAttempts.size, 1);
+});
+
 test('Telegram staff-link PIN uses the same five-attempt lockout', async () => {
   const { controller, getTelegramCalls } = createController();
   const dto = { token: 'staff_test-token', initData: 'test', pin: '0000' };
