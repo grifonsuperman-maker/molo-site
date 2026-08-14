@@ -24,7 +24,9 @@ export function useTelegramAuth() {
           telegram.setHeaderColor?.('#10100f');
           telegram.setBackgroundColor?.('#10100f');
           const result = await authApi.telegram(initData);
-          void linkKnownGuestBookingsToTelegram();
+          if (result.user.role === 'guest') {
+            void linkKnownGuestBookingsToTelegram();
+          }
           if (!cancelled) setUser(result.user);
           return;
         }
