@@ -36,8 +36,6 @@ import { TelegramStaffLinkService } from './telegram-staff-link.service';
 const PIN_MAX_FAILED_ATTEMPTS = 5;
 const PIN_WINDOW_MS = 15 * 60 * 1000;
 const PIN_LOCK_MS = 15 * 60 * 1000;
-const PIN_ATTEMPT_MAX_ENTRIES = 10_000;
-const PIN_OVERFLOW_BUCKET_COUNT = 256;
 const TELEGRAM_INVITE_PREFIX = 'staff_';
 
 type PinAttemptState = {
@@ -46,17 +44,10 @@ type PinAttemptState = {
   lockedUntil: number | null;
 };
 
-type PinAttemptTracking = {
-  key: string;
-  attempts: Map<string, PinAttemptState>;
-  shared: boolean;
-};
-
 @Controller('staff')
 export class StaffController {
   private readonly logger = new Logger(StaffController.name);
   private readonly pinAttempts = new Map<string, PinAttemptState>();
-  private readonly pinOverflowAttempts = new Map<string, PinAttemptState>();
   private readonly pinAttemptQueues = new Map<string, Promise<void>>();
 
   constructor(
@@ -101,26 +92,31 @@ export class StaffController {
   @Public()
   @Post('pin-login')
   async loginWithPin(@Body() dto: StaffPinLoginDto) {
-    const primaryKey = this.pinAttemptKey(
-      'pin-login',
-      dto.staffId.toLowerCase(),
+    const normalizedStaffId = dto.staffId.toLowerCase();
+    const loginOptions = await this.service.findActiveForLogin();
+    const isKnownPinSubject = loginOptions.some(
+      (employee) =>
+        employee.role !== 'owner' &&
+        String(employee.id).toLowerCase() === normalizedStaffId,
     );
-    const tracking = this.selectPinAttemptTracking(primaryKey);
 
-    return this.withPinAttemptLock(tracking.key, async () => {
-      this.assertPinAttemptAllowed(tracking.key, tracking.attempts);
+    if (!isKnownPinSubject) {
+      return this.service.loginWithPin(dto);
+    }
+
+    const key = this.pinAttemptKey('pin-login', normalizedStaffId);
+    this.cleanupPinAttempts();
+
+    return this.withPinAttemptLock(key, async () => {
+      this.assertPinAttemptAllowed(key);
 
       try {
         const result = await this.service.loginWithPin(dto);
-        if (!tracking.shared) {
-          this.resetPinAttempts(tracking.key, tracking.attempts);
-        }
+        this.resetPinAttempts(key);
         return result;
       } catch (error) {
         if (this.isCredentialFailure(error, 'Невірний працівник або PIN')) {
-          this.registerPinFailure(tracking.key, tracking.attempts);
-        } else if (!tracking.shared) {
-          this.resetPinAttempts(tracking.key, tracking.attempts);
+          this.registerPinFailure(key);
         }
         throw error;
       }
@@ -136,27 +132,25 @@ export class StaffController {
   @Public()
   @Post('telegram-link/confirm')
   async confirmTelegramLink(@Body() dto: ConfirmTelegramStaffLinkDto) {
+    await this.telegramLinks.getInviteInfo(dto.token);
+
     const normalizedToken = this.normalizeTelegramInviteToken(dto.token);
     const tokenFingerprint = createHash('sha256')
       .update(normalizedToken)
       .digest('hex');
-    const primaryKey = this.pinAttemptKey('telegram-link', tokenFingerprint);
-    const tracking = this.selectPinAttemptTracking(primaryKey);
+    const key = this.pinAttemptKey('telegram-link', tokenFingerprint);
+    this.cleanupPinAttempts();
 
-    return this.withPinAttemptLock(tracking.key, async () => {
-      this.assertPinAttemptAllowed(tracking.key, tracking.attempts);
+    return this.withPinAttemptLock(key, async () => {
+      this.assertPinAttemptAllowed(key);
 
       try {
         const result = await this.telegramLinks.confirmInvite(dto);
-        if (!tracking.shared) {
-          this.resetPinAttempts(tracking.key, tracking.attempts);
-        }
+        this.resetPinAttempts(key);
         return result;
       } catch (error) {
         if (this.isCredentialFailure(error, 'Невірний PIN')) {
-          this.registerPinFailure(tracking.key, tracking.attempts);
-        } else if (!tracking.shared) {
-          this.resetPinAttempts(tracking.key, tracking.attempts);
+          this.registerPinFailure(key);
         }
         throw error;
       }
@@ -389,64 +383,8 @@ export class StaffController {
     }
   }
 
-  private selectPinAttemptTracking(primaryKey: string): PinAttemptTracking {
-    if (this.pinAttempts.has(primaryKey)) {
-      return {
-        key: primaryKey,
-        attempts: this.pinAttempts,
-        shared: false,
-      };
-    }
-
-    const now = Date.now();
-    if (this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
-      this.cleanupPinAttemptStore(this.pinAttempts, now);
-    }
-
-    if (this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
-      for (const [candidateKey, state] of this.pinAttempts) {
-        const hasActiveLock = Boolean(
-          state.lockedUntil && state.lockedUntil > now,
-        );
-        if (!hasActiveLock) {
-          this.pinAttempts.delete(candidateKey);
-          break;
-        }
-      }
-    }
-
-    if (this.pinAttempts.size < PIN_ATTEMPT_MAX_ENTRIES) {
-      this.pinAttempts.set(primaryKey, {
-        failedAttempts: 0,
-        windowStartedAt: now,
-        lockedUntil: null,
-      });
-      return {
-        key: primaryKey,
-        attempts: this.pinAttempts,
-        shared: false,
-      };
-    }
-
-    const overflowKey = this.pinOverflowAttemptKey(primaryKey);
-    return {
-      key: overflowKey,
-      attempts: this.pinOverflowAttempts,
-      shared: true,
-    };
-  }
-
-  private pinOverflowAttemptKey(primaryKey: string) {
-    const bucket =
-      parseInt(primaryKey.slice(0, 8), 16) % PIN_OVERFLOW_BUCKET_COUNT;
-    return `overflow:${bucket}`;
-  }
-
-  private assertPinAttemptAllowed(
-    key: string,
-    attempts: Map<string, PinAttemptState>,
-  ) {
-    const state = attempts.get(key);
+  private assertPinAttemptAllowed(key: string) {
+    const state = this.pinAttempts.get(key);
     if (!state) return;
 
     const now = Date.now();
@@ -465,16 +403,13 @@ export class StaffController {
       (state.lockedUntil && state.lockedUntil <= now) ||
       now - state.windowStartedAt >= PIN_WINDOW_MS
     ) {
-      attempts.delete(key);
+      this.pinAttempts.delete(key);
     }
   }
 
-  private registerPinFailure(
-    key: string,
-    attempts: Map<string, PinAttemptState>,
-  ) {
+  private registerPinFailure(key: string) {
     const now = Date.now();
-    let state = attempts.get(key);
+    let state = this.pinAttempts.get(key);
 
     if (!state || now - state.windowStartedAt >= PIN_WINDOW_MS) {
       state = {
@@ -488,32 +423,26 @@ export class StaffController {
 
     if (state.failedAttempts >= PIN_MAX_FAILED_ATTEMPTS) {
       state.lockedUntil = now + PIN_LOCK_MS;
-      attempts.set(key, state);
+      this.pinAttempts.set(key, state);
       throw new HttpException(
         'Забагато невдалих спроб. Вхід заблоковано на 15 хв.',
         429,
       );
     }
 
-    attempts.set(key, state);
+    this.pinAttempts.set(key, state);
   }
 
-  private resetPinAttempts(
-    key: string,
-    attempts: Map<string, PinAttemptState>,
-  ) {
-    attempts.delete(key);
+  private resetPinAttempts(key: string) {
+    this.pinAttempts.delete(key);
   }
 
-  private cleanupPinAttemptStore(
-    attempts: Map<string, PinAttemptState>,
-    now = Date.now(),
-  ) {
-    for (const [key, state] of attempts) {
+  private cleanupPinAttempts(now = Date.now()) {
+    for (const [key, state] of this.pinAttempts) {
       const lockExpired = !state.lockedUntil || state.lockedUntil <= now;
       const windowExpired = now - state.windowStartedAt >= PIN_WINDOW_MS;
       if (lockExpired && windowExpired) {
-        attempts.delete(key);
+        this.pinAttempts.delete(key);
       }
     }
   }
