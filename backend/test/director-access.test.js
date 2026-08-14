@@ -57,6 +57,69 @@ function createService(director = createDirector()) {
       }
       return director;
     },
+    query: async (sql) => {
+      const normalized = sql.replace(/\s+/g, ' ').trim();
+
+      if (normalized.startsWith('SELECT director_failed_login_attempts')) {
+        return [
+          {
+            director_failed_login_attempts:
+              director.directorFailedLoginAttempts,
+            director_locked_until: director.directorLockedUntil,
+          },
+        ];
+      }
+
+      if (
+        normalized.startsWith(
+          'UPDATE staff SET director_failed_login_attempts = 0',
+        )
+      ) {
+        const lockedUntil = director.directorLockedUntil
+          ? new Date(director.directorLockedUntil)
+          : null;
+
+        if (!lockedUntil || lockedUntil.getTime() > Date.now()) {
+          return [];
+        }
+
+        director.directorFailedLoginAttempts = 0;
+        director.directorLockedUntil = null;
+        return [
+          {
+            director_failed_login_attempts: 0,
+            director_locked_until: null,
+          },
+        ];
+      }
+
+      if (
+        normalized.startsWith(
+          'UPDATE staff SET director_failed_login_attempts = director_failed_login_attempts + 1',
+        )
+      ) {
+        director.directorFailedLoginAttempts =
+          Number(director.directorFailedLoginAttempts || 0) + 1;
+
+        if (
+          director.directorFailedLoginAttempts >= 5 &&
+          (!director.directorLockedUntil ||
+            new Date(director.directorLockedUntil).getTime() <= Date.now())
+        ) {
+          director.directorLockedUntil = new Date(Date.now() + 15 * 60_000);
+        }
+
+        return [
+          {
+            director_failed_login_attempts:
+              director.directorFailedLoginAttempts,
+            director_locked_until: director.directorLockedUntil,
+          },
+        ];
+      }
+
+      throw new Error(`Unexpected query in test: ${normalized}`);
+    },
     save: async (value) => value,
     create: (value) => value,
   };
@@ -238,5 +301,38 @@ test('Director login is locked for 15 minutes after five wrong passwords', async
     /заблоковано на 15 хв/,
   );
 
+  assert.ok(director.directorLockedUntil instanceof Date);
+});
+
+test('parallel wrong Director passwords are all counted atomically', async () => {
+  const { service, director } = createService();
+
+  await service.updateDirectorAccess(
+    {
+      sub: director.id,
+      staffId: director.id,
+      telegramId: `staff:${director.id}`,
+      role: 'owner',
+      name: director.fullName,
+    },
+    {
+      fullName: director.fullName,
+      loginName: 'director',
+      newPassword: 'secure-123',
+      confirmPassword: 'secure-123',
+    },
+  );
+
+  const results = await Promise.allSettled(
+    Array.from({ length: 5 }, () =>
+      service.loginDirector({
+        loginName: 'director',
+        password: 'wrong-password',
+      }),
+    ),
+  );
+
+  assert.ok(results.every((result) => result.status === 'rejected'));
+  assert.equal(director.directorFailedLoginAttempts, 5);
   assert.ok(director.directorLockedUntil instanceof Date);
 });
