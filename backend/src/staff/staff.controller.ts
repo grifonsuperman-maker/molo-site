@@ -37,6 +37,7 @@ const PIN_MAX_FAILED_ATTEMPTS = 5;
 const PIN_WINDOW_MS = 15 * 60 * 1000;
 const PIN_LOCK_MS = 15 * 60 * 1000;
 const PIN_ATTEMPT_MAX_ENTRIES = 10_000;
+const TELEGRAM_INVITE_PREFIX = 'staff_';
 
 type PinAttemptState = {
   failedAttempts: number;
@@ -95,7 +96,7 @@ export class StaffController {
     const key = this.pinAttemptKey('pin-login', dto.staffId.toLowerCase());
 
     return this.withPinAttemptLock(key, async () => {
-      this.ensurePinAttemptCapacity(key);
+      const canTrackNewKey = this.ensurePinAttemptCapacity(key);
       this.assertPinAttemptAllowed(key);
 
       try {
@@ -104,7 +105,7 @@ export class StaffController {
         return result;
       } catch (error) {
         if (this.isCredentialFailure(error, 'Невірний працівник або PIN')) {
-          this.registerPinFailure(key);
+          this.registerPinFailure(key, canTrackNewKey);
         }
         throw error;
       }
@@ -120,13 +121,14 @@ export class StaffController {
   @Public()
   @Post('telegram-link/confirm')
   async confirmTelegramLink(@Body() dto: ConfirmTelegramStaffLinkDto) {
+    const normalizedToken = this.normalizeTelegramInviteToken(dto.token);
     const tokenFingerprint = createHash('sha256')
-      .update(String(dto.token || ''))
+      .update(normalizedToken)
       .digest('hex');
     const key = this.pinAttemptKey('telegram-link', tokenFingerprint);
 
     return this.withPinAttemptLock(key, async () => {
-      this.ensurePinAttemptCapacity(key);
+      const canTrackNewKey = this.ensurePinAttemptCapacity(key);
       this.assertPinAttemptAllowed(key);
 
       try {
@@ -135,7 +137,7 @@ export class StaffController {
         return result;
       } catch (error) {
         if (this.isCredentialFailure(error, 'Невірний PIN')) {
-          this.registerPinFailure(key);
+          this.registerPinFailure(key, canTrackNewKey);
         }
         throw error;
       }
@@ -338,6 +340,13 @@ export class StaffController {
       .digest('hex');
   }
 
+  private normalizeTelegramInviteToken(value: string) {
+    const token = String(value || '').trim();
+    return token.startsWith(TELEGRAM_INVITE_PREFIX)
+      ? token.slice(TELEGRAM_INVITE_PREFIX.length)
+      : token;
+  }
+
   private async withPinAttemptLock<T>(
     key: string,
     action: () => Promise<T>,
@@ -362,19 +371,28 @@ export class StaffController {
   }
 
   private ensurePinAttemptCapacity(key: string) {
-    if (this.pinAttempts.has(key)) return;
+    if (this.pinAttempts.has(key)) return true;
 
     const now = Date.now();
     if (this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
       this.cleanupPinAttempts(now);
     }
 
-    if (this.pinAttempts.size >= PIN_ATTEMPT_MAX_ENTRIES) {
-      const oldestKey = this.pinAttempts.keys().next().value;
-      if (oldestKey !== undefined) {
-        this.pinAttempts.delete(oldestKey);
+    if (this.pinAttempts.size < PIN_ATTEMPT_MAX_ENTRIES) {
+      return true;
+    }
+
+    for (const [candidateKey, state] of this.pinAttempts) {
+      const hasActiveLock = Boolean(
+        state.lockedUntil && state.lockedUntil > now,
+      );
+      if (!hasActiveLock) {
+        this.pinAttempts.delete(candidateKey);
+        return true;
       }
     }
+
+    return false;
   }
 
   private assertPinAttemptAllowed(key: string) {
@@ -401,9 +419,13 @@ export class StaffController {
     }
   }
 
-  private registerPinFailure(key: string) {
+  private registerPinFailure(key: string, canTrackNewKey = true) {
     const now = Date.now();
     let state = this.pinAttempts.get(key);
+
+    if (!state && !canTrackNewKey) {
+      return;
+    }
 
     if (!state || now - state.windowStartedAt >= PIN_WINDOW_MS) {
       state = {
