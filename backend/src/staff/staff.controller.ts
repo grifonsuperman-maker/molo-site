@@ -117,6 +117,10 @@ export class StaffController {
       } catch (error) {
         if (this.isCredentialFailure(error, 'Невірний працівник або PIN')) {
           this.registerPinFailure(key);
+        } else if (
+          this.isCredentialFailure(error, 'Працівника не додано на зміну')
+        ) {
+          this.resetPinAttempts(key);
         }
         throw error;
       }
