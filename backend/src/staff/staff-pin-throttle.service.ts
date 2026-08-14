@@ -1,11 +1,11 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
-const PIN_MAX_ATTEMPTS = 5;
-const PIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const PIN_MAX_FAILED_ATTEMPTS = 5;
+const PIN_FAILED_WINDOW_MS = 15 * 60 * 1000;
 const PIN_LOCK_MS = 15 * 60 * 1000;
-const STALE_ATTEMPT_RETENTION_HOURS = 24;
+const PIN_PENDING_TTL_MS = 60 * 1000;
 
 type PinThrottleScope = 'pin-login' | 'telegram-link';
 
@@ -17,9 +17,8 @@ type PinThrottleOptions<T> = {
   resetOnErrorMessage?: string;
 };
 
-type ReservedAttempt = {
-  attempt_count: number | string;
-  locked_until: Date | string | null;
+type AttemptReservation = {
+  id: string | number;
 };
 
 @Injectable()
@@ -36,22 +35,24 @@ export class StaffPinThrottleService {
 
     try {
       const value = await options.action();
-      await this.deleteState(options.scope, subjectHash);
+      await this.clearThrough(options.scope, subjectHash, reservation.id);
       return value;
     } catch (error) {
       if (
         options.resetOnErrorMessage &&
         this.hasHttpMessage(error, options.resetOnErrorMessage)
       ) {
-        await this.deleteState(options.scope, subjectHash);
+        await this.clearThrough(options.scope, subjectHash, reservation.id);
         throw error;
       }
 
       if (this.hasHttpMessage(error, options.credentialFailureMessage)) {
-        if (
-          Number(reservation.attempt_count) >= PIN_MAX_ATTEMPTS &&
-          reservation.locked_until
-        ) {
+        const locked = await this.markCredentialFailure(
+          options.scope,
+          subjectHash,
+          reservation.id,
+        );
+        if (locked) {
           throw new HttpException(
             'Забагато невдалих спроб. Вхід заблоковано на 15 хв.',
             429,
@@ -60,7 +61,7 @@ export class StaffPinThrottleService {
         throw error;
       }
 
-      await this.releaseReservation(options.scope, subjectHash);
+      await this.releaseReservation(options.scope, subjectHash, reservation.id);
       throw error;
     }
   }
@@ -68,118 +69,189 @@ export class StaffPinThrottleService {
   private async reserveAttempt(
     scope: PinThrottleScope,
     subjectHash: string,
-  ): Promise<ReservedAttempt> {
-    for (let retry = 0; retry < 2; retry += 1) {
-      const rows = (await this.dataSource.query(
-        `INSERT INTO "staff_pin_attempts" (
-           "scope",
-           "subject_hash",
-           "attempt_count",
-           "window_started_at",
-           "locked_until",
-           "updated_at"
-         ) VALUES ($1, $2, 1, NOW(), NULL, NOW())
-         ON CONFLICT ("scope", "subject_hash") DO UPDATE SET
-           "attempt_count" = CASE
-             WHEN "staff_pin_attempts"."window_started_at" <= NOW() - ($3::bigint * INTERVAL '1 millisecond')
-               OR ("staff_pin_attempts"."locked_until" IS NOT NULL AND "staff_pin_attempts"."locked_until" <= NOW())
-             THEN 1
-             ELSE "staff_pin_attempts"."attempt_count" + 1
-           END,
-           "window_started_at" = CASE
-             WHEN "staff_pin_attempts"."window_started_at" <= NOW() - ($3::bigint * INTERVAL '1 millisecond')
-               OR ("staff_pin_attempts"."locked_until" IS NOT NULL AND "staff_pin_attempts"."locked_until" <= NOW())
-             THEN NOW()
-             ELSE "staff_pin_attempts"."window_started_at"
-           END,
-           "locked_until" = CASE
-             WHEN "staff_pin_attempts"."window_started_at" <= NOW() - ($3::bigint * INTERVAL '1 millisecond')
-               OR ("staff_pin_attempts"."locked_until" IS NOT NULL AND "staff_pin_attempts"."locked_until" <= NOW())
-             THEN NULL
-             WHEN "staff_pin_attempts"."attempt_count" + 1 >= $4
-             THEN NOW() + ($5::bigint * INTERVAL '1 millisecond')
-             ELSE NULL
-           END,
-           "updated_at" = NOW()
-         WHERE "staff_pin_attempts"."locked_until" IS NULL
-            OR "staff_pin_attempts"."locked_until" <= NOW()
-         RETURNING "attempt_count", "locked_until"`,
-        [
-          scope,
-          subjectHash,
-          PIN_ATTEMPT_WINDOW_MS,
-          PIN_MAX_ATTEMPTS,
-          PIN_LOCK_MS,
-        ],
-      )) as ReservedAttempt[];
+  ): Promise<AttemptReservation> {
+    return this.dataSource.transaction(async (manager) => {
+      await this.acquireSubjectLock(manager, scope, subjectHash);
 
-      if (rows[0]) {
-        return rows[0];
+      const activeLock = await this.findActiveLock(manager, scope, subjectHash);
+      if (activeLock) {
+        this.throwActiveLock(activeLock);
       }
 
-      const lockedRows = (await this.dataSource.query(
-        `SELECT "locked_until"
+      const countRows = (await manager.query(
+        `SELECT COUNT(*)::int AS "count"
          FROM "staff_pin_attempts"
          WHERE "scope" = $1 AND "subject_hash" = $2`,
         [scope, subjectHash],
-      )) as Array<{ locked_until: Date | string | null }>;
-      const lockedUntil = lockedRows[0]?.locked_until
-        ? new Date(lockedRows[0].locked_until).getTime()
-        : 0;
+      )) as Array<{ count: number | string }>;
 
-      if (lockedUntil > Date.now()) {
-        const minutes = Math.max(
-          1,
-          Math.ceil((lockedUntil - Date.now()) / 60_000),
-        );
+      if (Number(countRows[0]?.count || 0) >= PIN_MAX_FAILED_ATTEMPTS) {
         throw new HttpException(
-          `Забагато невдалих спроб. Повторіть через ${minutes} хв.`,
+          'Забагато одночасних спроб. Повторіть через 1 хв.',
           429,
         );
       }
-    }
 
+      const rows = (await manager.query(
+        `INSERT INTO "staff_pin_attempts" (
+           "scope",
+           "subject_hash",
+           "status",
+           "reserved_at",
+           "updated_at"
+         ) VALUES ($1, $2, 'pending', NOW(), NOW())
+         RETURNING "id"`,
+        [scope, subjectHash],
+      )) as AttemptReservation[];
+
+      if (!rows[0]) {
+        throw new HttpException(
+          'Не вдалося перевірити PIN. Спробуйте ще раз.',
+          503,
+        );
+      }
+
+      return rows[0];
+    });
+  }
+
+  private async markCredentialFailure(
+    scope: PinThrottleScope,
+    subjectHash: string,
+    reservationId: string | number,
+  ): Promise<boolean> {
+    return this.dataSource.transaction(async (manager) => {
+      await this.acquireSubjectLock(manager, scope, subjectHash);
+
+      const updatedRows = (await manager.query(
+        `UPDATE "staff_pin_attempts"
+         SET "status" = 'failed',
+             "failed_at" = NOW(),
+             "updated_at" = NOW()
+         WHERE "id" = $3
+           AND "scope" = $1
+           AND "subject_hash" = $2
+           AND "status" = 'pending'
+         RETURNING "id"`,
+        [scope, subjectHash, reservationId],
+      )) as AttemptReservation[];
+
+      if (!updatedRows[0]) {
+        return false;
+      }
+
+      const failedRows = (await manager.query(
+        `SELECT COUNT(*)::int AS "count"
+         FROM "staff_pin_attempts"
+         WHERE "scope" = $1
+           AND "subject_hash" = $2
+           AND "status" = 'failed'
+           AND "failed_at" >= NOW() - ($3::bigint * INTERVAL '1 millisecond')`,
+        [scope, subjectHash, PIN_FAILED_WINDOW_MS],
+      )) as Array<{ count: number | string }>;
+
+      if (Number(failedRows[0]?.count || 0) < PIN_MAX_FAILED_ATTEMPTS) {
+        return false;
+      }
+
+      await manager.query(
+        `UPDATE "staff_pin_attempts"
+         SET "locked_until" = NOW() + ($4::bigint * INTERVAL '1 millisecond'),
+             "updated_at" = NOW()
+         WHERE "id" = $3
+           AND "scope" = $1
+           AND "subject_hash" = $2`,
+        [scope, subjectHash, reservationId, PIN_LOCK_MS],
+      );
+
+      return true;
+    });
+  }
+
+  private async acquireSubjectLock(
+    manager: EntityManager,
+    scope: PinThrottleScope,
+    subjectHash: string,
+  ) {
+    await manager.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+      [scope, subjectHash],
+    );
+  }
+
+  private async findActiveLock(
+    manager: EntityManager,
+    scope: PinThrottleScope,
+    subjectHash: string,
+  ) {
+    const rows = (await manager.query(
+      `SELECT "locked_until"
+       FROM "staff_pin_attempts"
+       WHERE "scope" = $1
+         AND "subject_hash" = $2
+         AND "locked_until" > NOW()
+       ORDER BY "locked_until" DESC
+       LIMIT 1`,
+      [scope, subjectHash],
+    )) as Array<{ locked_until: Date | string }>;
+
+    return rows[0]?.locked_until || null;
+  }
+
+  private throwActiveLock(lockedUntilValue: Date | string): never {
+    const lockedUntil = new Date(lockedUntilValue).getTime();
+    const minutes = Math.max(
+      1,
+      Math.ceil((lockedUntil - Date.now()) / 60_000),
+    );
     throw new HttpException(
-      'Забагато невдалих спроб. Повторіть через 1 хв.',
+      `Забагато невдалих спроб. Повторіть через ${minutes} хв.`,
       429,
+    );
+  }
+
+  private async clearThrough(
+    scope: PinThrottleScope,
+    subjectHash: string,
+    reservationId: string | number,
+  ) {
+    await this.dataSource.query(
+      `DELETE FROM "staff_pin_attempts"
+       WHERE "scope" = $1
+         AND "subject_hash" = $2
+         AND "id" <= $3`,
+      [scope, subjectHash, reservationId],
     );
   }
 
   private async releaseReservation(
     scope: PinThrottleScope,
     subjectHash: string,
+    reservationId: string | number,
   ) {
-    const rows = (await this.dataSource.query(
-      `UPDATE "staff_pin_attempts"
-       SET "attempt_count" = GREATEST("attempt_count" - 1, 0),
-           "locked_until" = CASE
-             WHEN GREATEST("attempt_count" - 1, 0) < $3 THEN NULL
-             ELSE "locked_until"
-           END,
-           "updated_at" = NOW()
-       WHERE "scope" = $1 AND "subject_hash" = $2
-       RETURNING "attempt_count"`,
-      [scope, subjectHash, PIN_MAX_ATTEMPTS],
-    )) as Array<{ attempt_count: number | string }>;
-
-    if (Number(rows[0]?.attempt_count ?? 1) === 0) {
-      await this.deleteState(scope, subjectHash);
-    }
+    await this.dataSource.query(
+      `DELETE FROM "staff_pin_attempts"
+       WHERE "scope" = $1
+         AND "subject_hash" = $2
+         AND "id" = $3
+         AND "status" = 'pending'`,
+      [scope, subjectHash, reservationId],
+    );
   }
 
   private async cleanupStaleAttempts() {
     await this.dataSource.query(
       `DELETE FROM "staff_pin_attempts"
-       WHERE "updated_at" < NOW() - INTERVAL '${STALE_ATTEMPT_RETENTION_HOURS} hours'
-         AND ("locked_until" IS NULL OR "locked_until" <= NOW())`,
-    );
-  }
-
-  private async deleteState(scope: PinThrottleScope, subjectHash: string) {
-    await this.dataSource.query(
-      `DELETE FROM "staff_pin_attempts"
-       WHERE "scope" = $1 AND "subject_hash" = $2`,
-      [scope, subjectHash],
+       WHERE ("locked_until" IS NULL OR "locked_until" <= NOW())
+         AND (
+           ("status" = 'pending'
+             AND "reserved_at" <= NOW() - ($1::bigint * INTERVAL '1 millisecond'))
+           OR
+           ("status" = 'failed'
+             AND "failed_at" IS NOT NULL
+             AND "failed_at" <= NOW() - ($2::bigint * INTERVAL '1 millisecond'))
+         )`,
+      [PIN_PENDING_TTL_MS, PIN_FAILED_WINDOW_MS],
     );
   }
 
