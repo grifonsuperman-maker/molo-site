@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, MigrationExecutor, QueryRunner } from 'typeorm';
 
 const MIGRATION_LOCK_NAMESPACE = 'molo';
 const MIGRATION_LOCK_NAME = 'schema-migrations';
@@ -24,9 +24,7 @@ export class StaffPinMigrationBootstrapService
       );
       lockAcquired = true;
 
-      const migrations = await this.dataSource.runMigrations({
-        transaction: 'all',
-      });
+      const migrations = await this.executeRegisteredMigrations(queryRunner);
 
       if (migrations.length > 0) {
         this.logger.log(
@@ -50,5 +48,11 @@ export class StaffPinMigrationBootstrapService
 
       await queryRunner.release();
     }
+  }
+
+  protected async executeRegisteredMigrations(queryRunner: QueryRunner) {
+    const executor = new MigrationExecutor(this.dataSource, queryRunner);
+    executor.transaction = 'all';
+    return executor.executePendingMigrations();
   }
 }
