@@ -1,5 +1,12 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
 
 import { BookingHistory } from '../bookings/entities/booking-history.entity';
@@ -65,6 +72,26 @@ export class WaiterCallsService {
     return booking;
   }
 
+  private async getGuestBooking(bookingId: string, guestToken?: string) {
+    const normalizedToken = String(guestToken || '').trim();
+    if (!normalizedToken || normalizedToken.length > 256) {
+      throw new UnauthorizedException('Недійсний доступ до бронювання');
+    }
+
+    const guestAccessTokenHash = createHash('sha256')
+      .update(normalizedToken)
+      .digest('hex');
+    const hasAccess = await this.bookings.exist({
+      where: { id: bookingId, guestAccessTokenHash },
+    });
+
+    if (!hasAccess) {
+      throw new UnauthorizedException('Недійсний доступ до бронювання');
+    }
+
+    return this.getBooking(bookingId);
+  }
+
   private rememberAssignment(assignment: WaiterAssignment) {
     this.assignments = this.assignments.filter(
       (item) =>
@@ -122,6 +149,31 @@ export class WaiterCallsService {
     });
   }
 
+  private async buildGuestStatus(booking: Booking) {
+    const tableStatus = booking.table?.status || null;
+    const canCall = booking.status === 'approved' && tableStatus === 'occupied';
+
+    const activeCall =
+      this.calls.find(
+        (call) =>
+          call.bookingId === booking.id &&
+          call.status !== 'closed',
+      ) || null;
+
+    const assignment = await this.resolveAssignment(booking);
+
+    return {
+      bookingId: booking.id,
+      tableNumber: booking.table?.tableNumber || null,
+      bookingStatus: booking.status,
+      tableStatus,
+      canCall,
+      waiterAssigned: Boolean(assignment),
+      waiterName: assignment?.waiterName || null,
+      activeCall,
+    };
+  }
+
   async assignmentForBooking(booking: Booking) {
     return this.resolveAssignment(booking);
   }
@@ -153,37 +205,16 @@ export class WaiterCallsService {
     };
   }
 
-  async guestStatus(bookingId: string) {
-    const booking = await this.getBooking(bookingId);
-    const tableStatus = booking.table?.status || null;
-    const canCall = booking.status === 'approved' && tableStatus === 'occupied';
-
-    const activeCall =
-      this.calls.find(
-        (call) =>
-          call.bookingId === booking.id &&
-          call.status !== 'closed',
-      ) || null;
-
-    const assignment = await this.resolveAssignment(booking);
-
-    return {
-      bookingId: booking.id,
-      tableNumber: booking.table?.tableNumber || null,
-      bookingStatus: booking.status,
-      tableStatus,
-      canCall,
-      waiterAssigned: Boolean(assignment),
-      waiterName: assignment?.waiterName || null,
-      activeCall,
-    };
+  async guestStatus(bookingId: string, guestToken?: string) {
+    const booking = await this.getGuestBooking(bookingId, guestToken);
+    return this.buildGuestStatus(booking);
   }
 
-  async createFromGuest(dto: { bookingId: string }) {
+  async createFromGuest(dto: { bookingId: string }, guestToken?: string) {
     if (!dto.bookingId) throw new BadRequestException('bookingId обовʼязковий');
 
-    const booking = await this.getBooking(dto.bookingId);
-    const status = await this.guestStatus(booking.id);
+    const booking = await this.getGuestBooking(dto.bookingId, guestToken);
+    const status = await this.buildGuestStatus(booking);
 
     if (!status.canCall) {
       throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
