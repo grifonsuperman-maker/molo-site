@@ -127,6 +127,35 @@ test('full attempt map never evicts an active lock', async () => {
   assert.equal(getLoginCalls(), 1);
   assert.equal(controller.pinAttempts.size, 10_000);
   assert.equal(controller.pinAttempts.has('locked-key-0'), true);
+  assert.equal(controller.pinOverflowAttempts.size, 1);
+});
+
+test('all-active saturation still throttles an unseen employee', async () => {
+  const { controller, getLoginCalls } = createController();
+  const now = Date.now();
+  const lockedUntil = now + 15 * 60 * 1000;
+
+  for (let index = 0; index < 10_000; index += 1) {
+    controller.pinAttempts.set(`locked-key-${index}`, {
+      failedAttempts: 5,
+      windowStartedAt: now,
+      lockedUntil,
+    });
+  }
+
+  const dto = { staffId: STAFF_ID, pin: '0000' };
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await assert.rejects(() => controller.loginWithPin(dto), /Невірний працівник або PIN/);
+  }
+
+  await assert.rejects(() => controller.loginWithPin(dto), /заблоковано на 15 хв/);
+  await assert.rejects(() => controller.loginWithPin(dto), /Повторіть через/);
+
+  assert.equal(getLoginCalls(), 5);
+  assert.equal(controller.pinAttempts.size, 10_000);
+  assert.equal(controller.pinAttempts.has('locked-key-0'), true);
+  assert.equal(controller.pinOverflowAttempts.size, 1);
+  assert.equal(controller.pinOverflowAttempts.size <= 256, true);
 });
 
 test('Telegram staff-link PIN uses the same five-attempt lockout', async () => {
