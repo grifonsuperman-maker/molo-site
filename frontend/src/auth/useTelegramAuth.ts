@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { authApi, AuthUser } from '../api/auth';
+import { linkKnownGuestBookingsToTelegram } from '../api/guestBookingAccess';
 import { getTelegramWebApp } from '../telegram/telegramRuntime';
 
 export function useTelegramAuth() {
@@ -23,6 +24,7 @@ export function useTelegramAuth() {
           telegram.setHeaderColor?.('#10100f');
           telegram.setBackgroundColor?.('#10100f');
           const result = await authApi.telegram(initData);
+          void linkKnownGuestBookingsToTelegram();
           if (!cancelled) setUser(result.user);
           return;
         }
