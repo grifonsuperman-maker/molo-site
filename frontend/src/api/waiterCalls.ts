@@ -50,12 +50,20 @@ type StoredGuestBooking = {
 
 type PatchableBookingsApi = typeof bookingsApi & {
   __waiterAssignmentsPatched?: boolean;
+  __waiterGuestTokenCapturePatched?: boolean;
 };
 
 const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
+const guestBookingTokens = new Map<string, string>();
 const patchableBookingsApi = bookingsApi as PatchableBookingsApi;
 
+function rememberGuestBookingToken(bookingId: string, token: string) {
+  if (bookingId && token) guestBookingTokens.set(bookingId, token);
+}
+
 function guestBookingToken(bookingId: string): string {
+  const inMemoryToken = guestBookingTokens.get(bookingId);
+  if (inMemoryToken) return inMemoryToken;
   if (typeof window === 'undefined') return '';
 
   try {
@@ -67,7 +75,9 @@ function guestBookingToken(bookingId: string): string {
     const booking = parsed.find(
       (item: StoredGuestBooking) => item?.bookingId === bookingId,
     );
-    return typeof booking?.token === 'string' ? booking.token : '';
+    const token = typeof booking?.token === 'string' ? booking.token : '';
+    if (token) rememberGuestBookingToken(bookingId, token);
+    return token;
   } catch {
     return '';
   }
@@ -75,6 +85,18 @@ function guestBookingToken(bookingId: string): string {
 
 function guestHeaders(bookingId: string): HeadersInit {
   return { 'x-guest-booking-token': guestBookingToken(bookingId) };
+}
+
+if (!patchableBookingsApi.__waiterGuestTokenCapturePatched) {
+  const originalCreate = bookingsApi.create.bind(bookingsApi);
+
+  bookingsApi.create = async (payload) => {
+    const result = await originalCreate(payload);
+    rememberGuestBookingToken(result.bookingId, result.guestAccessToken);
+    return result;
+  };
+
+  patchableBookingsApi.__waiterGuestTokenCapturePatched = true;
 }
 
 if (!patchableBookingsApi.__waiterAssignmentsPatched) {
