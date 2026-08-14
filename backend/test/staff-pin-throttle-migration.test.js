@@ -15,7 +15,7 @@ function createQueryRunner() {
   };
 }
 
-test('staff PIN migration creates the persistent attempt table used by the service', async () => {
+test('staff PIN migration creates per-attempt persistent rows', async () => {
   const migration = new CreateStaffPinAttempts2026081400010();
   const runner = createQueryRunner();
 
@@ -23,23 +23,28 @@ test('staff PIN migration creates the persistent attempt table used by the servi
 
   const sql = runner.queries.join('\n');
   assert.match(sql, /CREATE TABLE IF NOT EXISTS "staff_pin_attempts"/);
-  assert.match(sql, /"attempt_count" integer NOT NULL DEFAULT 0/);
-  assert.match(sql, /"window_started_at" timestamptz NOT NULL DEFAULT NOW\(\)/);
+  assert.match(sql, /"id" bigserial NOT NULL/);
+  assert.match(sql, /"status" varchar\(16\) NOT NULL DEFAULT 'pending'/);
+  assert.match(sql, /"reserved_at" timestamptz NOT NULL DEFAULT NOW\(\)/);
+  assert.match(sql, /"failed_at" timestamptz/);
   assert.match(sql, /"locked_until" timestamptz/);
-  assert.match(sql, /"updated_at" timestamptz NOT NULL DEFAULT NOW\(\)/);
-  assert.match(sql, /PRIMARY KEY \("scope", "subject_hash"\)/);
-  assert.match(sql, /CHECK \("attempt_count" >= 0\)/);
-  assert.match(sql, /IDX_staff_pin_attempts_updated_at/);
-  assert.doesNotMatch(sql, /failed_attempts/);
+  assert.match(sql, /PRIMARY KEY \("id"\)/);
+  assert.match(sql, /CHECK \("status" IN \('pending', 'failed'\)\)/);
+  assert.match(sql, /IDX_staff_pin_attempts_subject/);
+  assert.match(sql, /IDX_staff_pin_attempts_reserved_at/);
+  assert.match(sql, /IDX_staff_pin_attempts_failed_at/);
+  assert.doesNotMatch(sql, /attempt_count/);
 });
 
-test('staff PIN migration down removes its index and table', async () => {
+test('staff PIN migration down removes its indexes and table', async () => {
   const migration = new CreateStaffPinAttempts2026081400010();
   const runner = createQueryRunner();
 
   await migration.down(runner);
 
   const sql = runner.queries.join('\n');
-  assert.match(sql, /DROP INDEX IF EXISTS "IDX_staff_pin_attempts_updated_at"/);
+  assert.match(sql, /DROP INDEX IF EXISTS "IDX_staff_pin_attempts_failed_at"/);
+  assert.match(sql, /DROP INDEX IF EXISTS "IDX_staff_pin_attempts_reserved_at"/);
+  assert.match(sql, /DROP INDEX IF EXISTS "IDX_staff_pin_attempts_subject"/);
   assert.match(sql, /DROP TABLE IF EXISTS "staff_pin_attempts"/);
 });
