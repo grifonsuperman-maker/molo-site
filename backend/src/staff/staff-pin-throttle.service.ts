@@ -100,7 +100,7 @@ export class StaffPinThrottleService {
              ("status" = 'pending'
                AND "reserved_at" >= NOW() - ($3::bigint * INTERVAL '1 millisecond'))
              OR
-             ("status" = 'failed'
+             ("status" IN ('failed')
                AND "failed_at" IS NOT NULL
                AND "failed_at" >= NOW() - ($3::bigint * INTERVAL '1 millisecond'))
            )`,
