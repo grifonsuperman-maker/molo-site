@@ -15,6 +15,7 @@ import { HookahCallsModule } from './hookah-calls/hookah-calls.module';
 import { LogsModule } from './logs/logs.module';
 import { MapModule } from './map/map.module';
 import { CreateStaffPinAttempts2026081400010 } from './migrations/2026081400010-CreateStaffPinAttempts';
+import { UpgradeStaffPinAttemptsPerAttempt2026081400020 } from './migrations/2026081400020-UpgradeStaffPinAttemptsPerAttempt';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -26,7 +27,10 @@ import { WaiterCallsModule } from './waiter-calls/waiter-calls.module';
 import { ZonesModule } from './zones/zones.module';
 
 const staffPinMigrationOptions = {
-  migrations: [CreateStaffPinAttempts2026081400010],
+  migrations: [
+    CreateStaffPinAttempts2026081400010,
+    UpgradeStaffPinAttemptsPerAttempt2026081400020,
+  ],
 };
 
 @Module({
