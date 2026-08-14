@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Req } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
 import { WaiterCallsService } from './waiter-calls.service';
@@ -10,8 +10,11 @@ export class WaiterCallsController {
 
   @Post()
   @Public()
-  createFromGuest(@Body() dto: { bookingId: string }) {
-    return this.service.createFromGuest(dto);
+  createFromGuest(
+    @Body() dto: { bookingId: string },
+    @Headers('x-guest-booking-token') guestToken?: string,
+  ) {
+    return this.service.createFromGuest(dto, guestToken);
   }
 
   @Get()
@@ -22,8 +25,11 @@ export class WaiterCallsController {
 
   @Get('guest-status/:bookingId')
   @Public()
-  guestStatus(@Param('bookingId') bookingId: string) {
-    return this.service.guestStatus(bookingId);
+  guestStatus(
+    @Param('bookingId') bookingId: string,
+    @Headers('x-guest-booking-token') guestToken?: string,
+  ) {
+    return this.service.guestStatus(bookingId, guestToken);
   }
 
   @Get('assignments')
