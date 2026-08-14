@@ -24,6 +24,9 @@ test('staff PIN migration creates the persistent attempt table used by the servi
   const sql = runner.queries.join('\n');
   assert.match(sql, /CREATE TABLE IF NOT EXISTS "staff_pin_attempts"/);
   assert.match(sql, /"attempt_count" integer NOT NULL DEFAULT 0/);
+  assert.match(sql, /"window_started_at" timestamptz NOT NULL DEFAULT NOW\(\)/);
+  assert.match(sql, /"locked_until" timestamptz/);
+  assert.match(sql, /"updated_at" timestamptz NOT NULL DEFAULT NOW\(\)/);
   assert.match(sql, /PRIMARY KEY \("scope", "subject_hash"\)/);
   assert.match(sql, /CHECK \("attempt_count" >= 0\)/);
   assert.match(sql, /IDX_staff_pin_attempts_updated_at/);
