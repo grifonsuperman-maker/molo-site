@@ -5,7 +5,7 @@ import { DataSource, EntityManager } from 'typeorm';
 const PIN_MAX_FAILED_ATTEMPTS = 5;
 const PIN_FAILED_WINDOW_MS = 15 * 60 * 1000;
 const PIN_LOCK_MS = 15 * 60 * 1000;
-const PIN_PENDING_TTL_MS = 60 * 1000;
+const PIN_PENDING_RETENTION_MS = PIN_FAILED_WINDOW_MS + 5 * 60 * 1000;
 
 type PinThrottleScope = 'pin-login' | 'telegram-link';
 
@@ -94,8 +94,17 @@ export class StaffPinThrottleService {
       const countRows = (await manager.query(
         `SELECT COUNT(*)::int AS "count"
          FROM "staff_pin_attempts"
-         WHERE "scope" = $1 AND "subject_hash" = $2`,
-        [scope, subjectHash],
+         WHERE "scope" = $1
+           AND "subject_hash" = $2
+           AND (
+             ("status" = 'pending'
+               AND "reserved_at" >= NOW() - ($3::bigint * INTERVAL '1 millisecond'))
+             OR
+             ("status" = 'failed'
+               AND "failed_at" IS NOT NULL
+               AND "failed_at" >= NOW() - ($3::bigint * INTERVAL '1 millisecond'))
+           )`,
+        [scope, subjectHash, PIN_FAILED_WINDOW_MS],
       )) as Array<{ count: number | string }>;
 
       if (Number(countRows[0]?.count || 0) >= PIN_MAX_FAILED_ATTEMPTS) {
@@ -265,7 +274,7 @@ export class StaffPinThrottleService {
              AND "failed_at" IS NOT NULL
              AND "failed_at" <= NOW() - ($2::bigint * INTERVAL '1 millisecond'))
          )`,
-      [PIN_PENDING_TTL_MS, PIN_FAILED_WINDOW_MS],
+      [PIN_PENDING_RETENTION_MS, PIN_FAILED_WINDOW_MS],
     );
   }
 
