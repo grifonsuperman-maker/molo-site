@@ -6,6 +6,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { RestaurantModule } from '../restaurant/restaurant.module';
 import { StaffBootstrapService } from './staff-bootstrap.service';
 import { StaffController } from './staff.controller';
+import { StaffPinMigrationBootstrapService } from './staff-pin-migration-bootstrap.service';
 import { StaffPinThrottleService } from './staff-pin-throttle.service';
 import { StaffService } from './staff.service';
 import { TelegramStaffLinkService } from './telegram-staff-link.service';
@@ -25,6 +26,7 @@ import { StaffShiftEvent } from './entities/staff-shift-event.entity';
     StaffBootstrapService,
     TelegramStaffLinkService,
     StaffPinThrottleService,
+    StaffPinMigrationBootstrapService,
   ],
   exports: [StaffService, TelegramStaffLinkService],
 })
