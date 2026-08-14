@@ -7,6 +7,7 @@ import { WaiterCallsModule } from "../waiter-calls/waiter-calls.module";
 import { HookahCall } from "./entities/hookah-call.entity";
 import { HookahCallsController } from "./hookah-calls.controller";
 import { HookahCallsService } from "./hookah-calls.service";
+import { HookahGuestAccessService } from "./hookah-guest-access.service";
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { HookahCallsService } from "./hookah-calls.service";
     WaiterCallsModule,
   ],
   controllers: [HookahCallsController],
-  providers: [HookahCallsService],
+  providers: [HookahCallsService, HookahGuestAccessService],
   exports: [HookahCallsService],
 })
 export class HookahCallsModule {}
