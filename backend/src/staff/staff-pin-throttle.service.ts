@@ -121,7 +121,7 @@ export class StaffPinThrottleService {
       },
     );
 
-    if (!outcome.ok) {
+    if (outcome.ok === false) {
       throw outcome.error;
     }
 
