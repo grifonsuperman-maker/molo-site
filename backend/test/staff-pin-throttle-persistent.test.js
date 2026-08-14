@@ -8,8 +8,138 @@ const {
 
 function createSharedDatabase() {
   return {
-    attempts: new Map(),
+    attempts: [],
+    nextId: 1,
+    locks: new Map(),
   };
+}
+
+function rowsFor(shared, scope, subjectHash) {
+  return shared.attempts.filter(
+    (row) => row.scope === scope && row.subject_hash === subjectHash,
+  );
+}
+
+async function runQuery(shared, sql, params = []) {
+  const now = Date.now();
+
+  if (
+    sql.includes('DELETE FROM "staff_pin_attempts"') &&
+    sql.includes('"locked_until" IS NULL') &&
+    params.length === 2
+  ) {
+    const pendingTtl = Number(params[0]);
+    const failedWindow = Number(params[1]);
+    shared.attempts = shared.attempts.filter((row) => {
+      const lockActive = row.locked_until && row.locked_until.getTime() > now;
+      if (lockActive) return true;
+      if (row.status === 'pending') {
+        return row.reserved_at.getTime() > now - pendingTtl;
+      }
+      if (row.status === 'failed' && row.failed_at) {
+        return row.failed_at.getTime() > now - failedWindow;
+      }
+      return true;
+    });
+    return [];
+  }
+
+  if (sql.includes('SELECT "locked_until"') && sql.includes('> NOW()')) {
+    const [scope, subjectHash] = params;
+    const locks = rowsFor(shared, scope, subjectHash)
+      .filter((row) => row.locked_until && row.locked_until.getTime() > now)
+      .sort((a, b) => b.locked_until.getTime() - a.locked_until.getTime());
+    return locks[0] ? [{ locked_until: locks[0].locked_until }] : [];
+  }
+
+  if (sql.includes('SELECT COUNT(*)::int AS "count"')) {
+    const [scope, subjectHash, windowMs] = params;
+    let rows = rowsFor(shared, scope, subjectHash);
+    if (sql.includes('"status" = \'failed\'')) {
+      rows = rows.filter(
+        (row) =>
+          row.status === 'failed' &&
+          row.failed_at &&
+          row.failed_at.getTime() >= now - Number(windowMs),
+      );
+    }
+    return [{ count: rows.length }];
+  }
+
+  if (sql.includes('INSERT INTO "staff_pin_attempts"')) {
+    const [scope, subjectHash] = params;
+    const row = {
+      id: shared.nextId++,
+      scope,
+      subject_hash: subjectHash,
+      status: 'pending',
+      reserved_at: new Date(now),
+      failed_at: null,
+      locked_until: null,
+      updated_at: new Date(now),
+    };
+    shared.attempts.push(row);
+    return [{ id: row.id }];
+  }
+
+  if (sql.includes('SET "status" = \'failed\'')) {
+    const [scope, subjectHash, id] = params;
+    const row = shared.attempts.find(
+      (item) =>
+        item.id === Number(id) &&
+        item.scope === scope &&
+        item.subject_hash === subjectHash &&
+        item.status === 'pending',
+    );
+    if (!row) return [];
+    row.status = 'failed';
+    row.failed_at = new Date(now);
+    row.updated_at = new Date(now);
+    return [{ id: row.id }];
+  }
+
+  if (sql.includes('SET "locked_until"')) {
+    const [scope, subjectHash, id, lockMs] = params;
+    const row = shared.attempts.find(
+      (item) =>
+        item.id === Number(id) &&
+        item.scope === scope &&
+        item.subject_hash === subjectHash,
+    );
+    if (!row) return [];
+    row.locked_until = new Date(now + Number(lockMs));
+    row.updated_at = new Date(now);
+    return [];
+  }
+
+  if (sql.includes('"id" <= $3')) {
+    const [scope, subjectHash, id] = params;
+    shared.attempts = shared.attempts.filter(
+      (row) =>
+        !(
+          row.scope === scope &&
+          row.subject_hash === subjectHash &&
+          row.id <= Number(id)
+        ),
+    );
+    return [];
+  }
+
+  if (sql.includes('"id" = $3') && sql.includes('"status" = \'pending\'')) {
+    const [scope, subjectHash, id] = params;
+    shared.attempts = shared.attempts.filter(
+      (row) =>
+        !(
+          row.scope === scope &&
+          row.subject_hash === subjectHash &&
+          row.id === Number(id) &&
+          row.status === 'pending'
+        ),
+    );
+    return [];
+  }
+
+  throw new Error(`Unexpected SQL in test: ${sql}`);
 }
 
 class FakeDataSource {
@@ -17,86 +147,68 @@ class FakeDataSource {
     this.shared = shared;
   }
 
-  async query(sql, params = []) {
-    if (sql.includes('DELETE FROM "staff_pin_attempts"') && params.length === 0) {
-      const now = Date.now();
-      const cutoff = now - 24 * 60 * 60 * 1000;
-      for (const [key, value] of this.shared.attempts) {
-        const lockedUntil = value.locked_until
-          ? new Date(value.locked_until).getTime()
-          : 0;
-        if (value.updated_at.getTime() < cutoff && lockedUntil <= now) {
-          this.shared.attempts.delete(key);
-        }
-      }
-      return [];
-    }
-
-    if (sql.includes('INSERT INTO "staff_pin_attempts"')) {
-      const [scope, subjectHash, windowMs, maxAttempts, lockMs] = params;
-      const key = `${scope}|${subjectHash}`;
-      const now = Date.now();
-      const current = this.shared.attempts.get(key);
-      const currentLock = current?.locked_until
-        ? new Date(current.locked_until).getTime()
-        : 0;
-
-      if (current && currentLock > now) {
-        return [];
-      }
-
-      const reset =
-        !current ||
-        current.window_started_at.getTime() <= now - Number(windowMs) ||
-        (currentLock > 0 && currentLock <= now);
-      const attemptCount = reset ? 1 : Number(current.attempt_count) + 1;
-      const lockedUntil =
-        !reset && attemptCount >= Number(maxAttempts)
-          ? new Date(now + Number(lockMs))
-          : null;
-      const row = {
-        attempt_count: attemptCount,
-        window_started_at: reset ? new Date(now) : current.window_started_at,
-        locked_until: lockedUntil,
-        updated_at: new Date(now),
-      };
-      this.shared.attempts.set(key, row);
-      return [
-        {
-          attempt_count: row.attempt_count,
-          locked_until: row.locked_until,
-        },
-      ];
-    }
-
-    if (sql.includes('SELECT "locked_until"')) {
-      const value = this.shared.attempts.get(`${params[0]}|${params[1]}`);
-      return value ? [{ locked_until: value.locked_until }] : [];
-    }
-
-    if (sql.includes('UPDATE "staff_pin_attempts"')) {
-      const [scope, subjectHash, maxAttempts] = params;
-      const key = `${scope}|${subjectHash}`;
-      const current = this.shared.attempts.get(key);
-      if (!current) return [];
-
-      const attemptCount = Math.max(Number(current.attempt_count) - 1, 0);
-      current.attempt_count = attemptCount;
-      if (attemptCount < Number(maxAttempts)) {
-        current.locked_until = null;
-      }
-      current.updated_at = new Date();
-      this.shared.attempts.set(key, current);
-      return [{ attempt_count: attemptCount }];
-    }
-
-    if (sql.includes('DELETE FROM "staff_pin_attempts"')) {
-      this.shared.attempts.delete(`${params[0]}|${params[1]}`);
-      return [];
-    }
-
-    throw new Error(`Unexpected SQL in test: ${sql}`);
+  query(sql, params = []) {
+    return runQuery(this.shared, sql, params);
   }
+
+  async transaction(callback) {
+    const manager = new FakeManager(this.shared);
+    try {
+      return await callback(manager);
+    } finally {
+      manager.releaseAll();
+    }
+  }
+}
+
+class FakeManager {
+  constructor(shared) {
+    this.shared = shared;
+    this.releases = [];
+  }
+
+  async query(sql, params = []) {
+    if (sql.includes('pg_advisory_xact_lock')) {
+      const key = `${params[0]}|${params[1]}`;
+      this.releases.push(await this.acquire(key));
+      return [];
+    }
+    return runQuery(this.shared, sql, params);
+  }
+
+  async acquire(key) {
+    const previous = this.shared.locks.get(key) || Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => {
+      release = resolve;
+    });
+    const queued = previous.catch(() => undefined).then(() => current);
+    this.shared.locks.set(key, queued);
+
+    await previous.catch(() => undefined);
+
+    return () => {
+      release();
+      if (this.shared.locks.get(key) === queued) {
+        this.shared.locks.delete(key);
+      }
+    };
+  }
+
+  releaseAll() {
+    for (const release of this.releases.reverse()) release();
+    this.releases = [];
+  }
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 function executeWrongPin(service, subject, calls) {
@@ -137,7 +249,7 @@ test('five wrong PINs persist a 15-minute lock across service instances', async 
   assert.equal(calls.count, 5);
 });
 
-test('parallel guesses share the atomic database attempt counter', async () => {
+test('parallel guesses allow at most five credential checks for one subject', async () => {
   const shared = createSharedDatabase();
   const firstService = new StaffPinThrottleService(new FakeDataSource(shared));
   const secondService = new StaffPinThrottleService(new FakeDataSource(shared));
@@ -176,7 +288,7 @@ test('successful credential verification clears previous failures', async () => 
   });
 
   assert.equal(result, 'staff-token');
-  assert.equal(shared.attempts.size, 0);
+  assert.equal(shared.attempts.length, 0);
 });
 
 test('correct PIN rejected only because shift is closed clears failures', async () => {
@@ -205,10 +317,96 @@ test('correct PIN rejected only because shift is closed clears failures', async 
     /Працівника не додано на зміну/,
   );
 
-  assert.equal(shared.attempts.size, 0);
+  assert.equal(shared.attempts.length, 0);
 });
 
-test('non-credential failures release their reserved attempt', async () => {
+test('a successful request preserves a newer overlapping failed reservation', async () => {
+  const shared = createSharedDatabase();
+  const firstService = new StaffPinThrottleService(new FakeDataSource(shared));
+  const secondService = new StaffPinThrottleService(new FakeDataSource(shared));
+  const firstStarted = deferred();
+  const secondStarted = deferred();
+  const finishFirst = deferred();
+  const finishSecond = deferred();
+
+  const first = firstService.execute({
+    scope: 'pin-login',
+    subject: 'race-success',
+    credentialFailureMessage: 'Невірний працівник або PIN',
+    action: async () => {
+      firstStarted.resolve();
+      await finishFirst.promise;
+      return 'ok';
+    },
+  });
+  await firstStarted.promise;
+
+  const second = secondService.execute({
+    scope: 'pin-login',
+    subject: 'race-success',
+    credentialFailureMessage: 'Невірний працівник або PIN',
+    action: async () => {
+      secondStarted.resolve();
+      await finishSecond.promise;
+      throw new UnauthorizedException('Невірний працівник або PIN');
+    },
+  });
+  await secondStarted.promise;
+
+  finishFirst.resolve();
+  assert.equal(await first, 'ok');
+  finishSecond.resolve();
+  await assert.rejects(() => second, /Невірний працівник або PIN/);
+
+  assert.equal(shared.attempts.length, 1);
+  assert.equal(shared.attempts[0].status, 'failed');
+});
+
+test('releasing a failed infrastructure request cannot delete a newer reservation', async () => {
+  const shared = createSharedDatabase();
+  const firstService = new StaffPinThrottleService(new FakeDataSource(shared));
+  const secondService = new StaffPinThrottleService(new FakeDataSource(shared));
+  const firstStarted = deferred();
+  const secondStarted = deferred();
+  const finishFirst = deferred();
+  const finishSecond = deferred();
+
+  const first = firstService.execute({
+    scope: 'pin-login',
+    subject: 'race-release',
+    credentialFailureMessage: 'Невірний працівник або PIN',
+    action: async () => {
+      firstStarted.resolve();
+      await finishFirst.promise;
+      throw new Error('database unavailable');
+    },
+  });
+  await firstStarted.promise;
+
+  const second = secondService.execute({
+    scope: 'pin-login',
+    subject: 'race-release',
+    credentialFailureMessage: 'Невірний працівник або PIN',
+    action: async () => {
+      secondStarted.resolve();
+      await finishSecond.promise;
+      throw new UnauthorizedException('Невірний працівник або PIN');
+    },
+  });
+  await secondStarted.promise;
+
+  finishFirst.resolve();
+  await assert.rejects(() => first, /database unavailable/);
+  assert.equal(shared.attempts.length, 1);
+  assert.equal(shared.attempts[0].status, 'pending');
+
+  finishSecond.resolve();
+  await assert.rejects(() => second, /Невірний працівник або PIN/);
+  assert.equal(shared.attempts.length, 1);
+  assert.equal(shared.attempts[0].status, 'failed');
+});
+
+test('non-credential failures release only their own pending reservation', async () => {
   const shared = createSharedDatabase();
   const service = new StaffPinThrottleService(new FakeDataSource(shared));
 
@@ -225,32 +423,28 @@ test('non-credential failures release their reserved attempt', async () => {
     /database unavailable/,
   );
 
-  assert.equal(shared.attempts.size, 0);
+  assert.equal(shared.attempts.length, 0);
 });
 
-test('expired attempt windows restart from the first attempt', async () => {
+test('expired failed attempts restart the rolling window', async () => {
   const shared = createSharedDatabase();
-  const dataSource = new FakeDataSource(shared);
-  const service = new StaffPinThrottleService(dataSource);
+  const service = new StaffPinThrottleService(new FakeDataSource(shared));
   const calls = { count: 0 };
 
   await assert.rejects(() => executeWrongPin(service, 'staff-6', calls));
-
-  const row = [...shared.attempts.values()][0];
-  row.attempt_count = 4;
-  row.window_started_at = new Date(Date.now() - 16 * 60 * 1000);
+  shared.attempts[0].failed_at = new Date(Date.now() - 16 * 60 * 1000);
+  shared.attempts[0].updated_at = shared.attempts[0].failed_at;
 
   await assert.rejects(
     () => executeWrongPin(service, 'staff-6', calls),
     /Невірний працівник або PIN/,
   );
 
-  const resetRow = [...shared.attempts.values()][0];
-  assert.equal(resetRow.attempt_count, 1);
-  assert.equal(resetRow.locked_until, null);
+  assert.equal(shared.attempts.length, 1);
+  assert.equal(shared.attempts[0].status, 'failed');
 });
 
-test('different login subjects keep isolated counters', async () => {
+test('different login subjects keep isolated failure rows', async () => {
   const shared = createSharedDatabase();
   const service = new StaffPinThrottleService(new FakeDataSource(shared));
   const firstCalls = { count: 0 };
