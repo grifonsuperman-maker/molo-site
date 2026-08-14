@@ -1,4 +1,4 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 
@@ -23,6 +23,8 @@ type AttemptReservation = {
 
 @Injectable()
 export class StaffPinThrottleService {
+  private readonly logger = new Logger(StaffPinThrottleService.name);
+
   constructor(private readonly dataSource: DataSource) {}
 
   async execute<T>(options: PinThrottleOptions<T>): Promise<T> {
@@ -33,16 +35,18 @@ export class StaffPinThrottleService {
     await this.cleanupStaleAttempts();
     const reservation = await this.reserveAttempt(options.scope, subjectHash);
 
+    let value: T;
     try {
-      const value = await options.action();
-      await this.clearThrough(options.scope, subjectHash, reservation.id);
-      return value;
+      value = await options.action();
     } catch (error) {
       if (
         options.resetOnErrorMessage &&
         this.hasHttpMessage(error, options.resetOnErrorMessage)
       ) {
-        await this.clearThrough(options.scope, subjectHash, reservation.id);
+        await this.bestEffortCleanup(
+          () => this.clearThrough(options.scope, subjectHash, reservation.id),
+          'reset_after_verified_credential',
+        );
         throw error;
       }
 
@@ -61,9 +65,18 @@ export class StaffPinThrottleService {
         throw error;
       }
 
-      await this.releaseReservation(options.scope, subjectHash, reservation.id);
+      await this.bestEffortCleanup(
+        () => this.releaseReservation(options.scope, subjectHash, reservation.id),
+        'release_non_credential_failure',
+      );
       throw error;
     }
+
+    await this.bestEffortCleanup(
+      () => this.clearThrough(options.scope, subjectHash, reservation.id),
+      'clear_after_success',
+    );
+    return value;
   }
 
   private async reserveAttempt(
@@ -253,6 +266,20 @@ export class StaffPinThrottleService {
          )`,
       [PIN_PENDING_TTL_MS, PIN_FAILED_WINDOW_MS],
     );
+  }
+
+  private async bestEffortCleanup(
+    action: () => Promise<unknown>,
+    stage: string,
+  ) {
+    try {
+      await action();
+    } catch (error) {
+      this.logger.error(
+        `PIN throttle cleanup failed at ${stage}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   private hasHttpMessage(error: unknown, expectedMessage: string) {
