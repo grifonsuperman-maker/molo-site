@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post, Req } from "@nestjs/common";
 import type { Request } from "express";
 import type { AuthUser } from "../auth/types/auth-user.type";
 import { Public } from "../common/decorators/public.decorator";
@@ -8,6 +8,7 @@ import { CancelHookahCallDto } from "./dto/cancel-hookah-call.dto";
 import { CreateHookahCallDto } from "./dto/create-hookah-call.dto";
 import { UpdateHookahAvailabilityDto } from "./dto/update-hookah-availability.dto";
 import { HookahCallsService } from "./hookah-calls.service";
+import { HookahGuestAccessService } from "./hookah-guest-access.service";
 
 type AuthenticatedRequest = Request & {
   user: AuthUser;
@@ -15,11 +16,18 @@ type AuthenticatedRequest = Request & {
 
 @Controller("hookah-calls")
 export class HookahCallsController {
-  constructor(private readonly service: HookahCallsService) {}
+  constructor(
+    private readonly service: HookahCallsService,
+    private readonly guestAccess: HookahGuestAccessService,
+  ) {}
 
   @Public()
   @Get("guest/:bookingId/status")
-  guestStatus(@Param("bookingId") bookingId: string) {
+  async guestStatus(
+    @Param("bookingId") bookingId: string,
+    @Headers("x-guest-booking-token") guestToken?: string,
+  ) {
+    await this.guestAccess.assertBookingAccess(bookingId, guestToken);
     return this.service.guestStatus(bookingId);
   }
 
@@ -40,7 +48,11 @@ export class HookahCallsController {
 
   @Public()
   @Post("guest")
-  createFromGuest(@Body() dto: CreateHookahCallDto) {
+  async createFromGuest(
+    @Body() dto: CreateHookahCallDto,
+    @Headers("x-guest-booking-token") guestToken?: string,
+  ) {
+    await this.guestAccess.assertBookingAccess(dto.bookingId, guestToken);
     return this.service.createFromGuest(dto);
   }
 

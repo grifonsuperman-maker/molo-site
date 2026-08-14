@@ -1,4 +1,5 @@
 import { api } from "./client";
+import { guestBookingHeaders } from "./guestBookingAccess";
 
 export type HookahCallStatus = "new" | "accepted" | "completed" | "cancelled";
 
@@ -52,10 +53,17 @@ export const hookahCallsApi = {
     api.post<HookahAvailability>("/hookah-calls/availability", { available }),
 
   getGuestStatus: (bookingId: string) =>
-    api.get<GuestHookahStatus>(`/hookah-calls/guest/${bookingId}/status`),
+    api.get<GuestHookahStatus>(
+      `/hookah-calls/guest/${encodeURIComponent(bookingId)}/status`,
+      { headers: guestBookingHeaders(bookingId) },
+    ),
 
   createFromGuest: (bookingId: string) =>
-    api.post<HookahCallActionResponse>("/hookah-calls/guest", { bookingId }),
+    api.post<HookahCallActionResponse>(
+      "/hookah-calls/guest",
+      { bookingId },
+      { headers: guestBookingHeaders(bookingId) },
+    ),
 
   getActive: () => api.get<HookahCall[]>("/hookah-calls/active"),
 
