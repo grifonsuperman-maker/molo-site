@@ -14,6 +14,7 @@ import { ClientsModule } from './clients/clients.module';
 import { HookahCallsModule } from './hookah-calls/hookah-calls.module';
 import { LogsModule } from './logs/logs.module';
 import { MapModule } from './map/map.module';
+import { CreateStaffPinAttempts2026081400010 } from './migrations/2026081400010-CreateStaffPinAttempts';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -23,6 +24,11 @@ import { TablesModule } from './tables/tables.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { WaiterCallsModule } from './waiter-calls/waiter-calls.module';
 import { ZonesModule } from './zones/zones.module';
+
+const staffPinMigrationOptions = {
+  migrations: [CreateStaffPinAttempts2026081400010],
+  migrationsRun: true,
+};
 
 @Module({
   imports: [
@@ -47,6 +53,7 @@ import { ZonesModule } from './zones/zones.module';
             },
             autoLoadEntities: true,
             synchronize: true,
+            ...staffPinMigrationOptions,
           }
         : {
             type: 'postgres',
@@ -57,6 +64,7 @@ import { ZonesModule } from './zones/zones.module';
             database: process.env.DB_NAME || 'molo_restaurant',
             autoLoadEntities: true,
             synchronize: true,
+            ...staffPinMigrationOptions,
           },
     ),
 
