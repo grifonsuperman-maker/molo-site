@@ -51,28 +51,50 @@ function createDataSource(shared) {
   };
 
   return {
-    createQueryRunner: () => queryRunner,
-    runMigrations: async (options) => {
-      assert.deepEqual(options, { transaction: 'all' });
-      shared.runCalls += 1;
-      shared.activeRuns += 1;
-      shared.maxConcurrentRuns = Math.max(
-        shared.maxConcurrentRuns,
-        shared.activeRuns,
-      );
-
-      await new Promise((resolve) => setTimeout(resolve, 20));
-
-      shared.activeRuns -= 1;
-      return [{ name: 'CreateStaffPinAttempts2026081400010' }];
+    dataSource: {
+      createQueryRunner: () => queryRunner,
     },
+    queryRunner,
   };
 }
 
-test('two cold-start instances serialize registered migrations with one database lock', async () => {
+class TestMigrationBootstrapService extends StaffPinMigrationBootstrapService {
+  constructor(dataSource, shared, expectedQueryRunner) {
+    super(dataSource);
+    this.shared = shared;
+    this.expectedQueryRunner = expectedQueryRunner;
+  }
+
+  async executeRegisteredMigrations(queryRunner) {
+    assert.equal(queryRunner, this.expectedQueryRunner);
+    this.shared.runCalls += 1;
+    this.shared.activeRuns += 1;
+    this.shared.maxConcurrentRuns = Math.max(
+      this.shared.maxConcurrentRuns,
+      this.shared.activeRuns,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    this.shared.activeRuns -= 1;
+    return [{ name: 'CreateStaffPinAttempts2026081400010' }];
+  }
+}
+
+test('two cold-start instances serialize migrations on the same locked query runner', async () => {
   const shared = createSharedMigrationState();
-  const first = new StaffPinMigrationBootstrapService(createDataSource(shared));
-  const second = new StaffPinMigrationBootstrapService(createDataSource(shared));
+  const firstData = createDataSource(shared);
+  const secondData = createDataSource(shared);
+  const first = new TestMigrationBootstrapService(
+    firstData.dataSource,
+    shared,
+    firstData.queryRunner,
+  );
+  const second = new TestMigrationBootstrapService(
+    secondData.dataSource,
+    shared,
+    secondData.queryRunner,
+  );
 
   await Promise.all([
     first.onApplicationBootstrap(),
