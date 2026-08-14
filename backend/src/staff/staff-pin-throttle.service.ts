@@ -232,7 +232,10 @@ export class StaffPinThrottleService {
       `DELETE FROM "staff_pin_attempts"
        WHERE "scope" = $1
          AND "subject_hash" = $2
-         AND "id" <= $3`,
+         AND (
+           ("status" = 'failed' AND "id" < $3)
+           OR "id" = $3
+         )`,
       [scope, subjectHash, reservationId],
     );
   }
