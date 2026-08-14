@@ -244,7 +244,7 @@ export class StaffController {
   @Post(':id/archive')
   async archive(
     @Param('id') id: string,
-    @Body() dto: StaffShiftActionDto = {},
+    @Body() dto: StaffShiftActionDto,
     @Req() request: { user?: AuthUser },
   ) {
     this.assertCannotRemoveSelf(request.user, id);
@@ -256,7 +256,7 @@ export class StaffController {
   @Post(':id/restore')
   async restore(
     @Param('id') id: string,
-    @Body() dto: StaffShiftActionDto = {},
+    @Body() dto: StaffShiftActionDto,
     @Req() request: { user?: AuthUser },
   ) {
     await this.assertAdminCanManageOrdinaryStaff(request.user, id);
