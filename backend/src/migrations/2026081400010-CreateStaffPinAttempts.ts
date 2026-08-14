@@ -10,12 +10,12 @@ export class CreateStaffPinAttempts2026081400010
       CREATE TABLE IF NOT EXISTS "staff_pin_attempts" (
         "scope" varchar(32) NOT NULL,
         "subject_hash" char(64) NOT NULL,
-        "failed_attempts" integer NOT NULL DEFAULT 0,
+        "attempt_count" integer NOT NULL DEFAULT 0,
         "window_started_at" timestamp NOT NULL DEFAULT NOW(),
         "locked_until" timestamp,
         "updated_at" timestamp NOT NULL DEFAULT NOW(),
         CONSTRAINT "PK_staff_pin_attempts" PRIMARY KEY ("scope", "subject_hash"),
-        CONSTRAINT "CHK_staff_pin_attempts_failed_nonnegative" CHECK ("failed_attempts" >= 0)
+        CONSTRAINT "CHK_staff_pin_attempts_count_nonnegative" CHECK ("attempt_count" >= 0)
       )
     `);
 
