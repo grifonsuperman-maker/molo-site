@@ -32,7 +32,7 @@ export class StaffPinThrottleService {
       .digest('hex');
 
     await this.cleanupStaleAttempts();
-    await this.reserveAttempt(options.scope, subjectHash);
+    const reservation = await this.reserveAttempt(options.scope, subjectHash);
 
     try {
       const value = await options.action();
@@ -48,6 +48,15 @@ export class StaffPinThrottleService {
       }
 
       if (this.hasHttpMessage(error, options.credentialFailureMessage)) {
+        if (
+          Number(reservation.attempt_count) >= PIN_MAX_ATTEMPTS &&
+          reservation.locked_until
+        ) {
+          throw new HttpException(
+            'Забагато невдалих спроб. Вхід заблоковано на 15 хв.',
+            429,
+          );
+        }
         throw error;
       }
 
@@ -59,7 +68,7 @@ export class StaffPinThrottleService {
   private async reserveAttempt(
     scope: PinThrottleScope,
     subjectHash: string,
-  ) {
+  ): Promise<ReservedAttempt> {
     for (let retry = 0; retry < 2; retry += 1) {
       const rows = (await this.dataSource.query(
         `INSERT INTO "staff_pin_attempts" (
@@ -105,7 +114,7 @@ export class StaffPinThrottleService {
       )) as ReservedAttempt[];
 
       if (rows[0]) {
-        return;
+        return rows[0];
       }
 
       const lockedRows = (await this.dataSource.query(
