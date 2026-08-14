@@ -27,7 +27,6 @@ import { ZonesModule } from './zones/zones.module';
 
 const staffPinMigrationOptions = {
   migrations: [CreateStaffPinAttempts2026081400010],
-  migrationsRun: true,
 };
 
 @Module({
