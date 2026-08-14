@@ -14,45 +14,36 @@ export class StaffPinMigrationBootstrapService
 
   async onApplicationBootstrap() {
     const queryRunner = this.dataSource.createQueryRunner();
-    let lockAcquired = false;
 
     await queryRunner.connect();
+    await queryRunner.startTransaction();
     try {
       await queryRunner.query(
-        'SELECT pg_advisory_lock(hashtext($1), hashtext($2))',
+        'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
         [MIGRATION_LOCK_NAMESPACE, MIGRATION_LOCK_NAME],
       );
-      lockAcquired = true;
 
       const migrations = await this.executeRegisteredMigrations(queryRunner);
+      await queryRunner.commitTransaction();
 
       if (migrations.length > 0) {
         this.logger.log(
           `Applied ${migrations.length} registered database migration(s)`,
         );
       }
-    } finally {
-      if (lockAcquired) {
-        try {
-          await queryRunner.query(
-            'SELECT pg_advisory_unlock(hashtext($1), hashtext($2))',
-            [MIGRATION_LOCK_NAMESPACE, MIGRATION_LOCK_NAME],
-          );
-        } catch (error) {
-          this.logger.error(
-            'Failed to explicitly release migration advisory lock; the database connection release will clear it',
-            error instanceof Error ? error.stack : String(error),
-          );
-        }
+    } catch (error) {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
       }
-
+      throw error;
+    } finally {
       await queryRunner.release();
     }
   }
 
   protected async executeRegisteredMigrations(queryRunner: QueryRunner) {
     const executor = new MigrationExecutor(this.dataSource, queryRunner);
-    executor.transaction = 'all';
+    executor.transaction = 'none';
     return executor.executePendingMigrations();
   }
 }
