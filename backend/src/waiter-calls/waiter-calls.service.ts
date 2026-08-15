@@ -72,6 +72,12 @@ export class WaiterCallsService {
     return new Date().toISOString();
   }
 
+  private kyivDate() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Kyiv',
+    }).format(new Date());
+  }
+
   private makeId() {
     return `call_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
@@ -374,7 +380,13 @@ export class WaiterCallsService {
 
   async list(waiterId?: string) {
     const records = await this.callRecords.find({
-      where: { status: In(ACTIVE_CALL_STATUSES) },
+      where: {
+        status: In(ACTIVE_CALL_STATUSES),
+        booking: {
+          status: 'approved',
+          bookingDate: this.kyivDate(),
+        },
+      },
       relations: { booking: true },
       order: { createdAt: 'DESC' },
     });
