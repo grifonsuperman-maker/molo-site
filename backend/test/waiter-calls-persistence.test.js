@@ -19,10 +19,17 @@ function assignedTime(call) {
   return new Date(call.acceptedAt || call.createdAt).getTime();
 }
 
+function kyivToday() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv',
+  }).format(new Date());
+}
+
 function createStore() {
   const booking = {
     id: 'booking-1',
     status: 'approved',
+    bookingDate: kyivToday(),
     table: { id: 'table-1', tableNumber: '8', status: 'occupied' },
     client: { fullName: 'Гість' },
   };
@@ -77,12 +84,17 @@ function createStore() {
     async query(sql, params) {
       assert.match(sql, /ROW_NUMBER\(\) OVER/);
       assert.match(sql, /PARTITION BY waiter_calls\.booking_id/);
+      assert.match(sql, /INNER JOIN bookings/);
+      assert.match(sql, /bookings\.status = 'approved'/);
+      assert.match(sql, /bookings\.booking_date = \(CURRENT_TIMESTAMP AT TIME ZONE 'Europe\/Kyiv'\)::date/);
       assert.match(sql, /latest_per_table/);
       assert.match(sql, /LIMIT 50/);
 
       const waiterId = params[0];
+      const today = kyivToday();
       const ordered = [...calls]
         .filter((call) => call.waiterId === waiterId && call.assignmentActive)
+        .filter((call) => call.booking?.status === 'approved' && call.booking?.bookingDate === today)
         .sort((left, right) => assignedTime(right) - assignedTime(left));
 
       const latestByBooking = new Map();
@@ -290,11 +302,12 @@ test('myAssignments deduplicates persisted rows in SQL before applying the 50-as
   const store = createStore();
   const waiterId = '11111111-1111-4111-8111-111111111111';
   const baseTime = Date.now();
+  const today = kyivToday();
 
   for (let index = 0; index < 55; index += 1) {
     store.calls.push({
       id: `duplicate-${index}`,
-      booking: { id: 'booking-duplicate' },
+      booking: { id: 'booking-duplicate', status: 'approved', bookingDate: today },
       tableId: 'table-duplicate',
       tableNumber: '9',
       clientName: null,
@@ -311,7 +324,7 @@ test('myAssignments deduplicates persisted rows in SQL before applying the 50-as
 
   store.calls.push({
     id: 'older-other-booking',
-    booking: { id: 'booking-other' },
+    booking: { id: 'booking-other', status: 'approved', bookingDate: today },
     tableId: 'table-other',
     tableNumber: '10',
     clientName: null,
@@ -329,6 +342,52 @@ test('myAssignments deduplicates persisted rows in SQL before applying the 50-as
 
   assert.equal(assignments.filter((item) => item.bookingId === 'booking-duplicate').length, 1);
   assert.equal(assignments.some((item) => item.bookingId === 'booking-other'), true);
+});
+
+test('myAssignments filters completed history before the 50-assignment limit', async () => {
+  const store = createStore();
+  const waiterId = '11111111-1111-4111-8111-111111111111';
+  const baseTime = Date.now();
+  const today = kyivToday();
+
+  for (let index = 0; index < 55; index += 1) {
+    store.calls.push({
+      id: `completed-${index}`,
+      booking: { id: `completed-booking-${index}`, status: 'completed', bookingDate: today },
+      tableId: `completed-table-${index}`,
+      tableNumber: String(100 + index),
+      clientName: null,
+      waiterId,
+      waiterName: 'Офіціант 1',
+      assignmentActive: true,
+      status: 'closed',
+      acceptedAt: new Date(baseTime - index * 1000),
+      closedAt: new Date(baseTime - index * 900),
+      createdAt: new Date(baseTime - index * 1000),
+      updatedAt: new Date(baseTime - index * 900),
+    });
+  }
+
+  store.calls.push({
+    id: 'older-active-booking',
+    booking: { id: 'active-booking', status: 'approved', bookingDate: today },
+    tableId: 'active-table',
+    tableNumber: '8',
+    clientName: null,
+    waiterId,
+    waiterName: 'Офіціант 1',
+    assignmentActive: true,
+    status: 'closed',
+    acceptedAt: new Date(baseTime - 100000),
+    closedAt: new Date(baseTime - 99000),
+    createdAt: new Date(baseTime - 100000),
+    updatedAt: new Date(baseTime - 99000),
+  });
+
+  const assignments = await createService(store).myAssignments(waiterId);
+
+  assert.equal(assignments.length, 1);
+  assert.equal(assignments[0].bookingId, 'active-booking');
 });
 
 test('waiter_calls schema is migration-owned and enforces one active call per booking', () => {
