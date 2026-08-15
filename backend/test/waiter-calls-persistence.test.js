@@ -240,6 +240,51 @@ test('explicit booking detach removes persisted waiter assignment even after cal
   assert.equal(await restartedService.assignmentForBooking(store.booking), null);
 });
 
+test('myAssignments deduplicates persisted rows before applying the 50-assignment limit', async () => {
+  const store = createStore();
+  const waiterId = '11111111-1111-4111-8111-111111111111';
+  const baseTime = Date.now();
+
+  for (let index = 0; index < 55; index += 1) {
+    store.calls.push({
+      id: `duplicate-${index}`,
+      booking: { id: 'booking-duplicate' },
+      tableId: 'table-duplicate',
+      tableNumber: '9',
+      clientName: null,
+      waiterId,
+      waiterName: 'Офіціант 1',
+      assignmentActive: true,
+      status: 'closed',
+      acceptedAt: new Date(baseTime - index * 1000),
+      closedAt: new Date(baseTime - index * 900),
+      createdAt: new Date(baseTime - index * 1000),
+      updatedAt: new Date(baseTime - index * 900),
+    });
+  }
+
+  store.calls.push({
+    id: 'older-other-booking',
+    booking: { id: 'booking-other' },
+    tableId: 'table-other',
+    tableNumber: '10',
+    clientName: null,
+    waiterId,
+    waiterName: 'Офіціант 1',
+    assignmentActive: true,
+    status: 'closed',
+    acceptedAt: new Date(baseTime - 100000),
+    closedAt: new Date(baseTime - 99000),
+    createdAt: new Date(baseTime - 100000),
+    updatedAt: new Date(baseTime - 99000),
+  });
+
+  const assignments = await createService(store).myAssignments(waiterId);
+
+  assert.equal(assignments.filter((item) => item.bookingId === 'booking-duplicate').length, 1);
+  assert.equal(assignments.some((item) => item.bookingId === 'booking-other'), true);
+});
+
 test('waiter_calls schema is migration-owned and enforces one active call per booking', () => {
   const migrationSource = fs.readFileSync(
     path.join(__dirname, '../src/migrations/2026081500010-CreateWaiterCalls.ts'),
