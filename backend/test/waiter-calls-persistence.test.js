@@ -9,6 +9,12 @@ const { Booking } = require('../dist/bookings/entities/booking.entity.js');
 const { WaiterCallRecord } = require('../dist/waiter-calls/entities/waiter-call.entity.js');
 const { WaiterCallsService } = require('../dist/waiter-calls/waiter-calls.service.js');
 
+function matchesStatus(callStatus, requestedStatus) {
+  if (!requestedStatus) return true;
+  if (typeof requestedStatus === 'string') return callStatus === requestedStatus;
+  return callStatus === 'new' || callStatus === 'accepted';
+}
+
 function createStore() {
   const booking = {
     id: 'booking-1',
@@ -45,9 +51,8 @@ function createStore() {
     },
     async find({ where } = {}) {
       return [...calls]
-        .filter((call) => call.status === 'new' || call.status === 'accepted')
+        .filter((call) => matchesStatus(call.status, where?.status))
         .filter((call) => !where?.waiterId || call.waiterId === where.waiterId)
-        .filter((call) => !where?.status || call.status === where.status)
         .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
     },
     async findOne({ where }) {
@@ -57,8 +62,7 @@ function createStore() {
           .reverse()
           .find((call) =>
             call.booking.id === where.booking.id &&
-            (!where.status || call.status === where.status) &&
-            (call.status === 'new' || call.status === 'accepted')) || null;
+            matchesStatus(call.status, where.status)) || null;
       }
       return null;
     },
