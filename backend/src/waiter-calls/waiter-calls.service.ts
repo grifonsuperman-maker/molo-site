@@ -39,6 +39,15 @@ type WaiterAssignment = {
   assignedAt: string;
 };
 
+type PersistedAssignmentRow = {
+  bookingId: string;
+  tableId: string | null;
+  tableNumber: string | null;
+  waiterId: string;
+  waiterName: string | null;
+  assignedAt: Date | string;
+};
+
 const WAITER_ASSIGNMENT_HISTORY_ACTIONS = [
   'booking_checked_in',
   'waiter_table_transfer',
@@ -381,14 +390,59 @@ export class WaiterCallsService {
     const inMemory = [...this.assignments]
       .filter((assignment) => assignment.waiterId === waiterId)
       .reverse();
-    const persistedCalls = await this.callRecords.find({
-      where: { waiterId, assignmentActive: true },
-      relations: { booking: true },
-      order: { acceptedAt: 'DESC', createdAt: 'DESC' },
-    });
-    const persisted = persistedCalls
-      .map((call) => this.toAssignment(call))
-      .filter((assignment): assignment is WaiterAssignment => Boolean(assignment));
+    const rows = await this.callRecords.query(
+      `
+        WITH latest_per_booking AS (
+          SELECT
+            waiter_calls.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY waiter_calls.booking_id
+              ORDER BY COALESCE(waiter_calls.accepted_at, waiter_calls.created_at) DESC,
+                       waiter_calls.created_at DESC
+            ) AS booking_rank
+          FROM waiter_calls
+          WHERE waiter_calls.waiter_id = $1
+            AND waiter_calls.assignment_active = true
+        ),
+        latest_per_table AS (
+          SELECT
+            latest_per_booking.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY CASE
+                WHEN latest_per_booking.table_id IS NOT NULL
+                  THEN 'id:' || latest_per_booking.table_id::text
+                WHEN latest_per_booking.table_number IS NOT NULL
+                  THEN 'number:' || latest_per_booking.table_number
+                ELSE 'booking:' || latest_per_booking.booking_id::text
+              END
+              ORDER BY COALESCE(latest_per_booking.accepted_at, latest_per_booking.created_at) DESC,
+                       latest_per_booking.created_at DESC
+            ) AS table_rank
+          FROM latest_per_booking
+          WHERE latest_per_booking.booking_rank = 1
+        )
+        SELECT
+          latest_per_table.booking_id AS "bookingId",
+          latest_per_table.table_id AS "tableId",
+          latest_per_table.table_number AS "tableNumber",
+          latest_per_table.waiter_id AS "waiterId",
+          latest_per_table.waiter_name AS "waiterName",
+          COALESCE(latest_per_table.accepted_at, latest_per_table.created_at) AS "assignedAt"
+        FROM latest_per_table
+        WHERE latest_per_table.table_rank = 1
+        ORDER BY "assignedAt" DESC
+        LIMIT 50
+      `,
+      [waiterId],
+    ) as PersistedAssignmentRow[];
+    const persisted = rows.map((row) => ({
+      bookingId: row.bookingId,
+      tableId: row.tableId,
+      tableNumber: row.tableNumber,
+      waiterId: row.waiterId,
+      waiterName: row.waiterName || 'Офіціант',
+      assignedAt: this.dateText(row.assignedAt),
+    }));
     const seenBookings = new Set<string>();
     const seenTableIds = new Set<string>();
     const seenTableNumbers = new Set<string>();
