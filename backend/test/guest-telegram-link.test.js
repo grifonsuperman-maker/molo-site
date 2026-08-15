@@ -23,7 +23,9 @@ function createState(options = {}) {
   const booking = { id: bookingId, client: { id: client.id } };
   const bookingParams = {};
   let transactionCalls = 0;
-  let saveCalls = 0;
+  let clientSaveCalls = 0;
+  let bookingSaveCalls = 0;
+  let uniqueViolationThrown = false;
 
   const bookingQuery = {
     leftJoinAndSelect() { return this; },
@@ -47,17 +49,33 @@ function createState(options = {}) {
 
   const bookingRepo = {
     createQueryBuilder: () => bookingQuery,
+    save: async (value) => {
+      bookingSaveCalls += 1;
+      return value;
+    },
   };
   const clientRepo = {
     createQueryBuilder: () => clientQuery,
     findOne: async ({ where }) => {
-      if (options.linkedClient && where.telegramId === telegramId) {
-        return options.linkedClient;
+      if (where.telegramId !== telegramId) return null;
+      if (options.linkedClient) return options.linkedClient;
+      if (
+        options.linkedClientAfterRetry &&
+        transactionCalls >= 2
+      ) {
+        return options.linkedClientAfterRetry;
       }
       return null;
     },
     save: async (value) => {
-      saveCalls += 1;
+      clientSaveCalls += 1;
+      if (options.uniqueViolationOnce && !uniqueViolationThrown) {
+        uniqueViolationThrown = true;
+        value.telegramId = options.clientTelegramId ?? null;
+        const error = new Error('unique violation');
+        error.code = '23505';
+        throw error;
+      }
       return value;
     },
   };
@@ -80,10 +98,12 @@ function createState(options = {}) {
     guestToken,
     telegramId,
     client,
+    booking,
     bookingParams,
     service: new GuestTelegramLinkService(dataSource),
     transactionCalls: () => transactionCalls,
-    saveCalls: () => saveCalls,
+    clientSaveCalls: () => clientSaveCalls,
+    bookingSaveCalls: () => bookingSaveCalls,
   };
 }
 
@@ -130,7 +150,8 @@ test('Telegram link rejects a token from another booking', async () => {
     (error) => error.status === 401 && error.message === 'Недійсний доступ до бронювання',
   );
 
-  assert.equal(state.saveCalls(), 0);
+  assert.equal(state.clientSaveCalls(), 0);
+  assert.equal(state.bookingSaveCalls(), 0);
 });
 
 test('Telegram link stores the verified Telegram id for the owned booking client', async () => {
@@ -144,7 +165,8 @@ test('Telegram link stores the verified Telegram id for the owned booking client
 
   assert.equal(result.linked, true);
   assert.equal(state.client.telegramId, state.telegramId);
-  assert.equal(state.saveCalls(), 1);
+  assert.equal(state.clientSaveCalls(), 1);
+  assert.equal(state.bookingSaveCalls(), 0);
   assert.equal(
     state.bookingParams.guestAccessTokenHash,
     hashToken(state.guestToken),
@@ -160,17 +182,43 @@ test('Telegram link does not rewrite a client linked to another Telegram', async
   );
 
   assert.equal(state.client.telegramId, '987654321');
-  assert.equal(state.saveCalls(), 0);
+  assert.equal(state.clientSaveCalls(), 0);
+  assert.equal(state.bookingSaveCalls(), 0);
 });
 
-test('Telegram link does not move a Telegram id from another client', async () => {
-  const state = createState({ linkedClient: { id: 'client-2', telegramId: '123456789' } });
+test('Telegram link attaches an owned booking to the client already linked to this Telegram', async () => {
+  const linkedClient = { id: 'client-2', telegramId: '123456789' };
+  const state = createState({ linkedClient });
 
-  await assert.rejects(
-    () => state.service.link(state.bookingId, state.guestToken, guestUser()),
-    (error) => error.status === 409 && error.message === 'Цей Telegram уже прив’язаний до іншого гостя',
+  const result = await state.service.link(
+    state.bookingId,
+    state.guestToken,
+    guestUser(),
   );
 
+  assert.equal(result.linked, true);
+  assert.equal(state.booking.client, linkedClient);
   assert.equal(state.client.telegramId, null);
-  assert.equal(state.saveCalls(), 0);
+  assert.equal(state.clientSaveCalls(), 0);
+  assert.equal(state.bookingSaveCalls(), 1);
+});
+
+test('Telegram link recovers a concurrent unique-id race by attaching the owned booking to the winner', async () => {
+  const linkedClientAfterRetry = { id: 'client-2', telegramId: '123456789' };
+  const state = createState({
+    uniqueViolationOnce: true,
+    linkedClientAfterRetry,
+  });
+
+  const result = await state.service.link(
+    state.bookingId,
+    state.guestToken,
+    guestUser(),
+  );
+
+  assert.equal(result.linked, true);
+  assert.equal(state.transactionCalls(), 2);
+  assert.equal(state.clientSaveCalls(), 1);
+  assert.equal(state.bookingSaveCalls(), 1);
+  assert.equal(state.booking.client, linkedClientAfterRetry);
 });
