@@ -259,51 +259,51 @@ export class WaiterCallsService {
   async createFromGuest(dto: { bookingId: string }, guestToken?: string) {
     if (!dto.bookingId) throw new BadRequestException('bookingId обовʼязковий');
 
-    return this.dataSource.transaction(async (manager) => {
-      const bookingRepo = manager.getRepository(Booking);
-      const callRepo = manager.getRepository(WaiterCallRecord);
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        const bookingRepo = manager.getRepository(Booking);
+        const callRepo = manager.getRepository(WaiterCallRecord);
 
-      await this.assertGuestAccess(dto.bookingId, guestToken, bookingRepo);
+        await this.assertGuestAccess(dto.bookingId, guestToken, bookingRepo);
 
-      const lockedBooking = await bookingRepo
-        .createQueryBuilder('booking')
-        .where('booking.id = :bookingId', { bookingId: dto.bookingId })
-        .setLock('pessimistic_write', undefined, ['booking'])
-        .getOne();
+        const lockedBooking = await bookingRepo
+          .createQueryBuilder('booking')
+          .where('booking.id = :bookingId', { bookingId: dto.bookingId })
+          .setLock('pessimistic_write', undefined, ['booking'])
+          .getOne();
 
-      if (!lockedBooking) throw new NotFoundException('Бронювання не знайдено');
+        if (!lockedBooking) throw new NotFoundException('Бронювання не знайдено');
 
-      const booking = await this.getBooking(dto.bookingId, bookingRepo);
-      const tableStatus = booking.table?.status || null;
-      const canCall = booking.status === 'approved' && tableStatus === 'occupied';
+        const booking = await this.getBooking(dto.bookingId, bookingRepo);
+        const tableStatus = booking.table?.status || null;
+        const canCall = booking.status === 'approved' && tableStatus === 'occupied';
 
-      if (!canCall) {
-        throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
-      }
+        if (!canCall) {
+          throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
+        }
 
-      const existing = await this.activeCallForBooking(booking.id, callRepo);
-      if (existing) {
-        return {
-          message: 'Виклик вже відправлено',
-          call: this.toPublicCall(existing),
-        };
-      }
+        const existing = await this.activeCallForBooking(booking.id, callRepo);
+        if (existing) {
+          return {
+            message: 'Виклик вже відправлено',
+            call: this.toPublicCall(existing),
+          };
+        }
 
-      const assignment = await this.resolveAssignment(booking);
-      const call = callRepo.create({
-        id: this.makeId(),
-        booking,
-        tableId: booking.table?.id || null,
-        tableNumber: booking.table?.tableNumber || null,
-        clientName: booking.client?.fullName || null,
-        waiterId: assignment?.waiterId || null,
-        waiterName: assignment?.waiterName || null,
-        status: 'new',
-        acceptedAt: null,
-        closedAt: null,
-      });
+        const assignment = await this.resolveAssignment(booking);
+        const call = callRepo.create({
+          id: this.makeId(),
+          booking,
+          tableId: booking.table?.id || null,
+          tableNumber: booking.table?.tableNumber || null,
+          clientName: booking.client?.fullName || null,
+          waiterId: assignment?.waiterId || null,
+          waiterName: assignment?.waiterName || null,
+          status: 'new',
+          acceptedAt: null,
+          closedAt: null,
+        });
 
-      try {
         const saved = await callRepo.save(call);
         return {
           message: assignment
@@ -311,21 +311,21 @@ export class WaiterCallsService {
             : 'Виклик відправлено у загальний список офіціантів',
           call: this.toPublicCall(saved),
         };
-      } catch (error: any) {
-        const code = error?.code || error?.driverError?.code;
-        const constraint = error?.constraint || error?.driverError?.constraint;
-        if (code === '23505' && constraint === 'UQ_waiter_calls_active_booking') {
-          const concurrent = await this.activeCallForBooking(booking.id, callRepo);
-          if (concurrent) {
-            return {
-              message: 'Виклик вже відправлено',
-              call: this.toPublicCall(concurrent),
-            };
-          }
+      });
+    } catch (error: any) {
+      const code = error?.code || error?.driverError?.code;
+      const constraint = error?.constraint || error?.driverError?.constraint;
+      if (code === '23505' && constraint === 'UQ_waiter_calls_active_booking') {
+        const concurrent = await this.activeCallForBooking(dto.bookingId);
+        if (concurrent) {
+          return {
+            message: 'Виклик вже відправлено',
+            call: this.toPublicCall(concurrent),
+          };
         }
-        throw error;
       }
-    });
+      throw error;
+    }
   }
 
   async list(waiterId?: string) {
