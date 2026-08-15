@@ -7,12 +7,14 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 
 import { BookingHistory } from '../bookings/entities/booking-history.entity';
 import { Booking } from '../bookings/entities/booking.entity';
-
-type WaiterCallStatus = 'new' | 'accepted' | 'closed';
+import {
+  WaiterCallRecord,
+  type WaiterCallStatus,
+} from './entities/waiter-call.entity';
 
 export type WaiterCall = {
   id: string;
@@ -41,10 +43,10 @@ const WAITER_ASSIGNMENT_HISTORY_ACTIONS = [
   'booking_checked_in',
   'waiter_table_transfer',
 ];
+const ACTIVE_CALL_STATUSES: WaiterCallStatus[] = ['new', 'accepted'];
 
 @Injectable()
 export class WaiterCallsService {
-  private calls: WaiterCall[] = [];
   private assignments: WaiterAssignment[] = [];
 
   constructor(
@@ -52,6 +54,9 @@ export class WaiterCallsService {
     private readonly bookings: Repository<Booking>,
     @InjectRepository(BookingHistory)
     private readonly histories: Repository<BookingHistory>,
+    @InjectRepository(WaiterCallRecord)
+    private readonly callRecords: Repository<WaiterCallRecord>,
+    private readonly dataSource: DataSource,
   ) {}
 
   private now() {
@@ -62,8 +67,35 @@ export class WaiterCallsService {
     return `call_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
 
-  private async getBooking(bookingId: string) {
-    const booking = await this.bookings.findOne({
+  private dateText(value: Date | string) {
+    return typeof value === 'string' ? value : value.toISOString();
+  }
+
+  private nullableDateText(value: Date | string | null | undefined) {
+    return value ? this.dateText(value) : null;
+  }
+
+  private toPublicCall(call: WaiterCallRecord): WaiterCall {
+    return {
+      id: call.id,
+      bookingId: call.booking.id,
+      tableId: call.tableId,
+      tableNumber: call.tableNumber,
+      clientName: call.clientName,
+      waiterId: call.waiterId,
+      waiterName: call.waiterName,
+      status: call.status,
+      createdAt: this.dateText(call.createdAt),
+      acceptedAt: this.nullableDateText(call.acceptedAt),
+      closedAt: this.nullableDateText(call.closedAt),
+    };
+  }
+
+  private async getBooking(
+    bookingId: string,
+    repository: Repository<Booking> = this.bookings,
+  ) {
+    const booking = await repository.findOne({
       where: { id: bookingId },
       relations: ['table', 'client'],
     });
@@ -72,7 +104,11 @@ export class WaiterCallsService {
     return booking;
   }
 
-  private async getGuestBooking(bookingId: string, guestToken?: string) {
+  private async assertGuestAccess(
+    bookingId: string,
+    guestToken: string | undefined,
+    repository: Repository<Booking> = this.bookings,
+  ) {
     const normalizedToken = String(guestToken || '').trim();
     if (!normalizedToken || normalizedToken.length > 256) {
       throw new UnauthorizedException('Недійсний доступ до бронювання');
@@ -81,14 +117,17 @@ export class WaiterCallsService {
     const guestAccessTokenHash = createHash('sha256')
       .update(normalizedToken)
       .digest('hex');
-    const hasAccess = await this.bookings.exist({
+    const hasAccess = await repository.exist({
       where: { id: bookingId, guestAccessTokenHash },
     });
 
     if (!hasAccess) {
       throw new UnauthorizedException('Недійсний доступ до бронювання');
     }
+  }
 
+  private async getGuestBooking(bookingId: string, guestToken?: string) {
+    await this.assertGuestAccess(bookingId, guestToken);
     return this.getBooking(bookingId);
   }
 
@@ -149,17 +188,24 @@ export class WaiterCallsService {
     });
   }
 
+  private async activeCallForBooking(
+    bookingId: string,
+    repository: Repository<WaiterCallRecord> = this.callRecords,
+  ) {
+    return repository.findOne({
+      where: {
+        booking: { id: bookingId },
+        status: In(ACTIVE_CALL_STATUSES),
+      },
+      relations: { booking: true },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   private async buildGuestStatus(booking: Booking) {
     const tableStatus = booking.table?.status || null;
     const canCall = booking.status === 'approved' && tableStatus === 'occupied';
-
-    const activeCall =
-      this.calls.find(
-        (call) =>
-          call.bookingId === booking.id &&
-          call.status !== 'closed',
-      ) || null;
-
+    const activeCall = await this.activeCallForBooking(booking.id);
     const assignment = await this.resolveAssignment(booking);
 
     return {
@@ -170,7 +216,7 @@ export class WaiterCallsService {
       canCall,
       waiterAssigned: Boolean(assignment),
       waiterName: assignment?.waiterName || null,
-      activeCall,
+      activeCall: activeCall ? this.toPublicCall(activeCall) : null,
     };
   }
 
@@ -213,55 +259,84 @@ export class WaiterCallsService {
   async createFromGuest(dto: { bookingId: string }, guestToken?: string) {
     if (!dto.bookingId) throw new BadRequestException('bookingId обовʼязковий');
 
-    const booking = await this.getGuestBooking(dto.bookingId, guestToken);
-    const status = await this.buildGuestStatus(booking);
+    return this.dataSource.transaction(async (manager) => {
+      const bookingRepo = manager.getRepository(Booking);
+      const callRepo = manager.getRepository(WaiterCallRecord);
 
-    if (!status.canCall) {
-      throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
-    }
+      await this.assertGuestAccess(dto.bookingId, guestToken, bookingRepo);
 
-    const existing = this.calls.find(
-      (call) => call.bookingId === booking.id && call.status !== 'closed',
-    );
+      const lockedBooking = await bookingRepo
+        .createQueryBuilder('booking')
+        .where('booking.id = :bookingId', { bookingId: dto.bookingId })
+        .setLock('pessimistic_write', undefined, ['booking'])
+        .getOne();
 
-    if (existing) {
-      return {
-        message: 'Виклик вже відправлено',
-        call: existing,
-      };
-    }
+      if (!lockedBooking) throw new NotFoundException('Бронювання не знайдено');
 
-    const assignment = await this.resolveAssignment(booking);
+      const booking = await this.getBooking(dto.bookingId, bookingRepo);
+      const tableStatus = booking.table?.status || null;
+      const canCall = booking.status === 'approved' && tableStatus === 'occupied';
 
-    const call: WaiterCall = {
-      id: this.makeId(),
-      bookingId: booking.id,
-      tableId: booking.table?.id || null,
-      tableNumber: booking.table?.tableNumber || null,
-      clientName: booking.client?.fullName || null,
-      waiterId: assignment?.waiterId || null,
-      waiterName: assignment?.waiterName || null,
-      status: 'new',
-      createdAt: this.now(),
-      acceptedAt: null,
-      closedAt: null,
-    };
+      if (!canCall) {
+        throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
+      }
 
-    this.calls.unshift(call);
+      const existing = await this.activeCallForBooking(booking.id, callRepo);
+      if (existing) {
+        return {
+          message: 'Виклик вже відправлено',
+          call: this.toPublicCall(existing),
+        };
+      }
 
-    return {
-      message: assignment
-        ? `Виклик відправлено офіціанту ${assignment.waiterName}`
-        : 'Виклик відправлено у загальний список офіціантів',
-      call,
-    };
+      const assignment = await this.resolveAssignment(booking);
+      const call = callRepo.create({
+        id: this.makeId(),
+        booking,
+        tableId: booking.table?.id || null,
+        tableNumber: booking.table?.tableNumber || null,
+        clientName: booking.client?.fullName || null,
+        waiterId: assignment?.waiterId || null,
+        waiterName: assignment?.waiterName || null,
+        status: 'new',
+        acceptedAt: null,
+        closedAt: null,
+      });
+
+      try {
+        const saved = await callRepo.save(call);
+        return {
+          message: assignment
+            ? `Виклик відправлено офіціанту ${assignment.waiterName}`
+            : 'Виклик відправлено у загальний список офіціантів',
+          call: this.toPublicCall(saved),
+        };
+      } catch (error: any) {
+        const code = error?.code || error?.driverError?.code;
+        const constraint = error?.constraint || error?.driverError?.constraint;
+        if (code === '23505' && constraint === 'UQ_waiter_calls_active_booking') {
+          const concurrent = await this.activeCallForBooking(booking.id, callRepo);
+          if (concurrent) {
+            return {
+              message: 'Виклик вже відправлено',
+              call: this.toPublicCall(concurrent),
+            };
+          }
+        }
+        throw error;
+      }
+    });
   }
 
-  list(waiterId?: string) {
-    const active = this.calls.filter((call) => call.status !== 'closed');
+  async list(waiterId?: string) {
+    const records = await this.callRecords.find({
+      where: { status: In(ACTIVE_CALL_STATUSES) },
+      relations: { booking: true },
+      order: { createdAt: 'DESC' },
+    });
+    const active = records.map((call) => this.toPublicCall(call));
 
     if (!waiterId) return active;
-
     return active.filter((call) => !call.waiterId || call.waiterId === waiterId);
   }
 
@@ -278,70 +353,93 @@ export class WaiterCallsService {
   }
 
   /** Invalidates active guest calls after the booking has been moved to another table. */
-  closeActiveCallsAndDetachBooking(bookingId: string) {
-    const closedAt = this.now();
+  async closeActiveCallsAndDetachBooking(bookingId: string) {
+    const closedAt = new Date();
 
-    for (const call of this.calls) {
-      if (call.bookingId === bookingId && (call.status === 'new' || call.status === 'accepted')) {
-        call.status = 'closed';
-        call.closedAt = closedAt;
-      }
-    }
+    await this.callRecords
+      .createQueryBuilder()
+      .update(WaiterCallRecord)
+      .set({ status: 'closed', closedAt })
+      .where('"booking_id" = :bookingId', { bookingId })
+      .andWhere('"status" IN (:...statuses)', { statuses: ACTIVE_CALL_STATUSES })
+      .execute();
 
     this.detachBooking(bookingId);
   }
 
-  accept(id: string, dto: { waiterId: string; waiterName: string }) {
-    const call = this.calls.find((item) => item.id === id);
-    if (!call) throw new NotFoundException('Виклик не знайдено');
-    if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
-    if (!dto.waiterId) throw new BadRequestException('waiterId обовʼязковий');
-    if (call.waiterId && call.waiterId !== dto.waiterId) {
-      throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
-    }
-    if (call.status === 'accepted') {
+  async accept(id: string, dto: { waiterId: string; waiterName: string }) {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const callRepo = manager.getRepository(WaiterCallRecord);
+      const call = await callRepo.findOne({
+        where: { id },
+        relations: { booking: true },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!call) throw new NotFoundException('Виклик не знайдено');
+      if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
+      if (!dto.waiterId) throw new BadRequestException('waiterId обовʼязковий');
+      if (call.waiterId && call.waiterId !== dto.waiterId) {
+        throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+      }
+      if (call.status === 'accepted') {
+        return {
+          message: 'Виклик вже прийнято',
+          call: this.toPublicCall(call),
+        };
+      }
+
+      call.status = 'accepted';
+      call.waiterId = dto.waiterId;
+      call.waiterName = dto.waiterName || 'Офіціант';
+      call.acceptedAt = new Date();
+
+      const saved = await callRepo.save(call);
       return {
-        message: 'Виклик вже прийнято',
-        call,
+        message: 'Виклик прийнято',
+        call: this.toPublicCall(saved),
       };
-    }
-
-    call.status = 'accepted';
-    call.waiterId = dto.waiterId;
-    call.waiterName = dto.waiterName || 'Офіціант';
-    call.acceptedAt = this.now();
-
-    this.rememberAssignment({
-      bookingId: call.bookingId,
-      tableId: call.tableId,
-      tableNumber: call.tableNumber,
-      waiterId: call.waiterId,
-      waiterName: call.waiterName,
-      assignedAt: call.acceptedAt,
     });
 
-    return {
-      message: 'Виклик прийнято',
-      call,
-    };
-  }
-
-  close(id: string, waiterId: string) {
-    const call = this.calls.find((item) => item.id === id);
-    if (!call) throw new NotFoundException('Виклик не знайдено');
-    if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
-    if (call.status !== 'accepted') throw new BadRequestException('Спочатку прийміть виклик');
-    if (!waiterId) throw new BadRequestException('waiterId обовʼязковий');
-    if (call.waiterId !== waiterId) {
-      throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+    if (result.call.status === 'accepted' && result.call.waiterId) {
+      this.rememberAssignment({
+        bookingId: result.call.bookingId,
+        tableId: result.call.tableId,
+        tableNumber: result.call.tableNumber,
+        waiterId: result.call.waiterId,
+        waiterName: result.call.waiterName || 'Офіціант',
+        assignedAt: result.call.acceptedAt || this.now(),
+      });
     }
 
-    call.status = 'closed';
-    call.closedAt = this.now();
+    return result;
+  }
 
-    return {
-      message: 'Виклик закрито',
-      call,
-    };
+  async close(id: string, waiterId: string) {
+    return this.dataSource.transaction(async (manager) => {
+      const callRepo = manager.getRepository(WaiterCallRecord);
+      const call = await callRepo.findOne({
+        where: { id },
+        relations: { booking: true },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!call) throw new NotFoundException('Виклик не знайдено');
+      if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
+      if (call.status !== 'accepted') throw new BadRequestException('Спочатку прийміть виклик');
+      if (!waiterId) throw new BadRequestException('waiterId обовʼязковий');
+      if (call.waiterId !== waiterId) {
+        throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+      }
+
+      call.status = 'closed';
+      call.closedAt = new Date();
+
+      const saved = await callRepo.save(call);
+      return {
+        message: 'Виклик закрито',
+        call: this.toPublicCall(saved),
+      };
+    });
   }
 }
