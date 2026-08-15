@@ -66,6 +66,8 @@ function createStore() {
         .filter((call) => matchesStatus(call.status, where?.status))
         .filter((call) => !where?.waiterId || call.waiterId === where.waiterId)
         .filter((call) => where?.assignmentActive === undefined || call.assignmentActive === where.assignmentActive)
+        .filter((call) => !where?.booking?.status || call.booking?.status === where.booking.status)
+        .filter((call) => !where?.booking?.bookingDate || call.booking?.bookingDate === where.booking.bookingDate)
         .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
     },
     async findOne({ where }) {
@@ -207,6 +209,64 @@ test('active waiter call survives service recreation', async () => {
 
   assert.equal(guestStatus.activeCall.id, created.call.id);
   assert.equal(guestStatus.activeCall.status, 'new');
+});
+
+test('waiter list hides persisted active calls from non-current bookings', async () => {
+  const store = createStore();
+  const today = kyivToday();
+  const now = new Date();
+
+  store.calls.push(
+    {
+      id: 'valid-call',
+      booking: { id: 'valid-booking', status: 'approved', bookingDate: today },
+      tableId: 'table-valid',
+      tableNumber: '8',
+      clientName: null,
+      waiterId: null,
+      waiterName: null,
+      assignmentActive: true,
+      status: 'new',
+      acceptedAt: null,
+      closedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'completed-call',
+      booking: { id: 'completed-booking', status: 'completed', bookingDate: today },
+      tableId: 'table-completed',
+      tableNumber: '9',
+      clientName: null,
+      waiterId: null,
+      waiterName: null,
+      assignmentActive: true,
+      status: 'accepted',
+      acceptedAt: now,
+      closedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'past-call',
+      booking: { id: 'past-booking', status: 'approved', bookingDate: '2000-01-01' },
+      tableId: 'table-past',
+      tableNumber: '10',
+      clientName: null,
+      waiterId: null,
+      waiterName: null,
+      assignmentActive: true,
+      status: 'new',
+      acceptedAt: null,
+      closedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  );
+
+  const visible = await createService(store).list();
+
+  assert.deepEqual(visible.map((call) => call.id), ['valid-call']);
 });
 
 test('repeated guest call reuses the persisted active call', async () => {
