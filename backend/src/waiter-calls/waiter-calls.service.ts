@@ -91,6 +91,19 @@ export class WaiterCallsService {
     };
   }
 
+  private toAssignment(call: WaiterCallRecord): WaiterAssignment | null {
+    if (!call.waiterId) return null;
+    return {
+      bookingId: call.booking.id,
+      tableId: call.tableId,
+      tableNumber: call.tableNumber,
+      waiterId: call.waiterId,
+      waiterName: call.waiterName || 'Офіціант',
+      assignedAt:
+        this.nullableDateText(call.acceptedAt) || this.dateText(call.createdAt),
+    };
+  }
+
   private async getBooking(
     bookingId: string,
     repository: Repository<Booking> = this.bookings,
@@ -157,9 +170,29 @@ export class WaiterCallsService {
       }) || null;
   }
 
+  private async persistedAcceptedAssignment(bookingId: string) {
+    const call = await this.callRecords.findOne({
+      where: {
+        booking: { id: bookingId },
+        status: 'accepted',
+      },
+      relations: { booking: true },
+      order: { acceptedAt: 'DESC', createdAt: 'DESC' },
+    });
+
+    return call ? this.toAssignment(call) : null;
+  }
+
   private async resolveAssignment(booking: Booking) {
     const inMemoryAssignment = this.findAssignment(booking);
     if (inMemoryAssignment) return inMemoryAssignment;
+
+    const persistedCallAssignment = await this.persistedAcceptedAssignment(
+      booking.id,
+    );
+    if (persistedCallAssignment) {
+      return this.rememberAssignment(persistedCallAssignment);
+    }
 
     const latestAssignmentEvent = await this.histories
       .createQueryBuilder('history')
@@ -340,11 +373,41 @@ export class WaiterCallsService {
     return active.filter((call) => !call.waiterId || call.waiterId === waiterId);
   }
 
-  myAssignments(waiterId: string) {
+  async myAssignments(waiterId: string) {
     if (!waiterId) return [];
-    return [...this.assignments]
+
+    const inMemory = [...this.assignments]
       .filter((assignment) => assignment.waiterId === waiterId)
-      .reverse()
+      .reverse();
+    const persistedCalls = await this.callRecords.find({
+      where: { waiterId, status: 'accepted' },
+      relations: { booking: true },
+      order: { acceptedAt: 'DESC', createdAt: 'DESC' },
+      take: 50,
+    });
+    const persisted = persistedCalls
+      .map((call) => this.toAssignment(call))
+      .filter((assignment): assignment is WaiterAssignment => Boolean(assignment));
+    const seenBookings = new Set<string>();
+    const seenTableIds = new Set<string>();
+    const seenTableNumbers = new Set<string>();
+
+    return [...inMemory, ...persisted]
+      .filter((assignment) => {
+        if (seenBookings.has(assignment.bookingId)) return false;
+        if (assignment.tableId && seenTableIds.has(assignment.tableId)) return false;
+        if (
+          assignment.tableNumber &&
+          seenTableNumbers.has(assignment.tableNumber)
+        ) {
+          return false;
+        }
+
+        seenBookings.add(assignment.bookingId);
+        if (assignment.tableId) seenTableIds.add(assignment.tableId);
+        if (assignment.tableNumber) seenTableNumbers.add(assignment.tableNumber);
+        return true;
+      })
       .slice(0, 50);
   }
 
