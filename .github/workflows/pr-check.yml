@@ -24,6 +24,8 @@ jobs:
         run: npm --prefix frontend install --no-audit --no-fund
       - name: Build frontend
         run: npm --prefix frontend run build
+      - name: Test frontend
+        run: npm --prefix frontend test
       - name: Check whitespace
         run: git diff --check origin/main...HEAD
 
