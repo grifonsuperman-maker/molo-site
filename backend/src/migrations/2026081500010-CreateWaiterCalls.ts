@@ -13,7 +13,6 @@ export class CreateWaiterCalls2026081500010 implements MigrationInterface {
         "client_name" varchar(160),
         "waiter_id" uuid,
         "waiter_name" varchar(160),
-        "assignment_active" boolean NOT NULL DEFAULT true,
         "status" varchar(16) NOT NULL DEFAULT 'new',
         "accepted_at" timestamptz,
         "closed_at" timestamptz,
@@ -39,14 +38,14 @@ export class CreateWaiterCalls2026081500010 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE INDEX IF NOT EXISTS "IDX_waiter_calls_waiter_assignment"
-      ON "waiter_calls" ("waiter_id", "assignment_active")
+      CREATE INDEX IF NOT EXISTS "IDX_waiter_calls_waiter_status"
+      ON "waiter_calls" ("waiter_id", "status")
     `);
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      DROP INDEX IF EXISTS "IDX_waiter_calls_waiter_assignment"
+      DROP INDEX IF EXISTS "IDX_waiter_calls_waiter_status"
     `);
     await queryRunner.query(`
       DROP INDEX IF EXISTS "IDX_waiter_calls_status_created_at"
