@@ -43,9 +43,11 @@ function createStore() {
       else calls.push(value);
       return value;
     },
-    async find() {
+    async find({ where } = {}) {
       return [...calls]
         .filter((call) => call.status === 'new' || call.status === 'accepted')
+        .filter((call) => !where?.waiterId || call.waiterId === where.waiterId)
+        .filter((call) => !where?.status || call.status === where.status)
         .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
     },
     async findOne({ where }) {
@@ -55,6 +57,7 @@ function createStore() {
           .reverse()
           .find((call) =>
             call.booking.id === where.booking.id &&
+            (!where.status || call.status === where.status) &&
             (call.status === 'new' || call.status === 'accepted')) || null;
       }
       return null;
@@ -154,6 +157,31 @@ test('repeated guest call reuses the persisted active call', async () => {
   assert.match(second.message, /вже відправлено/);
 });
 
+test('accepted waiter assignment survives service recreation', async () => {
+  const store = createStore();
+  const service = createService(store);
+  const waiterId = '11111111-1111-4111-8111-111111111111';
+  const created = await service.createFromGuest(
+    { bookingId: store.booking.id },
+    'guest-token',
+  );
+
+  await service.accept(created.call.id, {
+    waiterId,
+    waiterName: 'Офіціант 1',
+  });
+
+  const restartedService = createService(store);
+  const assignments = await restartedService.myAssignments(waiterId);
+  const assignment = await restartedService.assignmentForBooking(store.booking);
+
+  assert.equal(assignments.length, 1);
+  assert.equal(assignments[0].bookingId, store.booking.id);
+  assert.equal(assignments[0].waiterId, waiterId);
+  assert.equal(assignment.waiterId, waiterId);
+  assert.equal(assignment.waiterName, 'Офіціант 1');
+});
+
 test('accepted and closed waiter call state is persisted for a new service instance', async () => {
   const store = createStore();
   const service = createService(store);
@@ -187,12 +215,18 @@ test('accepted and closed waiter call state is persisted for a new service insta
   );
 });
 
-test('migration enforces one active waiter call per booking', () => {
-  const source = fs.readFileSync(
+test('waiter_calls schema is migration-owned and enforces one active call per booking', () => {
+  const migrationSource = fs.readFileSync(
     path.join(__dirname, '../src/migrations/2026081500010-CreateWaiterCalls.ts'),
     'utf8',
   );
+  const entitySource = fs.readFileSync(
+    path.join(__dirname, '../src/waiter-calls/entities/waiter-call.entity.ts'),
+    'utf8',
+  );
 
-  assert.match(source, /CREATE UNIQUE INDEX IF NOT EXISTS "UQ_waiter_calls_active_booking"/);
-  assert.match(source, /WHERE "status" IN \('new', 'accepted'\)/);
+  assert.match(entitySource, /synchronize:\s*false/);
+  assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS "waiter_calls"/);
+  assert.match(migrationSource, /CREATE UNIQUE INDEX IF NOT EXISTS "UQ_waiter_calls_active_booking"/);
+  assert.match(migrationSource, /WHERE "status" IN \('new', 'accepted'\)/);
 });
