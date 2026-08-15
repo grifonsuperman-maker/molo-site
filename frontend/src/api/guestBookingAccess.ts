@@ -1,4 +1,5 @@
 import { bookingsApi } from './bookings';
+import { guestTelegramLinkApi } from './guestTelegramLink';
 
 type StoredGuestBooking = {
   bookingId?: unknown;
@@ -12,30 +13,62 @@ type PatchableBookingsApi = typeof bookingsApi & {
 const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
 const guestBookingTokens = new Map<string, string>();
 const patchableBookingsApi = bookingsApi as PatchableBookingsApi;
+let telegramLinkQueue: Promise<void> = Promise.resolve();
 
 function rememberGuestBookingToken(bookingId: string, token: string) {
   if (bookingId && token) guestBookingTokens.set(bookingId, token);
 }
 
-function guestBookingToken(bookingId: string): string {
-  const inMemoryToken = guestBookingTokens.get(bookingId);
-  if (inMemoryToken) return inMemoryToken;
-  if (typeof window === 'undefined') return '';
+function storedGuestBookings(): StoredGuestBooking[] {
+  if (typeof window === 'undefined') return [];
 
   try {
     const parsed = JSON.parse(
       window.localStorage.getItem(GUEST_BOOKINGS_STORAGE_KEY) || '[]',
     );
-    if (!Array.isArray(parsed)) return '';
-
-    const booking = parsed.find(
-      (item: StoredGuestBooking) => item?.bookingId === bookingId,
-    );
-    const token = typeof booking?.token === 'string' ? booking.token : '';
-    if (token) rememberGuestBookingToken(bookingId, token);
-    return token;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return '';
+    return [];
+  }
+}
+
+function guestBookingToken(bookingId: string): string {
+  const inMemoryToken = guestBookingTokens.get(bookingId);
+  if (inMemoryToken) return inMemoryToken;
+
+  const booking = storedGuestBookings().find(
+    (item: StoredGuestBooking) => item?.bookingId === bookingId,
+  );
+  const token = typeof booking?.token === 'string' ? booking.token : '';
+  if (token) rememberGuestBookingToken(bookingId, token);
+  return token;
+}
+
+function linkGuestBookingToTelegram(bookingId: string, token: string) {
+  if (!bookingId || !token) return Promise.resolve();
+
+  telegramLinkQueue = telegramLinkQueue.then(async () => {
+    try {
+      await guestTelegramLinkApi.link(bookingId, token);
+    } catch {
+      // Звичайний сайт і бронювання без Telegram мають працювати як раніше.
+    }
+  });
+
+  return telegramLinkQueue;
+}
+
+export async function linkKnownGuestBookingsToTelegram() {
+  const known = new Map(guestBookingTokens);
+
+  storedGuestBookings().forEach((booking) => {
+    const bookingId = typeof booking?.bookingId === 'string' ? booking.bookingId : '';
+    const token = typeof booking?.token === 'string' ? booking.token : '';
+    if (bookingId && token && !known.has(bookingId)) known.set(bookingId, token);
+  });
+
+  for (const [bookingId, token] of known.entries()) {
+    await linkGuestBookingToTelegram(bookingId, token);
   }
 }
 
@@ -49,6 +82,7 @@ if (!patchableBookingsApi.__guestBookingTokenCapturePatched) {
   bookingsApi.create = async (payload) => {
     const result = await originalCreate(payload);
     rememberGuestBookingToken(result.bookingId, result.guestAccessToken);
+    void linkGuestBookingToTelegram(result.bookingId, result.guestAccessToken);
     return result;
   };
 

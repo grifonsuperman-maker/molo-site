@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
 
+import type { AuthUser } from '../auth/types/auth-user.type';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AdminAttentionService } from './admin-attention.service';
@@ -14,12 +15,14 @@ import { GuestChangeTableDto } from './dto/guest-change-table.dto';
 import { GuestLatenessDto } from './dto/guest-lateness.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
 import { GuestBookingsService } from './guest-bookings.service';
+import { GuestTelegramLinkService } from './guest-telegram-link.service';
 
 @Controller('bookings')
 export class BookingsController {
   constructor(
     private readonly service: BookingsService,
     private readonly guestService: GuestBookingsService,
+    private readonly guestTelegramLink: GuestTelegramLinkService,
     private readonly tableLock: BookingTableLockService,
     private readonly availabilityBlocks: AvailabilityBlocksService,
     private readonly adminAttention: AdminAttentionService,
@@ -52,6 +55,16 @@ export class BookingsController {
   @Post('guest/list')
   guestList(@Body() dto: GuestBookingListDto) {
     return this.guestService.list(dto);
+  }
+
+  @Patch(':id/guest/telegram')
+  @Roles('guest')
+  guestLinkTelegram(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+    @Req() request: { user: AuthUser },
+  ) {
+    return this.guestTelegramLink.link(id, token, request.user);
   }
 
   @Get('pending-reminders')

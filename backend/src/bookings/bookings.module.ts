@@ -29,6 +29,7 @@ import { Booking } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
 import { GuestReviewsController } from './guest-reviews.controller';
+import { GuestTelegramLinkService } from './guest-telegram-link.service';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { GuestReviewsController } from './guest-reviews.controller';
   providers: [
     BookingsService,
     GuestBookingsService,
+    GuestTelegramLinkService,
     BookingExpirationService,
     BookingRescheduleApprovalService,
     BookingTableLockService,
