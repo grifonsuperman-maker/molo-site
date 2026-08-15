@@ -14,7 +14,7 @@ import { Booking } from '../../bookings/entities/booking.entity';
 
 export type WaiterCallStatus = 'new' | 'accepted' | 'closed';
 
-@Entity('waiter_calls')
+@Entity({ name: 'waiter_calls', synchronize: false })
 @Check('CHK_waiter_calls_status', `"status" IN ('new', 'accepted', 'closed')`)
 @Index('IDX_waiter_calls_status_created_at', ['status', 'createdAt'])
 @Index('IDX_waiter_calls_waiter_status', ['waiterId', 'status'])
