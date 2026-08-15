@@ -30,6 +30,7 @@ function createStore() {
     id: 'booking-1',
     status: 'approved',
     bookingDate: kyivToday(),
+    approvedAt: new Date(Date.now() - 60_000),
     table: { id: 'table-1', tableNumber: '8', status: 'occupied' },
     client: { fullName: 'Гість' },
   };
@@ -38,6 +39,10 @@ function createStore() {
   const bookingsRepo = {
     exist: async ({ where }) => where.id === booking.id && Boolean(where.guestAccessTokenHash),
     findOne: async ({ where }) => where.id === booking.id ? booking : null,
+    find: async () =>
+      booking.status === 'approved' && booking.bookingDate === kyivToday()
+        ? [booking]
+        : [],
     createQueryBuilder: () => ({
       where() { return this; },
       setLock() { return this; },
@@ -358,6 +363,25 @@ test('explicit booking detach removes persisted waiter assignment even after cal
   assert.equal(await restartedService.assignmentForBooking(store.booking), null);
 });
 
+test('re-approved booking does not reuse an in-memory assignment from the prior lifecycle', async () => {
+  const store = createStore();
+  const service = createService(store);
+  const waiterId = '11111111-1111-4111-8111-111111111111';
+
+  await service.assign({
+    bookingId: store.booking.id,
+    waiterId,
+    waiterName: 'Офіціант 1',
+  });
+
+  store.booking.status = 'cancelled';
+  store.booking.status = 'approved';
+  store.booking.approvedAt = new Date(Date.now() + 1_000);
+
+  assert.equal(await service.assignmentForBooking(store.booking), null);
+  assert.deepEqual(await service.myAssignments(waiterId), []);
+});
+
 test('myAssignments deduplicates persisted rows in SQL before applying the 50-assignment limit', async () => {
   const store = createStore();
   const waiterId = '11111111-1111-4111-8111-111111111111';
@@ -451,8 +475,12 @@ test('myAssignments filters completed history before the 50-assignment limit', a
 });
 
 test('waiter_calls schema is migration-owned and enforces one active call per booking', () => {
-  const migrationSource = fs.readFileSync(
+  const createMigrationSource = fs.readFileSync(
     path.join(__dirname, '../src/migrations/2026081500010-CreateWaiterCalls.ts'),
+    'utf8',
+  );
+  const assignmentMigrationSource = fs.readFileSync(
+    path.join(__dirname, '../src/migrations/2026081500015-AddWaiterCallAssignmentActive.ts'),
     'utf8',
   );
   const entitySource = fs.readFileSync(
@@ -461,8 +489,16 @@ test('waiter_calls schema is migration-owned and enforces one active call per bo
   );
 
   assert.match(entitySource, /synchronize:\s*false/);
-  assert.match(migrationSource, /"assignment_active" boolean NOT NULL DEFAULT true/);
-  assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS "waiter_calls"/);
-  assert.match(migrationSource, /CREATE UNIQUE INDEX IF NOT EXISTS "UQ_waiter_calls_active_booking"/);
-  assert.match(migrationSource, /WHERE "status" IN \('new', 'accepted'\)/);
+  assert.doesNotMatch(createMigrationSource, /assignment_active/);
+  assert.match(createMigrationSource, /CREATE TABLE IF NOT EXISTS "waiter_calls"/);
+  assert.match(createMigrationSource, /CREATE UNIQUE INDEX IF NOT EXISTS "UQ_waiter_calls_active_booking"/);
+  assert.match(createMigrationSource, /WHERE "status" IN \('new', 'accepted'\)/);
+  assert.match(
+    assignmentMigrationSource,
+    /ADD COLUMN IF NOT EXISTS "assignment_active" boolean NOT NULL DEFAULT true/,
+  );
+  assert.match(
+    assignmentMigrationSource,
+    /CREATE INDEX IF NOT EXISTS "IDX_waiter_calls_waiter_assignment"/,
+  );
 });
