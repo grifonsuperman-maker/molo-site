@@ -392,7 +392,7 @@ export default function PremiumDirectorPanel() {
     setBusy('broadcast');
     try {
       const result = await broadcastsApi.sendNow({ message, target: sendToAll ? 'all_clients' : 'selected_clients', clientIds: sendToAll ? undefined : Array.from(selectedClients) });
-      setNotice(`Розсилку надіслано. Отримувачів: ${result.recipientCount}`);
+      setNotice(`Розсилку оброблено: доставлено ${result.deliveredCount}, без доступного Telegram — ${result.unreachableCount}`);
       setBroadcastOpen(false); setBroadcastText(''); setSelectedClients(new Set()); setSendToAll(false);
     } catch (cause: any) { setError(cause?.message || 'Не вдалося надіслати розсилку'); }
     finally { setBusy(null); }
