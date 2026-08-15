@@ -4,7 +4,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { Client } from '../clients/entities/client.entity';
@@ -19,56 +19,11 @@ export class GuestTelegramLinkService {
     const guestAccessTokenHash = this.hashToken(guestToken);
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
-        const booking = await manager
-          .getRepository(Booking)
-          .createQueryBuilder('booking')
-          .leftJoinAndSelect('booking.client', 'client')
-          .where('booking.id = :bookingId', { bookingId })
-          .andWhere('booking.guestAccessTokenHash = :guestAccessTokenHash', {
-            guestAccessTokenHash,
-          })
-          .setLock('pessimistic_write', undefined, ['booking'])
-          .getOne();
-
-        if (!booking?.client?.id) {
-          throw new UnauthorizedException('Недійсний доступ до бронювання');
-        }
-
-        const clients = manager.getRepository(Client);
-        const client = await clients
-          .createQueryBuilder('client')
-          .where('client.id = :clientId', { clientId: booking.client.id })
-          .setLock('pessimistic_write')
-          .getOne();
-
-        if (!client) {
-          throw new UnauthorizedException('Недійсний доступ до бронювання');
-        }
-
-        if (client.telegramId && client.telegramId !== telegramId) {
-          throw new ConflictException(
-            'Цей гість уже прив’язаний до іншого Telegram',
-          );
-        }
-
-        const linkedClient = await clients.findOne({ where: { telegramId } });
-        if (linkedClient && linkedClient.id !== client.id) {
-          throw new ConflictException(
-            'Цей Telegram уже прив’язаний до іншого гостя',
-          );
-        }
-
-        if (client.telegramId !== telegramId) {
-          client.telegramId = telegramId;
-          await clients.save(client);
-        }
-
-        return {
-          message: 'Telegram гостя прив’язано',
-          linked: true,
-        };
-      });
+      return await this.performLink(
+        bookingId,
+        guestAccessTokenHash,
+        telegramId,
+      );
     } catch (error: any) {
       if (
         error instanceof UnauthorizedException ||
@@ -78,13 +33,108 @@ export class GuestTelegramLinkService {
       }
 
       if ((error?.code || error?.driverError?.code) === '23505') {
-        throw new ConflictException(
-          'Цей Telegram уже прив’язаний до іншого гостя',
-        );
+        try {
+          return await this.performLink(
+            bookingId,
+            guestAccessTokenHash,
+            telegramId,
+          );
+        } catch (retryError: any) {
+          if (
+            retryError instanceof UnauthorizedException ||
+            retryError instanceof ConflictException
+          ) {
+            throw retryError;
+          }
+          if (
+            (retryError?.code || retryError?.driverError?.code) === '23505'
+          ) {
+            throw new ConflictException(
+              'Цей Telegram уже прив’язаний до іншого гостя',
+            );
+          }
+          throw retryError;
+        }
       }
 
       throw error;
     }
+  }
+
+  private async performLink(
+    bookingId: string,
+    guestAccessTokenHash: string,
+    telegramId: string,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const { booking, client } = await this.loadOwnedBookingClient(
+        manager,
+        bookingId,
+        guestAccessTokenHash,
+      );
+      const clients = manager.getRepository(Client);
+
+      if (client.telegramId && client.telegramId !== telegramId) {
+        throw new ConflictException(
+          'Цей гість уже прив’язаний до іншого Telegram',
+        );
+      }
+
+      const linkedClient = await clients.findOne({ where: { telegramId } });
+      if (linkedClient && linkedClient.id !== client.id) {
+        booking.client = linkedClient;
+        await manager.getRepository(Booking).save(booking);
+        return this.linkedResponse();
+      }
+
+      if (client.telegramId !== telegramId) {
+        client.telegramId = telegramId;
+        await clients.save(client);
+      }
+
+      return this.linkedResponse();
+    });
+  }
+
+  private async loadOwnedBookingClient(
+    manager: EntityManager,
+    bookingId: string,
+    guestAccessTokenHash: string,
+  ) {
+    const booking = await manager
+      .getRepository(Booking)
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.client', 'client')
+      .where('booking.id = :bookingId', { bookingId })
+      .andWhere('booking.guestAccessTokenHash = :guestAccessTokenHash', {
+        guestAccessTokenHash,
+      })
+      .setLock('pessimistic_write', undefined, ['booking'])
+      .getOne();
+
+    if (!booking?.client?.id) {
+      throw new UnauthorizedException('Недійсний доступ до бронювання');
+    }
+
+    const client = await manager
+      .getRepository(Client)
+      .createQueryBuilder('client')
+      .where('client.id = :clientId', { clientId: booking.client.id })
+      .setLock('pessimistic_write')
+      .getOne();
+
+    if (!client) {
+      throw new UnauthorizedException('Недійсний доступ до бронювання');
+    }
+
+    return { booking, client };
+  }
+
+  private linkedResponse() {
+    return {
+      message: 'Telegram гостя прив’язано',
+      linked: true,
+    };
   }
 
   private verifiedGuestTelegramId(user: AuthUser) {
