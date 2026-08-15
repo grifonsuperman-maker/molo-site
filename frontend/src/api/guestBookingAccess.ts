@@ -13,6 +13,7 @@ type PatchableBookingsApi = typeof bookingsApi & {
 const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
 const guestBookingTokens = new Map<string, string>();
 const patchableBookingsApi = bookingsApi as PatchableBookingsApi;
+let telegramLinkQueue: Promise<void> = Promise.resolve();
 
 function rememberGuestBookingToken(bookingId: string, token: string) {
   if (bookingId && token) guestBookingTokens.set(bookingId, token);
@@ -43,14 +44,18 @@ function guestBookingToken(bookingId: string): string {
   return token;
 }
 
-async function linkGuestBookingToTelegram(bookingId: string, token: string) {
-  if (!bookingId || !token) return;
+function linkGuestBookingToTelegram(bookingId: string, token: string) {
+  if (!bookingId || !token) return Promise.resolve();
 
-  try {
-    await guestTelegramLinkApi.link(bookingId, token);
-  } catch {
-    // Звичайний сайт і бронювання без Telegram мають працювати як раніше.
-  }
+  telegramLinkQueue = telegramLinkQueue.then(async () => {
+    try {
+      await guestTelegramLinkApi.link(bookingId, token);
+    } catch {
+      // Звичайний сайт і бронювання без Telegram мають працювати як раніше.
+    }
+  });
+
+  return telegramLinkQueue;
 }
 
 export async function linkKnownGuestBookingsToTelegram() {
@@ -62,11 +67,9 @@ export async function linkKnownGuestBookingsToTelegram() {
     if (bookingId && token && !known.has(bookingId)) known.set(bookingId, token);
   });
 
-  await Promise.allSettled(
-    Array.from(known.entries()).map(([bookingId, token]) =>
-      linkGuestBookingToTelegram(bookingId, token),
-    ),
-  );
+  for (const [bookingId, token] of known.entries()) {
+    await linkGuestBookingToTelegram(bookingId, token);
+  }
 }
 
 export function guestBookingHeaders(bookingId: string): HeadersInit {
