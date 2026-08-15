@@ -401,8 +401,12 @@ export class WaiterCallsService {
                        waiter_calls.created_at DESC
             ) AS booking_rank
           FROM waiter_calls
+          INNER JOIN bookings
+            ON bookings.id = waiter_calls.booking_id
           WHERE waiter_calls.waiter_id = $1
             AND waiter_calls.assignment_active = true
+            AND bookings.status = 'approved'
+            AND bookings.booking_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Kyiv')::date
         ),
         latest_per_table AS (
           SELECT
