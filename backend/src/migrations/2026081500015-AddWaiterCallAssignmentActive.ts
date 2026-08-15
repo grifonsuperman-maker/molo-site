@@ -22,6 +22,20 @@ export class AddWaiterCallAssignmentActive2026081500015
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
+    const lifecycleTriggerRows = await queryRunner.query(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'TRG_bookings_close_waiter_calls_when_inactive'
+          AND tgrelid = 'bookings'::regclass
+          AND NOT tgisinternal
+      ) AS "exists"
+    `);
+
+    if (lifecycleTriggerRows?.[0]?.exists === true) {
+      return;
+    }
+
     await queryRunner.query(`
       DROP INDEX IF EXISTS "IDX_waiter_calls_waiter_assignment"
     `);
