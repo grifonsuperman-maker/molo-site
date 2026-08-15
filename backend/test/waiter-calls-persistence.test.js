@@ -37,6 +37,7 @@ function createStore() {
   const callRepo = {
     create(value) {
       return {
+        assignmentActive: value.assignmentActive ?? true,
         ...value,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -53,6 +54,7 @@ function createStore() {
       return [...calls]
         .filter((call) => matchesStatus(call.status, where?.status))
         .filter((call) => !where?.waiterId || call.waiterId === where.waiterId)
+        .filter((call) => where?.assignmentActive === undefined || call.assignmentActive === where.assignmentActive)
         .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
     },
     async findOne({ where }) {
@@ -62,28 +64,34 @@ function createStore() {
           .reverse()
           .find((call) =>
             call.booking.id === where.booking.id &&
-            matchesStatus(call.status, where.status)) || null;
+            matchesStatus(call.status, where.status) &&
+            (where.assignmentActive === undefined || call.assignmentActive === where.assignmentActive) &&
+            (!where.waiterId || Boolean(call.waiterId))) || null;
       }
       return null;
     },
     createQueryBuilder() {
       let bookingId = null;
       let values = {};
+      let activeOnly = false;
+      let assignmentActiveOnly = false;
       return {
         update() { return this; },
         set(next) { values = next; return this; },
         where(_sql, params) { bookingId = params.bookingId; return this; },
-        andWhere() { return this; },
+        andWhere(sql) {
+          activeOnly ||= sql.includes('"status"');
+          assignmentActiveOnly ||= sql.includes('"assignment_active"');
+          return this;
+        },
         async execute() {
           let affected = 0;
           calls.forEach((call) => {
-            if (
-              call.booking.id === bookingId &&
-              (call.status === 'new' || call.status === 'accepted')
-            ) {
-              Object.assign(call, values);
-              affected += 1;
-            }
+            if (call.booking.id !== bookingId) return;
+            if (activeOnly && call.status !== 'new' && call.status !== 'accepted') return;
+            if (assignmentActiveOnly && !call.assignmentActive) return;
+            Object.assign(call, values);
+            affected += 1;
           });
           return { affected };
         },
@@ -186,37 +194,50 @@ test('accepted waiter assignment survives service recreation', async () => {
   assert.equal(assignment.waiterName, 'Офіціант 1');
 });
 
-test('accepted and closed waiter call state is persisted for a new service instance', async () => {
+test('normal call close keeps the waiter assignment across service recreation', async () => {
   const store = createStore();
   const service = createService(store);
+  const waiterId = '11111111-1111-4111-8111-111111111111';
   const created = await service.createFromGuest(
     { bookingId: store.booking.id },
     'guest-token',
   );
 
-  const accepted = await service.accept(created.call.id, {
-    waiterId: '11111111-1111-4111-8111-111111111111',
+  await service.accept(created.call.id, {
+    waiterId,
     waiterName: 'Офіціант 1',
   });
-  assert.equal(accepted.call.status, 'accepted');
+  await service.close(created.call.id, waiterId);
 
   const restartedService = createService(store);
-  const visible = await restartedService.list(
-    '11111111-1111-4111-8111-111111111111',
-  );
-  assert.equal(visible.length, 1);
-  assert.equal(visible[0].status, 'accepted');
+  assert.deepEqual(await restartedService.list(waiterId), []);
 
-  await restartedService.close(
-    created.call.id,
-    '11111111-1111-4111-8111-111111111111',
+  const assignments = await restartedService.myAssignments(waiterId);
+  const assignment = await restartedService.assignmentForBooking(store.booking);
+  assert.equal(assignments.length, 1);
+  assert.equal(assignments[0].bookingId, store.booking.id);
+  assert.equal(assignment.waiterId, waiterId);
+});
+
+test('explicit booking detach removes persisted waiter assignment even after call close', async () => {
+  const store = createStore();
+  const service = createService(store);
+  const waiterId = '11111111-1111-4111-8111-111111111111';
+  const created = await service.createFromGuest(
+    { bookingId: store.booking.id },
+    'guest-token',
   );
 
-  const afterCloseRestart = createService(store);
-  assert.deepEqual(
-    await afterCloseRestart.list('11111111-1111-4111-8111-111111111111'),
-    [],
-  );
+  await service.accept(created.call.id, {
+    waiterId,
+    waiterName: 'Офіціант 1',
+  });
+  await service.close(created.call.id, waiterId);
+  await service.closeActiveCallsAndDetachBooking(store.booking.id);
+
+  const restartedService = createService(store);
+  assert.deepEqual(await restartedService.myAssignments(waiterId), []);
+  assert.equal(await restartedService.assignmentForBooking(store.booking), null);
 });
 
 test('waiter_calls schema is migration-owned and enforces one active call per booking', () => {
@@ -230,6 +251,7 @@ test('waiter_calls schema is migration-owned and enforces one active call per bo
   );
 
   assert.match(entitySource, /synchronize:\s*false/);
+  assert.match(migrationSource, /"assignment_active" boolean NOT NULL DEFAULT true/);
   assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS "waiter_calls"/);
   assert.match(migrationSource, /CREATE UNIQUE INDEX IF NOT EXISTS "UQ_waiter_calls_active_booking"/);
   assert.match(migrationSource, /WHERE "status" IN \('new', 'accepted'\)/);
