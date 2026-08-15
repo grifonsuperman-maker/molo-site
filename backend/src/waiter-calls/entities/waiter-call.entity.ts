@@ -17,7 +17,7 @@ export type WaiterCallStatus = 'new' | 'accepted' | 'closed';
 @Entity({ name: 'waiter_calls', synchronize: false })
 @Check('CHK_waiter_calls_status', `"status" IN ('new', 'accepted', 'closed')`)
 @Index('IDX_waiter_calls_status_created_at', ['status', 'createdAt'])
-@Index('IDX_waiter_calls_waiter_status', ['waiterId', 'status'])
+@Index('IDX_waiter_calls_waiter_assignment', ['waiterId', 'assignmentActive'])
 @Index('UQ_waiter_calls_active_booking', ['booking'], {
   unique: true,
   where: `"status" IN ('new', 'accepted')`,
@@ -47,6 +47,9 @@ export class WaiterCallRecord {
 
   @Column({ name: 'waiter_name', type: 'varchar', length: 160, nullable: true })
   waiterName: string | null;
+
+  @Column({ name: 'assignment_active', type: 'boolean', default: true })
+  assignmentActive: boolean;
 
   @Column({ type: 'varchar', length: 16, default: 'new' })
   status: WaiterCallStatus;
