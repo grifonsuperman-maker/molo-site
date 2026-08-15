@@ -60,14 +60,41 @@ test('waiter call schema upgrades stay in separate ordered migrations', async ()
 
   const assignmentDownQueries = [];
   await assignmentMigration.down({
-    query: async (sql) => assignmentDownQueries.push(sql),
+    query: async (sql) => {
+      assignmentDownQueries.push(sql);
+      if (sql.includes('SELECT EXISTS')) return [{ exists: false }];
+      return [];
+    },
   });
   const assignmentDownSql = assignmentDownQueries.join('\n');
+  assert.match(
+    assignmentDownSql,
+    /TRG_bookings_close_waiter_calls_when_inactive/,
+  );
   assert.match(assignmentDownSql, /DROP COLUMN IF EXISTS "assignment_active"/);
   assert.match(
     assignmentDownSql,
     /CREATE INDEX IF NOT EXISTS "IDX_waiter_calls_waiter_status"/,
   );
+});
+
+test('assignment rollback keeps schema while an earlier lifecycle trigger is still active', async () => {
+  const migration = new AddWaiterCallAssignmentActive2026081500015();
+  const queries = [];
+
+  await migration.down({
+    query: async (sql) => {
+      queries.push(sql);
+      if (sql.includes('SELECT EXISTS')) return [{ exists: true }];
+      return [];
+    },
+  });
+
+  const sql = queries.join('\n');
+  assert.match(sql, /TRG_bookings_close_waiter_calls_when_inactive/);
+  assert.doesNotMatch(sql, /DROP COLUMN IF EXISTS "assignment_active"/);
+  assert.doesNotMatch(sql, /DROP INDEX IF EXISTS "IDX_waiter_calls_waiter_assignment"/);
+  assert.doesNotMatch(sql, /CREATE INDEX IF NOT EXISTS "IDX_waiter_calls_waiter_status"/);
 });
 
 test('terminal booking statuses close persisted waiter calls after assignment schema upgrade', async () => {
