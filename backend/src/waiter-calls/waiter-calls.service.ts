@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 
 import { BookingHistory } from '../bookings/entities/booking-history.entity';
 import { Booking } from '../bookings/entities/booking.entity';
@@ -92,7 +92,7 @@ export class WaiterCallsService {
   }
 
   private toAssignment(call: WaiterCallRecord): WaiterAssignment | null {
-    if (!call.waiterId) return null;
+    if (!call.waiterId || !call.assignmentActive) return null;
     return {
       bookingId: call.booking.id,
       tableId: call.tableId,
@@ -170,11 +170,12 @@ export class WaiterCallsService {
       }) || null;
   }
 
-  private async persistedAcceptedAssignment(bookingId: string) {
+  private async persistedCallAssignment(bookingId: string) {
     const call = await this.callRecords.findOne({
       where: {
         booking: { id: bookingId },
-        status: 'accepted',
+        waiterId: Not(IsNull()),
+        assignmentActive: true,
       },
       relations: { booking: true },
       order: { acceptedAt: 'DESC', createdAt: 'DESC' },
@@ -187,7 +188,7 @@ export class WaiterCallsService {
     const inMemoryAssignment = this.findAssignment(booking);
     if (inMemoryAssignment) return inMemoryAssignment;
 
-    const persistedCallAssignment = await this.persistedAcceptedAssignment(
+    const persistedCallAssignment = await this.persistedCallAssignment(
       booking.id,
     );
     if (persistedCallAssignment) {
@@ -332,6 +333,7 @@ export class WaiterCallsService {
           clientName: booking.client?.fullName || null,
           waiterId: assignment?.waiterId || null,
           waiterName: assignment?.waiterName || null,
+          assignmentActive: true,
           status: 'new',
           acceptedAt: null,
           closedAt: null,
@@ -380,7 +382,7 @@ export class WaiterCallsService {
       .filter((assignment) => assignment.waiterId === waiterId)
       .reverse();
     const persistedCalls = await this.callRecords.find({
-      where: { waiterId, status: 'accepted' },
+      where: { waiterId, assignmentActive: true },
       relations: { booking: true },
       order: { acceptedAt: 'DESC', createdAt: 'DESC' },
       take: 50,
@@ -419,13 +421,25 @@ export class WaiterCallsService {
   async closeActiveCallsAndDetachBooking(bookingId: string) {
     const closedAt = new Date();
 
-    await this.callRecords
-      .createQueryBuilder()
-      .update(WaiterCallRecord)
-      .set({ status: 'closed', closedAt })
-      .where('"booking_id" = :bookingId', { bookingId })
-      .andWhere('"status" IN (:...statuses)', { statuses: ACTIVE_CALL_STATUSES })
-      .execute();
+    await this.dataSource.transaction(async (manager) => {
+      const callRepo = manager.getRepository(WaiterCallRecord);
+
+      await callRepo
+        .createQueryBuilder()
+        .update(WaiterCallRecord)
+        .set({ status: 'closed', closedAt })
+        .where('"booking_id" = :bookingId', { bookingId })
+        .andWhere('"status" IN (:...statuses)', { statuses: ACTIVE_CALL_STATUSES })
+        .execute();
+
+      await callRepo
+        .createQueryBuilder()
+        .update(WaiterCallRecord)
+        .set({ assignmentActive: false })
+        .where('"booking_id" = :bookingId', { bookingId })
+        .andWhere('"assignment_active" = true')
+        .execute();
+    });
 
     this.detachBooking(bookingId);
   }
@@ -455,6 +469,7 @@ export class WaiterCallsService {
       call.status = 'accepted';
       call.waiterId = dto.waiterId;
       call.waiterName = dto.waiterName || 'Офіціант';
+      call.assignmentActive = true;
       call.acceptedAt = new Date();
 
       const saved = await callRepo.save(call);
