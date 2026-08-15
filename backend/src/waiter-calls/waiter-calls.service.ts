@@ -185,6 +185,45 @@ export class WaiterCallsService {
       }) || null;
   }
 
+  private assignmentMatchesCurrentBookingLifecycle(
+    assignment: WaiterAssignment,
+    booking: Booking,
+  ) {
+    if (booking.status !== 'approved') return false;
+    if (!booking.approvedAt) return true;
+
+    const assignedAt = Date.parse(assignment.assignedAt);
+    return Number.isFinite(assignedAt) && assignedAt >= booking.approvedAt.getTime();
+  }
+
+  private async currentInMemoryAssignments(waiterId: string) {
+    const candidates = [...this.assignments]
+      .filter((assignment) => assignment.waiterId === waiterId)
+      .reverse()
+      .slice(0, 50);
+
+    if (candidates.length === 0) return [];
+
+    const bookingIds = [...new Set(candidates.map((assignment) => assignment.bookingId))];
+    const activeBookings = await this.bookings.find({
+      where: {
+        id: In(bookingIds),
+        status: 'approved',
+        bookingDate: this.kyivDate(),
+      },
+    });
+    const activeBookingById = new Map(
+      activeBookings.map((booking) => [booking.id, booking]),
+    );
+
+    return candidates.filter((assignment) => {
+      const booking = activeBookingById.get(assignment.bookingId);
+      return Boolean(
+        booking && this.assignmentMatchesCurrentBookingLifecycle(assignment, booking),
+      );
+    });
+  }
+
   private async persistedCallAssignment(bookingId: string) {
     const call = await this.callRecords.findOne({
       where: {
@@ -200,14 +239,33 @@ export class WaiterCallsService {
   }
 
   private async resolveAssignment(booking: Booking) {
+    if (booking.status !== 'approved') {
+      this.detachBooking(booking.id);
+      return null;
+    }
+
     const inMemoryAssignment = this.findAssignment(booking);
-    if (inMemoryAssignment) return inMemoryAssignment;
+    if (
+      inMemoryAssignment &&
+      this.assignmentMatchesCurrentBookingLifecycle(inMemoryAssignment, booking)
+    ) {
+      return inMemoryAssignment;
+    }
+    if (inMemoryAssignment?.bookingId === booking.id) {
+      this.detachBooking(booking.id);
+    }
 
     const persistedCallAssignment = await this.persistedCallAssignment(
       booking.id,
     );
-    if (persistedCallAssignment) {
-      return this.rememberAssignment(persistedCallAssignment);
+    if (
+      persistedCallAssignment &&
+      this.assignmentMatchesCurrentBookingLifecycle(
+        persistedCallAssignment,
+        booking,
+      )
+    ) {
+      return persistedCallAssignment;
     }
 
     const latestAssignmentEvent = await this.histories
@@ -227,14 +285,18 @@ export class WaiterCallsService {
 
     if (!latestAssignmentEvent || !hasPersistedWaiter) return null;
 
-    return this.rememberAssignment({
+    const historyAssignment: WaiterAssignment = {
       bookingId: booking.id,
       tableId: booking.table?.id || null,
       tableNumber: booking.table?.tableNumber || null,
       waiterId: latestAssignmentEvent.actorStaffId as string,
       waiterName: latestAssignmentEvent.actorName || 'Офіціант',
       assignedAt: latestAssignmentEvent.createdAt.toISOString(),
-    });
+    };
+
+    return this.assignmentMatchesCurrentBookingLifecycle(historyAssignment, booking)
+      ? historyAssignment
+      : null;
   }
 
   private async activeCallForBooking(
@@ -399,9 +461,7 @@ export class WaiterCallsService {
   async myAssignments(waiterId: string) {
     if (!waiterId) return [];
 
-    const inMemory = [...this.assignments]
-      .filter((assignment) => assignment.waiterId === waiterId)
-      .reverse();
+    const inMemory = await this.currentInMemoryAssignments(waiterId);
     const rows = await this.callRecords.query(
       `
         WITH latest_per_booking AS (
@@ -514,7 +574,7 @@ export class WaiterCallsService {
   }
 
   async accept(id: string, dto: { waiterId: string; waiterName: string }) {
-    const result = await this.dataSource.transaction(async (manager) => {
+    return this.dataSource.transaction(async (manager) => {
       const callRepo = manager.getRepository(WaiterCallRecord);
       const call = await callRepo.findOne({
         where: { id },
@@ -547,19 +607,6 @@ export class WaiterCallsService {
         call: this.toPublicCall(saved),
       };
     });
-
-    if (result.call.status === 'accepted' && result.call.waiterId) {
-      this.rememberAssignment({
-        bookingId: result.call.bookingId,
-        tableId: result.call.tableId,
-        tableNumber: result.call.tableNumber,
-        waiterId: result.call.waiterId,
-        waiterName: result.call.waiterName || 'Офіціант',
-        assignedAt: result.call.acceptedAt || this.now(),
-      });
-    }
-
-    return result;
   }
 
   async close(id: string, waiterId: string) {
