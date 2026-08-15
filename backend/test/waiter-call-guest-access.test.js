@@ -24,6 +24,7 @@ function createService() {
     },
     client: { fullName: 'Гість' },
   };
+  const calls = [];
   let bookingLoads = 0;
 
   const bookings = {
@@ -34,6 +35,17 @@ function createService() {
       bookingLoads += 1;
       return where.id === booking.id ? booking : null;
     },
+    createQueryBuilder: () => ({
+      where() {
+        return this;
+      },
+      setLock() {
+        return this;
+      },
+      async getOne() {
+        return { id: booking.id };
+      },
+    }),
   };
   const histories = {
     createQueryBuilder: () => ({
@@ -54,6 +66,38 @@ function createService() {
       },
     }),
   };
+  const callRecords = {
+    async findOne({ where }) {
+      if (where?.id) return calls.find((call) => call.id === where.id) || null;
+      if (where?.booking?.id) {
+        return calls.find(
+          (call) =>
+            call.booking.id === where.booking.id &&
+            (call.status === 'new' || call.status === 'accepted'),
+        ) || null;
+      }
+      return null;
+    },
+    create(value) {
+      return {
+        ...value,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    },
+    async save(value) {
+      calls.push(value);
+      return value;
+    },
+  };
+  const dataSource = {
+    transaction: async (work) =>
+      work({
+        getRepository(entity) {
+          return entity.name === 'WaiterCallRecord' ? callRecords : bookings;
+        },
+      }),
+  };
 
   return {
     booking,
@@ -61,7 +105,12 @@ function createService() {
     get bookingLoads() {
       return bookingLoads;
     },
-    service: new WaiterCallsService(bookings, histories),
+    service: new WaiterCallsService(
+      bookings,
+      histories,
+      callRecords,
+      dataSource,
+    ),
   };
 }
 

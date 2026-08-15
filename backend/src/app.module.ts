@@ -16,6 +16,9 @@ import { LogsModule } from './logs/logs.module';
 import { MapModule } from './map/map.module';
 import { CreateStaffPinAttempts2026081400010 } from './migrations/2026081400010-CreateStaffPinAttempts';
 import { UpgradeStaffPinAttemptsPerAttempt2026081400020 } from './migrations/2026081400020-UpgradeStaffPinAttemptsPerAttempt';
+import { CreateWaiterCalls2026081500010 } from './migrations/2026081500010-CreateWaiterCalls';
+import { AddWaiterCallAssignmentActive2026081500015 } from './migrations/2026081500015-AddWaiterCallAssignmentActive';
+import { CloseInactiveWaiterCalls2026081500020 } from './migrations/2026081500020-CloseInactiveWaiterCalls';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -30,6 +33,9 @@ const staffPinMigrationOptions = {
   migrations: [
     CreateStaffPinAttempts2026081400010,
     UpgradeStaffPinAttemptsPerAttempt2026081400020,
+    CreateWaiterCalls2026081500010,
+    AddWaiterCallAssignmentActive2026081500015,
+    CloseInactiveWaiterCalls2026081500020,
   ],
 };
 
