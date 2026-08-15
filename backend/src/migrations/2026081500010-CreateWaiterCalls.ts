@@ -42,57 +42,9 @@ export class CreateWaiterCalls2026081500010 implements MigrationInterface {
       CREATE INDEX IF NOT EXISTS "IDX_waiter_calls_waiter_assignment"
       ON "waiter_calls" ("waiter_id", "assignment_active")
     `);
-
-    await queryRunner.query(`
-      CREATE OR REPLACE FUNCTION "close_waiter_calls_when_booking_inactive"()
-      RETURNS trigger AS $$
-      BEGIN
-        UPDATE "waiter_calls"
-        SET
-          "status" = CASE
-            WHEN "status" IN ('new', 'accepted') THEN 'closed'
-            ELSE "status"
-          END,
-          "closed_at" = CASE
-            WHEN "status" IN ('new', 'accepted') THEN COALESCE("closed_at", CURRENT_TIMESTAMP)
-            ELSE "closed_at"
-          END,
-          "assignment_active" = false,
-          "updated_at" = CURRENT_TIMESTAMP
-        WHERE "booking_id" = NEW."id"
-          AND (
-            "status" IN ('new', 'accepted')
-            OR "assignment_active" = true
-          );
-
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql
-    `);
-
-    await queryRunner.query(`
-      DROP TRIGGER IF EXISTS "TRG_bookings_close_waiter_calls_when_inactive" ON "bookings"
-    `);
-
-    await queryRunner.query(`
-      CREATE TRIGGER "TRG_bookings_close_waiter_calls_when_inactive"
-      AFTER UPDATE OF "status" ON "bookings"
-      FOR EACH ROW
-      WHEN (
-        OLD."status" IS DISTINCT FROM NEW."status"
-        AND NEW."status" IN ('rejected', 'cancelled', 'completed')
-      )
-      EXECUTE FUNCTION "close_waiter_calls_when_booking_inactive"()
-    `);
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`
-      DROP TRIGGER IF EXISTS "TRG_bookings_close_waiter_calls_when_inactive" ON "bookings"
-    `);
-    await queryRunner.query(`
-      DROP FUNCTION IF EXISTS "close_waiter_calls_when_booking_inactive"()
-    `);
     await queryRunner.query(`
       DROP INDEX IF EXISTS "IDX_waiter_calls_waiter_assignment"
     `);
