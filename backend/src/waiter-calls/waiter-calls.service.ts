@@ -385,7 +385,6 @@ export class WaiterCallsService {
       where: { waiterId, assignmentActive: true },
       relations: { booking: true },
       order: { acceptedAt: 'DESC', createdAt: 'DESC' },
-      take: 50,
     });
     const persisted = persistedCalls
       .map((call) => this.toAssignment(call))
