@@ -15,6 +15,10 @@ function matchesStatus(callStatus, requestedStatus) {
   return callStatus === 'new' || callStatus === 'accepted';
 }
 
+function assignedTime(call) {
+  return new Date(call.acceptedAt || call.createdAt).getTime();
+}
+
 function createStore() {
   const booking = {
     id: 'booking-1',
@@ -69,6 +73,48 @@ function createStore() {
             (!where.waiterId || Boolean(call.waiterId))) || null;
       }
       return null;
+    },
+    async query(sql, params) {
+      assert.match(sql, /ROW_NUMBER\(\) OVER/);
+      assert.match(sql, /PARTITION BY waiter_calls\.booking_id/);
+      assert.match(sql, /latest_per_table/);
+      assert.match(sql, /LIMIT 50/);
+
+      const waiterId = params[0];
+      const ordered = [...calls]
+        .filter((call) => call.waiterId === waiterId && call.assignmentActive)
+        .sort((left, right) => assignedTime(right) - assignedTime(left));
+
+      const latestByBooking = new Map();
+      for (const call of ordered) {
+        if (!latestByBooking.has(call.booking.id)) {
+          latestByBooking.set(call.booking.id, call);
+        }
+      }
+
+      const latestByTable = new Map();
+      for (const call of latestByBooking.values()) {
+        const tableKey = call.tableId
+          ? `id:${call.tableId}`
+          : call.tableNumber
+            ? `number:${call.tableNumber}`
+            : `booking:${call.booking.id}`;
+        if (!latestByTable.has(tableKey)) {
+          latestByTable.set(tableKey, call);
+        }
+      }
+
+      return [...latestByTable.values()]
+        .sort((left, right) => assignedTime(right) - assignedTime(left))
+        .slice(0, 50)
+        .map((call) => ({
+          bookingId: call.booking.id,
+          tableId: call.tableId,
+          tableNumber: call.tableNumber,
+          waiterId: call.waiterId,
+          waiterName: call.waiterName,
+          assignedAt: call.acceptedAt || call.createdAt,
+        }));
     },
     createQueryBuilder() {
       let bookingId = null;
@@ -240,7 +286,7 @@ test('explicit booking detach removes persisted waiter assignment even after cal
   assert.equal(await restartedService.assignmentForBooking(store.booking), null);
 });
 
-test('myAssignments deduplicates persisted rows before applying the 50-assignment limit', async () => {
+test('myAssignments deduplicates persisted rows in SQL before applying the 50-assignment limit', async () => {
   const store = createStore();
   const waiterId = '11111111-1111-4111-8111-111111111111';
   const baseTime = Date.now();
