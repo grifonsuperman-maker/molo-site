@@ -147,6 +147,41 @@ export class SchedulesService {
     });
   }
 
+  private async releaseRestaurantReminder(
+    restaurantId: string,
+    today: string,
+    kind: RestaurantReminderKind,
+  ) {
+    await this.restaurantRepo.manager.transaction(async (manager) => {
+      const restaurantRepo = manager.getRepository(Restaurant);
+      const restaurant = await restaurantRepo.findOne({
+        where: { id: restaurantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!restaurant) {
+        return;
+      }
+
+      const notifiedAt =
+        kind === 'booking'
+          ? restaurant.bookingCloseNotifiedAt
+          : restaurant.restaurantCloseNotifiedAt;
+
+      if (notifiedAt !== today) {
+        return;
+      }
+
+      if (kind === 'booking') {
+        restaurant.bookingCloseNotifiedAt = null;
+      } else {
+        restaurant.restaurantCloseNotifiedAt = null;
+      }
+
+      await restaurantRepo.save(restaurant);
+    });
+  }
+
   private async checkLateGuests() {
     const { date: today, minutes: nowMinutes } = this.getKyivClock();
 
@@ -214,7 +249,13 @@ export class SchedulesService {
       return;
     }
 
-    await this.notificationsService.notifyBookingCloseReminder();
+    const delivery = await this.notificationsService.notifyBookingCloseReminder();
+
+    if (delivery && delivery.attempted > 0 && delivery.delivered === 0) {
+      await this.releaseRestaurantReminder(restaurant.id, today, 'booking');
+      this.logger.warn('Не вдалося доставити нагадування про закриття онлайн-бронювання; повторимо');
+      return;
+    }
 
     await this.logsService.create('Відправлено нагадування закрити онлайн-бронювання', null, {
       time: claimedReminderTime,
@@ -251,7 +292,13 @@ export class SchedulesService {
       return;
     }
 
-    await this.notificationsService.notifyRestaurantCloseReminder();
+    const delivery = await this.notificationsService.notifyRestaurantCloseReminder();
+
+    if (delivery && delivery.attempted > 0 && delivery.delivered === 0) {
+      await this.releaseRestaurantReminder(restaurant.id, today, 'restaurant');
+      this.logger.warn('Не вдалося доставити нагадування про закриття ресторану; повторимо');
+      return;
+    }
 
     await this.logsService.create('Відправлено нагадування закрити ресторан', null, {
       time: claimedReminderTime,
