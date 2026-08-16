@@ -3,6 +3,7 @@ import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AdminAttentionService } from './admin-attention.service';
 import { AvailabilityBlocksService } from './availability-blocks.service';
 import { BookingTableLockService } from './booking-table-lock.service';
@@ -26,6 +27,7 @@ export class BookingsController {
     private readonly tableLock: BookingTableLockService,
     private readonly availabilityBlocks: AvailabilityBlocksService,
     private readonly adminAttention: AdminAttentionService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @Public()
@@ -118,12 +120,23 @@ export class BookingsController {
 
   @Public()
   @Patch(':id/guest/lateness')
-  guestLateness(
+  async guestLateness(
     @Param('id') id: string,
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestLatenessDto,
   ) {
-    return this.guestService.reportLateness(id, token, dto);
+    const result = await this.guestService.reportLateness(id, token, dto);
+
+    try {
+      await this.notifications.notifyGuestReportedLateness(result.booking);
+    } catch (error) {
+      console.error('Telegram guest lateness notification failed', error);
+    }
+
+    return {
+      ...result,
+      message: 'Адміністратора повідомлено про запізнення',
+    };
   }
 
   @Public()

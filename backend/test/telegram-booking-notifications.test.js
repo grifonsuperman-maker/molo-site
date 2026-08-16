@@ -86,3 +86,45 @@ test('booking Telegram notifications keep phone text without broken booking:call
     );
   }
 });
+
+test('guest-reported lateness Telegram notification targets only admin without buttons', async () => {
+  const { service } = createNotificationsService();
+  let delivery = null;
+
+  service.sendToRoles = async (roles, text, replyMarkup) => {
+    delivery = { roles, text, replyMarkup };
+  };
+
+  await service.notifyGuestReportedLateness({
+    tableNumber: '8',
+    bookingDate: '2026-08-16',
+    bookingTime: '16:37',
+    latenessHours: 0,
+    latenessMinutes: 15,
+  });
+
+  assert.deepEqual(delivery.roles, ['admin']);
+  assert.match(delivery.text, /Гість повідомив про запізнення/);
+  assert.match(delivery.text, /Стіл: <b>8<\/b>/);
+  assert.match(delivery.text, /Час бронювання: <b>16:37<\/b>/);
+  assert.match(delivery.text, /Запізнення: <b>15 хв<\/b>/);
+  assert.equal(delivery.replyMarkup, undefined);
+});
+
+test('automatic late guest Telegram notification also targets only admin', async () => {
+  const { service } = createNotificationsService();
+  let delivery = null;
+
+  service.sendToRoles = async (roles, text, replyMarkup) => {
+    delivery = { roles, text, replyMarkup };
+  };
+
+  await service.notifyLateGuest(booking);
+
+  assert.deepEqual(delivery.roles, ['admin']);
+  assert.match(delivery.text, /Гість запізнюється/);
+  assert.deepEqual(callbacks(delivery.replyMarkup), [
+    'booking:cancel:booking-1',
+    'booking:change_time:booking-1',
+  ]);
+});

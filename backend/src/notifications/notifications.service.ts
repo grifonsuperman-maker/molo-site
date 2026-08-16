@@ -6,6 +6,14 @@ import { Staff } from '../staff/entities/staff.entity';
 import { Booking } from '../bookings/entities/booking.entity';
 import { BookingRescheduleRequest } from '../bookings/entities/booking-reschedule-request.entity';
 
+type GuestReportedLatenessNotification = {
+  tableNumber?: string | null;
+  bookingDate: string;
+  bookingTime: string;
+  latenessHours?: number | null;
+  latenessMinutes?: number | null;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -46,6 +54,15 @@ export class NotificationsService {
     if (!time) return '-';
     const [hours = '00', minutes = '00'] = String(time).split(':');
     return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
+  }
+
+  private latenessLabel(hoursValue: number | null | undefined, minutesValue: number | null | undefined) {
+    const hours = Math.max(0, Number(hoursValue || 0));
+    const minutes = Math.max(0, Number(minutesValue || 0));
+    const parts: string[] = [];
+    if (hours > 0) parts.push(`${hours} год`);
+    if (minutes > 0) parts.push(`${minutes} хв`);
+    return parts.join(' ') || '-';
   }
 
   private bookingTimeRange(booking: Booking) {
@@ -191,6 +208,19 @@ export class NotificationsService {
     await this.sendToRoles(['owner', 'admin'], text, replyMarkup);
   }
 
+  async notifyGuestReportedLateness(booking: GuestReportedLatenessNotification) {
+    const text = [
+      '⚠️ <b>Гість повідомив про запізнення</b>',
+      '',
+      `🪑 Стіл: <b>${booking.tableNumber || '-'}</b>`,
+      `📅 Дата: <b>${booking.bookingDate}</b>`,
+      `🕒 Час бронювання: <b>${this.timeLabel(booking.bookingTime)}</b>`,
+      `⏳ Запізнення: <b>${this.latenessLabel(booking.latenessHours, booking.latenessMinutes)}</b>`,
+    ].join('\n');
+
+    await this.sendToRoles(['admin'], text);
+  }
+
   async notifyLateGuest(booking: Booking) {
     const text = [
       '⚠️ <b>Гість запізнюється</b>',
@@ -210,7 +240,7 @@ export class NotificationsService {
       ],
     };
 
-    await this.sendToRoles(['owner', 'admin'], text, replyMarkup);
+    await this.sendToRoles(['admin'], text, replyMarkup);
   }
 
   async notifyBookingCloseReminder() {
