@@ -7,7 +7,6 @@ Telegram Mini App + Web Admin Panel + Backend API для бронювання с
 - Гостьовий Telegram Mini App
 - Панель офіціанта
 - Адмін-панель
-- Конструктор залу
 - Backend API на NestJS
 - Telegram Bot webhook
 - PostgreSQL
@@ -57,7 +56,7 @@ https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://your-dom
 - `guest` — гість
 - `waiter` — офіціант
 - `admin` — адміністратор
-- `owner` — власник
+- `owner` — Директор
 
 ### Як працює вхід
 
