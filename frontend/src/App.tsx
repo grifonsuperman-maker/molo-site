@@ -1,17 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { clearAccessToken } from "./api/client";
 import type { StaffAuthUser } from "./api/staff";
-import GuestApp from "./guest/GuestApp";
-import GuestBookingDecisionController from "./guest/GuestBookingDecisionController";
-import GuestReviewDismissController from "./guest/GuestReviewDismissController";
-import WaiterApp from "./waiter/WaiterAppV2";
-import WaiterCallAlertController from "./waiter/WaiterCallAlertController";
 import "./waiter/waiter-legacy-theme.css";
 import "./waiter/waiter-call-alert.css";
-import HookahApp from "./hookah/HookahApp";
-import AdminWorkspace from "./admin/AdminWorkspace";
 import "./admin/admin-neon-theme.css";
-import DirectorWorkspace from "./director/DirectorWorkspace";
 import SitePhotoController from "./theme/SitePhotoController";
 import MoloSplash from "./theme/MoloSplash";
 import { useTelegramAuth } from "./auth/useTelegramAuth";
@@ -19,6 +11,21 @@ import TelegramStaffLinkGate, {
   readTelegramStaffInviteToken,
 } from "./telegram/TelegramStaffLinkGate";
 import { resolveTelegramMode } from "./telegram/telegramRuntime";
+
+const GuestApp = lazy(() => import("./guest/GuestApp"));
+const GuestBookingDecisionController = lazy(
+  () => import("./guest/GuestBookingDecisionController"),
+);
+const GuestReviewDismissController = lazy(
+  () => import("./guest/GuestReviewDismissController"),
+);
+const WaiterApp = lazy(() => import("./waiter/WaiterAppV2"));
+const WaiterCallAlertController = lazy(
+  () => import("./waiter/WaiterCallAlertController"),
+);
+const HookahApp = lazy(() => import("./hookah/HookahApp"));
+const AdminWorkspace = lazy(() => import("./admin/AdminWorkspace"));
+const DirectorWorkspace = lazy(() => import("./director/DirectorWorkspace"));
 
 type Mode = "guest" | "waiter" | "hookah" | "admin" | "director";
 
@@ -193,26 +200,28 @@ export default function App() {
         </button>
       </div>
 
-      {mode === "guest" && (
-        <>
-          <GuestApp />
-          <GuestBookingDecisionController />
-          <GuestReviewDismissController />
-        </>
-      )}
-      {mode === "waiter" && (
-        <div className="molo-waiter-legacy-theme">
-          <WaiterCallAlertController />
-          <WaiterApp />
-        </div>
-      )}
-      {mode === "hookah" && <HookahApp />}
-      {mode === "admin" && (
-        <div className="molo-admin-neon-theme">
-          <AdminWorkspace />
-        </div>
-      )}
-      {mode === "director" && <DirectorWorkspace />}
+      <Suspense fallback={null}>
+        {mode === "guest" && (
+          <>
+            <GuestApp />
+            <GuestBookingDecisionController />
+            <GuestReviewDismissController />
+          </>
+        )}
+        {mode === "waiter" && (
+          <div className="molo-waiter-legacy-theme">
+            <WaiterCallAlertController />
+            <WaiterApp />
+          </div>
+        )}
+        {mode === "hookah" && <HookahApp />}
+        {mode === "admin" && (
+          <div className="molo-admin-neon-theme">
+            <AdminWorkspace />
+          </div>
+        )}
+        {mode === "director" && <DirectorWorkspace />}
+      </Suspense>
     </main>
   );
 }
