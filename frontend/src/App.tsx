@@ -1,17 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { clearAccessToken } from "./api/client";
 import type { StaffAuthUser } from "./api/staff";
-import GuestApp from "./guest/GuestApp";
-import GuestBookingDecisionController from "./guest/GuestBookingDecisionController";
-import GuestReviewDismissController from "./guest/GuestReviewDismissController";
-import WaiterApp from "./waiter/WaiterAppV2";
-import WaiterCallAlertController from "./waiter/WaiterCallAlertController";
 import "./waiter/waiter-legacy-theme.css";
 import "./waiter/waiter-call-alert.css";
-import HookahApp from "./hookah/HookahApp";
-import AdminWorkspace from "./admin/AdminWorkspace";
 import "./admin/admin-neon-theme.css";
-import DirectorWorkspace from "./director/DirectorWorkspace";
 import SitePhotoController from "./theme/SitePhotoController";
 import MoloSplash from "./theme/MoloSplash";
 import { useTelegramAuth } from "./auth/useTelegramAuth";
@@ -20,7 +13,67 @@ import TelegramStaffLinkGate, {
 } from "./telegram/TelegramStaffLinkGate";
 import { resolveTelegramMode } from "./telegram/telegramRuntime";
 
+const GuestApp = lazy(() => import("./guest/GuestApp"));
+const GuestBookingDecisionController = lazy(
+  () => import("./guest/GuestBookingDecisionController"),
+);
+const GuestReviewDismissController = lazy(
+  () => import("./guest/GuestReviewDismissController"),
+);
+const WaiterApp = lazy(() => import("./waiter/WaiterAppV2"));
+const WaiterCallAlertController = lazy(
+  () => import("./waiter/WaiterCallAlertController"),
+);
+const HookahApp = lazy(() => import("./hookah/HookahApp"));
+const AdminWorkspace = lazy(() => import("./admin/AdminWorkspace"));
+const DirectorWorkspace = lazy(() => import("./director/DirectorWorkspace"));
+
 type Mode = "guest" | "waiter" | "hookah" | "admin" | "director";
+
+type RoleLoadBoundaryProps = {
+  resetKey: Mode;
+  children: ReactNode;
+};
+
+type RoleLoadBoundaryState = {
+  failed: boolean;
+};
+
+class RoleLoadBoundary extends Component<
+  RoleLoadBoundaryProps,
+  RoleLoadBoundaryState
+> {
+  state: RoleLoadBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): RoleLoadBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidUpdate(previousProps: RoleLoadBoundaryProps) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.failed) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="mx-auto mt-8 max-w-md rounded-2xl border border-red-400/30 bg-red-950/70 p-5 text-center text-sm text-red-100">
+          <p>Не вдалося завантажити цей розділ.</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-3 rounded-xl bg-red-100 px-4 py-2 font-semibold text-red-950"
+          >
+            Оновити сторінку
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 const HOOKAH_STAFF_STORAGE_KEY = "molo_hookah_staff";
 
@@ -193,26 +246,30 @@ export default function App() {
         </button>
       </div>
 
-      {mode === "guest" && (
-        <>
-          <GuestApp />
-          <GuestBookingDecisionController />
-          <GuestReviewDismissController />
-        </>
-      )}
-      {mode === "waiter" && (
-        <div className="molo-waiter-legacy-theme">
-          <WaiterCallAlertController />
-          <WaiterApp />
-        </div>
-      )}
-      {mode === "hookah" && <HookahApp />}
-      {mode === "admin" && (
-        <div className="molo-admin-neon-theme">
-          <AdminWorkspace />
-        </div>
-      )}
-      {mode === "director" && <DirectorWorkspace />}
+      <RoleLoadBoundary resetKey={mode}>
+        <Suspense fallback={null}>
+          {mode === "guest" && (
+            <>
+              <GuestApp />
+              <GuestBookingDecisionController />
+              <GuestReviewDismissController />
+            </>
+          )}
+          {mode === "waiter" && (
+            <div className="molo-waiter-legacy-theme">
+              <WaiterCallAlertController />
+              <WaiterApp />
+            </div>
+          )}
+          {mode === "hookah" && <HookahApp />}
+          {mode === "admin" && (
+            <div className="molo-admin-neon-theme">
+              <AdminWorkspace />
+            </div>
+          )}
+          {mode === "director" && <DirectorWorkspace />}
+        </Suspense>
+      </RoleLoadBoundary>
     </main>
   );
 }
