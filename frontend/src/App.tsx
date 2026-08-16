@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { clearAccessToken } from "./api/client";
 import type { StaffAuthUser } from "./api/staff";
 import "./waiter/waiter-legacy-theme.css";
@@ -28,6 +29,51 @@ const AdminWorkspace = lazy(() => import("./admin/AdminWorkspace"));
 const DirectorWorkspace = lazy(() => import("./director/DirectorWorkspace"));
 
 type Mode = "guest" | "waiter" | "hookah" | "admin" | "director";
+
+type RoleLoadBoundaryProps = {
+  resetKey: Mode;
+  children: ReactNode;
+};
+
+type RoleLoadBoundaryState = {
+  failed: boolean;
+};
+
+class RoleLoadBoundary extends Component<
+  RoleLoadBoundaryProps,
+  RoleLoadBoundaryState
+> {
+  state: RoleLoadBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): RoleLoadBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidUpdate(previousProps: RoleLoadBoundaryProps) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.failed) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="mx-auto mt-8 max-w-md rounded-2xl border border-red-400/30 bg-red-950/70 p-5 text-center text-sm text-red-100">
+          <p>Не вдалося завантажити цей розділ.</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-3 rounded-xl bg-red-100 px-4 py-2 font-semibold text-red-950"
+          >
+            Оновити сторінку
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 const HOOKAH_STAFF_STORAGE_KEY = "molo_hookah_staff";
 
@@ -200,28 +246,30 @@ export default function App() {
         </button>
       </div>
 
-      <Suspense fallback={null}>
-        {mode === "guest" && (
-          <>
-            <GuestApp />
-            <GuestBookingDecisionController />
-            <GuestReviewDismissController />
-          </>
-        )}
-        {mode === "waiter" && (
-          <div className="molo-waiter-legacy-theme">
-            <WaiterCallAlertController />
-            <WaiterApp />
-          </div>
-        )}
-        {mode === "hookah" && <HookahApp />}
-        {mode === "admin" && (
-          <div className="molo-admin-neon-theme">
-            <AdminWorkspace />
-          </div>
-        )}
-        {mode === "director" && <DirectorWorkspace />}
-      </Suspense>
+      <RoleLoadBoundary resetKey={mode}>
+        <Suspense fallback={null}>
+          {mode === "guest" && (
+            <>
+              <GuestApp />
+              <GuestBookingDecisionController />
+              <GuestReviewDismissController />
+            </>
+          )}
+          {mode === "waiter" && (
+            <div className="molo-waiter-legacy-theme">
+              <WaiterCallAlertController />
+              <WaiterApp />
+            </div>
+          )}
+          {mode === "hookah" && <HookahApp />}
+          {mode === "admin" && (
+            <div className="molo-admin-neon-theme">
+              <AdminWorkspace />
+            </div>
+          )}
+          {mode === "director" && <DirectorWorkspace />}
+        </Suspense>
+      </RoleLoadBoundary>
     </main>
   );
 }
