@@ -110,3 +110,21 @@ test('guest-reported lateness Telegram notification targets only admin without b
   assert.match(delivery.text, /Запізнення: <b>15 хв<\/b>/);
   assert.equal(delivery.replyMarkup, undefined);
 });
+
+test('automatic late guest Telegram notification also targets only admin', async () => {
+  const { service } = createNotificationsService();
+  let delivery = null;
+
+  service.sendToRoles = async (roles, text, replyMarkup) => {
+    delivery = { roles, text, replyMarkup };
+  };
+
+  await service.notifyLateGuest(booking);
+
+  assert.deepEqual(delivery.roles, ['admin']);
+  assert.match(delivery.text, /Гість запізнюється/);
+  assert.deepEqual(callbacks(delivery.replyMarkup), [
+    'booking:cancel:booking-1',
+    'booking:change_time:booking-1',
+  ]);
+});
