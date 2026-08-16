@@ -47,7 +47,7 @@ const booking = {
   },
 };
 
-test('booking Telegram notifications keep phone text without broken booking:call callbacks', async () => {
+test('booking Telegram notifications keep phone text without broken callbacks', async () => {
   const { sent, service } = createNotificationsService();
 
   await service.notifyNewBooking(booking);
@@ -76,12 +76,16 @@ test('booking Telegram notifications keep phone text without broken booking:call
   ]);
   assert.deepEqual(callbacks(lateGuest[2]), [
     'booking:cancel:booking-1',
-    'booking:change_time:booking-1',
   ]);
 
   for (const message of sent) {
+    const messageCallbacks = callbacks(message[2]);
     assert.equal(
-      callbacks(message[2]).some((callback) => callback.startsWith('booking:call:')),
+      messageCallbacks.some((callback) => callback.startsWith('booking:call:')),
+      false,
+    );
+    assert.equal(
+      messageCallbacks.some((callback) => callback.startsWith('booking:change_time:')),
       false,
     );
   }
@@ -125,6 +129,5 @@ test('automatic late guest Telegram notification also targets only admin', async
   assert.match(delivery.text, /Гість запізнюється/);
   assert.deepEqual(callbacks(delivery.replyMarkup), [
     'booking:cancel:booking-1',
-    'booking:change_time:booking-1',
   ]);
 });
