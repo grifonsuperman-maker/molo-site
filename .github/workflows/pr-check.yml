@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - name: Install frontend dependencies
         run: npm --prefix frontend install --no-audit --no-fund
       - name: Build frontend
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - name: Install backend dependencies
         run: npm --prefix backend install --package-lock=false --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
       - name: Build backend
