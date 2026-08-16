@@ -134,7 +134,6 @@ export class NotificationsService {
           { text: '✅ Підтвердити', callback_data: `booking:approve:${booking.id}` },
           { text: '❌ Відхилити', callback_data: `booking:reject:${booking.id}` },
         ],
-        [{ text: '📞 Подзвонити', callback_data: `booking:call:${booking.id}` }],
       ],
     };
 
@@ -186,7 +185,6 @@ export class NotificationsService {
           { text: '✅ Погодити', callback_data: `reschedule:approve:${request.id}` },
           { text: '❌ Відмовити', callback_data: `reschedule:reject:${request.id}` },
         ],
-        [{ text: '📞 Подзвонити', callback_data: `booking:call:${booking.id}` }],
       ],
     };
 
@@ -207,10 +205,7 @@ export class NotificationsService {
 
     const replyMarkup = {
       inline_keyboard: [
-        [
-          { text: '📞 Подзвонити', callback_data: `booking:call:${booking.id}` },
-          { text: '❌ Скасувати', callback_data: `booking:cancel:${booking.id}` },
-        ],
+        [{ text: '❌ Скасувати', callback_data: `booking:cancel:${booking.id}` }],
         [{ text: '⏰ Змінити час', callback_data: `booking:change_time:${booking.id}` }],
       ],
     };
