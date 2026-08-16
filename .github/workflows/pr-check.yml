@@ -40,6 +40,6 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
       - name: Build backend
-        run: cd backend && npx --yes @nestjs/cli@10.4.9 build
+        run: npm --prefix backend run build
       - name: Test table changes
         run: npm --prefix backend test
