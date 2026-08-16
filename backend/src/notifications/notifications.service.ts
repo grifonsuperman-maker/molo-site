@@ -14,6 +14,12 @@ type GuestReportedLatenessNotification = {
   latenessMinutes?: number | null;
 };
 
+export type NotificationDeliverySummary = {
+  attempted: number;
+  delivered: number;
+  failed: number;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -35,19 +41,26 @@ export class NotificationsService {
     roles: Array<'owner' | 'admin' | 'waiter'>,
     text: string,
     replyMarkup?: unknown,
-  ) {
+  ): Promise<NotificationDeliverySummary> {
     const chatIds = await this.getActiveStaffTelegramIds(roles);
 
     if (!chatIds.length) {
       console.log('Telegram notification skipped: no active staff telegram ids');
-      return;
+      return { attempted: 0, delivered: 0, failed: 0 };
     }
 
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       chatIds.map((chatId) =>
         this.telegramService.sendMessage(chatId, text, replyMarkup),
       ),
     );
+    const delivered = results.filter((result) => result.status === 'fulfilled').length;
+
+    return {
+      attempted: results.length,
+      delivered,
+      failed: results.length - delivered,
+    };
   }
 
   private timeLabel(time: string | null | undefined) {
@@ -254,7 +267,7 @@ export class NotificationsService {
       inline_keyboard: [[{ text: '🔒 Закрити бронювання', callback_data: 'restaurant:close_booking' }]],
     };
 
-    await this.sendToRoles(['owner', 'admin'], text, replyMarkup);
+    return this.sendToRoles(['owner', 'admin'], text, replyMarkup);
   }
 
   async notifyRestaurantCloseReminder() {
@@ -269,6 +282,6 @@ export class NotificationsService {
       inline_keyboard: [[{ text: '🔴 Закрити ресторан', callback_data: 'restaurant:close_full' }]],
     };
 
-    await this.sendToRoles(['owner', 'admin'], text, replyMarkup);
+    return this.sendToRoles(['owner', 'admin'], text, replyMarkup);
   }
 }
