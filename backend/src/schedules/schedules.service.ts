@@ -30,22 +30,38 @@ export class SchedulesService {
     await this.checkRestaurantCloseReminder();
   }
 
-  private getTodayString() {
-    return new Date().toISOString().slice(0, 10);
-  }
+  private getKyivClock(now = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Kyiv',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(now);
+    const value = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((part) => part.type === type)?.value || '';
+    const year = value('year');
+    const month = value('month');
+    const day = value('day');
+    const hour = value('hour');
+    const minute = value('minute');
 
-  private getCurrentTimeString() {
-    return new Date().toTimeString().slice(0, 5);
+    if (!year || !month || !day || !hour || !minute) {
+      throw new Error('Could not determine the current Kyiv date and time');
+    }
+
+    return {
+      date: `${year}-${month}-${day}`,
+      time: `${hour}:${minute}`,
+      minutes: Number(hour) * 60 + Number(minute),
+    };
   }
 
   private minutesFromTime(time: string) {
     const [hours, minutes] = time.split(':').map(Number);
     return hours * 60 + minutes;
-  }
-
-  private currentMinutes() {
-    const now = new Date();
-    return now.getHours() * 60 + now.getMinutes();
   }
 
   private async getRestaurant() {
@@ -83,8 +99,7 @@ export class SchedulesService {
   }
 
   private async checkLateGuests() {
-    const today = this.getTodayString();
-    const nowMinutes = this.currentMinutes();
+    const { date: today, minutes: nowMinutes } = this.getKyivClock();
 
     const bookings = await this.bookingsRepo.find({
       where: {
@@ -127,8 +142,7 @@ export class SchedulesService {
       return;
     }
 
-    const today = this.getTodayString();
-    const currentTime = this.getCurrentTimeString();
+    const { date: today, time: currentTime } = this.getKyivClock();
     const closeBookingTime = restaurant.bookingCloseTime.slice(0, 5);
 
     if (currentTime !== closeBookingTime) {
@@ -156,8 +170,7 @@ export class SchedulesService {
       return;
     }
 
-    const today = this.getTodayString();
-    const currentTime = this.getCurrentTimeString();
+    const { date: today, time: currentTime } = this.getKyivClock();
     const closeRestaurantTime = restaurant.closeTime.slice(0, 5);
 
     if (currentTime !== closeRestaurantTime) {
