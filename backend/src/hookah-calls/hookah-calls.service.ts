@@ -350,6 +350,16 @@ export class HookahCallsService {
         );
       }
 
+      const lockedCall = await callRepo
+        .createQueryBuilder("hookah_call")
+        .where("hookah_call.id = :callId", { callId })
+        .setLock("pessimistic_write", undefined, ["hookah_call"])
+        .getOne();
+
+      if (!lockedCall) {
+        throw new NotFoundException("Виклик не знайдено");
+      }
+
       const call = await callRepo.findOne({
         where: {
           id: callId,
