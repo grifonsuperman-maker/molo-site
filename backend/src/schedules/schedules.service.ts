@@ -8,6 +8,8 @@ import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LogsService } from '../logs/logs.service';
 
+type RestaurantReminderKind = 'booking' | 'restaurant';
+
 @Injectable()
 export class SchedulesService {
   private readonly logger = new Logger(SchedulesService.name);
@@ -98,6 +100,53 @@ export class SchedulesService {
     return this.restaurantRepo.save(restaurant);
   }
 
+  private async claimRestaurantReminder(
+    restaurantId: string,
+    today: string,
+    currentMinutes: number,
+    kind: RestaurantReminderKind,
+  ): Promise<string | null> {
+    return this.restaurantRepo.manager.transaction(async (manager) => {
+      const restaurantRepo = manager.getRepository(Restaurant);
+      const restaurant = await restaurantRepo.findOne({
+        where: { id: restaurantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!restaurant) {
+        return null;
+      }
+
+      const reminderTime =
+        kind === 'booking'
+          ? restaurant.bookingCloseTime.slice(0, 5)
+          : restaurant.closeTime.slice(0, 5);
+
+      if (currentMinutes < this.minutesFromTime(reminderTime)) {
+        return null;
+      }
+
+      const alreadyNotified =
+        kind === 'booking'
+          ? restaurant.bookingCloseNotifiedAt
+          : restaurant.restaurantCloseNotifiedAt;
+
+      if (alreadyNotified === today) {
+        return null;
+      }
+
+      if (kind === 'booking') {
+        restaurant.bookingCloseNotifiedAt = today;
+      } else {
+        restaurant.restaurantCloseNotifiedAt = today;
+      }
+
+      await restaurantRepo.save(restaurant);
+
+      return reminderTime;
+    });
+  }
+
   private async checkLateGuests() {
     const { date: today, minutes: nowMinutes } = this.getKyivClock();
 
@@ -154,13 +203,21 @@ export class SchedulesService {
       return;
     }
 
-    restaurant.bookingCloseNotifiedAt = today;
+    const claimedReminderTime = await this.claimRestaurantReminder(
+      restaurant.id,
+      today,
+      currentMinutes,
+      'booking',
+    );
 
-    await this.restaurantRepo.save(restaurant);
+    if (!claimedReminderTime) {
+      return;
+    }
+
     await this.notificationsService.notifyBookingCloseReminder();
 
     await this.logsService.create('Відправлено нагадування закрити онлайн-бронювання', null, {
-      time: closeBookingTime,
+      time: claimedReminderTime,
     });
   }
 
@@ -183,13 +240,21 @@ export class SchedulesService {
       return;
     }
 
-    restaurant.restaurantCloseNotifiedAt = today;
+    const claimedReminderTime = await this.claimRestaurantReminder(
+      restaurant.id,
+      today,
+      currentMinutes,
+      'restaurant',
+    );
 
-    await this.restaurantRepo.save(restaurant);
+    if (!claimedReminderTime) {
+      return;
+    }
+
     await this.notificationsService.notifyRestaurantCloseReminder();
 
     await this.logsService.create('Відправлено нагадування закрити ресторан', null, {
-      time: closeRestaurantTime,
+      time: claimedReminderTime,
     });
   }
 }
