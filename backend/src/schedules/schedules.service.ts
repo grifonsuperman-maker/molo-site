@@ -142,10 +142,11 @@ export class SchedulesService {
       return;
     }
 
-    const { date: today, time: currentTime } = this.getKyivClock();
+    const { date: today, minutes: currentMinutes } = this.getKyivClock();
     const closeBookingTime = restaurant.bookingCloseTime.slice(0, 5);
+    const closeBookingMinutes = this.minutesFromTime(closeBookingTime);
 
-    if (currentTime !== closeBookingTime) {
+    if (currentMinutes < closeBookingMinutes) {
       return;
     }
 
@@ -170,10 +171,11 @@ export class SchedulesService {
       return;
     }
 
-    const { date: today, time: currentTime } = this.getKyivClock();
+    const { date: today, minutes: currentMinutes } = this.getKyivClock();
     const closeRestaurantTime = restaurant.closeTime.slice(0, 5);
+    const closeRestaurantMinutes = this.minutesFromTime(closeRestaurantTime);
 
-    if (currentTime !== closeRestaurantTime) {
+    if (currentMinutes < closeRestaurantMinutes) {
       return;
     }
 
