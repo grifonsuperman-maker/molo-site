@@ -18,21 +18,3 @@ export class MapController {
     return this.service.getPublicMap();
   }
 }
-
-// Тимчасова read-only сумісність для вже відкритих старих версій frontend.
-// Жодних методів редагування конструктора тут немає.
-@Public()
-@Controller('constructor')
-export class LegacyMapCompatibilityController {
-  constructor(private readonly service: MapService) {}
-
-  @Get('map')
-  getFullMap() {
-    return this.service.getFullMap();
-  }
-
-  @Get('public-map')
-  getPublicMap() {
-    return this.service.getPublicMap();
-  }
-}
