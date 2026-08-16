@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 24
       - name: Install frontend dependencies
-        run: npm --prefix frontend install --no-audit --no-fund
+        run: npm --prefix frontend ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
       - name: Build frontend
         run: npm --prefix frontend run build
       - name: Test frontend
