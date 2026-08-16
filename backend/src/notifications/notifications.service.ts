@@ -236,7 +236,6 @@ export class NotificationsService {
     const replyMarkup = {
       inline_keyboard: [
         [{ text: '❌ Скасувати', callback_data: `booking:cancel:${booking.id}` }],
-        [{ text: '⏰ Змінити час', callback_data: `booking:change_time:${booking.id}` }],
       ],
     };
 
