@@ -240,7 +240,7 @@ export class NotificationsService {
       ],
     };
 
-    await this.sendToRoles(['owner', 'admin'], text, replyMarkup);
+    await this.sendToRoles(['admin'], text, replyMarkup);
   }
 
   async notifyBookingCloseReminder() {
