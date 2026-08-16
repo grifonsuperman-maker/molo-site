@@ -42,6 +42,7 @@ import { restaurantApi } from '../api/restaurant';
 import { reviewsApi, type GuestReviewRecord } from '../api/reviews';
 import { staffApi, type StaffMember } from '../api/staff';
 import type { Booking, Client, FullMapResponse, HolidayKey, Restaurant, SiteMode } from '../api/types';
+import TelegramStaffInvitePanel from '../staff/TelegramStaffInvitePanel';
 
 type Tab = 'overview' | 'bookings' | 'locations' | 'guests' | 'blacklist' | 'activity' | 'stats' | 'team' | 'site' | 'more';
 type BookingFilter = 'all' | 'pending' | 'approved' | 'completed' | 'cancelled' | 'no_show';
@@ -570,6 +571,7 @@ export default function PremiumDirectorPanel() {
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {activeStaff.map((member) => <EmployeeCard key={member.id} member={member} isSelf={member.id === selfId} onRemove={() => setEmployeeToRemove(member)} />)}
             </div>
+            <TelegramStaffInvitePanel audience="director" />
             <button
               type="button"
               onClick={() => setArchiveOpen(true)}
