@@ -19,6 +19,26 @@ function createService(overrides = {}) {
     save: async (value) => value,
     ...overrides.restaurantRepo,
   };
+
+  if (!restaurantRepo.findOne) {
+    restaurantRepo.findOne = async () => {
+      const restaurants = await restaurantRepo.find({
+        order: { createdAt: "ASC" },
+        take: 1,
+      });
+      return restaurants[0] || null;
+    };
+  }
+
+  if (!restaurantRepo.manager) {
+    restaurantRepo.manager = {
+      transaction: async (work) =>
+        work({
+          getRepository: () => restaurantRepo,
+        }),
+    };
+  }
+
   const notificationsService = {
     notifyLateGuest: async () => undefined,
     notifyBookingCloseReminder: async () => undefined,
@@ -40,11 +60,36 @@ function createService(overrides = {}) {
 
 function createRestaurant(overrides = {}) {
   return {
+    id: "restaurant-1",
     bookingCloseTime: "22:00",
     closeTime: "23:00",
     bookingCloseNotifiedAt: null,
     restaurantCloseNotifiedAt: null,
     ...overrides,
+  };
+}
+
+function createSerialTransactionManager(repository) {
+  let tail = Promise.resolve();
+
+  return {
+    transaction: async (work) => {
+      const previous = tail;
+      let release;
+      tail = new Promise((resolve) => {
+        release = resolve;
+      });
+
+      await previous;
+
+      try {
+        return await work({
+          getRepository: () => repository,
+        });
+      } finally {
+        release();
+      }
+    },
   };
 }
 
@@ -215,4 +260,106 @@ test("restaurant close reminder catches up after the configured minute", async (
 
   assert.equal(notifications, 1);
   assert.equal(restaurant.restaurantCloseNotifiedAt, "2026-08-16");
+});
+
+test("scheduler reminder claim locks the restaurant row before saving the day marker", async () => {
+  const restaurant = createRestaurant();
+  let lockOptions = null;
+  let transactionCalls = 0;
+  let notifications = 0;
+  const transactionalRepo = {
+    findOne: async (options) => {
+      lockOptions = options.lock;
+      return restaurant;
+    },
+    save: async (value) => value,
+  };
+  const manager = {
+    transaction: async (work) => {
+      transactionCalls += 1;
+      return work({
+        getRepository: (entity) => {
+          assert.equal(entity.name, "Restaurant");
+          return transactionalRepo;
+        },
+      });
+    },
+  };
+  const service = createService({
+    restaurantRepo: {
+      find: async () => [restaurant],
+      manager,
+    },
+    notificationsService: {
+      notifyBookingCloseReminder: async () => {
+        notifications += 1;
+      },
+    },
+  });
+
+  service.getKyivClock = () => ({
+    date: "2026-08-16",
+    time: "22:01",
+    minutes: 22 * 60 + 1,
+  });
+
+  await service.checkBookingCloseReminder();
+
+  assert.equal(transactionCalls, 1);
+  assert.deepEqual(lockOptions, { mode: "pessimistic_write" });
+  assert.equal(restaurant.bookingCloseNotifiedAt, "2026-08-16");
+  assert.equal(notifications, 1);
+});
+
+test("two scheduler instances send only one reminder after the locked reread", async () => {
+  let databaseRestaurant = createRestaurant();
+  const staleRestaurant = createRestaurant();
+  let saves = 0;
+  let notifications = 0;
+  const transactionalRepo = {
+    findOne: async (options) => {
+      assert.deepEqual(options.lock, { mode: "pessimistic_write" });
+      return { ...databaseRestaurant };
+    },
+    save: async (value) => {
+      saves += 1;
+      databaseRestaurant = { ...value };
+      return value;
+    },
+  };
+  const manager = createSerialTransactionManager(transactionalRepo);
+  const restaurantRepo = {
+    find: async () => [{ ...staleRestaurant }],
+    manager,
+  };
+  const notificationsService = {
+    notifyBookingCloseReminder: async () => {
+      notifications += 1;
+    },
+  };
+  const firstService = createService({
+    restaurantRepo,
+    notificationsService,
+  });
+  const secondService = createService({
+    restaurantRepo,
+    notificationsService,
+  });
+
+  for (const service of [firstService, secondService]) {
+    service.getKyivClock = () => ({
+      date: "2026-08-16",
+      time: "22:01",
+      minutes: 22 * 60 + 1,
+    });
+  }
+
+  await Promise.all([
+    firstService.checkBookingCloseReminder(),
+    secondService.checkBookingCloseReminder(),
+  ]);
+
+  assert.equal(saves, 1);
+  assert.equal(databaseRestaurant.bookingCloseNotifiedAt, "2026-08-16");
+  assert.equal(notifications, 1);
 });
