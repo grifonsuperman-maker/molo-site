@@ -23,9 +23,11 @@ function createService(overrides = {}) {
     notifyLateGuest: async () => undefined,
     notifyBookingCloseReminder: async () => undefined,
     notifyRestaurantCloseReminder: async () => undefined,
+    ...overrides.notificationsService,
   };
   const logsService = {
     create: async () => undefined,
+    ...overrides.logsService,
   };
 
   return new SchedulesService(
@@ -34,6 +36,16 @@ function createService(overrides = {}) {
     notificationsService,
     logsService,
   );
+}
+
+function createRestaurant(overrides = {}) {
+  return {
+    bookingCloseTime: "22:00",
+    closeTime: "23:00",
+    bookingCloseNotifiedAt: null,
+    restaurantCloseNotifiedAt: null,
+    ...overrides,
+  };
 }
 
 test("scheduler clock follows Europe/Kyiv in summer and winter", () => {
@@ -92,4 +104,115 @@ test("late guest scan uses one Kyiv clock for both date and minutes", async () =
 
   assert.equal(findOptions.where.bookingDate, "2026-08-17");
   assert.equal(findOptions.where.status, "approved");
+});
+
+test("booking close reminder still sends at the configured minute", async () => {
+  const restaurant = createRestaurant();
+  let notifications = 0;
+  const service = createService({
+    restaurantRepo: {
+      find: async () => [restaurant],
+    },
+    notificationsService: {
+      notifyBookingCloseReminder: async () => {
+        notifications += 1;
+      },
+    },
+  });
+
+  service.getKyivClock = () => ({
+    date: "2026-08-16",
+    time: "22:00",
+    minutes: 22 * 60,
+  });
+
+  await service.checkBookingCloseReminder();
+
+  assert.equal(notifications, 1);
+  assert.equal(restaurant.bookingCloseNotifiedAt, "2026-08-16");
+});
+
+test("booking close reminder catches up after the configured minute", async () => {
+  const restaurant = createRestaurant();
+  let notifications = 0;
+  const service = createService({
+    restaurantRepo: {
+      find: async () => [restaurant],
+    },
+    notificationsService: {
+      notifyBookingCloseReminder: async () => {
+        notifications += 1;
+      },
+    },
+  });
+
+  service.getKyivClock = () => ({
+    date: "2026-08-16",
+    time: "22:01",
+    minutes: 22 * 60 + 1,
+  });
+
+  await service.checkBookingCloseReminder();
+
+  assert.equal(notifications, 1);
+  assert.equal(restaurant.bookingCloseNotifiedAt, "2026-08-16");
+});
+
+test("booking close reminder is not repeated after today's marker is saved", async () => {
+  const restaurant = createRestaurant({
+    bookingCloseNotifiedAt: "2026-08-16",
+  });
+  let notifications = 0;
+  let saves = 0;
+  const service = createService({
+    restaurantRepo: {
+      find: async () => [restaurant],
+      save: async (value) => {
+        saves += 1;
+        return value;
+      },
+    },
+    notificationsService: {
+      notifyBookingCloseReminder: async () => {
+        notifications += 1;
+      },
+    },
+  });
+
+  service.getKyivClock = () => ({
+    date: "2026-08-16",
+    time: "22:30",
+    minutes: 22 * 60 + 30,
+  });
+
+  await service.checkBookingCloseReminder();
+
+  assert.equal(notifications, 0);
+  assert.equal(saves, 0);
+});
+
+test("restaurant close reminder catches up after the configured minute", async () => {
+  const restaurant = createRestaurant();
+  let notifications = 0;
+  const service = createService({
+    restaurantRepo: {
+      find: async () => [restaurant],
+    },
+    notificationsService: {
+      notifyRestaurantCloseReminder: async () => {
+        notifications += 1;
+      },
+    },
+  });
+
+  service.getKyivClock = () => ({
+    date: "2026-08-16",
+    time: "23:01",
+    minutes: 23 * 60 + 1,
+  });
+
+  await service.checkRestaurantCloseReminder();
+
+  assert.equal(notifications, 1);
+  assert.equal(restaurant.restaurantCloseNotifiedAt, "2026-08-16");
 });
