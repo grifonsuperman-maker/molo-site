@@ -4,6 +4,9 @@
   "description": "MOLO Restaurant Backend API",
   "private": true,
   "license": "UNLICENSED",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",
