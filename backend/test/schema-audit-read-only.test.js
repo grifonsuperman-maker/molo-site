@@ -47,13 +47,16 @@ class RecordingClient {
   }
 }
 
-test('schema audit uses a read-only transaction and metadata SELECTs only', async () => {
+test('schema audit uses one repeatable read-only snapshot and metadata SELECTs only', async () => {
   const { collectSchemaSnapshot } = await import('../scripts/schema-audit.mjs');
   const client = new RecordingClient();
 
   const snapshot = await collectSchemaSnapshot(client);
 
-  assert.equal(client.statements[0], 'BEGIN TRANSACTION READ ONLY');
+  assert.equal(
+    client.statements[0],
+    'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+  );
   assert.equal(client.statements.at(-1), 'COMMIT');
   assert.equal(snapshot.server.database_name, 'molo_restaurant');
   assert.equal(snapshot.typeOrmMigrations.length, 1);
@@ -96,7 +99,10 @@ test('schema audit rolls back the read-only transaction when metadata read fails
     /simulated metadata read failure/,
   );
 
-  assert.equal(client.statements[0], 'BEGIN TRANSACTION READ ONLY');
+  assert.equal(
+    client.statements[0],
+    'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+  );
   assert.equal(client.statements.at(-1), 'ROLLBACK');
 });
 
