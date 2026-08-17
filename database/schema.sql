@@ -1,3 +1,8 @@
+-- LEGACY HISTORICAL BOOTSTRAP ONLY.
+-- DO NOT APPLY THIS FILE TO THE CURRENT MOLO DATABASE.
+-- It does not represent the current production schema.
+-- See database/README.md and backend/scripts/schema-audit.mjs.
+
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TYPE staff_role AS ENUM ('owner', 'admin', 'waiter');
