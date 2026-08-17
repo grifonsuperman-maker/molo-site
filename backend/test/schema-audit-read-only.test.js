@@ -71,10 +71,13 @@ test('schema audit uses one repeatable read-only snapshot and metadata SELECTs o
     );
   }
 
+  const triggerStatement = metadataStatements.find((statement) =>
+    statement.includes('FROM pg_trigger AS trigger_row'),
+  );
+  assert.ok(triggerStatement);
+  assert.ok(triggerStatement.includes('trigger_row.tgenabled AS enabled_state'));
   assert.ok(
-    metadataStatements.some((statement) =>
-      statement.includes('pg_get_triggerdef(trigger_row.oid, true)'),
-    ),
+    triggerStatement.includes('pg_get_triggerdef(trigger_row.oid, true)'),
   );
   assert.ok(
     metadataStatements.some((statement) =>
