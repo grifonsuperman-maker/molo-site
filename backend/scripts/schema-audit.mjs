@@ -143,7 +143,9 @@ const queries = {
 };
 
 export async function collectSchemaSnapshot(client) {
-  await client.query('BEGIN TRANSACTION READ ONLY');
+  await client.query(
+    'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+  );
 
   try {
     const snapshot = {
