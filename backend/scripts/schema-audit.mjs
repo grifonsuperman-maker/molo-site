@@ -91,14 +91,28 @@ const queries = {
   `,
   triggers: `
     SELECT
-      event_object_table AS table_name,
-      trigger_name,
-      action_timing,
-      event_manipulation,
-      action_statement
-    FROM information_schema.triggers
-    WHERE trigger_schema = 'public'
-    ORDER BY event_object_table, trigger_name, event_manipulation
+      relation.relname AS table_name,
+      trigger_row.tgname AS trigger_name,
+      pg_get_triggerdef(trigger_row.oid, true) AS definition
+    FROM pg_trigger AS trigger_row
+    JOIN pg_class AS relation ON relation.oid = trigger_row.tgrelid
+    JOIN pg_namespace AS relation_namespace ON relation_namespace.oid = relation.relnamespace
+    WHERE relation_namespace.nspname = 'public'
+      AND NOT trigger_row.tgisinternal
+    ORDER BY relation.relname, trigger_row.tgname
+  `,
+  functions: `
+    SELECT
+      function_namespace.nspname AS schema_name,
+      function_row.proname AS function_name,
+      pg_get_function_identity_arguments(function_row.oid) AS identity_arguments,
+      function_row.prokind AS function_kind,
+      pg_get_functiondef(function_row.oid) AS definition
+    FROM pg_proc AS function_row
+    JOIN pg_namespace AS function_namespace ON function_namespace.oid = function_row.pronamespace
+    WHERE function_namespace.nspname = 'public'
+      AND function_row.prokind IN ('f', 'p')
+    ORDER BY function_row.proname, pg_get_function_identity_arguments(function_row.oid)
   `,
   sequences: `
     SELECT
@@ -142,6 +156,7 @@ export async function collectSchemaSnapshot(client) {
       constraints: (await client.query(queries.constraints)).rows,
       indexes: (await client.query(queries.indexes)).rows,
       triggers: (await client.query(queries.triggers)).rows,
+      functions: (await client.query(queries.functions)).rows,
       sequences: (await client.query(queries.sequences)).rows,
       views: (await client.query(queries.views)).rows,
       typeOrmMigrations: [],
