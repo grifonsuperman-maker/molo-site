@@ -579,6 +579,7 @@ export class WaiterCallsService {
       const call = await callRepo.findOne({
         where: { id },
         relations: { booking: true },
+        relationLoadStrategy: 'query',
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -615,6 +616,7 @@ export class WaiterCallsService {
       const call = await callRepo.findOne({
         where: { id },
         relations: { booking: true },
+        relationLoadStrategy: 'query',
         lock: { mode: 'pessimistic_write' },
       });
 
