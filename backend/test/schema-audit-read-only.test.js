@@ -57,6 +57,7 @@ test('schema audit uses a read-only transaction and metadata SELECTs only', asyn
   assert.equal(client.statements.at(-1), 'COMMIT');
   assert.equal(snapshot.server.database_name, 'molo_restaurant');
   assert.equal(snapshot.typeOrmMigrations.length, 1);
+  assert.ok(Array.isArray(snapshot.functions));
 
   const metadataStatements = client.statements.slice(1, -1);
   for (const statement of metadataStatements) {
@@ -66,6 +67,17 @@ test('schema audit uses a read-only transaction and metadata SELECTs only', asyn
       /\b(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE|GRANT|REVOKE)\b/i,
     );
   }
+
+  assert.ok(
+    metadataStatements.some((statement) =>
+      statement.includes('pg_get_triggerdef(trigger_row.oid, true)'),
+    ),
+  );
+  assert.ok(
+    metadataStatements.some((statement) =>
+      statement.includes('pg_get_functiondef(function_row.oid)'),
+    ),
+  );
 
   const directPublicTableReads = metadataStatements.filter((statement) =>
     /\bFROM\s+public\./i.test(statement),
