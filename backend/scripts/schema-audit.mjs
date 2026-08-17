@@ -93,6 +93,7 @@ const queries = {
     SELECT
       relation.relname AS table_name,
       trigger_row.tgname AS trigger_name,
+      trigger_row.tgenabled AS enabled_state,
       pg_get_triggerdef(trigger_row.oid, true) AS definition
     FROM pg_trigger AS trigger_row
     JOIN pg_class AS relation ON relation.oid = trigger_row.tgrelid
