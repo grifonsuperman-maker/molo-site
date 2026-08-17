@@ -85,6 +85,17 @@ test('schema audit uses one repeatable read-only snapshot and metadata SELECTs o
     ),
   );
 
+  const sequenceStatement = metadataStatements.find((statement) =>
+    statement.includes('JOIN pg_sequence AS sequence_data'),
+  );
+  assert.ok(sequenceStatement);
+  assert.ok(sequenceStatement.includes('FROM pg_depend AS dependency'));
+  assert.ok(sequenceStatement.includes('owner_relation.relname AS owned_by_table'));
+  assert.ok(sequenceStatement.includes('owner_attribute.attname AS owned_by_column'));
+  assert.ok(
+    sequenceStatement.includes('ownership.deptype AS ownership_dependency_type'),
+  );
+
   const directPublicTableReads = metadataStatements.filter((statement) =>
     /\bFROM\s+public\./i.test(statement),
   );
