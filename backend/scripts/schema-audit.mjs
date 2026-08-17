@@ -117,15 +117,49 @@ const queries = {
   `,
   sequences: `
     SELECT
-      sequence_name,
-      data_type,
-      start_value,
-      minimum_value,
-      maximum_value,
-      increment
-    FROM information_schema.sequences
-    WHERE sequence_schema = 'public'
-    ORDER BY sequence_name
+      sequence_namespace.nspname AS schema_name,
+      sequence_relation.relname AS sequence_name,
+      format_type(sequence_data.seqtypid, NULL) AS data_type,
+      sequence_data.seqstart AS start_value,
+      sequence_data.seqmin AS minimum_value,
+      sequence_data.seqmax AS maximum_value,
+      sequence_data.seqincrement AS increment,
+      sequence_data.seqcycle AS cycle,
+      sequence_data.seqcache AS cache_size,
+      owner_namespace.nspname AS owned_by_schema,
+      owner_relation.relname AS owned_by_table,
+      owner_attribute.attname AS owned_by_column,
+      ownership.deptype AS ownership_dependency_type
+    FROM pg_class AS sequence_relation
+    JOIN pg_namespace AS sequence_namespace
+      ON sequence_namespace.oid = sequence_relation.relnamespace
+    JOIN pg_sequence AS sequence_data
+      ON sequence_data.seqrelid = sequence_relation.oid
+    LEFT JOIN LATERAL (
+      SELECT
+        dependency.refobjid,
+        dependency.refobjsubid,
+        dependency.deptype
+      FROM pg_depend AS dependency
+      WHERE dependency.classid = 'pg_class'::regclass
+        AND dependency.objid = sequence_relation.oid
+        AND dependency.objsubid = 0
+        AND dependency.refclassid = 'pg_class'::regclass
+        AND dependency.deptype IN ('a', 'i')
+      ORDER BY dependency.deptype
+      LIMIT 1
+    ) AS ownership ON true
+    LEFT JOIN pg_class AS owner_relation
+      ON owner_relation.oid = ownership.refobjid
+    LEFT JOIN pg_namespace AS owner_namespace
+      ON owner_namespace.oid = owner_relation.relnamespace
+    LEFT JOIN pg_attribute AS owner_attribute
+      ON owner_attribute.attrelid = owner_relation.oid
+      AND owner_attribute.attnum = ownership.refobjsubid
+      AND NOT owner_attribute.attisdropped
+    WHERE sequence_namespace.nspname = 'public'
+      AND sequence_relation.relkind = 'S'
+    ORDER BY sequence_relation.relname
   `,
   views: `
     SELECT table_name AS view_name, view_definition
