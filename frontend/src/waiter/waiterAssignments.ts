@@ -1,9 +1,17 @@
 import type { Booking } from '../api/types';
-import type { WaiterAssignment } from '../api/waiterCalls';
+
+export type BookingWaiterAssignment = {
+  bookingId: string;
+  tableId: string | null;
+  tableNumber: string | null;
+  waiterId: string;
+  waiterName: string;
+  assignedAt: string;
+};
 
 export function waiterAssignmentsFromBookings(
   bookings: Booking[],
-): WaiterAssignment[] {
+): BookingWaiterAssignment[] {
   return bookings.flatMap((booking) => {
     if (!booking.assignedWaiterId) return [];
 
