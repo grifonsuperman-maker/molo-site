@@ -12,6 +12,7 @@ import {
 } from '../api/waiterCalls';
 import type { Booking } from '../api/types';
 import WaiterTablesByLocation from './WaiterTablesByLocation';
+import { waiterAssignmentsFromBookings } from './waiterAssignments';
 
 const SESSION_KEY = 'molo_waiter_staff';
 const SHIFT_ENDED_KEY = 'molo_waiter_shift_ended_name';
@@ -141,12 +142,12 @@ export default function WaiterAppV2() {
   async function load() {
     if (!staff) return;
     try {
-      const [bookingResult, callResult, assignmentResult] = await Promise.all([
-        bookingsApi.getToday(), waiterCallsApi.list(), waiterCallsApi.assignments(),
+      const [bookingResult, callResult] = await Promise.all([
+        bookingsApi.getToday(), waiterCallsApi.list(),
       ]);
       setBookings(bookingResult);
       setCalls(callResult);
-      setAssignments(assignmentResult);
+      setAssignments(waiterAssignmentsFromBookings(bookingResult));
       setError('');
     } catch (loadError: any) {
       if (/зміну|заблокований|архівований|авторизац/i.test(loadError?.message || '')) logout();
