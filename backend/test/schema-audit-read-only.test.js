@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const { readFile } = require('node:fs/promises');
+const path = require('node:path');
 const test = require('node:test');
 
 function normalize(sql) {
@@ -84,4 +86,17 @@ test('schema audit rolls back the read-only transaction when metadata read fails
 
   assert.equal(client.statements[0], 'BEGIN TRANSACTION READ ONLY');
   assert.equal(client.statements.at(-1), 'ROLLBACK');
+});
+
+test('production image includes the manual schema audit script without changing startup', async () => {
+  const dockerfile = await readFile(
+    path.resolve(__dirname, '../Dockerfile'),
+    'utf8',
+  );
+
+  assert.match(
+    dockerfile,
+    /COPY --from=build \/app\/scripts \.\/scripts/,
+  );
+  assert.match(dockerfile, /CMD \["node", "dist\/main\.js"\]/);
 });
