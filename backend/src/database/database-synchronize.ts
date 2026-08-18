@@ -1,5 +1,5 @@
 export function resolveDatabaseSynchronize(value: string | undefined): boolean {
-  if (value === undefined || value.trim() === '') {
+  if (value === undefined) {
     return true;
   }
 
