@@ -104,3 +104,29 @@ test('fresh schema reference requires synchronize only on the disposable databas
     /requires DB_SYNCHRONIZE=true/,
   );
 });
+
+test('fresh schema reference locks external credentials before ConfigModule loads env files', async () => {
+  const { lockFreshSchemaReferenceEnvironment } =
+    await loadFreshSchemaReference();
+  const env = {
+    DB_URL: 'postgres://production.example/molo',
+    TELEGRAM_BOT_TOKEN: 'production-token',
+    TELEGRAM_BOT_USERNAME: 'production-bot',
+    TELEGRAM_WEBHOOK_SECRET: 'production-secret',
+    RENDER_EXTERNAL_URL: 'https://production.example',
+    MOLO_BOOTSTRAP_ADMIN_NAME: 'Production Admin',
+    MOLO_BOOTSTRAP_ADMIN_PIN: '123456',
+    NODE_ENV: 'production',
+  };
+
+  lockFreshSchemaReferenceEnvironment(env);
+
+  assert.equal(env.DB_URL, '');
+  assert.equal(env.TELEGRAM_BOT_TOKEN, '');
+  assert.equal(env.TELEGRAM_BOT_USERNAME, '');
+  assert.equal(env.TELEGRAM_WEBHOOK_SECRET, '');
+  assert.equal(env.RENDER_EXTERNAL_URL, '');
+  assert.equal(env.MOLO_BOOTSTRAP_ADMIN_NAME, '');
+  assert.equal(env.MOLO_BOOTSTRAP_ADMIN_PIN, '');
+  assert.equal(env.NODE_ENV, 'test');
+});
