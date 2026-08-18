@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
@@ -40,10 +40,6 @@ const staffPinMigrationOptions = {
   ],
 };
 
-const databaseSynchronize = resolveDatabaseSynchronize(
-  process.env.DB_SYNCHRONIZE,
-);
-
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -52,35 +48,46 @@ const databaseSynchronize = resolveDatabaseSynchronize(
 
     ScheduleModule.forRoot(),
 
-    TypeOrmModule.forRoot(
-      process.env.DB_URL
-        ? {
-            type: 'postgres',
-            url: process.env.DB_URL,
-            ssl: {
-              rejectUnauthorized: false,
-            },
-            extra: {
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const databaseSynchronize = resolveDatabaseSynchronize(
+          configService.get<string>('DB_SYNCHRONIZE'),
+        );
+        const dbUrl = configService.get<string>('DB_URL');
+
+        return dbUrl
+          ? {
+              type: 'postgres' as const,
+              url: dbUrl,
               ssl: {
                 rejectUnauthorized: false,
               },
-            },
-            autoLoadEntities: true,
-            synchronize: databaseSynchronize,
-            ...staffPinMigrationOptions,
-          }
-        : {
-            type: 'postgres',
-            host: process.env.DB_HOST || 'localhost',
-            port: Number(process.env.DB_PORT || 5432),
-            username: process.env.DB_USER || 'postgres',
-            password: process.env.DB_PASSWORD || 'postgres',
-            database: process.env.DB_NAME || 'molo_restaurant',
-            autoLoadEntities: true,
-            synchronize: databaseSynchronize,
-            ...staffPinMigrationOptions,
-          },
-    ),
+              extra: {
+                ssl: {
+                  rejectUnauthorized: false,
+                },
+              },
+              autoLoadEntities: true,
+              synchronize: databaseSynchronize,
+              ...staffPinMigrationOptions,
+            }
+          : {
+              type: 'postgres' as const,
+              host: configService.get<string>('DB_HOST') || 'localhost',
+              port: Number(configService.get<string>('DB_PORT') || 5432),
+              username: configService.get<string>('DB_USER') || 'postgres',
+              password:
+                configService.get<string>('DB_PASSWORD') || 'postgres',
+              database:
+                configService.get<string>('DB_NAME') || 'molo_restaurant',
+              autoLoadEntities: true,
+              synchronize: databaseSynchronize,
+              ...staffPinMigrationOptions,
+            };
+      },
+    }),
 
     AuthModule,
     LogsModule,
