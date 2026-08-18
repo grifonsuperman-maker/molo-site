@@ -24,12 +24,12 @@ node backend/scripts/schema-baseline.mjs schema-audit.json > schema-baseline.jso
 
 ## Перевірка без TypeORM synchronize
 
-Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо перевірити backend на ізольованій копії production:
+Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо перевірити backend на ізольованій копії production. Значення читається через `ConfigService` після завантаження environment/.env конфігурації:
 
 - якщо `DB_SYNCHRONIZE` не задано, поточна поведінка зберігається: `synchronize: true`;
 - `DB_SYNCHRONIZE=false` вимикає TypeORM schema synchronize;
 - `DB_SYNCHRONIZE=true` вмикає його явно;
-- будь-яке інше непорожнє значення зупиняє запуск із зрозумілою помилкою замість неоднозначного режиму.
+- будь-яке інше задане значення, включно з порожнім, зупиняє запуск із зрозумілою помилкою замість неоднозначного режиму.
 
 `DB_SYNCHRONIZE=false` на цьому етапі потрібно використовувати **лише** для тимчасового backend, підключеного до ізольованої Neon branch. Production environment поки не змінюється.
 
