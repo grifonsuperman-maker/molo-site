@@ -7,10 +7,8 @@ const {
   resolveDatabaseSynchronize,
 } = require('../dist/database/database-synchronize.js');
 
-test('database synchronize stays enabled when DB_SYNCHRONIZE is unset', () => {
+test('database synchronize stays enabled only when DB_SYNCHRONIZE is unset', () => {
   assert.equal(resolveDatabaseSynchronize(undefined), true);
-  assert.equal(resolveDatabaseSynchronize(''), true);
-  assert.equal(resolveDatabaseSynchronize('   '), true);
 });
 
 test('database synchronize can be explicitly disabled for an isolated database', () => {
@@ -23,27 +21,31 @@ test('database synchronize can be explicitly enabled', () => {
   assert.equal(resolveDatabaseSynchronize(' TRUE '), true);
 });
 
-test('database synchronize rejects ambiguous values', () => {
-  assert.throws(
-    () => resolveDatabaseSynchronize('0'),
-    /DB_SYNCHRONIZE must be "true" or "false"/,
-  );
-  assert.throws(
-    () => resolveDatabaseSynchronize('off'),
-    /DB_SYNCHRONIZE must be "true" or "false"/,
-  );
+test('database synchronize rejects empty and ambiguous configured values', () => {
+  for (const value of ['', '   ', '0', 'off']) {
+    assert.throws(
+      () => resolveDatabaseSynchronize(value),
+      /DB_SYNCHRONIZE must be "true" or "false"/,
+    );
+  }
 });
 
-test('both TypeORM connection shapes use the same synchronize switch', async () => {
+test('TypeORM resolves DB_SYNCHRONIZE through ConfigService after config loading', async () => {
   const appModule = await readFile(
     path.resolve(__dirname, '../src/app.module.ts'),
     'utf8',
   );
 
+  assert.ok(
+    appModule.indexOf('ConfigModule.forRoot') <
+      appModule.indexOf('TypeOrmModule.forRootAsync'),
+  );
+  assert.match(appModule, /TypeOrmModule\.forRootAsync\(\{/);
   assert.match(
     appModule,
-    /resolveDatabaseSynchronize\(\s*process\.env\.DB_SYNCHRONIZE,?\s*\)/,
+    /configService\.get<string>\('DB_SYNCHRONIZE'\)/,
   );
+  assert.doesNotMatch(appModule, /process\.env\.DB_SYNCHRONIZE/);
 
   const synchronizeUsages = appModule.match(
     /synchronize:\s*databaseSynchronize/g,
