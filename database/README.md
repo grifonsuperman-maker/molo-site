@@ -31,7 +31,13 @@ Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо пер
 - `DB_SYNCHRONIZE=true` вмикає його явно;
 - будь-яке інше задане значення, включно з порожнім, зупиняє запуск із зрозумілою помилкою замість неоднозначного режиму.
 
-`DB_SYNCHRONIZE=false` на цьому етапі потрібно використовувати **лише** для тимчасового backend, підключеного до ізольованої Neon branch. Production environment поки не змінюється.
+### Перевірено 18 серпня 2026
+
+Ізольований backend на commit `72453e592d3cc5840c4bdc1062a3e436735d98fd` успішно стартував із `DB_SYNCHRONIZE=false` проти Neon branch `db-baseline-test`, створеної від production. Read-only health check до та після запуску зберіг однаковий критичний snapshot: 20 public tables, 39 indexes, 5 TypeORM migration rows, 0 views і наявні очікувані booking/waiter indexes, waiter trigger/function та `uuid-ossp`.
+
+Детальний запис і межі цієї перевірки: [`MIGRATION_BASELINE_STATUS.md`](./MIGRATION_BASELINE_STATUS.md).
+
+Це підтверджує готовність **поточної production-подібної схеми** працювати без TypeORM schema synchronize. Це не є повним migration bootstrap для нової порожньої бази.
 
 ## Важливі обмеження
 
@@ -41,6 +47,12 @@ Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо пер
 - старі migration-файли не реєструються і не запускаються;
 - production schema і production data не змінюються;
 - `database/schema.sql` не використовується як джерело істини;
-- жодних DDL/DML операцій baseline-процес не виконує.
+- жодних DDL/DML операцій baseline-процес не виконує;
+- не можна вручну підміняти migration baseline вставками в таблицю `migrations` без окремої перевірки.
 
-Перед майбутнім переходом production на `synchronize: false` потрібно окремо запустити backend з `DB_SYNCHRONIZE=false` проти ізольованої копії production, підтвердити запуск і відсутність schema drift, і лише після цього робити окремий PR для зміни production runtime-конфігурації.
+## Наступні окремі кроки
+
+1. Production runtime switch на `DB_SYNCHRONIZE=false` робиться окремим керованим кроком після ручного погодження та перевірки поточного production environment.
+2. Повний fresh-database migration bootstrap залишається окремою задачею: потрібно окремо визначити безпечний baseline для нової порожньої БД, не запускаючи старі migration-файли поверх чинного production.
+
+Ці два сценарії не потрібно змішувати: вимкнення TypeORM synchronize для **вже існуючої перевіреної production schema** і відтворення **нової порожньої БД** — різні задачі з різними ризиками.
