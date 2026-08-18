@@ -37,7 +37,7 @@ Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо пер
 
 Детальний запис і межі цієї перевірки: [`MIGRATION_BASELINE_STATUS.md`](./MIGRATION_BASELINE_STATUS.md).
 
-Це підтверджує готовність **поточної production-подібної схеми** працювати без TypeORM schema synchronize. Це не є повним migration bootstrap для нової порожньої бази.
+Це підтверджує, що **поточна production-подібна схема достатня для успішного запуску перевіреного backend без TypeORM schema synchronize**. Перевірка не доводить повну працездатність усіх runtime-сценаріїв у такому режимі та не є повним migration bootstrap для нової порожньої бази.
 
 ## Важливі обмеження
 
