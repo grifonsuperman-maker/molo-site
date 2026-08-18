@@ -11,6 +11,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
 import { BookingsModule } from './bookings/bookings.module';
 import { BroadcastsModule } from './broadcasts/broadcasts.module';
 import { ClientsModule } from './clients/clients.module';
+import { resolveDatabaseSynchronize } from './database/database-synchronize';
 import { HookahCallsModule } from './hookah-calls/hookah-calls.module';
 import { LogsModule } from './logs/logs.module';
 import { MapModule } from './map/map.module';
@@ -39,6 +40,10 @@ const staffPinMigrationOptions = {
   ],
 };
 
+const databaseSynchronize = resolveDatabaseSynchronize(
+  process.env.DB_SYNCHRONIZE,
+);
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -61,7 +66,7 @@ const staffPinMigrationOptions = {
               },
             },
             autoLoadEntities: true,
-            synchronize: true,
+            synchronize: databaseSynchronize,
             ...staffPinMigrationOptions,
           }
         : {
@@ -72,7 +77,7 @@ const staffPinMigrationOptions = {
             password: process.env.DB_PASSWORD || 'postgres',
             database: process.env.DB_NAME || 'molo_restaurant',
             autoLoadEntities: true,
-            synchronize: true,
+            synchronize: databaseSynchronize,
             ...staffPinMigrationOptions,
           },
     ),
