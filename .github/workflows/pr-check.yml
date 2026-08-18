@@ -43,3 +43,54 @@ jobs:
         run: npm --prefix backend run build
       - name: Test table changes
         run: npm --prefix backend test
+
+  database-reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: molo_fresh_schema_reference
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d molo_fresh_schema_reference"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      NODE_ENV: test
+      FRESH_SCHEMA_REFERENCE_ALLOW: 'true'
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: molo_fresh_schema_reference
+      DB_SYNCHRONIZE: 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install backend dependencies
+        run: npm --prefix backend ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Initialize disposable fresh schema
+        run: node backend/scripts/fresh-schema-reference.mjs
+      - name: Capture fresh schema audit
+        run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
+      - name: Normalize fresh schema baseline
+        run: node backend/scripts/schema-baseline.mjs fresh-schema-audit.json > fresh-schema-baseline.json
+      - name: Upload fresh schema reference
+        uses: actions/upload-artifact@v4
+        with:
+          name: fresh-schema-reference
+          path: |
+            fresh-schema-audit.json
+            fresh-schema-baseline.json
+          if-no-files-found: error
+          retention-days: 7
