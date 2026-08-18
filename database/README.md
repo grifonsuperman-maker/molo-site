@@ -22,14 +22,25 @@ node backend/scripts/schema-baseline.mjs schema-audit.json > schema-baseline.jso
 
 `schema-baseline.mjs` не підключається до PostgreSQL і не виконує SQL. Він лише перевіряє структуру вже отриманого JSON, прибирає мінливі поля та стабілізує порядок ключів. Порядок масивів із read-only audit зберігається, зокрема порядок значень enum.
 
+## Перевірка без TypeORM synchronize
+
+Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо перевірити backend на ізольованій копії production. Значення читається через `ConfigService` після завантаження environment/.env конфігурації:
+
+- якщо `DB_SYNCHRONIZE` не задано, поточна поведінка зберігається: `synchronize: true`;
+- `DB_SYNCHRONIZE=false` вимикає TypeORM schema synchronize;
+- `DB_SYNCHRONIZE=true` вмикає його явно;
+- будь-яке інше задане значення, включно з порожнім, зупиняє запуск із зрозумілою помилкою замість неоднозначного режиму.
+
+`DB_SYNCHRONIZE=false` на цьому етапі потрібно використовувати **лише** для тимчасового backend, підключеного до ізольованої Neon branch. Production environment поки не змінюється.
+
 ## Важливі обмеження
 
 На цьому етапі:
 
-- `synchronize: true` не вимикається;
+- production продовжує працювати з поточною поведінкою `synchronize: true`, доки `DB_SYNCHRONIZE` там не задано;
 - старі migration-файли не реєструються і не запускаються;
 - production schema і production data не змінюються;
 - `database/schema.sql` не використовується як джерело істини;
-- жодних DDL/DML операцій цей baseline-процес не виконує.
+- жодних DDL/DML операцій baseline-процес не виконує.
 
-Перед майбутнім переходом на `synchronize: false` потрібно окремо перевірити повний baseline на ізольованій копії production, підтвердити відсутність schema drift і лише після цього робити окремий PR для зміни runtime-конфігурації.
+Перед майбутнім переходом production на `synchronize: false` потрібно окремо запустити backend з `DB_SYNCHRONIZE=false` проти ізольованої копії production, підтвердити запуск і відсутність schema drift, і лише після цього робити окремий PR для зміни production runtime-конфігурації.
