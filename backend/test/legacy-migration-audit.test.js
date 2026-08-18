@@ -136,6 +136,27 @@ test('legacy migration audit rejects an opposite NOT IN predicate with the same 
   );
 });
 
+test('legacy migration audit rejects extra conjuncts in a partial-index predicate', async () => {
+  const { auditLegacyMigrationArtifacts } = await loadAudit();
+  const snapshot = emptySnapshot();
+  const artifacts = guestBookingArtifacts();
+  snapshot.columns.push(...artifacts.columns);
+  snapshot.indexes.push(...artifacts.indexes);
+  snapshot.indexes[1].definition =
+    "CREATE UNIQUE INDEX UQ_bookings_active_guest_device_date ON bookings (booking_date, guest_device_id_hash) WHERE guest_device_id_hash IS NOT NULL AND status IN ('pending', 'approved') AND guest_device_id_hash = ''";
+
+  const result = auditLegacyMigrationArtifacts(snapshot);
+  const bookingMigration = result.migrations.find(
+    (migration) => migration.name === 'AddGuestDeviceIdHash2026072000000',
+  );
+  assert.equal(bookingMigration.schemaArtifactsPresent, false);
+  assert.ok(
+    bookingMigration.missingArtifacts.includes(
+      'index:bookings.UQ_bookings_active_guest_device_date',
+    ),
+  );
+});
+
 test('legacy migration audit accepts PostgreSQL ANY form for the active booking predicate', async () => {
   const { auditLegacyMigrationArtifacts } = await loadAudit();
   const snapshot = emptySnapshot();
@@ -150,6 +171,69 @@ test('legacy migration audit accepts PostgreSQL ANY form for the active booking 
     (migration) => migration.name === 'AddGuestDeviceIdHash2026072000000',
   );
   assert.equal(bookingMigration.schemaArtifactsPresent, true);
+});
+
+test('legacy migration audit requires a positive status CHECK with the exact allowed set', async () => {
+  const { auditLegacyMigrationArtifacts } = await loadAudit();
+  const snapshot = emptySnapshot();
+  snapshot.constraints.push({
+    table_name: 'booking_table_change_requests',
+    constraint_name: 'CHK_booking_table_change_requests_status',
+    constraint_type: 'c',
+    definition: "CHECK (status IN ('pending', 'approved', 'rejected'))",
+  });
+
+  let result = auditLegacyMigrationArtifacts(snapshot);
+  let migration = result.migrations.find(
+    (item) => item.name === 'CreateBookingTableChangeRequests1784930400000',
+  );
+  assert.equal(
+    migration.missingArtifacts.includes(
+      'statusCheck:booking_table_change_requests.CHK_booking_table_change_requests_status',
+    ),
+    false,
+  );
+
+  snapshot.constraints[0].definition =
+    "CHECK (status <> 'pending' AND status <> 'approved' AND status <> 'rejected')";
+  result = auditLegacyMigrationArtifacts(snapshot);
+  migration = result.migrations.find(
+    (item) => item.name === 'CreateBookingTableChangeRequests1784930400000',
+  );
+  assert.ok(
+    migration.missingArtifacts.includes(
+      'statusCheck:booking_table_change_requests.CHK_booking_table_change_requests_status',
+    ),
+  );
+});
+
+test('legacy migration audit requires the primary key created by table migrations', async () => {
+  const { auditLegacyMigrationArtifacts } = await loadAudit();
+  const snapshot = emptySnapshot();
+  snapshot.constraints.push({
+    table_name: 'availability_blocks',
+    constraint_name: 'PK_any_generated_name',
+    constraint_type: 'p',
+    definition: 'PRIMARY KEY (id)',
+  });
+
+  let result = auditLegacyMigrationArtifacts(snapshot);
+  let migration = result.migrations.find(
+    (item) => item.name === 'CreateAvailabilityBlocks1784844000000',
+  );
+  assert.equal(
+    migration.missingArtifacts.includes('primaryKey:availability_blocks.id'),
+    false,
+  );
+
+  snapshot.constraints.length = 0;
+  result = auditLegacyMigrationArtifacts(snapshot);
+  migration = result.migrations.find(
+    (item) => item.name === 'CreateAvailabilityBlocks1784844000000',
+  );
+  assert.ok(
+    migration.missingArtifacts.includes('primaryKey:availability_blocks.id'),
+  );
 });
 
 test('legacy migration audit flags old migrations already present in TypeORM history', async () => {
