@@ -22,6 +22,27 @@ node backend/scripts/schema-baseline.mjs schema-audit.json > schema-baseline.jso
 
 `schema-baseline.mjs` не підключається до PostgreSQL і не виконує SQL. Він лише перевіряє структуру вже отриманого JSON, прибирає мінливі поля та стабілізує порядок ключів. Порядок масивів із read-only audit зберігається, зокрема порядок значень enum.
 
+## Перевірка legacy migrations
+
+У репозиторії є вісім старих migration-файлів, яких немає в поточному runtime migration list. Їх не можна реєструвати або запускати поверх production лише тому, що частина `up` використовує `IF NOT EXISTS`.
+
+Для офлайн-перевірки їхніх schema-ефектів використовується:
+
+```bash
+node backend/scripts/legacy-migration-audit.mjs schema-baseline.json
+```
+
+Скрипт **не підключається до PostgreSQL і не виконує SQL**. Він читає вже отриманий `schema-audit.json` або нормалізований `schema-baseline.json` та перевіряє очікувані таблиці, колонки, constraints, indexes і extensions для всіх восьми legacy migrations. Перевіряються не лише імена index/constraint, а й ключові частини їхніх definitions.
+
+Результат окремо показує:
+
+- чи присутні всі schema artifacts кожної legacy migration;
+- чи є якась legacy migration вже записаною в TypeORM `migrations` history;
+- які schema artifacts відсутні;
+- які migrations потребують ручної перевірки даних.
+
+`AddHookahCallAvailability1786057200000` має історичні `UPDATE` для `hookah_calls`, тому schema snapshot **не може довести**, що ці data changes колись виконувалися. Навіть повний успіх schema-artifact audit не дозволяє автоматично запускати, реєструвати або вручну позначати legacy migrations виконаними.
+
 ## Перевірка без TypeORM synchronize
 
 Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо перевірити backend на ізольованій копії production. Значення читається через `ConfigService` після завантаження environment/.env конфігурації:
