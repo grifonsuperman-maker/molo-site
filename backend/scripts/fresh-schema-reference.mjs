@@ -37,13 +37,15 @@ export function assertFreshSchemaReferenceTarget(env = process.env) {
   }
 }
 
-function disableExternalIntegrations(env = process.env) {
-  delete env.TELEGRAM_BOT_TOKEN;
-  delete env.TELEGRAM_BOT_USERNAME;
-  delete env.TELEGRAM_WEBHOOK_SECRET;
-  delete env.RENDER_EXTERNAL_URL;
-  delete env.MOLO_BOOTSTRAP_ADMIN_NAME;
-  delete env.MOLO_BOOTSTRAP_ADMIN_PIN;
+export function lockFreshSchemaReferenceEnvironment(env = process.env) {
+  env.DB_URL = '';
+  env.TELEGRAM_BOT_TOKEN = '';
+  env.TELEGRAM_BOT_USERNAME = '';
+  env.TELEGRAM_WEBHOOK_SECRET = '';
+  env.RENDER_EXTERNAL_URL = '';
+  env.MOLO_BOOTSTRAP_ADMIN_NAME = '';
+  env.MOLO_BOOTSTRAP_ADMIN_PIN = '';
+  env.NODE_ENV = 'test';
 }
 
 export async function createFreshSchemaReference(env = process.env) {
@@ -55,8 +57,9 @@ export async function createFreshSchemaReference(env = process.env) {
     );
   }
 
-  disableExternalIntegrations(process.env);
-  process.env.NODE_ENV = 'test';
+  // Keep explicit empty values in process.env so ConfigModule cannot reintroduce
+  // DB_URL, Telegram/Render credentials or bootstrap admin values from a local .env.
+  lockFreshSchemaReferenceEnvironment(process.env);
 
   const require = createRequire(import.meta.url);
   const { NestFactory } = require('@nestjs/core');
