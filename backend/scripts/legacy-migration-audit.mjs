@@ -24,6 +24,12 @@ const idx = (table, name, columns, options = {}) => ({
   statusValues: options.statusValues ?? null,
 });
 
+const pk = (table, columns) => ({
+  kind: 'primaryKey',
+  table,
+  columns,
+});
+
 const fk = (table, name, column, referencedTable, onDelete) => ({
   kind: 'foreignKey',
   table,
@@ -60,6 +66,7 @@ const legacyMigrations = [
         nullable: false,
         defaultValue: 'now()',
       }),
+      pk('availability_blocks', ['id']),
       fk(
         'availability_blocks',
         'FK_availability_blocks_table',
@@ -126,6 +133,7 @@ const legacyMigrations = [
         'resolved_at',
         'timestamp without time zone',
       ),
+      pk('booking_table_change_requests', ['id']),
       fk(
         'booking_table_change_requests',
         'FK_booking_table_change_requests_booking',
@@ -234,6 +242,7 @@ const legacyMigrations = [
         nullable: false,
         defaultValue: 'now()',
       }),
+      pk('syrve_integrations', ['id']),
       statusCheck('syrve_integrations', 'CHK_syrve_integration_status', [
         'not_connected',
         'connected',
@@ -388,7 +397,7 @@ function extractWhere(definition) {
 }
 
 function quotedValues(value) {
-  return [...String(value || '').matchAll(/'([^']+)'/g)]
+  return [...String(value || '').matchAll(/'([^']*)'/g)]
     .map((match) => match[1].toLowerCase())
     .sort();
 }
@@ -401,18 +410,73 @@ function sameValues(actual, expected) {
   );
 }
 
-function positiveStatusPredicate(where, expectedValues) {
-  if (!where || /\bor\b/.test(where)) return false;
-  if (/status\s+not\s+in\b/.test(where)) return false;
-  if (/\bnot\s*\(*\s*status\b/.test(where)) return false;
-  if (!/\bstatus\b/.test(where)) return false;
-  if (!sameValues(quotedValues(where), expectedValues)) return false;
+function predicateClauses(where) {
+  if (!where || /\bor\b/.test(where)) return null;
+  return where
+    .replace(/[()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/\s+and\s+/)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+}
 
-  if (expectedValues.length === 1) {
-    return /\bstatus\b[^=]*=/.test(where) || /\bstatus\b.*\bin\b/.test(where);
+function parseStatusClause(clause) {
+  const equality = clause.match(/^status\s*=\s*'([^']*)'$/);
+  if (equality) return [equality[1].toLowerCase()];
+
+  const directIn = clause.match(/^status\s+in\s+(.+)$/);
+  if (directIn) {
+    const tail = directIn[1].trim();
+    const withoutValues = tail
+      .replace(/'[^']*'/g, '')
+      .replace(/,/g, '')
+      .replace(/\s+/g, '');
+    if (withoutValues !== '') return null;
+    return quotedValues(tail);
   }
 
-  return /\bstatus\b.*(?:\bin\b|=\s*any\b)/.test(where);
+  const anyArray = clause.match(/^status\s*=\s*any\s+array\s*\[(.*)\]$/);
+  if (anyArray) {
+    const inner = anyArray[1].trim();
+    const withoutValues = inner
+      .replace(/'[^']*'/g, '')
+      .replace(/,/g, '')
+      .replace(/\s+/g, '');
+    if (withoutValues !== '') return null;
+    return quotedValues(inner);
+  }
+
+  return null;
+}
+
+function predicateMatches(where, artifact) {
+  const clauses = predicateClauses(where);
+  if (!clauses) return false;
+
+  const expectedClauseCount =
+    (artifact.requiredNotNull ? 1 : 0) + (artifact.statusValues ? 1 : 0);
+  if (clauses.length !== expectedClauseCount) return false;
+
+  const remaining = [...clauses];
+
+  if (artifact.requiredNotNull) {
+    const expected = `${artifact.requiredNotNull} is not null`;
+    const index = remaining.indexOf(expected);
+    if (index === -1) return false;
+    remaining.splice(index, 1);
+  }
+
+  if (artifact.statusValues) {
+    const index = remaining.findIndex((clause) => {
+      const values = parseStatusClause(clause);
+      return values && sameValues(values, artifact.statusValues);
+    });
+    if (index === -1) return false;
+    remaining.splice(index, 1);
+  }
+
+  return remaining.length === 0;
 }
 
 function indexMatches(row, artifact) {
@@ -434,30 +498,19 @@ function indexMatches(row, artifact) {
   );
   if (Boolean(where) !== expectsPredicate) return false;
 
-  if (artifact.requiredNotNull) {
-    const nullPattern = new RegExp(
-      `\\b${artifact.requiredNotNull}\\b\\s+is\\s+not\\s+null`,
-    );
-    if (!nullPattern.test(where)) return false;
-  }
+  return !expectsPredicate || predicateMatches(where, artifact);
+}
 
-  if (artifact.statusValues) {
-    if (!positiveStatusPredicate(where, artifact.statusValues)) return false;
-  }
-
-  if (artifact.requiredNotNull && artifact.statusValues && !/\band\b/.test(where)) {
-    return false;
-  }
-
-  if (artifact.requiredNotNull && !artifact.statusValues) {
-    const simplified = where
-      .replace(/[()]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (simplified !== `${artifact.requiredNotNull} is not null`) return false;
-  }
-
-  return true;
+function primaryKeyMatches(row, artifact) {
+  if (row.constraint_type !== 'p') return false;
+  const normalized = normalizeSql(row.definition);
+  const match = normalized.match(/primary key\s*\(([^)]+)\)/);
+  if (!match) return false;
+  const columns = match[1].split(',').map((value) => value.trim());
+  return (
+    columns.length === artifact.columns.length &&
+    columns.every((column, index) => column === artifact.columns[index])
+  );
 }
 
 function foreignKeyMatches(row, artifact) {
@@ -484,12 +537,11 @@ function normalizedCheckExpression(definition) {
 }
 
 function statusCheckMatches(row, artifact) {
-  const normalized = normalizeSql(row.definition);
-  if (/status\s+not\s+in\b/.test(normalized)) return false;
-  if (/\bnot\s*\(*\s*status\b/.test(normalized)) return false;
-  if (/\bor\b/.test(normalized)) return false;
-  if (!/\bstatus\b/.test(normalized)) return false;
-  return sameValues(quotedValues(normalized), artifact.values);
+  const normalized = normalizeSql(row.definition).replace(/^check\s*/, '').trim();
+  const clauses = predicateClauses(normalized);
+  if (!clauses || clauses.length !== 1) return false;
+  const values = parseStatusClause(clauses[0]);
+  return values != null && sameValues(values, artifact.values);
 }
 
 function artifactPresent(snapshot, artifact) {
@@ -507,6 +559,13 @@ function artifactPresent(snapshot, artifact) {
         row.table_name === artifact.table &&
         row.column_name === artifact.name &&
         columnMatches(row, artifact),
+    );
+  }
+
+  if (artifact.kind === 'primaryKey') {
+    return snapshot.constraints.some(
+      (row) =>
+        row.table_name === artifact.table && primaryKeyMatches(row, artifact),
     );
   }
 
@@ -551,7 +610,7 @@ function artifactPresent(snapshot, artifact) {
 
 function describeArtifact(artifact) {
   if (artifact.table) {
-    return `${artifact.kind}:${artifact.table}.${artifact.name}`;
+    return `${artifact.kind}:${artifact.table}.${artifact.name || artifact.columns.join(',')}`;
   }
   return `${artifact.kind}:${artifact.name}`;
 }
