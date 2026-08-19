@@ -123,6 +123,26 @@ jobs:
             echo 'Failed adoption unexpectedly wrote baseline migration history.' >&2
             exit 1
           fi
+      - name: Verify adoption rejects RLS and policies
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;' \
+            -c 'ALTER TABLE bookings FORCE ROW LEVEL SECURITY;' \
+            -c 'CREATE POLICY "__baseline_rls_probe" ON bookings USING (true);'
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted RLS/policy drift.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'DROP POLICY "__baseline_rls_probe" ON bookings;' \
+            -c 'ALTER TABLE bookings NO FORCE ROW LEVEL SECURITY;' \
+            -c 'ALTER TABLE bookings DISABLE ROW LEVEL SECURITY;'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'RLS rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
       - name: Verify adoption rejects invalid active-booking index
         run: |
           export PGPASSWORD="$DB_PASSWORD"
@@ -216,6 +236,22 @@ jobs:
           domain_exists="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'public' AND t.typname = 'positive_int'")"
           if [ "$domain_exists" != "1" ]; then
             echo 'Rejected baseline unexpectedly removed the pre-existing domain.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'DROP DOMAIN public.positive_int;'
+      - name: Verify baseline refuses pre-existing public collation
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'CREATE COLLATION public.baseline_probe FROM pg_catalog."C";'
+          if node backend/scripts/initial-schema-baseline-validation.mjs fresh; then
+            echo 'Initial baseline unexpectedly accepted a public collation.' >&2
+            exit 1
+          fi
+          collation_exists="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_collation c JOIN pg_namespace n ON n.oid = c.collnamespace WHERE n.nspname = 'public' AND c.collname = 'baseline_probe'")"
+          if [ "$collation_exists" != "1" ]; then
+            echo 'Rejected baseline unexpectedly removed the pre-existing collation.' >&2
             exit 1
           fi
       - name: Reset disposable database for baseline bootstrap
