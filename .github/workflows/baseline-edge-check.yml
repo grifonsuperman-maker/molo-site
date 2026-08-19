@@ -1,0 +1,112 @@
+name: Baseline edge checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: baseline-edge-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline-edge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: molo_fresh_schema_reference
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d molo_fresh_schema_reference"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      NODE_ENV: test
+      FRESH_SCHEMA_REFERENCE_ALLOW: 'true'
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: molo_fresh_schema_reference
+      DB_SYNCHRONIZE: 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install backend dependencies
+        run: npm --prefix backend ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Initialize disposable current schema
+        run: node backend/scripts/fresh-schema-reference.mjs
+      - name: Reject changed column collation during adoption
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE clients ALTER COLUMN full_name TYPE character varying COLLATE "C";'
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted changed column collation.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE clients ALTER COLUMN full_name TYPE character varying COLLATE "default";'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Column-collation rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
+      - name: Reject public materialized view during adoption
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'CREATE MATERIALIZED VIEW public.__baseline_matview_probe AS SELECT 1 AS value WITH NO DATA;'
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted a materialized view.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'DROP MATERIALIZED VIEW public.__baseline_matview_probe;'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Materialized-view rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
+      - name: Validate exact current-schema adoption after cleanup
+        run: node backend/scripts/initial-schema-baseline-validation.mjs adopt
+      - name: Reset disposable database for stale-history guard
+        run: |
+          PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS molo_fresh_schema_reference WITH (FORCE);' \
+            -c 'CREATE DATABASE molo_fresh_schema_reference;'
+      - name: Reject stale TypeORM history on fresh path
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'CREATE TABLE public.migrations (id SERIAL PRIMARY KEY, "timestamp" bigint NOT NULL, name character varying NOT NULL);' \
+            -c "INSERT INTO public.migrations (\"timestamp\", name) VALUES (1, 'ForeignMigration0000000000001');"
+          if node backend/scripts/initial-schema-baseline-validation.mjs fresh; then
+            echo 'Initial baseline unexpectedly accepted stale TypeORM migration history.' >&2
+            exit 1
+          fi
+          stale_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM public.migrations WHERE name = 'ForeignMigration0000000000001'")"
+          if [ "$stale_rows" != "1" ]; then
+            echo 'Rejected fresh baseline unexpectedly changed stale migration history.' >&2
+            exit 1
+          fi
+      - name: Reset disposable database for clean fresh bootstrap
+        run: |
+          PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS molo_fresh_schema_reference WITH (FORCE);' \
+            -c 'CREATE DATABASE molo_fresh_schema_reference;'
+      - name: Validate clean fresh bootstrap and revert
+        run: |
+          node backend/scripts/initial-schema-baseline-validation.mjs fresh
+          node backend/scripts/initial-schema-baseline-validation.mjs revert
