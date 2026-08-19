@@ -68,50 +68,32 @@ jobs:
             echo 'Generated-column rejection unexpectedly wrote baseline history.' >&2
             exit 1
           fi
-      - name: Reject table ownership drift during adoption
+      - name: Reject runtime role missing table INSERT privilege
         run: |
           export PGPASSWORD="$DB_PASSWORD"
           psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
-            -c 'CREATE ROLE __baseline_table_owner_probe NOLOGIN;' \
-            -c 'ALTER TABLE bookings OWNER TO __baseline_table_owner_probe;'
-          owner_is_current="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT (c.relowner = r.oid)::text FROM pg_class c CROSS JOIN LATERAL (SELECT oid FROM pg_roles WHERE rolname = current_user) r WHERE c.oid = 'public.bookings'::regclass")"
-          if [ "$owner_is_current" != "false" ]; then
-            echo 'Ownership probe did not change table owner.' >&2
+            -c "CREATE ROLE __baseline_runtime_probe LOGIN PASSWORD 'baseline-probe';" \
+            -c 'GRANT CONNECT ON DATABASE molo_fresh_schema_reference TO __baseline_runtime_probe;' \
+            -c 'GRANT USAGE ON SCHEMA public TO __baseline_runtime_probe;' \
+            -c 'GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO __baseline_runtime_probe;' \
+            -c 'GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO __baseline_runtime_probe;'
+          probe_insert="$(PGPASSWORD='baseline-probe' psql -h "$DB_HOST" -p "$DB_PORT" -U __baseline_runtime_probe -d "$DB_NAME" -Atc "SELECT has_table_privilege(current_user, 'public.bookings', 'INSERT')::text")"
+          if [ "$probe_insert" != "false" ]; then
+            echo "Limited runtime role unexpectedly has INSERT: $probe_insert" >&2
             exit 1
           fi
-          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
-            echo 'Baseline adoption unexpectedly accepted table ownership drift.' >&2
+          if DB_USER=__baseline_runtime_probe DB_PASSWORD=baseline-probe node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted a runtime role without INSERT.' >&2
             exit 1
           fi
-          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
-            -c 'ALTER TABLE bookings OWNER TO CURRENT_USER;' \
-            -c 'DROP ROLE __baseline_table_owner_probe;'
           baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
           if [ "$baseline_rows" != "0" ]; then
-            echo 'Ownership rejection unexpectedly wrote baseline history.' >&2
-            exit 1
-          fi
-      - name: Reject revoked table runtime privilege during adoption
-        run: |
-          export PGPASSWORD="$DB_PASSWORD"
-          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
-            -c 'REVOKE INSERT ON TABLE bookings FROM CURRENT_USER;'
-          can_insert="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT has_table_privilege(current_user, 'public.bookings', 'INSERT')::text")"
-          if [ "$can_insert" != "false" ]; then
-            echo "Privilege probe did not revoke INSERT: $can_insert" >&2
-            exit 1
-          fi
-          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
-            echo 'Baseline adoption unexpectedly accepted revoked table INSERT privilege.' >&2
+            echo 'Runtime-privilege rejection unexpectedly wrote baseline history.' >&2
             exit 1
           fi
           psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
-            -c 'GRANT INSERT ON TABLE bookings TO CURRENT_USER;'
-          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
-          if [ "$baseline_rows" != "0" ]; then
-            echo 'Table-privilege rejection unexpectedly wrote baseline history.' >&2
-            exit 1
-          fi
+            -c 'DROP OWNED BY __baseline_runtime_probe;' \
+            -c 'DROP ROLE __baseline_runtime_probe;'
       - name: Reject changed column collation during adoption
         run: |
           export PGPASSWORD="$DB_PASSWORD"
