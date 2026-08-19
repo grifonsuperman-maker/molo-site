@@ -1,9 +1,11 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 import {
+  assertCurrentSchemaMatchesAdoptionReference,
+  assertDatabaseIsFreshForInitialBaseline,
+} from '../database/initial-schema-adoption-fingerprint';
+import {
   INITIAL_SCHEMA_BASELINE_CREATE_STATEMENTS,
-  INITIAL_SCHEMA_BASELINE_CRITICAL_INDEXES,
-  INITIAL_SCHEMA_BASELINE_ENUMS,
   INITIAL_SCHEMA_BASELINE_NAME,
   INITIAL_SCHEMA_BASELINE_TABLES,
 } from '../database/initial-schema-baseline-definition';
@@ -24,48 +26,6 @@ async function readExistingBaselineTableNames(queryRunner: QueryRunner) {
   return rows.map((row: { table_name: string }) => String(row.table_name));
 }
 
-async function assertExistingBaselineCompatible(queryRunner: QueryRunner) {
-  const [extension] = await queryRunner.query(
-    `SELECT EXISTS (
-       SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp'
-     ) AS present`,
-  );
-  if (!extension?.present) {
-    throw new Error('Existing baseline is missing uuid-ossp extension');
-  }
-
-  const enumRows = await queryRunner.query(
-    `SELECT typname
-     FROM pg_type
-     WHERE typname = ANY($1::text[])
-     ORDER BY typname`,
-    [[...INITIAL_SCHEMA_BASELINE_ENUMS]],
-  );
-  const enumNames = enumRows.map((row: { typname: string }) => String(row.typname));
-  if (
-    JSON.stringify(enumNames) !==
-    JSON.stringify([...INITIAL_SCHEMA_BASELINE_ENUMS].sort())
-  ) {
-    throw new Error('Existing baseline is missing expected enum types');
-  }
-
-  const indexRows = await queryRunner.query(
-    `SELECT indexname
-     FROM pg_indexes
-     WHERE schemaname = 'public'
-       AND indexname = ANY($1::text[])
-     ORDER BY indexname`,
-    [[...INITIAL_SCHEMA_BASELINE_CRITICAL_INDEXES]],
-  );
-  const indexNames = indexRows.map((row: { indexname: string }) => String(row.indexname));
-  if (
-    JSON.stringify(indexNames) !==
-    JSON.stringify([...INITIAL_SCHEMA_BASELINE_CRITICAL_INDEXES].sort())
-  ) {
-    throw new Error('Existing baseline is missing critical booking indexes');
-  }
-}
-
 async function assertBaselineTablesEmpty(queryRunner: QueryRunner) {
   for (const tableName of INITIAL_SCHEMA_BASELINE_TABLES) {
     const [row] = await queryRunner.query(
@@ -79,48 +39,86 @@ async function assertBaselineTablesEmpty(queryRunner: QueryRunner) {
   }
 }
 
+async function lockBaselineTablesAgainstWrites(queryRunner: QueryRunner) {
+  const tableList = INITIAL_SCHEMA_BASELINE_TABLES.map(
+    (tableName) => `"${tableName}"`,
+  ).join(', ');
+  await queryRunner.query(
+    `LOCK TABLE ${tableList} IN SHARE ROW EXCLUSIVE MODE`,
+  );
+}
+
+async function runAtomicallyIfNeeded(
+  queryRunner: QueryRunner,
+  action: () => Promise<void>,
+) {
+  const ownsTransaction = !queryRunner.isTransactionActive;
+  if (ownsTransaction) {
+    await queryRunner.startTransaction();
+  }
+
+  try {
+    await action();
+    if (ownsTransaction) {
+      await queryRunner.commitTransaction();
+    }
+  } catch (error) {
+    if (ownsTransaction && queryRunner.isTransactionActive) {
+      await queryRunner.rollbackTransaction();
+    }
+    throw error;
+  }
+}
+
 export class InitialSchemaBaseline2026081300000 implements MigrationInterface {
   name = INITIAL_SCHEMA_BASELINE_NAME;
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    const existingTables = await readExistingBaselineTableNames(queryRunner);
+    await runAtomicallyIfNeeded(queryRunner, async () => {
+      const existingTables = await readExistingBaselineTableNames(queryRunner);
 
-    if (existingTables.length === INITIAL_SCHEMA_BASELINE_TABLES.length) {
-      await assertExistingBaselineCompatible(queryRunner);
-      return;
-    }
+      if (existingTables.length === INITIAL_SCHEMA_BASELINE_TABLES.length) {
+        await assertCurrentSchemaMatchesAdoptionReference(queryRunner);
+        return;
+      }
 
-    if (existingTables.length > 0) {
-      throw new Error(
-        `Refusing partial initial baseline. Found ${existingTables.length} of ${INITIAL_SCHEMA_BASELINE_TABLES.length} expected tables`,
-      );
-    }
+      if (existingTables.length > 0) {
+        throw new Error(
+          `Refusing partial initial baseline. Found ${existingTables.length} of ${INITIAL_SCHEMA_BASELINE_TABLES.length} expected tables`,
+        );
+      }
 
-    for (const statement of INITIAL_SCHEMA_BASELINE_CREATE_STATEMENTS) {
-      await queryRunner.query(statement);
-    }
-    for (const statement of INITIAL_SCHEMA_BASELINE_RELATION_STATEMENTS) {
-      await queryRunner.query(statement);
-    }
+      await assertDatabaseIsFreshForInitialBaseline(queryRunner);
+
+      for (const statement of INITIAL_SCHEMA_BASELINE_CREATE_STATEMENTS) {
+        await queryRunner.query(statement);
+      }
+      for (const statement of INITIAL_SCHEMA_BASELINE_RELATION_STATEMENTS) {
+        await queryRunner.query(statement);
+      }
+    });
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    const existingTables = await readExistingBaselineTableNames(queryRunner);
+    await runAtomicallyIfNeeded(queryRunner, async () => {
+      const existingTables = await readExistingBaselineTableNames(queryRunner);
 
-    if (existingTables.length === 0) {
-      return;
-    }
+      if (existingTables.length === 0) {
+        return;
+      }
 
-    if (existingTables.length !== INITIAL_SCHEMA_BASELINE_TABLES.length) {
-      throw new Error(
-        `Refusing partial initial baseline revert. Found ${existingTables.length} of ${INITIAL_SCHEMA_BASELINE_TABLES.length} expected tables`,
-      );
-    }
+      if (existingTables.length !== INITIAL_SCHEMA_BASELINE_TABLES.length) {
+        throw new Error(
+          `Refusing partial initial baseline revert. Found ${existingTables.length} of ${INITIAL_SCHEMA_BASELINE_TABLES.length} expected tables`,
+        );
+      }
 
-    await assertBaselineTablesEmpty(queryRunner);
+      await lockBaselineTablesAgainstWrites(queryRunner);
+      await assertBaselineTablesEmpty(queryRunner);
 
-    for (const statement of INITIAL_SCHEMA_BASELINE_DOWN_STATEMENTS) {
-      await queryRunner.query(statement);
-    }
+      for (const statement of INITIAL_SCHEMA_BASELINE_DOWN_STATEMENTS) {
+        await queryRunner.query(statement);
+      }
+    });
   }
 }
