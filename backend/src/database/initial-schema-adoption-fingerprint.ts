@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { QueryRunner } from 'typeorm';
 
 export const CURRENT_SCHEMA_ADOPTION_FINGERPRINT =
-  'f92863785d64faac96a1d5eecfb873dc9cd86cafe62a515ce7e60bd7a018019b';
+  'becec181685729a950d6eadec24c9ab0c015f71eb0cf14809a0fe60d2cff901f';
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -80,12 +80,21 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
 
   const indexes = await queryRunner.query(`
     SELECT
-      tablename AS table_name,
-      indexname AS index_name,
-      indexdef AS definition
-    FROM pg_indexes
-    WHERE schemaname = 'public'
-    ORDER BY tablename, indexname
+      index_view.tablename AS table_name,
+      index_view.indexname AS index_name,
+      index_view.indexdef AS definition,
+      index_state.indisvalid AS is_valid,
+      index_state.indisready AS is_ready
+    FROM pg_indexes AS index_view
+    JOIN pg_namespace AS index_namespace
+      ON index_namespace.nspname = index_view.schemaname
+    JOIN pg_class AS index_relation
+      ON index_relation.relnamespace = index_namespace.oid
+      AND index_relation.relname = index_view.indexname
+    JOIN pg_index AS index_state
+      ON index_state.indexrelid = index_relation.oid
+    WHERE index_view.schemaname = 'public'
+    ORDER BY index_view.tablename, index_view.indexname
   `);
 
   const triggers = await queryRunner.query(`
@@ -231,14 +240,12 @@ export async function assertDatabaseIsFreshForInitialBaseline(
       UNION ALL
 
       SELECT
-        'enum'::text,
-        type_namespace.nspname || '.' || enum_type.typname
-      FROM pg_type AS enum_type
-      JOIN pg_namespace AS type_namespace ON type_namespace.oid = enum_type.typnamespace
+        'type'::text,
+        type_namespace.nspname || '.' || type_row.typname
+      FROM pg_type AS type_row
+      JOIN pg_namespace AS type_namespace ON type_namespace.oid = type_row.typnamespace
       WHERE type_namespace.nspname = 'public'
-        AND EXISTS (
-          SELECT 1 FROM pg_enum AS enum_value WHERE enum_value.enumtypid = enum_type.oid
-        )
+        AND type_row.typname NOT IN ('migrations', '_migrations')
 
       UNION ALL
 
