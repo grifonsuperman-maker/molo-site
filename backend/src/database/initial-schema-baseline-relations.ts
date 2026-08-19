@@ -78,5 +78,6 @@ export const INITIAL_SCHEMA_BASELINE_DOWN_STATEMENTS = [
   `DROP TYPE "restaurant_site_mode_enum"`,
   `DROP TYPE "bookings_status_enum"`,
   `DROP TYPE "bookings_source_enum"`,
-  `DROP TYPE "booking_reschedule_requests_status_enum"`
+  `DROP TYPE "booking_reschedule_requests_status_enum"`,
+  `DROP EXTENSION IF EXISTS "uuid-ossp"`
 ] as const;
