@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { QueryRunner } from 'typeorm';
 
 export const CURRENT_SCHEMA_ADOPTION_FINGERPRINT =
-  'becec181685729a950d6eadec24c9ab0c015f71eb0cf14809a0fe60d2cff901f';
+  '7e0a128135fec2eb63c8ad1007f4b7b666ef64a923ff82a6e7b847f2ccae6177';
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -27,11 +27,16 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
   `);
 
   const tables = await queryRunner.query(`
-    SELECT table_name
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_type = 'BASE TABLE'
-    ORDER BY table_name
+    SELECT
+      relation.relname AS table_name,
+      relation.relrowsecurity AS row_security_enabled,
+      relation.relforcerowsecurity AS row_security_forced
+    FROM pg_class AS relation
+    JOIN pg_namespace AS relation_namespace
+      ON relation_namespace.oid = relation.relnamespace
+    WHERE relation_namespace.nspname = 'public'
+      AND relation.relkind IN ('r', 'p')
+    ORDER BY relation.relname
   `);
 
   const columns = await queryRunner.query(`
@@ -95,6 +100,33 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
       ON index_state.indexrelid = index_relation.oid
     WHERE index_view.schemaname = 'public'
     ORDER BY index_view.tablename, index_view.indexname
+  `);
+
+  const policies = await queryRunner.query(`
+    SELECT
+      relation.relname AS table_name,
+      policy_row.polname AS policy_name,
+      policy_row.polpermissive AS permissive,
+      policy_row.polcmd AS command,
+      ARRAY(
+        SELECT role_name
+        FROM (
+          SELECT CASE
+            WHEN role_oid = 0 THEN 'PUBLIC'
+            ELSE pg_get_userbyid(role_oid)
+          END AS role_name
+          FROM unnest(policy_row.polroles) AS role_oid
+        ) AS policy_roles
+        ORDER BY role_name
+      ) AS roles,
+      pg_get_expr(policy_row.polqual, policy_row.polrelid, true) AS using_expression,
+      pg_get_expr(policy_row.polwithcheck, policy_row.polrelid, true) AS check_expression
+    FROM pg_policy AS policy_row
+    JOIN pg_class AS relation ON relation.oid = policy_row.polrelid
+    JOIN pg_namespace AS relation_namespace
+      ON relation_namespace.oid = relation.relnamespace
+    WHERE relation_namespace.nspname = 'public'
+    ORDER BY relation.relname, policy_row.polname
   `);
 
   const triggers = await queryRunner.query(`
@@ -194,6 +226,7 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
     enums,
     constraints,
     indexes,
+    policies,
     triggers,
     functions,
     sequences,
@@ -257,6 +290,16 @@ export async function assertDatabaseIsFreshForInitialBaseline(
       JOIN pg_namespace AS function_namespace ON function_namespace.oid = function_row.pronamespace
       WHERE function_namespace.nspname = 'public'
         AND function_row.prokind IN ('f', 'p')
+
+      UNION ALL
+
+      SELECT
+        'collation'::text,
+        collation_namespace.nspname || '.' || collation_row.collname
+      FROM pg_collation AS collation_row
+      JOIN pg_namespace AS collation_namespace
+        ON collation_namespace.oid = collation_row.collnamespace
+      WHERE collation_namespace.nspname = 'public'
 
       UNION ALL
 
