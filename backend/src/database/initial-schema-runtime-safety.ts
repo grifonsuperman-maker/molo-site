@@ -36,13 +36,12 @@ export async function assertNoGeneratedOrIdentityColumns(
   }
 }
 
-export async function assertCurrentUserOwnsAndCanUsePublicTables(
+export async function assertCurrentUserCanUsePublicTables(
   queryRunner: QueryRunner,
 ): Promise<void> {
   const unsafeTables = await queryRunner.query(`
     SELECT
       relation.relname AS table_name,
-      relation.relowner = current_role.oid AS owned_by_current_user,
       has_table_privilege(current_user, relation.oid, 'SELECT') AS can_select,
       has_table_privilege(current_user, relation.oid, 'INSERT') AS can_insert,
       has_table_privilege(current_user, relation.oid, 'UPDATE') AS can_update,
@@ -50,14 +49,10 @@ export async function assertCurrentUserOwnsAndCanUsePublicTables(
     FROM pg_class AS relation
     JOIN pg_namespace AS relation_namespace
       ON relation_namespace.oid = relation.relnamespace
-    CROSS JOIN LATERAL (
-      SELECT oid FROM pg_roles WHERE rolname = current_user
-    ) AS current_role
     WHERE relation_namespace.nspname = 'public'
       AND relation.relkind IN ('r', 'p')
       AND NOT (
-        relation.relowner = current_role.oid
-        AND has_table_privilege(current_user, relation.oid, 'SELECT')
+        has_table_privilege(current_user, relation.oid, 'SELECT')
         AND has_table_privilege(current_user, relation.oid, 'INSERT')
         AND has_table_privilege(current_user, relation.oid, 'UPDATE')
         AND has_table_privilege(current_user, relation.oid, 'DELETE')
@@ -71,38 +66,32 @@ export async function assertCurrentUserOwnsAndCanUsePublicTables(
       .map(
         (row: {
           table_name: string;
-          owned_by_current_user: boolean;
           can_select: boolean;
           can_insert: boolean;
           can_update: boolean;
           can_delete: boolean;
         }) =>
-          `${row.table_name}:owner=${row.owned_by_current_user},select=${row.can_select},insert=${row.can_insert},update=${row.can_update},delete=${row.can_delete}`,
+          `${row.table_name}:select=${row.can_select},insert=${row.can_insert},update=${row.can_update},delete=${row.can_delete}`,
       )
       .join(', ');
     throw new Error(
-      `Current database role does not own or cannot perform required runtime operations on public tables: ${preview}`,
+      `Current database role cannot perform required runtime operations on public tables: ${preview}`,
     );
   }
 
   const unsafeSequences = await queryRunner.query(`
     SELECT
       sequence_relation.relname AS sequence_name,
-      sequence_relation.relowner = current_role.oid AS owned_by_current_user,
       has_sequence_privilege(current_user, sequence_relation.oid, 'USAGE') AS can_use,
       has_sequence_privilege(current_user, sequence_relation.oid, 'SELECT') AS can_select,
       has_sequence_privilege(current_user, sequence_relation.oid, 'UPDATE') AS can_update
     FROM pg_class AS sequence_relation
     JOIN pg_namespace AS sequence_namespace
       ON sequence_namespace.oid = sequence_relation.relnamespace
-    CROSS JOIN LATERAL (
-      SELECT oid FROM pg_roles WHERE rolname = current_user
-    ) AS current_role
     WHERE sequence_namespace.nspname = 'public'
       AND sequence_relation.relkind = 'S'
       AND NOT (
-        sequence_relation.relowner = current_role.oid
-        AND has_sequence_privilege(current_user, sequence_relation.oid, 'USAGE')
+        has_sequence_privilege(current_user, sequence_relation.oid, 'USAGE')
         AND has_sequence_privilege(current_user, sequence_relation.oid, 'SELECT')
         AND has_sequence_privilege(current_user, sequence_relation.oid, 'UPDATE')
       )
@@ -115,16 +104,15 @@ export async function assertCurrentUserOwnsAndCanUsePublicTables(
       .map(
         (row: {
           sequence_name: string;
-          owned_by_current_user: boolean;
           can_use: boolean;
           can_select: boolean;
           can_update: boolean;
         }) =>
-          `${row.sequence_name}:owner=${row.owned_by_current_user},usage=${row.can_use},select=${row.can_select},update=${row.can_update}`,
+          `${row.sequence_name}:usage=${row.can_use},select=${row.can_select},update=${row.can_update}`,
       )
       .join(', ');
     throw new Error(
-      `Current database role does not own or cannot use required public sequences: ${preview}`,
+      `Current database role cannot use required public sequences: ${preview}`,
     );
   }
 }
@@ -133,5 +121,5 @@ export async function assertInitialSchemaAdoptionRuntimeSafety(
   queryRunner: QueryRunner,
 ): Promise<void> {
   await assertNoGeneratedOrIdentityColumns(queryRunner);
-  await assertCurrentUserOwnsAndCanUsePublicTables(queryRunner);
+  await assertCurrentUserCanUsePublicTables(queryRunner);
 }
