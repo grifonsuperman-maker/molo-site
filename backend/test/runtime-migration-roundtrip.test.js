@@ -32,6 +32,46 @@ test('runtime migration history must match the exact registered order', async ()
   );
 });
 
+test('rewind state assertion rejects a leftover migration object', async () => {
+  const { assertRewindState } = await importScript(
+    'runtime-migration-roundtrip.mjs',
+  );
+
+  assert.doesNotThrow(() =>
+    assertRewindState(
+      {
+        waiterAssignmentActiveColumn: false,
+        waiterAssignmentIndex: false,
+        waiterStatusIndex: true,
+      },
+      {
+        waiterAssignmentActiveColumn: false,
+        waiterAssignmentIndex: false,
+        waiterStatusIndex: true,
+      },
+      'test checkpoint',
+    ),
+  );
+
+  assert.throws(
+    () =>
+      assertRewindState(
+        {
+          waiterAssignmentActiveColumn: true,
+          waiterAssignmentIndex: false,
+          waiterStatusIndex: true,
+        },
+        {
+          waiterAssignmentActiveColumn: false,
+          waiterAssignmentIndex: false,
+          waiterStatusIndex: true,
+        },
+        'test checkpoint',
+      ),
+    /Unexpected rewind state test checkpoint: waiterAssignmentActiveColumn/,
+  );
+});
+
 test('schema roundtrip comparison ignores only TypeORM migration row ids', async () => {
   const { compareSchemaBaselines } = await importScript(
     'schema-roundtrip-compare.mjs',
