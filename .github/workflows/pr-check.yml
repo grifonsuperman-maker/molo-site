@@ -99,7 +99,19 @@ jobs:
         run: node backend/scripts/schema-baseline.mjs roundtrip-schema-audit.json > roundtrip-schema-baseline.json
       - name: Verify runtime migration schema roundtrip
         run: node backend/scripts/schema-roundtrip-compare.mjs fresh-schema-baseline.json roundtrip-schema-baseline.json
-      - name: Validate baseline adoption on existing schema
+      - name: Verify adoption rejects schema drift
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE bookings ADD COLUMN "__baseline_drift_probe" text;'
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted schema drift.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE bookings DROP COLUMN "__baseline_drift_probe";' \
+            -c "SELECT CASE WHEN EXISTS (SELECT 1 FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000') THEN 1/0 ELSE 1 END;"
+      - name: Validate baseline adoption on exact existing schema
         run: node backend/scripts/initial-schema-baseline-validation.mjs adopt
       - name: Capture adopted schema audit
         run: node backend/scripts/schema-audit.mjs > adopted-schema-audit.json
@@ -116,6 +128,23 @@ jobs:
           }
           NODE
           node backend/scripts/schema-roundtrip-compare.mjs fresh-schema-baseline-objects.json adopted-schema-baseline-objects.json
+      - name: Reset disposable database for partial-schema guard
+        run: |
+          PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS molo_fresh_schema_reference WITH (FORCE);' \
+            -c 'CREATE DATABASE molo_fresh_schema_reference;'
+      - name: Verify baseline refuses unrelated pre-existing objects
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'CREATE TABLE staff_pin_attempts (id bigint PRIMARY KEY, sentinel text NOT NULL);' \
+            -c "INSERT INTO staff_pin_attempts (id, sentinel) VALUES (1, 'keep-me');"
+          if node backend/scripts/initial-schema-baseline-validation.mjs fresh; then
+            echo 'Initial baseline unexpectedly accepted a non-empty database.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c "SELECT CASE WHEN (SELECT sentinel FROM staff_pin_attempts WHERE id = 1) = 'keep-me' THEN 1 ELSE 1/0 END;"
       - name: Reset disposable database for baseline bootstrap
         run: |
           PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
