@@ -10,6 +10,11 @@ import {
   INITIAL_SCHEMA_BASELINE_TABLES,
 } from '../database/initial-schema-baseline-definition';
 import {
+  INITIAL_SCHEMA_BASELINE_ADOPTED_HISTORY,
+  INITIAL_SCHEMA_BASELINE_ADOPTION_RUNTIME_MIGRATIONS,
+  INITIAL_SCHEMA_BASELINE_FRESH_REVERT_HISTORY,
+} from '../database/initial-schema-baseline-history';
+import {
   INITIAL_SCHEMA_BASELINE_DOWN_STATEMENTS,
   INITIAL_SCHEMA_BASELINE_RELATION_STATEMENTS,
 } from '../database/initial-schema-baseline-relations';
@@ -24,6 +29,25 @@ async function readExistingBaselineTableNames(queryRunner: QueryRunner) {
     [[...INITIAL_SCHEMA_BASELINE_TABLES]],
   );
   return rows.map((row: { table_name: string }) => String(row.table_name));
+}
+
+async function readMigrationHistory(queryRunner: QueryRunner) {
+  const rows = await queryRunner.query(
+    `SELECT "name" FROM "migrations" ORDER BY "id" ASC`,
+  );
+  return rows.map((row: { name: string }) => String(row.name));
+}
+
+function assertMigrationHistory(
+  actualNames: string[],
+  expectedNames: readonly string[],
+  label: string,
+) {
+  if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
+    throw new Error(
+      `Unexpected ${label}. Expected ${JSON.stringify(expectedNames)}, received ${JSON.stringify(actualNames)}`,
+    );
+  }
 }
 
 async function assertBaselineTablesEmpty(queryRunner: QueryRunner) {
@@ -78,6 +102,12 @@ export class InitialSchemaBaseline2026081300000 implements MigrationInterface {
       const existingTables = await readExistingBaselineTableNames(queryRunner);
 
       if (existingTables.length === INITIAL_SCHEMA_BASELINE_TABLES.length) {
+        const migrationHistory = await readMigrationHistory(queryRunner);
+        assertMigrationHistory(
+          migrationHistory,
+          INITIAL_SCHEMA_BASELINE_ADOPTION_RUNTIME_MIGRATIONS,
+          'migration history before baseline adoption',
+        );
         await assertCurrentSchemaMatchesAdoptionReference(queryRunner);
         return;
       }
@@ -101,12 +131,22 @@ export class InitialSchemaBaseline2026081300000 implements MigrationInterface {
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await runAtomicallyIfNeeded(queryRunner, async () => {
-      const existingTables = await readExistingBaselineTableNames(queryRunner);
+      const migrationHistory = await readMigrationHistory(queryRunner);
 
-      if (existingTables.length === 0) {
+      if (
+        JSON.stringify(migrationHistory) ===
+        JSON.stringify(INITIAL_SCHEMA_BASELINE_ADOPTED_HISTORY)
+      ) {
         return;
       }
 
+      assertMigrationHistory(
+        migrationHistory,
+        INITIAL_SCHEMA_BASELINE_FRESH_REVERT_HISTORY,
+        'migration history before fresh baseline revert',
+      );
+
+      const existingTables = await readExistingBaselineTableNames(queryRunner);
       if (existingTables.length !== INITIAL_SCHEMA_BASELINE_TABLES.length) {
         throw new Error(
           `Refusing partial initial baseline revert. Found ${existingTables.length} of ${INITIAL_SCHEMA_BASELINE_TABLES.length} expected tables`,
