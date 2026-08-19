@@ -1,0 +1,147 @@
+name: Baseline text-search checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: baseline-text-search-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline-text-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: molo_fresh_schema_reference
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d molo_fresh_schema_reference"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      NODE_ENV: test
+      FRESH_SCHEMA_REFERENCE_ALLOW: 'true'
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: molo_fresh_schema_reference
+      DB_SYNCHRONIZE: 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install backend dependencies
+        run: npm --prefix backend ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Initialize disposable current schema
+        run: node backend/scripts/fresh-schema-reference.mjs
+      - name: Create public text-search catalog probes
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TEXT SEARCH TEMPLATE public.__baseline_template_probe (
+            LEXIZE = pg_catalog.dsimple_lexize
+          );
+          CREATE TEXT SEARCH DICTIONARY public.__baseline_dictionary_probe (
+            TEMPLATE = public.__baseline_template_probe
+          );
+          CREATE TEXT SEARCH PARSER public.__baseline_parser_probe (
+            START = pg_catalog.prsd_start,
+            GETTOKEN = pg_catalog.prsd_nexttoken,
+            END = pg_catalog.prsd_end,
+            LEXTYPES = pg_catalog.prsd_lextype,
+            HEADLINE = pg_catalog.prsd_headline
+          );
+          CREATE TEXT SEARCH CONFIGURATION public.__baseline_configuration_probe (
+            PARSER = public.__baseline_parser_probe
+          );
+          SQL
+      - name: Reject public text-search objects during adoption
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted public text-search catalog objects.' >&2
+            exit 1
+          fi
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Text-search rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
+          config_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_ts_config c JOIN pg_namespace n ON n.oid = c.cfgnamespace WHERE n.nspname='public' AND c.cfgname='__baseline_configuration_probe'")"
+          dict_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_ts_dict d JOIN pg_namespace n ON n.oid = d.dictnamespace WHERE n.nspname='public' AND d.dictname='__baseline_dictionary_probe'")"
+          parser_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_ts_parser p JOIN pg_namespace n ON n.oid = p.prsnamespace WHERE n.nspname='public' AND p.prsname='__baseline_parser_probe'")"
+          template_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_ts_template t JOIN pg_namespace n ON n.oid = t.tmplnamespace WHERE n.nspname='public' AND t.tmplname='__baseline_template_probe'")"
+          if [ "$config_rows|$dict_rows|$parser_rows|$template_rows" != "1|1|1|1" ]; then
+            echo 'Rejected adoption unexpectedly changed text-search probe objects.' >&2
+            exit 1
+          fi
+      - name: Clean text-search probes and validate exact adoption
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
+          DROP TEXT SEARCH CONFIGURATION public.__baseline_configuration_probe;
+          DROP TEXT SEARCH DICTIONARY public.__baseline_dictionary_probe;
+          DROP TEXT SEARCH PARSER public.__baseline_parser_probe;
+          DROP TEXT SEARCH TEMPLATE public.__baseline_template_probe;
+          SQL
+          node backend/scripts/initial-schema-baseline-validation.mjs adopt
+      - name: Reset disposable database for fresh text-search guard
+        run: |
+          PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS molo_fresh_schema_reference WITH (FORCE);' \
+            -c 'CREATE DATABASE molo_fresh_schema_reference;'
+      - name: Reject public text-search objects on fresh path
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TEXT SEARCH TEMPLATE public.__baseline_template_probe (
+            LEXIZE = pg_catalog.dsimple_lexize
+          );
+          CREATE TEXT SEARCH DICTIONARY public.__baseline_dictionary_probe (
+            TEMPLATE = public.__baseline_template_probe
+          );
+          CREATE TEXT SEARCH PARSER public.__baseline_parser_probe (
+            START = pg_catalog.prsd_start,
+            GETTOKEN = pg_catalog.prsd_nexttoken,
+            END = pg_catalog.prsd_end,
+            LEXTYPES = pg_catalog.prsd_lextype,
+            HEADLINE = pg_catalog.prsd_headline
+          );
+          CREATE TEXT SEARCH CONFIGURATION public.__baseline_configuration_probe (
+            PARSER = public.__baseline_parser_probe
+          );
+          SQL
+          if node backend/scripts/initial-schema-baseline-validation.mjs fresh; then
+            echo 'Initial baseline unexpectedly accepted public text-search catalog objects on fresh path.' >&2
+            exit 1
+          fi
+          config_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_ts_config c JOIN pg_namespace n ON n.oid = c.cfgnamespace WHERE n.nspname='public' AND c.cfgname='__baseline_configuration_probe'")"
+          dict_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_ts_dict d JOIN pg_namespace n ON n.oid = d.dictnamespace WHERE n.nspname='public' AND d.dictname='__baseline_dictionary_probe'")"
+          parser_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_ts_parser p JOIN pg_namespace n ON n.oid = p.prsnamespace WHERE n.nspname='public' AND p.prsname='__baseline_parser_probe'")"
+          template_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_ts_template t JOIN pg_namespace n ON n.oid = t.tmplnamespace WHERE n.nspname='public' AND t.tmplname='__baseline_template_probe'")"
+          if [ "$config_rows|$dict_rows|$parser_rows|$template_rows" != "1|1|1|1" ]; then
+            echo 'Rejected fresh baseline unexpectedly changed text-search probe objects.' >&2
+            exit 1
+          fi
+      - name: Reset disposable database for clean bootstrap
+        run: |
+          PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS molo_fresh_schema_reference WITH (FORCE);' \
+            -c 'CREATE DATABASE molo_fresh_schema_reference;'
+      - name: Validate clean fresh bootstrap and revert
+        run: |
+          node backend/scripts/initial-schema-baseline-validation.mjs fresh
+          node backend/scripts/initial-schema-baseline-validation.mjs revert
