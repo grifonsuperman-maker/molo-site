@@ -52,7 +52,9 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
       character_maximum_length,
       numeric_precision,
       numeric_scale,
-      datetime_precision
+      datetime_precision,
+      collation_schema,
+      collation_name
     FROM information_schema.columns
     WHERE table_schema = 'public'
     ORDER BY table_name, ordinal_position
@@ -353,6 +355,18 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
     ORDER BY table_name
   `);
 
+  const materializedViews = await queryRunner.query(`
+    SELECT
+      matviewname AS view_name,
+      tablespace,
+      hasindexes AS has_indexes,
+      ispopulated AS is_populated,
+      definition
+    FROM pg_matviews
+    WHERE schemaname = 'public'
+    ORDER BY matviewname
+  `);
+
   return {
     extensions,
     tables,
@@ -370,6 +384,7 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
     aggregates,
     sequences,
     views,
+    materializedViews,
   };
 }
 
@@ -391,9 +406,30 @@ export async function assertCurrentSchemaMatchesAdoptionReference(
   }
 }
 
+async function assertTypeOrmMigrationHistoryEmpty(queryRunner: QueryRunner) {
+  const [relation] = await queryRunner.query(`
+    SELECT to_regclass('public.migrations') IS NOT NULL AS exists
+  `);
+  if (!relation?.exists) {
+    return;
+  }
+
+  const [history] = await queryRunner.query(`
+    SELECT COUNT(*)::int AS count
+    FROM public.migrations
+  `);
+  if (Number(history?.count) !== 0) {
+    throw new Error(
+      `Refusing initial baseline because TypeORM migration history is not empty (${history?.count} row(s))`,
+    );
+  }
+}
+
 export async function assertDatabaseIsFreshForInitialBaseline(
   queryRunner: QueryRunner,
 ): Promise<void> {
+  await assertTypeOrmMigrationHistoryEmpty(queryRunner);
+
   const unexpected = await queryRunner.query(`
     SELECT object_kind, object_name
     FROM (
