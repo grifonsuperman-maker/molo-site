@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { QueryRunner } from 'typeorm';
 
 export const CURRENT_SCHEMA_ADOPTION_FINGERPRINT =
-  '8e94c1395b6cb52ec2e116f0c495a040161a713d9796a798ad859e847771a72a';
+  '326faee9ce433c415e3e5e18a8c864e0d41e94800b04fd62f9f1275f4ecb5982';
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {
