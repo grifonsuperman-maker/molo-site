@@ -164,6 +164,91 @@ jobs:
             echo 'Persistence rejection unexpectedly wrote baseline history.' >&2
             exit 1
           fi
+      - name: Verify adoption rejects disabled internal constraint triggers
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE guest_reviews DISABLE TRIGGER ALL;'
+          disabled_count="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_trigger WHERE tgrelid = 'public.guest_reviews'::regclass AND tgisinternal AND tgenabled = 'D'")"
+          if [ "$disabled_count" = "0" ]; then
+            echo 'Constraint-trigger probe did not disable any internal trigger.' >&2
+            exit 1
+          fi
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted disabled internal constraint triggers.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE guest_reviews ENABLE TRIGGER ALL;'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Constraint-trigger rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
+      - name: Verify adoption rejects table rewrite rules
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'CREATE RULE "__baseline_rule_probe" AS ON INSERT TO bookings DO INSTEAD NOTHING;'
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted a table rewrite rule.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'DROP RULE "__baseline_rule_probe" ON bookings;'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Rewrite-rule rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
+      - name: Verify adoption rejects standalone public types
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'CREATE DOMAIN public.__baseline_domain_probe AS integer CHECK (VALUE > 0);'
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted a standalone public type.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'DROP DOMAIN public.__baseline_domain_probe;'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Standalone-type rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
+      - name: Verify adoption rejects public collations
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'CREATE COLLATION public.__baseline_collation_probe FROM pg_catalog."C";'
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted a public collation.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'DROP COLLATION public.__baseline_collation_probe;'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Collation rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
+      - name: Verify adoption rejects public aggregates
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c "CREATE AGGREGATE public.__baseline_sum_probe(integer) (SFUNC = pg_catalog.int4pl, STYPE = integer, INITCOND = '0');"
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted a public aggregate.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'DROP AGGREGATE public.__baseline_sum_probe(integer);'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Aggregate rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
       - name: Verify adoption rejects invalid active-booking index
         run: |
           export PGPASSWORD="$DB_PASSWORD"
