@@ -1,3 +1,5 @@
+import { INITIAL_SCHEMA_BASELINE_NAME } from './initial-schema-baseline-definition';
+
 export const INITIAL_SCHEMA_BASELINE_ADOPTION_RUNTIME_MIGRATIONS = [
   'CreateStaffPinAttempts2026081400010',
   'UpgradeStaffPinAttemptsPerAttempt2026081400020',
@@ -5,9 +7,6 @@ export const INITIAL_SCHEMA_BASELINE_ADOPTION_RUNTIME_MIGRATIONS = [
   'AddWaiterCallAssignmentActive2026081500015',
   'CloseInactiveWaiterCalls2026081500020',
 ] as const;
-
-export const INITIAL_SCHEMA_BASELINE_NAME =
-  'InitialSchemaBaseline2026081300000';
 
 export const INITIAL_SCHEMA_BASELINE_ADOPTED_HISTORY = [
   ...INITIAL_SCHEMA_BASELINE_ADOPTION_RUNTIME_MIGRATIONS,
