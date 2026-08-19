@@ -58,7 +58,7 @@ Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо пер
 
 Детальний запис і межі цієї перевірки: [`MIGRATION_BASELINE_STATUS.md`](./MIGRATION_BASELINE_STATUS.md).
 
-Це підтверджує, що **поточна production-подібна схема достатня для успішного запуску перевіреного backend без TypeORM schema synchronize**. Перевірка не доводить повну працездатність усіх runtime-сценаріїв у такому режимі та не є автоматичним adoption існуючої production-БД.
+Це підтверджує, що **поточна production-подібна схема достатня для успішного запуску перевіреного backend без TypeORM schema synchronize**. Перевірка не доводить повну працездатність усіх runtime-сценаріїв у такому режимі.
 
 ## Fresh-only initial migration
 
@@ -72,7 +72,20 @@ Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо пер
 - baseline не реєструється в `AppModule` і не входить до production runtime migration list;
 - migration не є універсальним аудитом усього PostgreSQL catalog і не повинна запускатися на довільній існуючій БД.
 
-CI для цього baseline працює тільки з одноразовим локальним PostgreSQL 17: окремо будує current schema reference, створює нову БД через `CREATE DATABASE`, застосовує baseline + 5 runtime migrations, порівнює результат із current schema та перевіряє повний fresh down path. Окремий negative case доводить, що БД з уже наявними 5 runtime migration rows **не adoption-иться** цим baseline.
+CI для цього baseline працює тільки з одноразовим локальним PostgreSQL 17: окремо будує current schema reference, створює нову БД через `CREATE DATABASE`, застосовує baseline + runtime migrations, порівнює результат із current schema та перевіряє full down path.
+
+## Два migration-history шляхи
+
+Initial baseline **не потрібно заднім числом додавати** в migration history уже існуючої production-БД, доки він залишається виключеним із runtime migration list.
+
+Підтримуються два окремі шляхи:
+
+- existing production: поточні 5 runtime migration rows → наступні runtime migrations;
+- fresh database: `InitialSchemaBaseline2026081300000` → поточні 5 runtime migrations → наступні runtime migrations.
+
+Disposable PostgreSQL CI перевіряє обидва шляхи реальною майбутньою probe-migration: вона повинна застосуватися як наступна migration і коректно відкотитися першою. Для existing-production шляху CI додатково доводить, що initial baseline row відсутній, а після probe apply/undo schema повертається точно до current reference.
+
+Якщо в майбутньому initial baseline коли-небудь буде потрібно додати до runtime migration list, це буде окрема зміна архітектури з окремою перевіркою. Поточний production history вручну не переписується.
 
 ## Важливі обмеження
 
@@ -83,11 +96,10 @@ CI для цього baseline працює тільки з одноразови�
 - production schema і production data не змінюються;
 - `database/schema.sql` не використовується як джерело істини;
 - fresh-only baseline не підключений до runtime;
-- не можна вручну підміняти migration baseline вставками в таблицю `migrations` без окремої перевірки.
+- existing production migration history залишається з поточними 5 runtime rows; initial baseline row туди не вставляється.
 
-## Наступні окремі кроки
+## Наступний окремий крок
 
-1. Production runtime switch на `DB_SYNCHRONIZE=false` робиться окремим керованим кроком після ручного погодження та перевірки поточного production environment.
-2. Adoption уже існуючої production schema в migration history — окрема задача. Її не потрібно змішувати з fresh-database bootstrap і не можна робити автоматично через initial migration.
+Production runtime switch на `DB_SYNCHRONIZE=false` робиться окремим керованим кроком після ручного погодження та перевірки поточного production environment.
 
-Ці сценарії різні: відтворення **нової порожньої БД**, вимкнення TypeORM synchronize для **вже існуючої перевіреної production schema** та migration-history adoption цієї production schema мають окремі ризики й окремі кроки.
+Fresh bootstrap і existing-production history залишаються різними шляхами. Це дозволяє вимкнути TypeORM synchronize на вже існуючій перевіреній production schema без переписування її migration history.

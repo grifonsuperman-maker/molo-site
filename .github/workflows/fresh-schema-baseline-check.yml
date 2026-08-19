@@ -52,6 +52,13 @@ jobs:
         run: |
           node backend/scripts/schema-audit.mjs > /tmp/current-schema.json
           node backend/scripts/schema-baseline.mjs /tmp/current-schema.json > /tmp/current-baseline.json
+      - name: Verify existing production-style history advances without baseline
+        run: node backend/scripts/migration-history-track-validation.mjs existing
+      - name: Verify existing history probe leaves current schema unchanged
+        run: |
+          node backend/scripts/schema-audit.mjs > /tmp/existing-track-after.json
+          node backend/scripts/schema-baseline.mjs /tmp/existing-track-after.json > /tmp/existing-track-after-baseline.json
+          node backend/scripts/schema-roundtrip-compare.mjs /tmp/current-baseline.json /tmp/existing-track-after-baseline.json
 
       - name: Reset disposable database for non-adoption guard
         run: |
@@ -89,8 +96,8 @@ jobs:
           PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
             -c 'DROP DATABASE IF EXISTS molo_fresh_schema_reference WITH (FORCE);' \
             -c 'CREATE DATABASE molo_fresh_schema_reference;'
-      - name: Apply initial baseline plus runtime migrations
-        run: node backend/scripts/fresh-schema-baseline-validation.mjs apply
+      - name: Verify fresh history advances and rolls back future migration
+        run: node backend/scripts/migration-history-track-validation.mjs fresh
       - name: Capture baseline-built schema
         run: |
           node backend/scripts/schema-audit.mjs > /tmp/baseline-built-schema.json
