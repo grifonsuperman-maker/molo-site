@@ -109,8 +109,12 @@ jobs:
             exit 1
           fi
           psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
-            -c 'ALTER TABLE bookings DROP COLUMN "__baseline_drift_probe";' \
-            -c "SELECT CASE WHEN EXISTS (SELECT 1 FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000') THEN 1/0 ELSE 1 END;"
+            -c 'ALTER TABLE bookings DROP COLUMN "__baseline_drift_probe";'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Failed adoption unexpectedly wrote baseline migration history.' >&2
+            exit 1
+          fi
       - name: Validate baseline adoption on exact existing schema
         run: node backend/scripts/initial-schema-baseline-validation.mjs adopt
       - name: Capture adopted schema audit
@@ -143,8 +147,11 @@ jobs:
             echo 'Initial baseline unexpectedly accepted a non-empty database.' >&2
             exit 1
           fi
-          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
-            -c "SELECT CASE WHEN (SELECT sentinel FROM staff_pin_attempts WHERE id = 1) = 'keep-me' THEN 1 ELSE 1/0 END;"
+          sentinel="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc 'SELECT sentinel FROM staff_pin_attempts WHERE id = 1')"
+          if [ "$sentinel" != "keep-me" ]; then
+            echo 'Rejected baseline modified pre-existing data.' >&2
+            exit 1
+          fi
       - name: Reset disposable database for baseline bootstrap
         run: |
           PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
