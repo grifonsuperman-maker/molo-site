@@ -79,6 +79,27 @@ jobs:
             echo 'Materialized-view rejection unexpectedly wrote baseline history.' >&2
             exit 1
           fi
+      - name: Reject revoked uuid-ossp execution privilege during adoption
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'REVOKE EXECUTE ON FUNCTION public.uuid_generate_v4() FROM PUBLIC;'
+          public_execute="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_proc p CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE p.oid = 'public.uuid_generate_v4()'::regprocedure AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'")"
+          if [ "$public_execute" != "0" ]; then
+            echo 'Privilege probe did not revoke PUBLIC execute.' >&2
+            exit 1
+          fi
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted revoked uuid-ossp execution privilege.' >&2
+            exit 1
+          fi
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'uuid-ossp privilege rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'GRANT EXECUTE ON FUNCTION public.uuid_generate_v4() TO PUBLIC;'
       - name: Reject modified uuid-ossp function during adoption
         run: |
           export PGPASSWORD="$DB_PASSWORD"
