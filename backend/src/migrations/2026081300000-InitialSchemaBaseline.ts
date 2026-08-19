@@ -18,6 +18,7 @@ import {
   INITIAL_SCHEMA_BASELINE_DOWN_STATEMENTS,
   INITIAL_SCHEMA_BASELINE_RELATION_STATEMENTS,
 } from '../database/initial-schema-baseline-relations';
+import { assertInitialSchemaAdoptionRuntimeSafety } from '../database/initial-schema-runtime-safety';
 import { assertUuidOsspMatchesAdoptionReference } from '../database/uuid-ossp-adoption-fingerprint';
 
 async function readExistingBaselineTableNames(queryRunner: QueryRunner) {
@@ -109,6 +110,7 @@ export class InitialSchemaBaseline2026081300000 implements MigrationInterface {
           INITIAL_SCHEMA_BASELINE_ADOPTION_RUNTIME_MIGRATIONS,
           'migration history before baseline adoption',
         );
+        await assertInitialSchemaAdoptionRuntimeSafety(queryRunner);
         await assertCurrentSchemaMatchesAdoptionReference(queryRunner);
         await assertUuidOsspMatchesAdoptionReference(queryRunner);
         return;
