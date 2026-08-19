@@ -71,6 +71,55 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
     ORDER BY enum_type.typname, enum_value.enumsortorder
   `);
 
+  const standaloneTypes = await queryRunner.query(`
+    SELECT
+      type_namespace.nspname AS schema_name,
+      type_row.typname AS type_name,
+      type_row.typtype AS type_kind,
+      type_row.typcategory AS type_category,
+      CASE
+        WHEN type_row.typbasetype = 0 THEN NULL
+        ELSE format_type(type_row.typbasetype, type_row.typtypmod)
+      END AS base_type,
+      type_row.typnotnull AS not_null,
+      type_row.typdefault AS default_expression,
+      type_relation.relkind AS relation_kind
+    FROM pg_type AS type_row
+    JOIN pg_namespace AS type_namespace
+      ON type_namespace.oid = type_row.typnamespace
+    LEFT JOIN pg_class AS type_relation
+      ON type_relation.oid = type_row.typrelid
+    WHERE type_namespace.nspname = 'public'
+      AND type_row.typtype <> 'e'
+      AND NOT (type_row.typcategory = 'A' AND type_row.typelem <> 0)
+      AND (
+        type_row.typrelid = 0
+        OR type_relation.relkind = 'c'
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend AS dependency
+        WHERE dependency.classid = 'pg_type'::regclass
+          AND dependency.objid = type_row.oid
+          AND dependency.refclassid = 'pg_extension'::regclass
+          AND dependency.deptype = 'e'
+      )
+    ORDER BY type_row.typname
+  `);
+
+  const collations = await queryRunner.query(`
+    SELECT
+      collation_namespace.nspname AS schema_name,
+      collation_row.collname AS collation_name,
+      collation_row.collprovider AS provider,
+      collation_row.collisdeterministic AS deterministic
+    FROM pg_collation AS collation_row
+    JOIN pg_namespace AS collation_namespace
+      ON collation_namespace.oid = collation_row.collnamespace
+    WHERE collation_namespace.nspname = 'public'
+    ORDER BY collation_row.collname
+  `);
+
   const constraints = await queryRunner.query(`
     SELECT
       relation.relname AS table_name,
@@ -143,6 +192,55 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
     WHERE relation_namespace.nspname = 'public'
       AND NOT trigger_row.tgisinternal
     ORDER BY relation.relname, trigger_row.tgname
+  `);
+
+  const internalConstraintTriggers = await queryRunner.query(`
+    SELECT
+      relation.relname AS table_name,
+      constraint_row.conname AS constraint_name,
+      constraint_row.contype AS constraint_type,
+      trigger_row.tgenabled AS enabled_state,
+      trigger_row.tgtype AS trigger_type,
+      trigger_function.proname AS trigger_function,
+      constraint_relation.relname AS constraint_relation_name
+    FROM pg_trigger AS trigger_row
+    JOIN pg_class AS relation
+      ON relation.oid = trigger_row.tgrelid
+    JOIN pg_namespace AS relation_namespace
+      ON relation_namespace.oid = relation.relnamespace
+    JOIN pg_constraint AS constraint_row
+      ON constraint_row.oid = trigger_row.tgconstraint
+    JOIN pg_proc AS trigger_function
+      ON trigger_function.oid = trigger_row.tgfoid
+    LEFT JOIN pg_class AS constraint_relation
+      ON constraint_relation.oid = trigger_row.tgconstrrelid
+    WHERE relation_namespace.nspname = 'public'
+      AND trigger_row.tgisinternal
+      AND trigger_row.tgconstraint <> 0
+    ORDER BY
+      relation.relname,
+      constraint_row.conname,
+      trigger_function.proname,
+      trigger_row.tgtype,
+      constraint_relation.relname
+  `);
+
+  const tableRules = await queryRunner.query(`
+    SELECT
+      relation.relname AS table_name,
+      rewrite_rule.rulename AS rule_name,
+      rewrite_rule.ev_type AS event_type,
+      rewrite_rule.is_instead AS is_instead,
+      rewrite_rule.ev_enabled AS enabled_state,
+      pg_get_ruledef(rewrite_rule.oid, true) AS definition
+    FROM pg_rewrite AS rewrite_rule
+    JOIN pg_class AS relation
+      ON relation.oid = rewrite_rule.ev_class
+    JOIN pg_namespace AS relation_namespace
+      ON relation_namespace.oid = relation.relnamespace
+    WHERE relation_namespace.nspname = 'public'
+      AND relation.relkind IN ('r', 'p')
+    ORDER BY relation.relname, rewrite_rule.rulename
   `);
 
   const functions = await queryRunner.query(`
@@ -260,10 +358,14 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
     tables,
     columns,
     enums,
+    standaloneTypes,
+    collations,
     constraints,
     indexes,
     policies,
     triggers,
+    internalConstraintTriggers,
+    tableRules,
     functions,
     aggregates,
     sequences,
