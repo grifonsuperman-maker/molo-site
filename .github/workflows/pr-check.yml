@@ -99,6 +99,45 @@ jobs:
         run: node backend/scripts/schema-baseline.mjs roundtrip-schema-audit.json > roundtrip-schema-baseline.json
       - name: Verify runtime migration schema roundtrip
         run: node backend/scripts/schema-roundtrip-compare.mjs fresh-schema-baseline.json roundtrip-schema-baseline.json
+      - name: Validate baseline adoption on existing schema
+        run: node backend/scripts/initial-schema-baseline-validation.mjs adopt
+      - name: Capture adopted schema audit
+        run: node backend/scripts/schema-audit.mjs > adopted-schema-audit.json
+      - name: Normalize adopted schema baseline
+        run: node backend/scripts/schema-baseline.mjs adopted-schema-audit.json > adopted-schema-baseline.json
+      - name: Verify adoption leaves schema objects unchanged
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          for (const input of ['fresh-schema-baseline.json', 'adopted-schema-baseline.json']) {
+            const snapshot = JSON.parse(fs.readFileSync(input, 'utf8'));
+            delete snapshot.typeOrmMigrations;
+            fs.writeFileSync(input.replace('.json', '-objects.json'), JSON.stringify(snapshot));
+          }
+          NODE
+          node backend/scripts/schema-roundtrip-compare.mjs fresh-schema-baseline-objects.json adopted-schema-baseline-objects.json
+      - name: Reset disposable database for baseline bootstrap
+        run: |
+          PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS molo_fresh_schema_reference WITH (FORCE);' \
+            -c 'CREATE DATABASE molo_fresh_schema_reference;'
+      - name: Build fresh schema from initial baseline plus runtime migrations
+        run: node backend/scripts/initial-schema-baseline-validation.mjs fresh
+      - name: Capture baseline-built schema audit
+        run: node backend/scripts/schema-audit.mjs > baseline-built-schema-audit.json
+      - name: Normalize baseline-built schema
+        run: node backend/scripts/schema-baseline.mjs baseline-built-schema-audit.json > baseline-built-schema-baseline.json
+      - name: Verify baseline-built schema matches current schema objects
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const snapshot = JSON.parse(fs.readFileSync('baseline-built-schema-baseline.json', 'utf8'));
+          delete snapshot.typeOrmMigrations;
+          fs.writeFileSync('baseline-built-schema-objects.json', JSON.stringify(snapshot));
+          NODE
+          node backend/scripts/schema-roundtrip-compare.mjs fresh-schema-baseline-objects.json baseline-built-schema-objects.json
+      - name: Verify full migration down path on disposable database
+        run: node backend/scripts/initial-schema-baseline-validation.mjs revert
       - name: Upload migration baseline reference
         uses: actions/upload-artifact@v4
         with:
@@ -110,5 +149,9 @@ jobs:
             pre-runtime-schema-baseline.json
             roundtrip-schema-audit.json
             roundtrip-schema-baseline.json
+            adopted-schema-audit.json
+            adopted-schema-baseline.json
+            baseline-built-schema-audit.json
+            baseline-built-schema-baseline.json
           if-no-files-found: error
           retention-days: 7
