@@ -18,6 +18,7 @@ import {
   INITIAL_SCHEMA_BASELINE_DOWN_STATEMENTS,
   INITIAL_SCHEMA_BASELINE_RELATION_STATEMENTS,
 } from '../database/initial-schema-baseline-relations';
+import { assertUuidOsspMatchesAdoptionReference } from '../database/uuid-ossp-adoption-fingerprint';
 
 async function readExistingBaselineTableNames(queryRunner: QueryRunner) {
   const rows = await queryRunner.query(
@@ -109,6 +110,7 @@ export class InitialSchemaBaseline2026081300000 implements MigrationInterface {
           'migration history before baseline adoption',
         );
         await assertCurrentSchemaMatchesAdoptionReference(queryRunner);
+        await assertUuidOsspMatchesAdoptionReference(queryRunner);
         return;
       }
 
