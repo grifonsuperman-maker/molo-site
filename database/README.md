@@ -58,7 +58,21 @@ Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо пер
 
 Детальний запис і межі цієї перевірки: [`MIGRATION_BASELINE_STATUS.md`](./MIGRATION_BASELINE_STATUS.md).
 
-Це підтверджує, що **поточна production-подібна схема достатня для успішного запуску перевіреного backend без TypeORM schema synchronize**. Перевірка не доводить повну працездатність усіх runtime-сценаріїв у такому режимі та не є повним migration bootstrap для нової порожньої бази.
+Це підтверджує, що **поточна production-подібна схема достатня для успішного запуску перевіреного backend без TypeORM schema synchronize**. Перевірка не доводить повну працездатність усіх runtime-сценаріїв у такому режимі та не є автоматичним adoption існуючої production-БД.
+
+## Fresh-only initial migration
+
+`InitialSchemaBaseline2026081300000` призначена **лише для нової disposable/щойно створеної БД**, щоб відтворити pre-runtime MOLO schema, після чого застосовуються поточні 5 runtime migrations.
+
+Вона навмисно не намагається автоматично визнати існуючу production schema baseline-станом:
+
+- non-empty TypeORM migration history блокує `up()`;
+- наявність будь-якої з 17 pre-runtime MOLO tables блокує `up()`;
+- pre-existing `uuid-ossp` блокує `up()`, щоб `down()` міг однозначно прибрати extension, створений саме цим fresh bootstrap;
+- baseline не реєструється в `AppModule` і не входить до production runtime migration list;
+- migration не є універсальним аудитом усього PostgreSQL catalog і не повинна запускатися на довільній існуючій БД.
+
+CI для цього baseline працює тільки з одноразовим локальним PostgreSQL 17: окремо будує current schema reference, створює нову БД через `CREATE DATABASE`, застосовує baseline + 5 runtime migrations, порівнює результат із current schema та перевіряє повний fresh down path. Окремий negative case доводить, що БД з уже наявними 5 runtime migration rows **не adoption-иться** цим baseline.
 
 ## Важливі обмеження
 
@@ -68,12 +82,12 @@ Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо пер
 - старі migration-файли не реєструються і не запускаються;
 - production schema і production data не змінюються;
 - `database/schema.sql` не використовується як джерело істини;
-- жодних DDL/DML операцій baseline-процес не виконує;
+- fresh-only baseline не підключений до runtime;
 - не можна вручну підміняти migration baseline вставками в таблицю `migrations` без окремої перевірки.
 
 ## Наступні окремі кроки
 
 1. Production runtime switch на `DB_SYNCHRONIZE=false` робиться окремим керованим кроком після ручного погодження та перевірки поточного production environment.
-2. Повний fresh-database migration bootstrap залишається окремою задачею: потрібно окремо визначити безпечний baseline для нової порожньої БД, не запускаючи старі migration-файли поверх чинного production.
+2. Adoption уже існуючої production schema в migration history — окрема задача. Її не потрібно змішувати з fresh-database bootstrap і не можна робити автоматично через initial migration.
 
-Ці два сценарії не потрібно змішувати: вимкнення TypeORM synchronize для **вже існуючої перевіреної production schema** і відтворення **нової порожньої БД** — різні задачі з різними ризиками.
+Ці сценарії різні: відтворення **нової порожньої БД**, вимкнення TypeORM synchronize для **вже існуючої перевіреної production schema** та migration-history adoption цієї production schema мають окремі ризики й окремі кроки.

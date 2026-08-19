@@ -1,0 +1,102 @@
+name: Fresh schema baseline checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: fresh-schema-baseline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fresh-schema-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: molo_fresh_schema_reference
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d molo_fresh_schema_reference"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      NODE_ENV: test
+      FRESH_SCHEMA_REFERENCE_ALLOW: 'true'
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: molo_fresh_schema_reference
+      DB_SYNCHRONIZE: 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install backend dependencies
+        run: npm --prefix backend ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+      - name: Build backend
+        run: npm --prefix backend run build
+
+      - name: Build current schema reference
+        run: node backend/scripts/fresh-schema-reference.mjs
+      - name: Capture current schema reference
+        run: |
+          node backend/scripts/schema-audit.mjs > /tmp/current-schema.json
+          node backend/scripts/schema-baseline.mjs /tmp/current-schema.json > /tmp/current-baseline.json
+
+      - name: Reset disposable database for non-adoption guard
+        run: |
+          PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS molo_fresh_schema_reference WITH (FORCE);' \
+            -c 'CREATE DATABASE molo_fresh_schema_reference;'
+      - name: Reject existing migration history instead of adopting it
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE migrations (
+            id SERIAL PRIMARY KEY,
+            timestamp bigint NOT NULL,
+            name varchar NOT NULL
+          );
+          INSERT INTO migrations(timestamp, name) VALUES
+            (1786665670000, 'CreateStaffPinAttempts2026081400010'),
+            (1786665680000, 'UpgradeStaffPinAttemptsPerAttempt2026081400020'),
+            (1786752010000, 'CreateWaiterCalls2026081500010'),
+            (1786752015000, 'AddWaiterCallAssignmentActive2026081500015'),
+            (1786752020000, 'CloseInactiveWaiterCalls2026081500020');
+          SQL
+          if node backend/scripts/fresh-schema-baseline-validation.mjs apply; then
+            echo 'Fresh baseline unexpectedly adopted an existing migration history.' >&2
+            exit 1
+          fi
+          business_tables="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name <> 'migrations'")"
+          if [ "$business_tables" != "0" ]; then
+            echo 'Rejected fresh baseline unexpectedly created business tables.' >&2
+            exit 1
+          fi
+
+      - name: Reset disposable database for fresh bootstrap
+        run: |
+          PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS molo_fresh_schema_reference WITH (FORCE);' \
+            -c 'CREATE DATABASE molo_fresh_schema_reference;'
+      - name: Apply initial baseline plus runtime migrations
+        run: node backend/scripts/fresh-schema-baseline-validation.mjs apply
+      - name: Capture baseline-built schema
+        run: |
+          node backend/scripts/schema-audit.mjs > /tmp/baseline-built-schema.json
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('/tmp/baseline-built-schema.json','utf8'));p.typeOrmMigrations=p.typeOrmMigrations.filter((row)=>row.name!=='InitialSchemaBaseline2026081300000');fs.writeFileSync('/tmp/baseline-built-for-compare.json',JSON.stringify(p));"
+          node backend/scripts/schema-baseline.mjs /tmp/baseline-built-for-compare.json > /tmp/baseline-built.json
+      - name: Verify fresh baseline matches current schema
+        run: node backend/scripts/schema-roundtrip-compare.mjs /tmp/current-baseline.json /tmp/baseline-built.json
+      - name: Verify full fresh migration down path
+        run: node backend/scripts/fresh-schema-baseline-validation.mjs revert
