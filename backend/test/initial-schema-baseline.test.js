@@ -21,6 +21,19 @@ test('initial baseline history keeps baseline before runtime migrations on fresh
   assert.equal(EXPECTED_FRESH_BASELINE_HISTORY.length, 6);
 });
 
+test('adopted baseline history keeps baseline after already executed runtime migrations', async () => {
+  const {
+    INITIAL_BASELINE_MIGRATION,
+    EXPECTED_ADOPTED_BASELINE_HISTORY,
+  } = await loadValidationScript();
+
+  assert.equal(
+    EXPECTED_ADOPTED_BASELINE_HISTORY.at(-1),
+    INITIAL_BASELINE_MIGRATION,
+  );
+  assert.equal(EXPECTED_ADOPTED_BASELINE_HISTORY.length, 6);
+});
+
 test('initial baseline history comparison rejects missing or reordered migrations', async () => {
   const {
     EXPECTED_FRESH_BASELINE_HISTORY,
