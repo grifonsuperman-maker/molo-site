@@ -14,6 +14,7 @@ import {
   INITIAL_SCHEMA_BASELINE_ADOPTION_RUNTIME_MIGRATIONS,
   INITIAL_SCHEMA_BASELINE_FRESH_REVERT_HISTORY,
 } from '../database/initial-schema-baseline-history';
+import { assertNoPublicOperators } from '../database/initial-schema-operator-safety';
 import {
   INITIAL_SCHEMA_BASELINE_DOWN_STATEMENTS,
   INITIAL_SCHEMA_BASELINE_RELATION_STATEMENTS,
@@ -110,6 +111,7 @@ export class InitialSchemaBaseline2026081300000 implements MigrationInterface {
           INITIAL_SCHEMA_BASELINE_ADOPTION_RUNTIME_MIGRATIONS,
           'migration history before baseline adoption',
         );
+        await assertNoPublicOperators(queryRunner);
         await assertInitialSchemaAdoptionRuntimeSafety(queryRunner);
         await assertCurrentSchemaMatchesAdoptionReference(queryRunner);
         await assertUuidOsspMatchesAdoptionReference(queryRunner);
@@ -122,6 +124,7 @@ export class InitialSchemaBaseline2026081300000 implements MigrationInterface {
         );
       }
 
+      await assertNoPublicOperators(queryRunner);
       await assertDatabaseIsFreshForInitialBaseline(queryRunner);
 
       for (const statement of INITIAL_SCHEMA_BASELINE_CREATE_STATEMENTS) {
