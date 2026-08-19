@@ -85,12 +85,30 @@ jobs:
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline
         run: node backend/scripts/schema-baseline.mjs fresh-schema-audit.json > fresh-schema-baseline.json
-      - name: Upload fresh schema reference
+      - name: Rewind registered runtime migrations
+        run: node backend/scripts/runtime-migration-roundtrip.mjs rewind
+      - name: Capture pre-runtime schema audit
+        run: node backend/scripts/schema-audit.mjs > pre-runtime-schema-audit.json
+      - name: Normalize pre-runtime schema baseline
+        run: node backend/scripts/schema-baseline.mjs pre-runtime-schema-audit.json > pre-runtime-schema-baseline.json
+      - name: Reapply registered runtime migrations
+        run: node backend/scripts/runtime-migration-roundtrip.mjs forward
+      - name: Capture roundtrip schema audit
+        run: node backend/scripts/schema-audit.mjs > roundtrip-schema-audit.json
+      - name: Normalize roundtrip schema baseline
+        run: node backend/scripts/schema-baseline.mjs roundtrip-schema-audit.json > roundtrip-schema-baseline.json
+      - name: Verify runtime migration schema roundtrip
+        run: node backend/scripts/schema-roundtrip-compare.mjs fresh-schema-baseline.json roundtrip-schema-baseline.json
+      - name: Upload migration baseline reference
         uses: actions/upload-artifact@v4
         with:
-          name: fresh-schema-reference
+          name: migration-baseline-reference
           path: |
             fresh-schema-audit.json
             fresh-schema-baseline.json
+            pre-runtime-schema-audit.json
+            pre-runtime-schema-baseline.json
+            roundtrip-schema-audit.json
+            roundtrip-schema-baseline.json
           if-no-files-found: error
           retention-days: 7
