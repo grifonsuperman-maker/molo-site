@@ -20,6 +20,7 @@ import {
   INITIAL_SCHEMA_BASELINE_RELATION_STATEMENTS,
 } from '../database/initial-schema-baseline-relations';
 import { assertInitialSchemaAdoptionRuntimeSafety } from '../database/initial-schema-runtime-safety';
+import { assertNoPublicTextSearchCatalogObjects } from '../database/initial-schema-text-search-safety';
 import { assertUuidOsspMatchesAdoptionReference } from '../database/uuid-ossp-adoption-fingerprint';
 
 async function readExistingBaselineTableNames(queryRunner: QueryRunner) {
@@ -112,6 +113,7 @@ export class InitialSchemaBaseline2026081300000 implements MigrationInterface {
           'migration history before baseline adoption',
         );
         await assertNoPublicOperatorCatalogObjects(queryRunner);
+        await assertNoPublicTextSearchCatalogObjects(queryRunner);
         await assertInitialSchemaAdoptionRuntimeSafety(queryRunner);
         await assertCurrentSchemaMatchesAdoptionReference(queryRunner);
         await assertUuidOsspMatchesAdoptionReference(queryRunner);
@@ -125,6 +127,7 @@ export class InitialSchemaBaseline2026081300000 implements MigrationInterface {
       }
 
       await assertNoPublicOperatorCatalogObjects(queryRunner);
+      await assertNoPublicTextSearchCatalogObjects(queryRunner);
       await assertDatabaseIsFreshForInitialBaseline(queryRunner);
 
       for (const statement of INITIAL_SCHEMA_BASELINE_CREATE_STATEMENTS) {
