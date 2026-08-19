@@ -9,6 +9,10 @@ export const EXPECTED_FRESH_BASELINE_HISTORY = [
   INITIAL_BASELINE_MIGRATION,
   ...EXPECTED_RUNTIME_MIGRATIONS,
 ];
+export const EXPECTED_ADOPTED_BASELINE_HISTORY = [
+  ...EXPECTED_RUNTIME_MIGRATIONS,
+  INITIAL_BASELINE_MIGRATION,
+];
 
 export function assertMigrationNames(actualNames, expectedNames, label = 'migration history') {
   const actual = JSON.stringify(actualNames);
@@ -65,13 +69,24 @@ async function assertNoBaselineBusinessTables(dataSource) {
   }
 }
 
+async function assertUuidOsspAbsent(dataSource) {
+  const [row] = await dataSource.query(`
+    SELECT EXISTS (
+      SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp'
+    ) AS present
+  `);
+  if (row?.present) {
+    throw new Error('Fresh baseline revert left uuid-ossp extension installed');
+  }
+}
+
 export async function runInitialBaselineValidation(mode, env = process.env) {
   assertFreshSchemaReferenceTarget(env);
   if (env !== process.env) {
     throw new Error('Initial baseline validation must use process.env after safety validation.');
   }
-  if (!['adopt', 'fresh', 'revert'].includes(mode)) {
-    throw new Error('Mode must be adopt, fresh or revert');
+  if (!['adopt', 'revert-adopted', 'fresh', 'revert'].includes(mode)) {
+    throw new Error('Mode must be adopt, revert-adopted, fresh or revert');
   }
 
   const require = createRequire(import.meta.url);
@@ -103,8 +118,27 @@ export async function runInitialBaselineValidation(mode, env = process.env) {
       const after = await readMigrationHistory(dataSource);
       assertMigrationNames(
         after,
-        [...EXPECTED_RUNTIME_MIGRATIONS, INITIAL_BASELINE_MIGRATION],
+        EXPECTED_ADOPTED_BASELINE_HISTORY,
         'post-adoption history',
+      );
+      return;
+    }
+
+    if (mode === 'revert-adopted') {
+      const before = await readMigrationHistory(dataSource);
+      assertMigrationNames(
+        before,
+        EXPECTED_ADOPTED_BASELINE_HISTORY,
+        'pre-adopted-revert history',
+      );
+
+      await dataSource.undoLastMigration({ transaction: 'all' });
+
+      const after = await readMigrationHistory(dataSource);
+      assertMigrationNames(
+        after,
+        EXPECTED_RUNTIME_MIGRATIONS,
+        'post-adopted-revert history',
       );
       return;
     }
@@ -131,6 +165,7 @@ export async function runInitialBaselineValidation(mode, env = process.env) {
     const after = await readMigrationHistory(dataSource);
     assertMigrationNames(after, [], 'post-revert history');
     await assertNoBaselineBusinessTables(dataSource);
+    await assertUuidOsspAbsent(dataSource);
   } finally {
     await dataSource.destroy();
   }
