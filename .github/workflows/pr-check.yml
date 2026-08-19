@@ -143,6 +143,27 @@ jobs:
             echo 'RLS rejection unexpectedly wrote baseline history.' >&2
             exit 1
           fi
+      - name: Verify adoption rejects unlogged persistence
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE syrve_integrations SET UNLOGGED;'
+          persistence="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT relpersistence FROM pg_class WHERE oid = 'public.syrve_integrations'::regclass")"
+          if [ "$persistence" != "u" ]; then
+            echo "Persistence probe did not make syrve_integrations unlogged: $persistence" >&2
+            exit 1
+          fi
+          if node backend/scripts/initial-schema-baseline-validation.mjs adopt; then
+            echo 'Baseline adoption unexpectedly accepted unlogged table persistence.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE syrve_integrations SET LOGGED;'
+          baseline_rows="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM migrations WHERE name = 'InitialSchemaBaseline2026081300000'")"
+          if [ "$baseline_rows" != "0" ]; then
+            echo 'Persistence rejection unexpectedly wrote baseline history.' >&2
+            exit 1
+          fi
       - name: Verify adoption rejects invalid active-booking index
         run: |
           export PGPASSWORD="$DB_PASSWORD"
@@ -252,6 +273,22 @@ jobs:
           collation_exists="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_collation c JOIN pg_namespace n ON n.oid = c.collnamespace WHERE n.nspname = 'public' AND c.collname = 'baseline_probe'")"
           if [ "$collation_exists" != "1" ]; then
             echo 'Rejected baseline unexpectedly removed the pre-existing collation.' >&2
+            exit 1
+          fi
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'DROP COLLATION public.baseline_probe;'
+      - name: Verify baseline refuses pre-existing public aggregate
+        run: |
+          export PGPASSWORD="$DB_PASSWORD"
+          psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c "CREATE AGGREGATE public.baseline_sum(integer) (SFUNC = pg_catalog.int4pl, STYPE = integer, INITCOND = '0');"
+          if node backend/scripts/initial-schema-baseline-validation.mjs fresh; then
+            echo 'Initial baseline unexpectedly accepted a public aggregate.' >&2
+            exit 1
+          fi
+          aggregate_exists="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'baseline_sum' AND p.prokind = 'a'")"
+          if [ "$aggregate_exists" != "1" ]; then
+            echo 'Rejected baseline unexpectedly removed the pre-existing aggregate.' >&2
             exit 1
           fi
       - name: Reset disposable database for baseline bootstrap
