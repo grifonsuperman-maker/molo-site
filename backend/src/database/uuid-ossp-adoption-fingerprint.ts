@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { QueryRunner } from 'typeorm';
 
-export const UUID_OSSP_ADOPTION_FINGERPRINT = 'PENDING';
+export const UUID_OSSP_ADOPTION_FINGERPRINT =
+  '502e4e1133e3fae5e19abee1edff830bb64cc1d3b54ebbe160ea860d12b8c3ef';
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {
