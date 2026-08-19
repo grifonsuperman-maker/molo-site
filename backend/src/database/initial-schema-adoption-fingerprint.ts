@@ -29,6 +29,7 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
   const tables = await queryRunner.query(`
     SELECT
       relation.relname AS table_name,
+      relation.relpersistence AS persistence,
       relation.relrowsecurity AS row_security_enabled,
       relation.relforcerowsecurity AS row_security_forced
     FROM pg_class AS relation
@@ -88,6 +89,7 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
       index_view.tablename AS table_name,
       index_view.indexname AS index_name,
       index_view.indexdef AS definition,
+      index_relation.relpersistence AS persistence,
       index_state.indisvalid AS is_valid,
       index_state.indisready AS is_ready
     FROM pg_indexes AS index_view
@@ -165,6 +167,40 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
     ORDER BY function_row.proname, pg_get_function_identity_arguments(function_row.oid)
   `);
 
+  const aggregates = await queryRunner.query(`
+    SELECT
+      aggregate_namespace.nspname AS schema_name,
+      aggregate_proc.proname AS aggregate_name,
+      pg_get_function_identity_arguments(aggregate_proc.oid) AS identity_arguments,
+      pg_get_function_result(aggregate_proc.oid) AS result_type,
+      aggregate_row.aggkind AS aggregate_kind,
+      aggregate_row.aggnumdirectargs AS direct_argument_count,
+      aggregate_row.aggtransfn::regprocedure::text AS transition_function,
+      aggregate_row.aggfinalfn::regprocedure::text AS final_function,
+      aggregate_row.aggcombinefn::regprocedure::text AS combine_function,
+      aggregate_row.aggserialfn::regprocedure::text AS serial_function,
+      aggregate_row.aggdeserialfn::regprocedure::text AS deserial_function,
+      format_type(aggregate_row.aggtranstype, NULL) AS transition_type,
+      aggregate_row.agginitval AS initial_value,
+      aggregate_proc.proparallel AS parallel_safety
+    FROM pg_proc AS aggregate_proc
+    JOIN pg_namespace AS aggregate_namespace
+      ON aggregate_namespace.oid = aggregate_proc.pronamespace
+    JOIN pg_aggregate AS aggregate_row
+      ON aggregate_row.aggfnoid = aggregate_proc.oid
+    WHERE aggregate_namespace.nspname = 'public'
+      AND aggregate_proc.prokind = 'a'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend AS dependency
+        WHERE dependency.classid = 'pg_proc'::regclass
+          AND dependency.objid = aggregate_proc.oid
+          AND dependency.refclassid = 'pg_extension'::regclass
+          AND dependency.deptype = 'e'
+      )
+    ORDER BY aggregate_proc.proname, pg_get_function_identity_arguments(aggregate_proc.oid)
+  `);
+
   const sequences = await queryRunner.query(`
     SELECT
       sequence_namespace.nspname AS schema_name,
@@ -229,6 +265,7 @@ async function collectCurrentSchemaShape(queryRunner: QueryRunner) {
     policies,
     triggers,
     functions,
+    aggregates,
     sequences,
     views,
   };
@@ -290,6 +327,18 @@ export async function assertDatabaseIsFreshForInitialBaseline(
       JOIN pg_namespace AS function_namespace ON function_namespace.oid = function_row.pronamespace
       WHERE function_namespace.nspname = 'public'
         AND function_row.prokind IN ('f', 'p')
+
+      UNION ALL
+
+      SELECT
+        'aggregate'::text,
+        aggregate_namespace.nspname || '.' || aggregate_proc.proname || '(' ||
+          pg_get_function_identity_arguments(aggregate_proc.oid) || ')'
+      FROM pg_proc AS aggregate_proc
+      JOIN pg_namespace AS aggregate_namespace
+        ON aggregate_namespace.oid = aggregate_proc.pronamespace
+      WHERE aggregate_namespace.nspname = 'public'
+        AND aggregate_proc.prokind = 'a'
 
       UNION ALL
 
