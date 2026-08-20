@@ -117,3 +117,50 @@ test('waiter Telegram pages keep every booking reachable', async () => {
   callbacks = keyboardCallbacks(messages.at(-1));
   assert.equal(callbacks.includes('waiter:booking:booking-24'), true);
 });
+
+test('My tables uses booking assignment data and keeps assignments beyond 50 reachable', async () => {
+  const messages = [];
+  const bookings = Array.from({ length: 65 }, (_, index) => ({
+    id: `mine-${index}`,
+    status: 'approved',
+    bookingDate: '2099-01-01',
+    bookingTime: `${String(index % 24).padStart(2, '0')}:30:00`,
+    guestsCount: 2,
+    checkedInAt: new Date('2099-01-01T12:00:00.000Z'),
+    assignedWaiterId: 'waiter-1',
+    assignedWaiterName: 'Олександр',
+    table: {
+      id: `mine-table-${index}`,
+      tableNumber: String(index + 1),
+      seats: 4,
+      status: 'occupied',
+      isVisible: true,
+      zone: { name: 'Зал ресторану' },
+    },
+    client: { fullName: `Гість ${index + 1}` },
+  }));
+
+  const service = new TelegramWaiterMenuService(
+    { async getToday() { return bookings; } },
+    {
+      async list() { return []; },
+      async myAssignments() {
+        throw new Error('My tables must not depend on the capped assignment list');
+      },
+    },
+    { async findAll() { return []; } },
+    {
+      async sendMessage(chatId, text, replyMarkup) {
+        messages.push({ chatId, text, replyMarkup });
+        return { ok: true };
+      },
+    },
+  );
+
+  await service.handle('mine', '6', 999, actor);
+  const callbacks = keyboardCallbacks(messages.at(-1));
+  assert.equal(callbacks.includes('waiter:booking:mine-60'), true);
+  assert.equal(callbacks.includes('waiter:booking:mine-64'), true);
+  assert.equal(callbacks.includes('waiter:mine:5'), true);
+  assert.equal(callbacks.some((value) => value === 'waiter:mine:7'), false);
+});
