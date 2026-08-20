@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  assertProductionDatabaseSynchronize,
   resolveDatabaseSynchronize,
 } = require('../dist/database/database-synchronize.js');
 
@@ -30,6 +31,53 @@ test('database synchronize rejects empty and ambiguous configured values', () =>
   }
 });
 
+test('non-production runtime keeps existing synchronize configuration behavior', () => {
+  assert.doesNotThrow(() =>
+    assertProductionDatabaseSynchronize({ NODE_ENV: 'development' }),
+  );
+  assert.doesNotThrow(() =>
+    assertProductionDatabaseSynchronize({
+      NODE_ENV: 'development',
+      DB_SYNCHRONIZE: 'true',
+    }),
+  );
+});
+
+test('production and Render require DB_SYNCHRONIZE=false explicitly', () => {
+  for (const productionEnv of [
+    { NODE_ENV: 'production' },
+    { RENDER_EXTERNAL_URL: 'https://molo-backend.example' },
+  ]) {
+    assert.throws(
+      () => assertProductionDatabaseSynchronize(productionEnv),
+      /DB_SYNCHRONIZE must be "false" in production/,
+    );
+    assert.throws(
+      () =>
+        assertProductionDatabaseSynchronize({
+          ...productionEnv,
+          DB_SYNCHRONIZE: 'true',
+        }),
+      /DB_SYNCHRONIZE must be "false" in production/,
+    );
+  }
+});
+
+test('production accepts explicit DB_SYNCHRONIZE=false', () => {
+  assert.doesNotThrow(() =>
+    assertProductionDatabaseSynchronize({
+      NODE_ENV: 'production',
+      DB_SYNCHRONIZE: 'false',
+    }),
+  );
+  assert.doesNotThrow(() =>
+    assertProductionDatabaseSynchronize({
+      RENDER_EXTERNAL_URL: 'https://molo-backend.example',
+      DB_SYNCHRONIZE: ' FALSE ',
+    }),
+  );
+});
+
 test('TypeORM resolves DB_SYNCHRONIZE through ConfigService after config loading', async () => {
   const appModule = await readFile(
     path.resolve(__dirname, '../src/app.module.ts'),
@@ -52,4 +100,17 @@ test('TypeORM resolves DB_SYNCHRONIZE through ConfigService after config loading
   );
   assert.equal(synchronizeUsages?.length, 2);
   assert.doesNotMatch(appModule, /synchronize:\s*false/);
+});
+
+test('production synchronize guard runs before Nest application startup', async () => {
+  const main = await readFile(path.resolve(__dirname, '../src/main.ts'), 'utf8');
+
+  assert.match(
+    main,
+    /import \{ assertProductionDatabaseSynchronize \} from '\.\/database\/database-synchronize';/,
+  );
+  assert.ok(
+    main.indexOf('assertProductionDatabaseSynchronize();') <
+      main.indexOf('NestFactory.create(AppModule)'),
+  );
 });

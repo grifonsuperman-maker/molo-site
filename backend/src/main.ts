@@ -2,10 +2,12 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { assertProductionSecrets } from './config/runtime-secrets';
+import { assertProductionDatabaseSynchronize } from './database/database-synchronize';
 import { TelegramService } from './notifications/telegram.service';
 
 async function bootstrap() {
   assertProductionSecrets();
+  assertProductionDatabaseSynchronize();
 
   const app = await NestFactory.create(AppModule);
   app.enableCors({ origin: true, credentials: true });
