@@ -167,7 +167,10 @@ export class NotificationsService {
       ],
     };
 
-    await this.sendToRoles(['owner', 'admin', 'waiter'], text, replyMarkup);
+    await Promise.all([
+      this.sendToRoles(['owner', 'admin'], text, replyMarkup),
+      this.sendToRoles(['waiter'], text),
+    ]);
   }
 
   async notifyBookingApproved(booking: Booking) {
