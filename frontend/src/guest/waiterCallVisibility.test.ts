@@ -1,6 +1,7 @@
 import {
   isGuestServiceBookingForToday,
   isWaiterCallBookingForToday,
+  shouldRefreshGuestServiceStatusOnVisibility,
 } from './waiterCallVisibility.js';
 
 const today = '2026-08-09';
@@ -39,4 +40,21 @@ for (const testCase of cases) {
   }
 }
 
-console.log(`Passed ${cases.length} guest-service visibility checks.`);
+const visibilityCases = [
+  { state: 'visible', expected: true },
+  { state: 'hidden', expected: false },
+  { state: 'prerender', expected: false },
+];
+
+for (const testCase of visibilityCases) {
+  const actual = shouldRefreshGuestServiceStatusOnVisibility(testCase.state);
+  if (actual !== testCase.expected) {
+    throw new Error(
+      `visibility ${testCase.state}: expected ${testCase.expected}, received ${actual}`,
+    );
+  }
+}
+
+console.log(
+  `Passed ${cases.length} guest-service visibility checks and ${visibilityCases.length} resume checks.`,
+);
