@@ -12,6 +12,7 @@ import {
 } from '../api/waiterCalls';
 import {
   isGuestServiceBookingForToday,
+  isGuestServiceStatusSnapshotCurrent,
   shouldRefreshGuestServiceStatusOnVisibility,
 } from './waiterCallVisibility';
 
@@ -54,8 +55,21 @@ export default function GuestBookingServiceActions({
   const [burst, setBurst] = useState<ServiceKind | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const burstTimer = useRef<number | null>(null);
+  const waiterStatusRequestId = useRef(0);
+  const hookahStatusRequestId = useRef(0);
+  const waiterMutationVersion = useRef(0);
+  const hookahMutationVersion = useRef(0);
 
   const loadWaiterStatus = useCallback(async (silent = false) => {
+    const requestId = ++waiterStatusRequestId.current;
+    const mutationVersion = waiterMutationVersion.current;
+    const snapshotIsCurrent = () => isGuestServiceStatusSnapshotCurrent(
+      requestId,
+      waiterStatusRequestId.current,
+      mutationVersion,
+      waiterMutationVersion.current,
+    );
+
     if (!bookingIsToday) {
       setWaiterStatus(null);
       setWaiterLoading(false);
@@ -65,16 +79,29 @@ export default function GuestBookingServiceActions({
     try {
       if (!silent) setWaiterLoading(true);
       const result = await waiterCallsApi.guestStatus(booking.bookingId);
+      if (!snapshotIsCurrent()) return;
       setWaiterStatus(result);
       setWaiterError(null);
     } catch (loadError) {
+      if (!snapshotIsCurrent()) return;
       setWaiterError(errorText(loadError));
     } finally {
-      if (!silent) setWaiterLoading(false);
+      if (!silent && requestId === waiterStatusRequestId.current) {
+        setWaiterLoading(false);
+      }
     }
   }, [booking.bookingId, bookingIsToday]);
 
   const loadHookahStatus = useCallback(async (silent = false) => {
+    const requestId = ++hookahStatusRequestId.current;
+    const mutationVersion = hookahMutationVersion.current;
+    const snapshotIsCurrent = () => isGuestServiceStatusSnapshotCurrent(
+      requestId,
+      hookahStatusRequestId.current,
+      mutationVersion,
+      hookahMutationVersion.current,
+    );
+
     if (!bookingIsToday) {
       setHookahStatus(null);
       setHookahLoading(false);
@@ -84,12 +111,16 @@ export default function GuestBookingServiceActions({
     try {
       if (!silent) setHookahLoading(true);
       const result = await hookahCallsApi.getGuestStatus(booking.bookingId);
+      if (!snapshotIsCurrent()) return;
       setHookahStatus(result);
       setHookahError(null);
     } catch (loadError) {
+      if (!snapshotIsCurrent()) return;
       setHookahError(errorText(loadError));
     } finally {
-      if (!silent) setHookahLoading(false);
+      if (!silent && requestId === hookahStatusRequestId.current) {
+        setHookahLoading(false);
+      }
     }
   }, [booking.bookingId, bookingIsToday]);
 
@@ -176,12 +207,14 @@ export default function GuestBookingServiceActions({
       return;
     }
     showBurst('waiter');
+    waiterMutationVersion.current += 1;
 
     try {
       setWaiterCalling(true);
       setWaiterError(null);
       setWaiterMessage(null);
       const result = await waiterCallsApi.createFromGuest(booking.bookingId);
+      waiterMutationVersion.current += 1;
       setWaiterStatus((current) => ({
         bookingId: booking.bookingId,
         tableNumber:
@@ -206,12 +239,14 @@ export default function GuestBookingServiceActions({
       return;
     }
     showBurst('hookah');
+    hookahMutationVersion.current += 1;
 
     try {
       setHookahCalling(true);
       setHookahError(null);
       setHookahMessage(null);
       const result = await hookahCallsApi.createFromGuest(booking.bookingId);
+      hookahMutationVersion.current += 1;
       setHookahStatus((current) => ({
         bookingId: booking.bookingId,
         bookingStatus: current?.bookingStatus || booking.status,
