@@ -280,7 +280,7 @@ export default function GuestBookingServiceActions({
         Math.ceil((new Date(hookahCall.etaDueAt).getTime() - now) / 1_000),
       )
     : 0;
-  const countdown = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60)).padStart(2, '0')}`;
+  const countdown = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`;
 
   return (
     <section
