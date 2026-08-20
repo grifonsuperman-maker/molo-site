@@ -235,9 +235,9 @@ export class TelegramWaiterMenuService {
     }
 
     if (mode === 'mine') {
-      const assignments = await this.waiterCalls.myAssignments(actor.staffId || '');
-      const bookingIds = new Set(assignments.map((item) => item.bookingId));
-      bookings = bookings.filter((booking) => bookingIds.has(booking.id));
+      bookings = bookings.filter(
+        (booking) => booking.assignedWaiterId === actor.staffId,
+      );
     }
 
     const title = mode === 'mine'
