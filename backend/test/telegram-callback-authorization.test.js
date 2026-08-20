@@ -17,11 +17,11 @@ function createHarness(actor) {
     async cancel(id) {
       calls.push(['cancel', id]);
     },
-    async checkIn(id) {
-      calls.push(['checkin', id]);
+    async checkIn(id, authUser) {
+      calls.push(['checkin', id, authUser]);
     },
-    async complete(id) {
-      calls.push(['complete', id]);
+    async complete(id, authUser) {
+      calls.push(['complete', id, authUser]);
     },
     async rejectReschedule(id) {
       calls.push(['reschedule-reject', id]);
@@ -207,6 +207,8 @@ test('Director can execute protected admin callbacks without shift requirement',
 
 test('Waiter on shift can check in and complete but cannot approve', async () => {
   const actor = {
+    id: 'staff-waiter-1',
+    fullName: 'Олександр',
     role: 'waiter',
     active: true,
     isArchived: false,
@@ -220,7 +222,12 @@ test('Waiter on shift can check in and complete but cannot approve', async () =>
     ),
     { ok: true },
   );
-  assert.equal(checkIn.calls.some((entry) => entry[0] === 'checkin'), true);
+  const checkInCall = checkIn.calls.find((entry) => entry[0] === 'checkin');
+  assert.ok(checkInCall);
+  assert.equal(checkInCall[2].role, 'waiter');
+  assert.equal(checkInCall[2].staffId, 'staff-waiter-1');
+  assert.equal(checkInCall[2].name, 'Олександр');
+  assert.equal(checkInCall[2].telegramId, '123');
 
   const complete = createHarness(actor);
   assert.deepEqual(
@@ -229,7 +236,12 @@ test('Waiter on shift can check in and complete but cannot approve', async () =>
     ),
     { ok: true },
   );
-  assert.equal(complete.calls.some((entry) => entry[0] === 'complete'), true);
+  const completeCall = complete.calls.find((entry) => entry[0] === 'complete');
+  assert.ok(completeCall);
+  assert.equal(completeCall[2].role, 'waiter');
+  assert.equal(completeCall[2].staffId, 'staff-waiter-1');
+  assert.equal(completeCall[2].name, 'Олександр');
+  assert.equal(completeCall[2].telegramId, '123');
 
   const approve = createHarness(actor);
   assert.deepEqual(
