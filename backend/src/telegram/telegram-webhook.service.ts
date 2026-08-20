@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import type { AuthUser } from '../auth/types/auth-user.type';
 import { BookingRescheduleApprovalService } from '../bookings/booking-reschedule-approval.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { TelegramService } from '../notifications/telegram.service';
@@ -10,6 +11,11 @@ import { TelegramStaffLinkService } from '../staff/telegram-staff-link.service';
 type CallbackRoleRule = {
   roles: StaffRole[];
   requiresShift?: boolean;
+};
+
+type CallbackAuthorization = {
+  role: StaffRole | 'unprotected';
+  actor: AuthUser | null;
 };
 
 const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
@@ -124,19 +130,22 @@ export class TelegramWebhookService {
     const [type, action, id] = data.split(':');
 
     try {
-      const actorRole = await this.getCallbackActorRole(
+      const authorization = await this.getCallbackAuthorization(
         cb.from?.id,
         type,
         action,
       );
 
-      if (!actorRole) {
+      if (!authorization) {
         await this.telegram.sendMessage(
           chatId,
           '⛔ Недостатньо прав для цієї команди. Відкрийте робочий профіль MOLO.',
         );
         return { ok: false };
       }
+
+      const actorRole = authorization.role;
+      const actor = authorization.actor;
 
       if (type === 'menu' && action === 'admin') {
         const keyboard: Array<Array<Record<string, unknown>>> = [];
@@ -214,13 +223,13 @@ export class TelegramWebhookService {
       }
 
       if (type === 'booking' && action === 'checkin') {
-        await this.bookings.checkIn(id);
+        await this.bookings.checkIn(id, actor || undefined);
         await this.telegram.sendMessage(chatId, '⚫ Гості прийшли, стіл зайнятий');
         return { ok: true };
       }
 
       if (type === 'booking' && action === 'complete') {
-        await this.bookings.complete(id);
+        await this.bookings.complete(id, actor || undefined);
         await this.telegram.sendMessage(chatId, '🟢 Стіл вільний');
         return { ok: true };
       }
@@ -269,19 +278,18 @@ export class TelegramWebhookService {
     }
   }
 
-  private async getCallbackActorRole(
+  private async getCallbackAuthorization(
     telegramUserId: string | number | undefined,
     type: string,
     action: string,
-  ): Promise<StaffRole | 'unprotected' | null> {
+  ): Promise<CallbackAuthorization | null> {
     const rule = CALLBACK_ROLE_RULES[`${type}:${action}`];
 
-    if (!rule) return 'unprotected';
+    if (!rule) return { role: 'unprotected', actor: null };
     if (!telegramUserId) return null;
 
-    const actor = await this.telegramStaff.findActiveStaffByTelegramId(
-      String(telegramUserId),
-    );
+    const telegramId = String(telegramUserId);
+    const actor = await this.telegramStaff.findActiveStaffByTelegramId(telegramId);
 
     if (!actor || !rule.roles.includes(actor.role)) return null;
 
@@ -293,7 +301,16 @@ export class TelegramWebhookService {
       return null;
     }
 
-    return actor.role;
+    return {
+      role: actor.role,
+      actor: {
+        sub: actor.id,
+        telegramId,
+        role: actor.role,
+        staffId: actor.id,
+        name: actor.fullName,
+      },
+    };
   }
 
   private staffRoleMenu(role: StaffRole): {

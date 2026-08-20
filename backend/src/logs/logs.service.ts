@@ -9,6 +9,19 @@ export class LogsService {
   constructor(@InjectRepository(Log) private readonly logsRepo: Repository<Log>) {}
   findAll() { return this.logsRepo.find({ relations: ['staff'], order: { createdAt: 'DESC' }, take: 300 }); }
   create(action: string, staff?: Staff | null, details?: Record<string, unknown>) {
-    return this.logsRepo.save(this.logsRepo.create({ action, staff: staff || null, details: details || null }));
+    const staffIdFromDetails =
+      !staff && typeof details?.staffId === 'string'
+        ? details.staffId.trim()
+        : '';
+    const resolvedStaff =
+      staff || (staffIdFromDetails ? ({ id: staffIdFromDetails } as Staff) : null);
+
+    return this.logsRepo.save(
+      this.logsRepo.create({
+        action,
+        staff: resolvedStaff,
+        details: details || null,
+      }),
+    );
   }
 }

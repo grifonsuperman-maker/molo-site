@@ -215,8 +215,8 @@ export class BookingsController {
 
   @Patch(':id/complete')
   @Roles('waiter', 'admin', 'owner')
-  complete(@Param('id') id: string) {
-    return this.service.complete(id);
+  complete(@Param('id') id: string, @Req() request: any) {
+    return this.service.complete(id, request.user);
   }
 
   @Patch(':id/waiter-transfer')
