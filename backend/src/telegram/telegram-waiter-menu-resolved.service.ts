@@ -6,6 +6,7 @@ import { BookingsService } from '../bookings/bookings.service';
 import { TelegramService } from '../notifications/telegram.service';
 import { TablesService } from '../tables/tables.service';
 import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
+import { TelegramWaiterAssignmentLookupService } from './telegram-waiter-assignment-lookup.service';
 import { TelegramWaiterMenuService } from './telegram-waiter-menu.service';
 
 type TodayBooking = Booking & {
@@ -14,7 +15,6 @@ type TodayBooking = Booking & {
 };
 
 const PAGE_SIZE = 10;
-const RESOLUTION_BATCH_SIZE = 10;
 const ACTIVE_BOOKING_STATUSES = new Set(['pending', 'approved']);
 
 @Injectable()
@@ -24,6 +24,7 @@ export class TelegramWaiterMenuResolvedService extends TelegramWaiterMenuService
     private readonly mineWaiterCalls: WaiterCallsService,
     tables: TablesService,
     private readonly mineTelegram: TelegramService,
+    private readonly mineAssignmentLookup: TelegramWaiterAssignmentLookupService,
   ) {
     super(mineBookingsService, mineWaiterCalls, tables, mineTelegram);
   }
@@ -90,27 +91,23 @@ export class TelegramWaiterMenuResolvedService extends TelegramWaiterMenuService
   }
 
   private async resolveMine(bookings: TodayBooking[], waiterId: string) {
-    const mine: TodayBooking[] = [];
+    const withoutHistoryAssignment = bookings.filter(
+      (booking) => !booking.assignedWaiterId,
+    );
+    const callAssignmentBookingIds = withoutHistoryAssignment.length
+      ? new Set(
+          await this.mineAssignmentLookup.bookingIdsForWaiter(
+            withoutHistoryAssignment,
+            waiterId,
+          ),
+        )
+      : new Set<string>();
 
-    for (let offset = 0; offset < bookings.length; offset += RESOLUTION_BATCH_SIZE) {
-      const chunk = bookings.slice(offset, offset + RESOLUTION_BATCH_SIZE);
-      const matches = await Promise.all(
-        chunk.map(async (booking) => {
-          if (booking.assignedWaiterId) {
-            return booking.assignedWaiterId === waiterId;
-          }
-
-          const assignment = await this.mineWaiterCalls.assignmentForBooking(booking);
-          return assignment?.waiterId === waiterId;
-        }),
-      );
-
-      matches.forEach((matchesWaiter, index) => {
-        if (matchesWaiter) mine.push(chunk[index]);
-      });
-    }
-
-    return mine;
+    return bookings.filter((booking) =>
+      booking.assignedWaiterId
+        ? booking.assignedWaiterId === waiterId
+        : callAssignmentBookingIds.has(booking.id),
+    );
   }
 
   private mineBookingButtonLabel(booking: TodayBooking) {
