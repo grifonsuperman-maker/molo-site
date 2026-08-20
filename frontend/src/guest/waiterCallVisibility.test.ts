@@ -75,7 +75,12 @@ const snapshotCases = [
 ];
 
 for (const testCase of snapshotCases) {
-  const actual = isGuestServiceStatusSnapshotCurrent(...testCase.args);
+  const actual = isGuestServiceStatusSnapshotCurrent(
+    testCase.args[0],
+    testCase.args[1],
+    testCase.args[2],
+    testCase.args[3],
+  );
   if (actual !== testCase.expected) {
     throw new Error(
       `${testCase.name}: expected ${testCase.expected}, received ${actual}`,
