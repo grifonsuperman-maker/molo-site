@@ -228,6 +228,10 @@ test('Waiter on shift can check in and complete but cannot approve', async () =>
   assert.equal(checkInCall[2].staffId, 'staff-waiter-1');
   assert.equal(checkInCall[2].name, 'Олександр');
   assert.equal(checkInCall[2].telegramId, '123');
+  assert.equal(
+    checkIn.calls.filter((entry) => entry[0] === 'staff-find').length,
+    1,
+  );
 
   const complete = createHarness(actor);
   assert.deepEqual(
@@ -242,6 +246,10 @@ test('Waiter on shift can check in and complete but cannot approve', async () =>
   assert.equal(completeCall[2].staffId, 'staff-waiter-1');
   assert.equal(completeCall[2].name, 'Олександр');
   assert.equal(completeCall[2].telegramId, '123');
+  assert.equal(
+    complete.calls.filter((entry) => entry[0] === 'staff-find').length,
+    1,
+  );
 
   const approve = createHarness(actor);
   assert.deepEqual(
