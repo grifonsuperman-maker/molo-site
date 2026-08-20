@@ -1,5 +1,6 @@
 import {
   isGuestServiceBookingForToday,
+  isGuestServiceStatusSnapshotCurrent,
   isWaiterCallBookingForToday,
   shouldRefreshGuestServiceStatusOnVisibility,
 } from './waiterCallVisibility.js';
@@ -55,6 +56,33 @@ for (const testCase of visibilityCases) {
   }
 }
 
+const snapshotCases = [
+  {
+    name: 'accepts the latest snapshot when no guest action happened',
+    args: [3, 3, 4, 4] as const,
+    expected: true,
+  },
+  {
+    name: 'rejects an older request that resolves after a newer request',
+    args: [2, 3, 4, 4] as const,
+    expected: false,
+  },
+  {
+    name: 'rejects a snapshot started before a new guest call',
+    args: [3, 3, 4, 5] as const,
+    expected: false,
+  },
+];
+
+for (const testCase of snapshotCases) {
+  const actual = isGuestServiceStatusSnapshotCurrent(...testCase.args);
+  if (actual !== testCase.expected) {
+    throw new Error(
+      `${testCase.name}: expected ${testCase.expected}, received ${actual}`,
+    );
+  }
+}
+
 console.log(
-  `Passed ${cases.length} guest-service visibility checks and ${visibilityCases.length} resume checks.`,
+  `Passed ${cases.length} guest-service visibility checks, ${visibilityCases.length} resume checks and ${snapshotCases.length} stale-snapshot checks.`,
 );
