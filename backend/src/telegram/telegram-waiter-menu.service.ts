@@ -15,6 +15,7 @@ type TodayBooking = Booking & {
 
 type BookingListMode = 'active' | 'mine' | 'history';
 
+const PAGE_SIZE = 10;
 const ACTIVE_BOOKING_STATUSES = new Set(['pending', 'approved']);
 
 const BOOKING_STATUS_LABELS: Record<string, string> = {
@@ -94,7 +95,10 @@ export class TelegramWaiterMenuService {
 
     switch (action) {
       case 'calls':
-        await this.sendCalls(chatId, actor);
+        await this.sendCalls(chatId, actor, 0);
+        return true;
+      case 'calls_page':
+        await this.sendCalls(chatId, actor, this.parsePage(id));
         return true;
       case 'call':
         await this.sendCall(chatId, id, actor);
@@ -106,13 +110,22 @@ export class TelegramWaiterMenuService {
         await this.closeCall(chatId, id, actor);
         return true;
       case 'mine':
-        await this.sendBookings(chatId, actor, 'mine');
+        await this.sendBookings(chatId, actor, 'mine', 0);
+        return true;
+      case 'mine_page':
+        await this.sendBookings(chatId, actor, 'mine', this.parsePage(id));
         return true;
       case 'bookings':
-        await this.sendBookings(chatId, actor, 'active');
+        await this.sendBookings(chatId, actor, 'active', 0);
+        return true;
+      case 'bookings_page':
+        await this.sendBookings(chatId, actor, 'active', this.parsePage(id));
         return true;
       case 'history':
-        await this.sendBookings(chatId, actor, 'history');
+        await this.sendBookings(chatId, actor, 'history', 0);
+        return true;
+      case 'history_page':
+        await this.sendBookings(chatId, actor, 'history', this.parsePage(id));
         return true;
       case 'booking':
         await this.sendBooking(chatId, id);
@@ -146,20 +159,30 @@ export class TelegramWaiterMenuService {
     }
   }
 
-  private async sendCalls(chatId: string | number, actor: AuthUser) {
+  private async sendCalls(chatId: string | number, actor: AuthUser, requestedPage = 0) {
     const calls = await this.waiterCalls.list(actor.staffId || undefined);
-    const keyboard = calls.slice(0, 20).map((call) => [
+    const page = this.paginate(calls, requestedPage);
+    const keyboard: Array<Array<Record<string, unknown>>> = page.items.map((call) => [
       {
         text: `${call.status === 'accepted' ? '✅' : '🔔'} Стіл №${call.tableNumber || '—'} · ${call.clientName || 'Гість'}`.slice(0, 60),
         callback_data: `waiter:call:${call.id}`,
       },
     ]);
+
+    const pageButtons: Array<Record<string, unknown>> = [];
+    if (page.pageIndex > 0) {
+      pageButtons.push({ text: '⬅️', callback_data: `waiter:calls_page:${page.pageIndex - 1}` });
+    }
+    if (page.pageIndex + 1 < page.totalPages) {
+      pageButtons.push({ text: '➡️', callback_data: `waiter:calls_page:${page.pageIndex + 1}` });
+    }
+    if (pageButtons.length) keyboard.push(pageButtons);
     keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:waiter' }]);
 
     await this.telegram.sendMessage(
       chatId,
       calls.length
-        ? `🔔 <b>Виклики Офіціанта</b> · ${calls.length}`
+        ? `🔔 <b>Виклики Офіціанта</b> · ${calls.length}\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
         : '🔔 <b>Виклики Офіціанта</b>\n\nНових викликів немає.',
       { inline_keyboard: keyboard },
     );
@@ -199,20 +222,21 @@ export class TelegramWaiterMenuService {
       waiterName: actor.name || 'Офіціант',
     });
     await this.telegram.sendMessage(chatId, '✅ Виклик прийнято');
-    await this.sendCalls(chatId, actor);
+    await this.sendCalls(chatId, actor, 0);
   }
 
   private async closeCall(chatId: string | number, id: string | undefined, actor: AuthUser) {
     if (!id || !actor.staffId) throw new BadRequestException('Виклик не вказано');
     await this.waiterCalls.close(id, actor.staffId);
     await this.telegram.sendMessage(chatId, '🟢 Виклик закрито');
-    await this.sendCalls(chatId, actor);
+    await this.sendCalls(chatId, actor, 0);
   }
 
   private async sendBookings(
     chatId: string | number,
     actor: AuthUser,
     mode: BookingListMode,
+    requestedPage = 0,
   ) {
     let bookings = (await this.bookings.getToday()) as TodayBooking[];
 
@@ -233,18 +257,34 @@ export class TelegramWaiterMenuService {
       : mode === 'history'
         ? '🧾 <b>Історія за сьогодні</b>'
         : '📋 <b>Усі бронювання на сьогодні</b>';
-
-    const keyboard = bookings.slice(0, 20).map((booking) => [
+    const pageAction = mode === 'mine'
+      ? 'mine_page'
+      : mode === 'history'
+        ? 'history_page'
+        : 'bookings_page';
+    const page = this.paginate(bookings, requestedPage);
+    const keyboard: Array<Array<Record<string, unknown>>> = page.items.map((booking) => [
       {
         text: this.bookingButtonLabel(booking),
         callback_data: `waiter:booking:${booking.id}`,
       },
     ]);
+
+    const pageButtons: Array<Record<string, unknown>> = [];
+    if (page.pageIndex > 0) {
+      pageButtons.push({ text: '⬅️', callback_data: `waiter:${pageAction}:${page.pageIndex - 1}` });
+    }
+    if (page.pageIndex + 1 < page.totalPages) {
+      pageButtons.push({ text: '➡️', callback_data: `waiter:${pageAction}:${page.pageIndex + 1}` });
+    }
+    if (pageButtons.length) keyboard.push(pageButtons);
     keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:waiter' }]);
 
     await this.telegram.sendMessage(
       chatId,
-      bookings.length ? `${title} · ${bookings.length}` : `${title}\n\nБронювань немає.`,
+      bookings.length
+        ? `${title} · ${bookings.length}\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
+        : `${title}\n\nБронювань немає.`,
       { inline_keyboard: keyboard },
     );
   }
@@ -344,7 +384,7 @@ export class TelegramWaiterMenuService {
 
     await this.bookings.complete(booking.id, actor);
     await this.telegram.sendMessage(chatId, '✅ Стіл готовий і вільний');
-    await this.sendBookings(chatId, actor, 'active');
+    await this.sendBookings(chatId, actor, 'active', 0);
   }
 
   private async sendTableLocations(chatId: string | number) {
@@ -460,6 +500,22 @@ export class TelegramWaiterMenuService {
     const table = booking.table?.tableNumber || '—';
     const guest = booking.client?.fullName || 'Гість';
     return `№${table} · ${this.formatTime(booking.bookingTime)} · ${guest}`.slice(0, 60);
+  }
+
+  private parsePage(value: string | undefined) {
+    const page = Number(value);
+    return Number.isInteger(page) && page >= 0 ? page : 0;
+  }
+
+  private paginate<T>(items: T[], requestedPage: number) {
+    const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    const pageIndex = Math.min(Math.max(0, requestedPage), totalPages - 1);
+    const start = pageIndex * PAGE_SIZE;
+    return {
+      items: items.slice(start, start + PAGE_SIZE),
+      pageIndex,
+      totalPages,
+    };
   }
 
   private formatTime(value: string | null | undefined) {
