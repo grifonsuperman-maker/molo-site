@@ -16,4 +16,16 @@ export function shouldRefreshGuestServiceStatusOnVisibility(
   return visibilityState === 'visible';
 }
 
+export function isGuestServiceStatusSnapshotCurrent(
+  requestId: number,
+  latestRequestId: number,
+  mutationVersion: number,
+  currentMutationVersion: number,
+) {
+  return (
+    requestId === latestRequestId &&
+    mutationVersion === currentMutationVersion
+  );
+}
+
 export const isWaiterCallBookingForToday = isGuestServiceBookingForToday;
