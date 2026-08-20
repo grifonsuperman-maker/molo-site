@@ -1,20 +1,30 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Req } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
-import { WaiterCallsService } from './waiter-calls.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { WaiterCallTelegramNotifierService } from './waiter-call-telegram-notifier.service';
+import { WaiterCallsService } from './waiter-calls.service';
 
 @Controller('waiter-calls')
 export class WaiterCallsController {
-  constructor(private readonly service: WaiterCallsService) {}
+  constructor(
+    private readonly service: WaiterCallsService,
+    private readonly telegramNotifier: WaiterCallTelegramNotifierService,
+  ) {}
 
   @Post()
   @Public()
-  createFromGuest(
+  async createFromGuest(
     @Body() dto: { bookingId: string },
     @Headers('x-guest-booking-token') guestToken?: string,
   ) {
-    return this.service.createFromGuest(dto, guestToken);
+    const result = await this.service.createFromGuest(dto, guestToken);
+
+    if (result.message !== 'Виклик вже відправлено') {
+      void this.notifyTelegramWaiters(result.call);
+    }
+
+    return result;
   }
 
   @Get()
@@ -58,5 +68,17 @@ export class WaiterCallsController {
   @Roles('waiter')
   close(@Param('id') id: string, @Req() request: any) {
     return this.service.close(id, request.user.staffId);
+  }
+
+  private async notifyTelegramWaiters(call: Awaited<ReturnType<WaiterCallsService['createFromGuest']>>['call']) {
+    try {
+      const activeCalls = await this.service.list();
+      await this.telegramNotifier.notifyCreated(call, activeCalls);
+    } catch (error: any) {
+      console.error(
+        'Telegram waiter call notification failed:',
+        error?.message || error,
+      );
+    }
   }
 }
