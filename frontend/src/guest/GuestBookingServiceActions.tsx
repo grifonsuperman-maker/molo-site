@@ -86,7 +86,7 @@ export default function GuestBookingServiceActions({
       if (!snapshotIsCurrent()) return;
       setWaiterError(errorText(loadError));
     } finally {
-      if (!silent && requestId === waiterStatusRequestId.current) {
+      if (requestId === waiterStatusRequestId.current) {
         setWaiterLoading(false);
       }
     }
@@ -118,7 +118,7 @@ export default function GuestBookingServiceActions({
       if (!snapshotIsCurrent()) return;
       setHookahError(errorText(loadError));
     } finally {
-      if (!silent && requestId === hookahStatusRequestId.current) {
+      if (requestId === hookahStatusRequestId.current) {
         setHookahLoading(false);
       }
     }
