@@ -7,6 +7,7 @@ import { TelegramService } from '../notifications/telegram.service';
 import { RestaurantService } from '../restaurant/restaurant.service';
 import type { StaffRole } from '../staff/entities/staff.entity';
 import { TelegramStaffLinkService } from '../staff/telegram-staff-link.service';
+import { TelegramWaiterMenuService } from './telegram-waiter-menu.service';
 
 type CallbackRoleRule = {
   roles: StaffRole[];
@@ -18,12 +19,37 @@ type CallbackAuthorization = {
   actor: AuthUser | null;
 };
 
+const WAITER_CALLBACK_ACTIONS = [
+  'calls',
+  'call',
+  'call_accept',
+  'call_close',
+  'mine',
+  'bookings',
+  'history',
+  'booking',
+  'booking_checkin',
+  'booking_cleaning',
+  'booking_complete',
+  'tables',
+  'zone',
+  'table',
+  'table_occupied',
+  'table_free',
+] as const;
+
 const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
   'menu:admin': { roles: ['admin', 'owner'] },
   'menu:waiter': {
     roles: ['waiter', 'admin', 'owner'],
     requiresShift: true,
   },
+  ...Object.fromEntries(
+    WAITER_CALLBACK_ACTIONS.map((action) => [
+      `waiter:${action}`,
+      { roles: ['waiter'] as StaffRole[], requiresShift: true },
+    ]),
+  ),
   'booking:approve': { roles: ['admin', 'owner'] },
   'booking:reject': { roles: ['admin', 'owner'] },
   'booking:cancel': { roles: ['admin', 'owner'] },
@@ -50,6 +76,7 @@ export class TelegramWebhookService {
     private readonly restaurant: RestaurantService,
     private readonly telegram: TelegramService,
     private readonly telegramStaff: TelegramStaffLinkService,
+    private readonly waiterMenu?: TelegramWaiterMenuService,
   ) {}
 
   async handleUpdate(update: any) {
@@ -94,23 +121,30 @@ export class TelegramWebhookService {
 
       const roleMenu = this.staffRoleMenu(staff.role);
       const appUrl = this.getWebAppUrl(roleMenu.mode);
-      const keyboard = appUrl
-        ? {
-            inline_keyboard: [
-              [
-                {
-                  text: roleMenu.button,
-                  web_app: { url: appUrl },
-                },
-              ],
-            ],
-          }
-        : undefined;
+      const rows: Array<Array<Record<string, unknown>>> = [];
+
+      if (staff.role === 'waiter') {
+        rows.push([
+          {
+            text: '👨‍🍳 Команди Офіціанта',
+            callback_data: 'menu:waiter',
+          },
+        ]);
+      }
+
+      if (appUrl) {
+        rows.push([
+          {
+            text: roleMenu.button,
+            web_app: { url: appUrl },
+          },
+        ]);
+      }
 
       await this.telegram.sendMessage(
         chatId,
         `Вітаємо, ${staff.fullName} 👋\n\n${roleMenu.title}`,
-        keyboard,
+        rows.length ? { inline_keyboard: rows } : undefined,
       );
       return { ok: true };
     }
@@ -185,6 +219,11 @@ export class TelegramWebhookService {
       if (type === 'menu' && action === 'waiter') {
         const waiterAppUrl = this.getWebAppUrl('waiter');
 
+        if (actorRole === 'waiter' && this.waiterMenu) {
+          await this.waiterMenu.sendMenu(chatId, waiterAppUrl);
+          return { ok: true };
+        }
+
         await this.telegram.sendMessage(
           chatId,
           '👨‍🍳 Панель офіціанта\n\nБронювання на сьогодні доступні в Mini App.',
@@ -202,6 +241,14 @@ export class TelegramWebhookService {
             : undefined,
         );
         return { ok: true };
+      }
+
+      if (type === 'waiter') {
+        if (!this.waiterMenu) {
+          throw new Error('Telegram-пульт Офіціанта не підключено');
+        }
+        const handled = await this.waiterMenu.handle(action, id, chatId, actor);
+        if (handled) return { ok: true };
       }
 
       if (type === 'booking' && action === 'approve') {
