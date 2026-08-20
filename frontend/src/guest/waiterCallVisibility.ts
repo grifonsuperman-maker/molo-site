@@ -10,4 +10,10 @@ export function isGuestServiceBookingForToday(
   return booking.status === 'approved' && booking.bookingDate === today;
 }
 
+export function shouldRefreshGuestServiceStatusOnVisibility(
+  visibilityState: string,
+) {
+  return visibilityState === 'visible';
+}
+
 export const isWaiterCallBookingForToday = isGuestServiceBookingForToday;
