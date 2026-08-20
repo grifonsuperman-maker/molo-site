@@ -905,7 +905,7 @@ export class BookingsService {
     return { message: 'Гості відмічені як присутні' };
   }
 
-  async complete(id: string) {
+  async complete(id: string, actor?: AuthUser) {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
@@ -913,9 +913,22 @@ export class BookingsService {
     booking.status = 'completed';
     booking.completedAt = new Date();
     await this.bookings.save(booking);
-    await this.saveHistory(booking, 'booking_completed', 'admin', previousData, this.bookingSnapshot(booking));
+    await this.saveHistory(
+      booking,
+      'booking_completed',
+      actor?.role || 'admin',
+      previousData,
+      this.bookingSnapshot(booking),
+      null,
+      actor || null,
+    );
     await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate, true);
-    await this.safeLog('Стіл звільнено', { bookingId: id });
+    await this.safeLog('Стіл звільнено', {
+      bookingId: id,
+      staffId: actor?.staffId || null,
+      staffName: actor?.name || null,
+      role: actor?.role || 'admin',
+    });
     return { message: 'Стіл звільнено' };
   }
 
