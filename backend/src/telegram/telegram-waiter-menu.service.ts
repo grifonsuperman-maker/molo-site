@@ -95,9 +95,6 @@ export class TelegramWaiterMenuService {
 
     switch (action) {
       case 'calls':
-        await this.sendCalls(chatId, actor, 0);
-        return true;
-      case 'calls_page':
         await this.sendCalls(chatId, actor, this.parsePage(id));
         return true;
       case 'call':
@@ -110,21 +107,12 @@ export class TelegramWaiterMenuService {
         await this.closeCall(chatId, id, actor);
         return true;
       case 'mine':
-        await this.sendBookings(chatId, actor, 'mine', 0);
-        return true;
-      case 'mine_page':
         await this.sendBookings(chatId, actor, 'mine', this.parsePage(id));
         return true;
       case 'bookings':
-        await this.sendBookings(chatId, actor, 'active', 0);
-        return true;
-      case 'bookings_page':
         await this.sendBookings(chatId, actor, 'active', this.parsePage(id));
         return true;
       case 'history':
-        await this.sendBookings(chatId, actor, 'history', 0);
-        return true;
-      case 'history_page':
         await this.sendBookings(chatId, actor, 'history', this.parsePage(id));
         return true;
       case 'booking':
@@ -171,10 +159,10 @@ export class TelegramWaiterMenuService {
 
     const pageButtons: Array<Record<string, unknown>> = [];
     if (page.pageIndex > 0) {
-      pageButtons.push({ text: '⬅️', callback_data: `waiter:calls_page:${page.pageIndex - 1}` });
+      pageButtons.push({ text: '⬅️', callback_data: `waiter:calls:${page.pageIndex - 1}` });
     }
     if (page.pageIndex + 1 < page.totalPages) {
-      pageButtons.push({ text: '➡️', callback_data: `waiter:calls_page:${page.pageIndex + 1}` });
+      pageButtons.push({ text: '➡️', callback_data: `waiter:calls:${page.pageIndex + 1}` });
     }
     if (pageButtons.length) keyboard.push(pageButtons);
     keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:waiter' }]);
@@ -258,10 +246,10 @@ export class TelegramWaiterMenuService {
         ? '🧾 <b>Історія за сьогодні</b>'
         : '📋 <b>Усі бронювання на сьогодні</b>';
     const pageAction = mode === 'mine'
-      ? 'mine_page'
+      ? 'mine'
       : mode === 'history'
-        ? 'history_page'
-        : 'bookings_page';
+        ? 'history'
+        : 'bookings';
     const page = this.paginate(bookings, requestedPage);
     const keyboard: Array<Array<Record<string, unknown>>> = page.items.map((booking) => [
       {
