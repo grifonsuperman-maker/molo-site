@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import type { AuthUser } from '../auth/types/auth-user.type';
 import { BookingRescheduleApprovalService } from '../bookings/booking-reschedule-approval.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { TelegramService } from '../notifications/telegram.service';
@@ -214,13 +215,15 @@ export class TelegramWebhookService {
       }
 
       if (type === 'booking' && action === 'checkin') {
-        await this.bookings.checkIn(id);
+        const actor = await this.getCallbackAuthUser(cb.from?.id);
+        await this.bookings.checkIn(id, actor || undefined);
         await this.telegram.sendMessage(chatId, '⚫ Гості прийшли, стіл зайнятий');
         return { ok: true };
       }
 
       if (type === 'booking' && action === 'complete') {
-        await this.bookings.complete(id);
+        const actor = await this.getCallbackAuthUser(cb.from?.id);
+        await this.bookings.complete(id, actor || undefined);
         await this.telegram.sendMessage(chatId, '🟢 Стіл вільний');
         return { ok: true };
       }
@@ -294,6 +297,24 @@ export class TelegramWebhookService {
     }
 
     return actor.role;
+  }
+
+  private async getCallbackAuthUser(
+    telegramUserId: string | number | undefined,
+  ): Promise<AuthUser | null> {
+    if (!telegramUserId) return null;
+
+    const telegramId = String(telegramUserId);
+    const actor = await this.telegramStaff.findActiveStaffByTelegramId(telegramId);
+    if (!actor) return null;
+
+    return {
+      sub: actor.id,
+      telegramId,
+      role: actor.role,
+      staffId: actor.id,
+      name: actor.fullName,
+    };
   }
 
   private staffRoleMenu(role: StaffRole): {
