@@ -10,7 +10,10 @@ import {
   waiterCallsApi,
   type GuestWaiterCallStatus,
 } from '../api/waiterCalls';
-import { isGuestServiceBookingForToday } from './waiterCallVisibility';
+import {
+  isGuestServiceBookingForToday,
+  shouldRefreshGuestServiceStatusOnVisibility,
+} from './waiterCallVisibility';
 
 const POLLING_INTERVAL_MS = 15_000;
 const BURST_DURATION_MS = 720;
@@ -111,6 +114,33 @@ export default function GuestBookingServiceActions({
 
     return () => window.clearInterval(interval);
   }, [bookingIsToday, loadHookahStatus]);
+
+  useEffect(() => {
+    if (!bookingIsToday) return;
+
+    const refreshServiceStatuses = () => {
+      void loadWaiterStatus(true);
+      void loadHookahStatus(true);
+    };
+    const handleVisibilityChange = () => {
+      if (
+        shouldRefreshGuestServiceStatusOnVisibility(document.visibilityState)
+      ) {
+        refreshServiceStatuses();
+      }
+    };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refreshServiceStatuses();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pageshow', handlePageShow);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [bookingIsToday, loadHookahStatus, loadWaiterStatus]);
 
   useEffect(() => {
     if (
@@ -250,7 +280,7 @@ export default function GuestBookingServiceActions({
         Math.ceil((new Date(hookahCall.etaDueAt).getTime() - now) / 1_000),
       )
     : 0;
-  const countdown = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`;
+  const countdown = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60)).padStart(2, '0')}`;
 
   return (
     <section
