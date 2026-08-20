@@ -28,6 +28,7 @@ function createNotificationsService() {
 }
 
 function callbacks(replyMarkup) {
+  if (!replyMarkup?.inline_keyboard) return [];
   return replyMarkup.inline_keyboard
     .flat()
     .map((button) => button.callback_data)
@@ -59,17 +60,19 @@ test('booking Telegram notifications keep phone text without broken callbacks', 
   });
   await service.notifyLateGuest(booking);
 
-  assert.equal(sent.length, 3);
+  assert.equal(sent.length, 4);
 
-  const [newBooking, reschedule, lateGuest] = sent;
-  assert.match(newBooking[1], /\+380501112233/);
+  const [newBookingActions, newBookingWaiter, reschedule, lateGuest] = sent;
+  assert.match(newBookingActions[1], /\+380501112233/);
+  assert.match(newBookingWaiter[1], /\+380501112233/);
   assert.match(reschedule[1], /\+380501112233/);
   assert.match(lateGuest[1], /\+380501112233/);
 
-  assert.deepEqual(callbacks(newBooking[2]), [
+  assert.deepEqual(callbacks(newBookingActions[2]), [
     'booking:approve:booking-1',
     'booking:reject:booking-1',
   ]);
+  assert.deepEqual(callbacks(newBookingWaiter[2]), []);
   assert.deepEqual(callbacks(reschedule[2]), [
     'reschedule:approve:request-1',
     'reschedule:reject:request-1',
@@ -89,6 +92,28 @@ test('booking Telegram notifications keep phone text without broken callbacks', 
       false,
     );
   }
+});
+
+test('new booking action buttons go only to admin and director', async () => {
+  const { service } = createNotificationsService();
+  const deliveries = [];
+
+  service.sendToRoles = async (roles, text, replyMarkup) => {
+    deliveries.push({ roles, text, replyMarkup });
+    return { attempted: 1, delivered: 1, failed: 0 };
+  };
+
+  await service.notifyNewBooking(booking);
+
+  assert.equal(deliveries.length, 2);
+  assert.deepEqual(deliveries[0].roles, ['owner', 'admin']);
+  assert.deepEqual(callbacks(deliveries[0].replyMarkup), [
+    'booking:approve:booking-1',
+    'booking:reject:booking-1',
+  ]);
+  assert.deepEqual(deliveries[1].roles, ['waiter']);
+  assert.equal(deliveries[1].replyMarkup, undefined);
+  assert.match(deliveries[1].text, /Нове бронювання/);
 });
 
 test('guest-reported lateness Telegram notification targets only admin without buttons', async () => {
