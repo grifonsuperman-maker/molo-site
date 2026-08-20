@@ -45,12 +45,13 @@ node backend/scripts/legacy-migration-audit.mjs schema-baseline.json
 
 ## Перевірка без TypeORM synchronize
 
-Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо перевірити backend на ізольованій копії production. Значення читається через `ConfigService` після завантаження environment/.env конфігурації:
+Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо керувати TypeORM schema synchronize. Значення читається через `ConfigService` після завантаження environment/.env конфігурації:
 
-- якщо `DB_SYNCHRONIZE` не задано, поточна поведінка зберігається: `synchronize: true`;
+- поза production, якщо `DB_SYNCHRONIZE` не задано, зберігається legacy-поведінка `synchronize: true`;
 - `DB_SYNCHRONIZE=false` вимикає TypeORM schema synchronize;
-- `DB_SYNCHRONIZE=true` вмикає його явно;
-- будь-яке інше задане значення, включно з порожнім, зупиняє запуск із зрозумілою помилкою замість неоднозначного режиму.
+- `DB_SYNCHRONIZE=true` вмикає його явно поза production;
+- будь-яке інше задане значення, включно з порожнім, зупиняє запуск із зрозумілою помилкою замість неоднозначного режиму;
+- у production/Render backend додатково вимагає **явно** `DB_SYNCHRONIZE=false` і зупиняється до старту Nest application, якщо змінна відсутня або дорівнює `true`.
 
 ### Перевірено 18 серпня 2026
 
@@ -59,6 +60,12 @@ Runtime-перемикач `DB_SYNCHRONIZE` дозволяє окремо пер
 Детальний запис і межі цієї перевірки: [`MIGRATION_BASELINE_STATUS.md`](./MIGRATION_BASELINE_STATUS.md).
 
 Це підтверджує, що **поточна production-подібна схема достатня для успішного запуску перевіреного backend без TypeORM schema synchronize**. Перевірка не доводить повну працездатність усіх runtime-сценаріїв у такому режимі.
+
+### Production switch і smoke test 19–20 серпня 2026
+
+Production `molo-backend` на commit `fd3a733f5c65ae01045f4aa8e903531e9673842f` було перезапущено після оновлення environment із `DB_SYNCHRONIZE=false`; Render показав успішний deploy і `Live`, backend стартував на port 3000 та налаштував Telegram webhook.
+
+Після switch вручну перевірено основний production flow без повернення `synchronize`: guest UI/карти/фото, читання існуючої броні, створення нової броні, підтвердження Адміністратором, відображення броні Офіціанту, виклики Офіціанта/Кальянника та завантаження пульта Директора. Це є runtime smoke test, а не повний schema audit.
 
 ## Fresh-only initial migration
 
@@ -91,15 +98,15 @@ Disposable PostgreSQL CI перевіряє обидва шляхи реальн
 
 На цьому етапі:
 
-- production продовжує працювати з поточною поведінкою `synchronize: true`, доки `DB_SYNCHRONIZE` там не задано;
+- production/Render повинен мати `DB_SYNCHRONIZE=false`; запуск із відсутнім значенням або `true` має бути заблокований до підключення TypeORM;
 - старі migration-файли не реєструються і не запускаються;
-- production schema і production data не змінюються;
+- production migration history залишається з поточними 5 runtime rows; initial baseline row туди не вставляється;
+- production schema і production data guard-перевіркою не змінюються;
 - `database/schema.sql` не використовується як джерело істини;
-- fresh-only baseline не підключений до runtime;
-- existing production migration history залишається з поточними 5 runtime rows; initial baseline row туди не вставляється.
+- fresh-only baseline не підключений до runtime.
 
-## Наступний окремий крок
+## Наступні schema changes
 
-Production runtime switch на `DB_SYNCHRONIZE=false` робиться окремим керованим кроком після ручного погодження та перевірки поточного production environment.
+Fresh bootstrap і existing-production history залишаються різними шляхами. Після production switch не потрібен окремий migration-history adoption для initial baseline.
 
-Fresh bootstrap і existing-production history залишаються різними шляхами. Це дозволяє вимкнути TypeORM synchronize на вже існуючій перевіреній production schema без переписування її migration history.
+Кожна наступна зміна database schema повинна бути новою TypeORM migration з безпечними `up`/`down` і пройти CI на обох history-шляхах перед production deploy.
