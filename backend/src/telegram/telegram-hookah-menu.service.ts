@@ -14,16 +14,16 @@ export class TelegramHookahMenuService {
     private readonly telegram: TelegramService,
   ) {}
 
-  async sendMenu(chatId: string | number, hookahAppUrl?: string | null) {
+  async sendMenu(
+    chatId: string | number,
+    staffId: string,
+    hookahAppUrl?: string | null,
+  ) {
     const [active, mine, availability] = await Promise.all([
       this.hookahCalls.listActive(),
-      this.hookahCalls.listMineFromTelegram?.('') ?? Promise.resolve([]),
+      this.hookahCalls.listMine(staffId),
       this.hookahCalls.availability(),
-    ]).catch(async () => {
-      const activeCalls = await this.hookahCalls.listActive();
-      const available = await this.hookahCalls.availability();
-      return [activeCalls, [], available] as const;
-    });
+    ]);
 
     const newCount = active.filter((call) => call.status === 'new').length;
     const keyboard: Array<Array<Record<string, unknown>>> = [
@@ -109,7 +109,7 @@ export class TelegramHookahMenuService {
         actor.staffId,
         action === 'availability_on',
       );
-      await this.sendMenu(chatId, hookahAppUrl);
+      await this.sendMenu(chatId, actor.staffId, hookahAppUrl);
       return true;
     }
 
