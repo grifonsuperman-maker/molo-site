@@ -14,11 +14,7 @@ export class WaiterCallTelegramNotifierService {
     private readonly telegram: TelegramService,
   ) {}
 
-  async notifyCreated(
-    call: WaiterCall,
-    activeCalls: WaiterCall[],
-    timingStartedAtMs?: number,
-  ) {
+  async notifyCreated(call: WaiterCall, activeCalls: WaiterCall[]) {
     const staff = await this.staffRepo.find({
       where: {
         role: 'waiter',
@@ -34,24 +30,9 @@ export class WaiterCallTelegramNotifierService {
         (!call.waiterId || person.id === call.waiterId),
     );
 
-    this.logTiming(
-      'recipients_resolved',
-      call.id,
-      timingStartedAtMs,
-      { recipientCount: recipients.length },
-    );
-
     if (!recipients.length) {
-      this.logTiming('telegram_skipped_no_recipients', call.id, timingStartedAtMs);
       return { attempted: 0, delivered: 0, failed: 0 };
     }
-
-    this.logTiming(
-      'telegram_send_started',
-      call.id,
-      timingStartedAtMs,
-      { recipientCount: recipients.length },
-    );
 
     const results = await Promise.allSettled(
       recipients.map((person) => {
@@ -90,41 +71,11 @@ export class WaiterCallTelegramNotifierService {
       (result) => result.status === 'fulfilled',
     ).length;
 
-    this.logTiming(
-      'telegram_confirmed',
-      call.id,
-      timingStartedAtMs,
-      {
-        attempted: results.length,
-        delivered,
-        failed: results.length - delivered,
-      },
-    );
-
     return {
       attempted: results.length,
       delivered,
       failed: results.length - delivered,
     };
-  }
-
-  private logTiming(
-    stage: string,
-    callId: string,
-    timingStartedAtMs?: number,
-    details: Record<string, unknown> = {},
-  ) {
-    if (timingStartedAtMs == null) return;
-
-    console.info(
-      '[waiter-call-timing]',
-      JSON.stringify({
-        stage,
-        callId,
-        elapsedMs: Date.now() - timingStartedAtMs,
-        ...details,
-      }),
-    );
   }
 
   private escapeHtml(value: string) {
