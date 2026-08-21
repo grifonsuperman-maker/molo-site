@@ -14,13 +14,13 @@ const PAGE_SIZE = 8;
 const BROADCAST_DRAFT_TTL_MS = 10 * 60 * 1000;
 
 const LOCATIONS = [
-  { key: 'hall', label: 'Зал ресторану', range: '1–14', accepts: (value: number) => value >= 1 && value <= 14 },
-  { key: 'canopy', label: 'Навіс', range: '15–20', accepts: (value: number) => value >= 15 && value <= 20 },
-  { key: 'gazebo', label: 'Велика альтанка', range: '21–36', accepts: (value: number) => value >= 21 && value <= 36 },
-  { key: 'rotang', label: 'Ротанг', range: '37–39', accepts: (value: number) => value >= 37 && value <= 39 },
-  { key: 'embankment', label: 'Набережна', range: '40–44', accepts: (value: number) => value >= 40 && value <= 44 },
-  { key: 'glass_gazebo', label: 'Скляна альтанка', range: '45–50', accepts: (value: number) => value >= 45 && value <= 50 },
-  { key: 'water_gazebo', label: 'Альтанка на воді', range: '100–109', accepts: (value: number) => value >= 100 && value <= 109 },
+  { key: 'hall', label: 'Зал ресторану', accepts: (value: number) => value >= 1 && value <= 14 },
+  { key: 'canopy', label: 'Навіс', accepts: (value: number) => value >= 15 && value <= 20 },
+  { key: 'gazebo', label: 'Велика альтанка', accepts: (value: number) => value >= 21 && value <= 36 },
+  { key: 'rotang', label: 'Ротанг', accepts: (value: number) => value >= 37 && value <= 39 },
+  { key: 'embankment', label: 'Набережна', accepts: (value: number) => value >= 40 && value <= 44 },
+  { key: 'glass_gazebo', label: 'Скляна альтанка', accepts: (value: number) => value >= 45 && value <= 50 },
+  { key: 'water_gazebo', label: 'Альтанка на воді', accepts: (value: number) => value >= 100 && value <= 109 },
 ] as const;
 
 type BroadcastDraft = {
@@ -68,7 +68,6 @@ export class TelegramAdminMenuService {
     adminAppUrl?: string | null,
   ) {
     this.assertAdminActor(actor);
-
     const [today, reschedules, dashboard, restaurant] = await Promise.all([
       this.bookings.getToday(),
       this.bookings.getPendingReschedules(),
@@ -79,7 +78,6 @@ export class TelegramAdminMenuService {
     const pendingCount = today.filter((booking) => booking.status === 'pending').length;
     const canBroadcast =
       actor.role === 'owner' || Boolean(restaurant.adminCanSendBroadcasts);
-
     const keyboard: Array<Array<Record<string, unknown>>> = [
       [
         {
@@ -98,6 +96,10 @@ export class TelegramAdminMenuService {
         },
       ],
       [
+        {
+          text: `💬 Відгуки · ${dashboard.reviews.length}`,
+          callback_data: 'admin:reviews:0',
+        },
         {
           text: '🪑 Локації та столи',
           callback_data: 'admin:locations',
@@ -161,20 +163,8 @@ export class TelegramAdminMenuService {
       await this.sendBooking(chatId, id);
       return true;
     }
-    if (action === 'booking_approve') {
-      await this.runBookingAction(chatId, id, 'approve');
-      return true;
-    }
-    if (action === 'booking_reject') {
-      await this.runBookingAction(chatId, id, 'reject');
-      return true;
-    }
-    if (action === 'booking_checkin') {
-      await this.runBookingAction(chatId, id, 'checkin', actor);
-      return true;
-    }
-    if (action === 'booking_complete') {
-      await this.runBookingAction(chatId, id, 'complete', actor);
+    if (action.startsWith('booking_')) {
+      await this.runBookingAction(chatId, id, action, actor);
       return true;
     }
     if (action === 'reschedules') {
@@ -185,12 +175,8 @@ export class TelegramAdminMenuService {
       await this.sendReschedule(chatId, id);
       return true;
     }
-    if (action === 'reschedule_approve') {
-      await this.runRescheduleAction(chatId, id, 'approve');
-      return true;
-    }
-    if (action === 'reschedule_reject') {
-      await this.runRescheduleAction(chatId, id, 'reject');
+    if (action.startsWith('reschedule_')) {
+      await this.runRescheduleAction(chatId, id, action);
       return true;
     }
     if (action === 'attention') {
@@ -199,6 +185,10 @@ export class TelegramAdminMenuService {
     }
     if (action === 'attention_item') {
       await this.sendAttentionItem(chatId, id, adminAppUrl);
+      return true;
+    }
+    if (action === 'reviews') {
+      await this.sendReviews(chatId, this.parsePage(id));
       return true;
     }
     if (action === 'locations') {
@@ -258,11 +248,7 @@ export class TelegramAdminMenuService {
     return false;
   }
 
-  async handleText(
-    text: string,
-    chatId: string | number,
-    actor: AuthUser,
-  ) {
+  async handleText(text: string, chatId: string | number, actor: AuthUser) {
     this.assertAdminActor(actor);
     const key = this.actorKey(actor);
     const draft = this.broadcastDrafts.get(key);
@@ -278,7 +264,6 @@ export class TelegramAdminMenuService {
     }
 
     await this.permissions.assert(actor, 'adminCanSendBroadcasts');
-
     const message = String(text || '').trim();
     if (!message) {
       await this.telegram.sendMessage(chatId, '⚠️ Введіть текст повідомлення');
@@ -326,11 +311,14 @@ export class TelegramAdminMenuService {
         ],
       },
     );
-
     return true;
   }
 
-  private async sendBookings(chatId: string | number, requestedPage: number) {
+  private async sendBookings(
+    chatId: string | number,
+    requestedPage: number,
+    notice?: string,
+  ) {
     const bookings = await this.bookings.getToday();
     const page = this.paginate(bookings, requestedPage);
     const keyboard: Array<Array<Record<string, unknown>>> = page.items.map(
@@ -341,15 +329,14 @@ export class TelegramAdminMenuService {
         },
       ],
     );
-
     this.addPageButtons(keyboard, 'admin:bookings', page.pageIndex, page.totalPages);
     keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:admin' }]);
-
+    const title = bookings.length
+      ? `📋 <b>Бронювання сьогодні</b> · ${bookings.length}\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
+      : '📋 <b>Бронювання сьогодні</b>\n\nБронювань немає.';
     await this.telegram.sendMessage(
       chatId,
-      bookings.length
-        ? `📋 <b>Бронювання сьогодні</b> · ${bookings.length}\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
-        : '📋 <b>Бронювання сьогодні</b>\n\nБронювань немає.',
+      notice ? `${notice}\n\n${title}` : title,
       { inline_keyboard: keyboard },
     );
   }
@@ -413,25 +400,30 @@ export class TelegramAdminMenuService {
   private async runBookingAction(
     chatId: string | number,
     id: string | undefined,
-    action: 'approve' | 'reject' | 'checkin' | 'complete',
-    actor?: AuthUser,
+    action: string,
+    actor: AuthUser,
   ) {
     if (!id) throw new BadRequestException('Бронювання не вказано');
-    if (action === 'approve') await this.bookings.approve(id);
-    if (action === 'reject') await this.bookings.reject(id);
-    if (action === 'checkin') await this.bookings.checkIn(id, actor);
-    if (action === 'complete') await this.bookings.complete(id, actor);
+    if (action === 'booking_approve') await this.bookings.approve(id);
+    else if (action === 'booking_reject') await this.bookings.reject(id);
+    else if (action === 'booking_checkin') await this.bookings.checkIn(id, actor);
+    else if (action === 'booking_complete') await this.bookings.complete(id, actor);
+    else return;
 
-    const message = {
-      approve: '✅ Бронювання підтверджено',
-      reject: '❌ Бронювання відхилено',
-      checkin: '⚫ Гості відмічені як прибулі',
-      complete: '✅ Візит завершено',
+    const notice = {
+      booking_approve: '✅ Бронювання підтверджено',
+      booking_reject: '❌ Бронювання відхилено',
+      booking_checkin: '⚫ Гості відмічені як прибулі',
+      booking_complete: '✅ Візит завершено',
     }[action];
-    await this.sendBookings(chatId, 0, message);
+    await this.sendBookings(chatId, 0, notice);
   }
 
-  private async sendReschedules(chatId: string | number, requestedPage: number) {
+  private async sendReschedules(
+    chatId: string | number,
+    requestedPage: number,
+    notice?: string,
+  ) {
     const requests: any[] = await this.bookings.getPendingReschedules();
     const page = this.paginate(requests, requestedPage);
     const keyboard: Array<Array<Record<string, unknown>>> = page.items.map(
@@ -442,15 +434,14 @@ export class TelegramAdminMenuService {
         },
       ],
     );
-
     this.addPageButtons(keyboard, 'admin:reschedules', page.pageIndex, page.totalPages);
     keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:admin' }]);
-
+    const title = requests.length
+      ? `🔁 <b>Запити на перенесення</b> · ${requests.length}\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
+      : '🔁 <b>Запити на перенесення</b>\n\nНових запитів немає.';
     await this.telegram.sendMessage(
       chatId,
-      requests.length
-        ? `🔁 <b>Запити на перенесення</b> · ${requests.length}\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
-        : '🔁 <b>Запити на перенесення</b>\n\nНових запитів немає.',
+      notice ? `${notice}\n\n${title}` : title,
       { inline_keyboard: keyboard },
     );
   }
@@ -496,16 +487,18 @@ export class TelegramAdminMenuService {
   private async runRescheduleAction(
     chatId: string | number,
     id: string | undefined,
-    action: 'approve' | 'reject',
+    action: string,
   ) {
     if (!id) throw new BadRequestException('Запит не вказано');
-    if (action === 'approve') await this.rescheduleApproval.approve(id);
-    else await this.bookings.rejectReschedule(id, {});
-    await this.sendReschedules(
-      chatId,
-      0,
-      action === 'approve' ? '✅ Перенесення підтверджено' : '❌ Перенесення відхилено',
-    );
+    if (action === 'reschedule_approve') {
+      await this.rescheduleApproval.approve(id);
+      await this.sendReschedules(chatId, 0, '✅ Перенесення підтверджено');
+      return;
+    }
+    if (action === 'reschedule_reject') {
+      await this.bookings.rejectReschedule(id, {});
+      await this.sendReschedules(chatId, 0, '❌ Перенесення відхилено');
+    }
   }
 
   private async sendAttention(
@@ -524,7 +517,6 @@ export class TelegramAdminMenuService {
         },
       ],
     );
-
     this.addPageButtons(keyboard, 'admin:attention', page.pageIndex, page.totalPages);
     if (adminAppUrl) {
       keyboard.push([
@@ -584,6 +576,26 @@ export class TelegramAdminMenuService {
     );
   }
 
+  private async sendReviews(chatId: string | number, requestedPage: number) {
+    const dashboard: any = await this.attention.dashboard();
+    const reviews: any[] = dashboard.reviews || [];
+    const page = this.paginate(reviews, requestedPage);
+    const lines = page.items.map(
+      (review: any) =>
+        `• <b>${this.escapeHtml(review.booking?.client?.fullName || 'Гість')}</b> · №${this.escapeHtml(String(review.booking?.table?.tableNumber || '—'))}\n${this.escapeHtml(String(review.text || 'Без тексту').slice(0, 500))}`,
+    );
+    const keyboard: Array<Array<Record<string, unknown>>> = [];
+    this.addPageButtons(keyboard, 'admin:reviews', page.pageIndex, page.totalPages);
+    keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:admin' }]);
+    await this.telegram.sendMessage(
+      chatId,
+      reviews.length
+        ? `💬 <b>Відгуки гостей</b> · ${reviews.length}\n\n${lines.join('\n\n')}\n\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
+        : '💬 <b>Відгуки гостей</b>\n\nВідгуків поки немає.',
+      { inline_keyboard: keyboard },
+    );
+  }
+
   private async sendLocations(chatId: string | number) {
     const tables: any[] = (await this.tables.findAll()).filter(
       (table: any) => table.isVisible !== false,
@@ -611,7 +623,7 @@ export class TelegramAdminMenuService {
 
     await this.telegram.sendMessage(
       chatId,
-      '🪑 <b>Локації та столи</b>\n\nСтатуси показані для поточного фізичного стану столів. Зміна статусу залишається у повному пульті.',
+      '🪑 <b>Локації та столи</b>\n\nПоказано поточний фізичний статус. Зміна статусу столу залишається у повному пульті.',
       { inline_keyboard: keyboard },
     );
   }
@@ -621,8 +633,6 @@ export class TelegramAdminMenuService {
       .filter((table: any) => table.isVisible !== false)
       .filter((table: any) => this.locationKeyForTable(table) === key)
       .sort((left: any, right: any) => Number(left.tableNumber) - Number(right.tableNumber));
-    const location = LOCATIONS.find((item) => item.key === key);
-    const label = location?.label || 'Без визначеної локації';
     const keyboard: Array<Array<Record<string, unknown>>> = tables.map((table: any) => [
       {
         text: `${this.tableStatusEmoji(table.status)} №${table.tableNumber} · ${this.tableStatusLabel(table.status)}`.slice(0, 60),
@@ -630,10 +640,9 @@ export class TelegramAdminMenuService {
       },
     ]);
     keyboard.push([{ text: '⬅️ До локацій', callback_data: 'admin:locations' }]);
-
     await this.telegram.sendMessage(
       chatId,
-      `📍 <b>${this.escapeHtml(label)}</b>\nСтолів: <b>${tables.length}</b>`,
+      `📍 <b>${this.escapeHtml(this.locationLabelForKey(key || 'other'))}</b>\nСтолів: <b>${tables.length}</b>`,
       { inline_keyboard: keyboard },
     );
   }
@@ -644,7 +653,6 @@ export class TelegramAdminMenuService {
     const table = tables.find((item: any) => item.id === id);
     if (!table) throw new BadRequestException('Стіл не знайдено');
     const locationKey = this.locationKeyForTable(table);
-
     await this.telegram.sendMessage(
       chatId,
       [
@@ -673,13 +681,11 @@ export class TelegramAdminMenuService {
     if (!recipients.length) {
       throw new BadRequestException('Немає доступних гостей для розсилки');
     }
-
     this.broadcastDrafts.set(this.actorKey(actor), {
       stage: 'awaiting_text',
       recipientCount: recipients.length,
       expiresAt: Date.now() + BROADCAST_DRAFT_TTL_MS,
     });
-
     await this.telegram.sendMessage(
       chatId,
       [
@@ -721,13 +727,11 @@ export class TelegramAdminMenuService {
       this.broadcastDrafts.delete(key);
       throw new BadRequestException('Чернетка розсилки застаріла. Створіть її ще раз.');
     }
-
     const result = await this.broadcasts.sendNow({
       message: draft.message,
       target: 'all_clients',
     } as any);
     this.broadcastDrafts.delete(key);
-
     await this.telegram.sendMessage(
       chatId,
       [
@@ -784,7 +788,6 @@ export class TelegramAdminMenuService {
         ]);
       }
     }
-
     keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:admin' }]);
 
     await this.telegram.sendMessage(
@@ -800,60 +803,6 @@ export class TelegramAdminMenuService {
           ? '✅ Є право відкривати/закривати ресторан'
           : '🔒 Немає права відкривати/закривати ресторан',
       ].join('\n'),
-      { inline_keyboard: keyboard },
-    );
-  }
-
-  private async sendBookings(
-    chatId: string | number,
-    requestedPage: number,
-    notice?: string,
-  ) {
-    const bookings = await this.bookings.getToday();
-    const page = this.paginate(bookings, requestedPage);
-    const keyboard: Array<Array<Record<string, unknown>>> = page.items.map(
-      (booking: any) => [
-        {
-          text: `${this.bookingStatusEmoji(booking.status)} ${this.timeLabel(booking.bookingTime)} · №${booking.table?.tableNumber || '—'} · ${booking.client?.fullName || 'Гість'}`.slice(0, 60),
-          callback_data: `admin:booking:${booking.id}`,
-        },
-      ],
-    );
-    this.addPageButtons(keyboard, 'admin:bookings', page.pageIndex, page.totalPages);
-    keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:admin' }]);
-    const title = bookings.length
-      ? `📋 <b>Бронювання сьогодні</b> · ${bookings.length}\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
-      : '📋 <b>Бронювання сьогодні</b>\n\nБронювань немає.';
-    await this.telegram.sendMessage(
-      chatId,
-      notice ? `${notice}\n\n${title}` : title,
-      { inline_keyboard: keyboard },
-    );
-  }
-
-  private async sendReschedules(
-    chatId: string | number,
-    requestedPage: number,
-    notice?: string,
-  ) {
-    const requests: any[] = await this.bookings.getPendingReschedules();
-    const page = this.paginate(requests, requestedPage);
-    const keyboard: Array<Array<Record<string, unknown>>> = page.items.map(
-      (request: any) => [
-        {
-          text: `🔁 №${request.booking?.table?.tableNumber || '—'} · ${this.dateLabel(request.requestedDate)} ${this.timeLabel(request.requestedTime)}`.slice(0, 60),
-          callback_data: `admin:reschedule:${request.id}`,
-        },
-      ],
-    );
-    this.addPageButtons(keyboard, 'admin:reschedules', page.pageIndex, page.totalPages);
-    keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:admin' }]);
-    const title = requests.length
-      ? `🔁 <b>Запити на перенесення</b> · ${requests.length}\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
-      : '🔁 <b>Запити на перенесення</b>\n\nНових запитів немає.';
-    await this.telegram.sendMessage(
-      chatId,
-      notice ? `${notice}\n\n${title}` : title,
       { inline_keyboard: keyboard },
     );
   }
@@ -910,53 +859,53 @@ export class TelegramAdminMenuService {
   }
 
   private tableStatusLabel(status: string) {
-    return {
+    return ({
       free: 'Вільний',
       pending: 'Очікує',
       reserved: 'Заброньований',
       occupied: 'Зайнятий',
       cleaning: 'Готується',
       closed: 'Недоступний',
-    }[status] || status || 'Невідомо';
+    } as Record<string, string>)[status] || status || 'Невідомо';
   }
 
   private tableStatusEmoji(status: string) {
-    return {
+    return ({
       free: '🟢',
       pending: '🔵',
       reserved: '🟠',
       occupied: '🔴',
       cleaning: '🧼',
       closed: '⚪',
-    }[status] || '⚪';
+    } as Record<string, string>)[status] || '⚪';
   }
 
   private bookingStatusLabel(status: string) {
-    return {
+    return ({
       pending: 'Очікує підтвердження',
       approved: 'Підтверджено',
       rejected: 'Відхилено',
       cancelled: 'Скасовано',
       completed: 'Завершено',
-    }[status] || status || 'Невідомо';
+    } as Record<string, string>)[status] || status || 'Невідомо';
   }
 
   private bookingStatusEmoji(status: string) {
-    return {
+    return ({
       pending: '⏳',
       approved: '✅',
       rejected: '❌',
       cancelled: '🚫',
       completed: '🏁',
-    }[status] || '📋';
+    } as Record<string, string>)[status] || '📋';
   }
 
   private restaurantStatusLabel(status: string) {
-    return {
+    return ({
       open: 'Відкрито',
       booking_closed: 'Бронювання закрито',
       closed: 'Закрито',
-    }[status] || status || 'Невідомо';
+    } as Record<string, string>)[status] || status || 'Невідомо';
   }
 
   private timeLabel(value: string | null | undefined) {
