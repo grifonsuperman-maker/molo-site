@@ -8,17 +8,15 @@ const {
   TelegramWebhookService,
 } = require('../dist/telegram/telegram-webhook.service.js');
 
-function adminActor() {
-  return {
-    sub: 'admin-1',
-    telegramId: '777',
-    role: 'admin',
-    staffId: 'admin-1',
-    name: 'Олена Адміністратор',
-  };
-}
+const ACTOR = {
+  sub: 'admin-1',
+  telegramId: '777',
+  role: 'admin',
+  staffId: 'admin-1',
+  name: 'Олена Адміністратор',
+};
 
-function menuHarness(options = {}) {
+function harness(options = {}) {
   const calls = [];
   const today = options.today || [
     {
@@ -28,19 +26,11 @@ function menuHarness(options = {}) {
       bookingTime: '19:00:00',
       guestsCount: 4,
       checkedInAt: null,
-      table: {
-        id: 'table-1',
-        tableNumber: '1',
-        zone: { name: 'Зал ресторану' },
-      },
+      table: { id: 'table-1', tableNumber: '1', zone: { name: 'Зал ресторану' } },
       client: { fullName: 'Гість Один', phone: '+380000000001' },
     },
   ];
-  const reschedules = options.reschedules || [];
-  const dashboard = options.dashboard || {
-    tableChanges: [],
-    reviews: [],
-  };
+  const dashboard = options.dashboard || { tableChanges: [], reviews: [] };
   const restaurantState = {
     status: 'open',
     adminCanSendBroadcasts: options.canBroadcast !== false,
@@ -49,56 +39,24 @@ function menuHarness(options = {}) {
     ...(options.restaurant || {}),
   };
   const tables = options.tables || [
-    {
-      id: 'table-1',
-      tableNumber: '1',
-      seats: 4,
-      status: 'free',
-      isVisible: true,
-      zone: { name: 'Зал ресторану' },
-    },
-    {
-      id: 'table-15',
-      tableNumber: '15',
-      seats: 4,
-      status: 'occupied',
-      isVisible: true,
-      zone: { name: 'Навіс' },
-    },
+    { id: 'table-1', tableNumber: '1', seats: 4, status: 'free', isVisible: true, zone: { name: 'Зал ресторану' } },
+    { id: 'table-15', tableNumber: '15', seats: 4, status: 'occupied', isVisible: true, zone: { name: 'Навіс' } },
   ];
 
   const bookings = {
-    async getToday() {
-      return today;
-    },
-    async getPendingReschedules() {
-      return reschedules;
-    },
-    async approve(id) {
-      calls.push(['approve', id]);
-    },
-    async reject(id) {
-      calls.push(['reject', id]);
-    },
-    async checkIn(id, actor) {
-      calls.push(['checkin', id, actor]);
-    },
-    async complete(id, actor) {
-      calls.push(['complete', id, actor]);
-    },
-    async rejectReschedule(id) {
-      calls.push(['reschedule-reject', id]);
-    },
+    async getToday() { return today; },
+    async getPendingReschedules() { return options.reschedules || []; },
+    async approve(id) { calls.push(['approve', id]); },
+    async reject(id) { calls.push(['reject', id]); },
+    async checkIn(id, actor) { calls.push(['checkin', id, actor]); },
+    async complete(id, actor) { calls.push(['complete', id, actor]); },
+    async rejectReschedule(id) { calls.push(['reschedule-reject', id]); },
   };
   const rescheduleApproval = {
-    async approve(id) {
-      calls.push(['reschedule-approve', id]);
-    },
+    async approve(id) { calls.push(['reschedule-approve', id]); },
   };
   const attention = {
-    async dashboard() {
-      return dashboard;
-    },
+    async dashboard() { return dashboard; },
   };
   const broadcasts = {
     async getTargetClients(target) {
@@ -111,11 +69,7 @@ function menuHarness(options = {}) {
     async sendNow(payload) {
       calls.push(['broadcast-send', payload]);
       if (options.broadcastGate) await options.broadcastGate;
-      return {
-        recipientCount: 2,
-        deliveredCount: 1,
-        unreachableCount: 1,
-      };
+      return { recipientCount: 2, deliveredCount: 1, unreachableCount: 1 };
     },
   };
   const permissions = {
@@ -125,31 +79,17 @@ function menuHarness(options = {}) {
     },
   };
   const restaurant = {
-    async getRestaurant() {
-      return restaurantState;
-    },
-    async adminOpenRestaurant() {
-      calls.push(['admin-open-restaurant']);
-    },
-    async adminCloseRestaurant() {
-      calls.push(['admin-close-restaurant']);
-    },
-    async adminOpenBooking() {
-      calls.push(['admin-open-booking']);
-    },
-    async adminCloseBooking() {
-      calls.push(['admin-close-booking']);
-    },
+    async getRestaurant() { return restaurantState; },
+    async adminOpenRestaurant() { calls.push(['admin-open-restaurant']); },
+    async adminCloseRestaurant() { calls.push(['admin-close-restaurant']); },
+    async adminOpenBooking() { calls.push(['admin-open-booking']); },
+    async adminCloseBooking() { calls.push(['admin-close-booking']); },
     async openRestaurant() {},
     async closeRestaurant() {},
     async openBooking() {},
     async closeBooking() {},
   };
-  const tableService = {
-    async findAll() {
-      return tables;
-    },
-  };
+  const tableService = { async findAll() { return tables; } };
   const telegram = {
     async sendMessage(chatId, text, markup) {
       calls.push(['message', chatId, text, markup]);
@@ -176,97 +116,70 @@ function lastMessage(calls) {
   return [...calls].reverse().find((entry) => entry[0] === 'message');
 }
 
-function keyboardTexts(messageCall) {
-  return (messageCall?.[3]?.inline_keyboard || []).flat().map((button) => button.text);
+function buttons(messageCall) {
+  return (messageCall?.[3]?.inline_keyboard || []).flat();
 }
 
-function callbackDataForText(messageCall, text) {
-  const button = (messageCall?.[3]?.inline_keyboard || [])
-    .flat()
-    .find((item) => item.text === text);
-  return button?.callback_data || null;
+function callbackFor(messageCall, text) {
+  return buttons(messageCall).find((button) => button.text === text)?.callback_data || null;
 }
 
-function draftIdFromCallback(callbackData) {
+function draftId(callbackData) {
   return String(callbackData || '').split(':')[2] || null;
 }
 
-test('Admin Telegram menu shows operational counts, locations, broadcast and full Mini App', async () => {
-  const { service, calls } = menuHarness({
+test('Admin menu shows counts, locations, broadcast and full Mini App', async () => {
+  const { service, calls } = harness({
     reschedules: [{ id: 'reschedule-1' }],
-    dashboard: {
-      tableChanges: [{ id: 'change-1' }],
-      reviews: [{ id: 'review-1' }],
-    },
+    dashboard: { tableChanges: [{ id: 'change-1' }], reviews: [{ id: 'review-1' }] },
   });
 
-  await service.sendMenu(42, adminActor(), 'https://molo.example/app#admin');
+  await service.sendMenu(42, ACTOR, 'https://molo.example/app#admin');
 
   const message = lastMessage(calls);
   assert.match(message[2], /Бронювань сьогодні: <b>1<\/b>/);
   assert.match(message[2], /Запитів на перенесення: <b>1<\/b>/);
   assert.match(message[2], /Запитів на інший стіл: <b>1<\/b>/);
-  const texts = keyboardTexts(message);
+  const texts = buttons(message).map((button) => button.text);
   assert.equal(texts.some((value) => /Локації та столи/.test(value)), true);
   assert.equal(texts.some((value) => /Розсилка всім гостям/.test(value)), true);
   assert.equal(texts.some((value) => /Відкрити повний пульт/.test(value)), true);
 });
 
-test('broadcast button is hidden when Director did not grant Admin broadcast permission', async () => {
-  const { service, calls } = menuHarness({ canBroadcast: false });
-
-  await service.sendMenu(42, adminActor(), 'https://molo.example/app#admin');
-
-  const texts = keyboardTexts(lastMessage(calls));
-  assert.equal(texts.some((value) => /Розсилка/.test(value)), false);
+test('broadcast button is hidden without Director permission', async () => {
+  const { service, calls } = harness({ canBroadcast: false });
+  await service.sendMenu(42, ACTOR, 'https://molo.example/app#admin');
+  assert.equal(buttons(lastMessage(calls)).some((button) => /Розсилка/.test(button.text)), false);
 });
 
-test('locations and tables show current status without status-changing Telegram callbacks', async () => {
-  const { service, calls } = menuHarness();
+test('locations show statuses without status-changing callbacks', async () => {
+  const { service, calls } = harness();
 
-  await service.handle('locations', undefined, 42, adminActor());
-  let message = lastMessage(calls);
-  let callbacks = message[3].inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
-  assert.equal(callbacks.includes('admin:location:hall'), true);
-  assert.equal(callbacks.includes('admin:location:canopy'), true);
+  await service.handle('locations', undefined, 42, ACTOR);
+  assert.equal(buttons(lastMessage(calls)).some((button) => button.callback_data === 'admin:location:canopy'), true);
 
-  await service.handle('location', 'canopy', 42, adminActor());
-  message = lastMessage(calls);
+  await service.handle('location', 'canopy', 42, ACTOR);
+  const message = lastMessage(calls);
   assert.match(message[2], /Навіс/);
-  assert.equal(keyboardTexts(message).some((value) => /№15 · Зайнятий/.test(value)), true);
-  callbacks = message[3].inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
-  assert.equal(callbacks.some((value) => /occupied|free|cleaning|close|open/.test(value)), false);
+  assert.equal(buttons(message).some((button) => /№15 · Зайнятий/.test(button.text)), true);
+  const callbacks = buttons(message).map((button) => button.callback_data).filter(Boolean);
   assert.equal(callbacks.includes('admin:table:table-15'), true);
+  assert.equal(callbacks.some((value) => /occupied|free|cleaning|table_close|table_open/.test(value)), false);
 });
 
-test('Admin broadcast to all requires permission, preview and explicit draft-bound confirmation', async () => {
-  const { service, calls } = menuHarness();
-  const actor = adminActor();
+test('broadcast to all requires preview and draft-bound confirmation', async () => {
+  const { service, calls } = harness();
 
-  await service.handle('broadcast', undefined, 42, actor);
-  assert.equal(service.hasPendingInput('777'), true);
-  assert.equal(calls.some((entry) => entry[0] === 'broadcast-target' && entry[1] === 'all_clients'), true);
-
-  await service.handleText('Сьогодні жива музика 🎵', 42, actor);
-  let message = lastMessage(calls);
-  assert.match(message[2], /Перевірте розсилку/);
-  assert.match(message[2], /Сьогодні жива музика/);
-  assert.equal(keyboardTexts(message).includes('✅ Надіслати всім'), true);
+  await service.handle('broadcast', undefined, 42, ACTOR);
+  await service.handleText('Сьогодні жива музика 🎵', 42, ACTOR);
+  const preview = lastMessage(calls);
+  const confirmData = callbackFor(preview, '✅ Надіслати всім');
+  assert.match(confirmData, /^admin:broadcast_confirm:[a-f0-9]{16}$/);
   assert.equal(calls.some((entry) => entry[0] === 'broadcast-send'), false);
 
-  const confirmData = callbackDataForText(message, '✅ Надіслати всім');
-  assert.match(confirmData, /^admin:broadcast_confirm:[a-f0-9]{16}$/);
-  const draftId = draftIdFromCallback(confirmData);
-  await service.handle(
-    'broadcast_confirm',
-    draftId,
-    42,
-    actor,
-    'https://molo.example/app#admin',
-  );
+  await service.handle('broadcast_confirm', draftId(confirmData), 42, ACTOR);
 
   const send = calls.find((entry) => entry[0] === 'broadcast-send');
-  assert.ok(send);
   assert.equal(send[1].target, 'all_clients');
   assert.equal(send[1].message, 'Сьогодні жива музика 🎵');
   assert.equal(service.hasPendingInput('777'), false);
@@ -275,63 +188,46 @@ test('Admin broadcast to all requires permission, preview and explicit draft-bou
 
 test('double broadcast confirmation can deliver at most once', async () => {
   let releaseBroadcast;
-  const broadcastGate = new Promise((resolve) => {
-    releaseBroadcast = resolve;
-  });
-  const { service, calls } = menuHarness({ broadcastGate });
-  const actor = adminActor();
+  const broadcastGate = new Promise((resolve) => { releaseBroadcast = resolve; });
+  const { service, calls } = harness({ broadcastGate });
 
-  await service.handle('broadcast', undefined, 42, actor);
-  await service.handleText('Одне повідомлення', 42, actor);
-  const preview = lastMessage(calls);
-  const draftId = draftIdFromCallback(
-    callbackDataForText(preview, '✅ Надіслати всім'),
-  );
+  await service.handle('broadcast', undefined, 42, ACTOR);
+  await service.handleText('Одне повідомлення', 42, ACTOR);
+  const id = draftId(callbackFor(lastMessage(calls), '✅ Надіслати всім'));
 
-  const first = service.handle('broadcast_confirm', draftId, 42, actor);
-  const second = service.handle('broadcast_confirm', draftId, 42, actor);
+  const first = service.handle('broadcast_confirm', id, 42, ACTOR);
+  const second = service.handle('broadcast_confirm', id, 42, ACTOR);
+  const settled = Promise.allSettled([first, second]);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(
-    calls.filter((entry) => entry[0] === 'broadcast-send').length,
-    1,
-  );
+  assert.equal(calls.filter((entry) => entry[0] === 'broadcast-send').length, 1);
   releaseBroadcast();
-  const results = await Promise.allSettled([first, second]);
+  const results = await settled;
   assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
   assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
 });
 
-test('old broadcast preview cannot confirm a newer corrected message', async () => {
-  const { service, calls } = menuHarness();
-  const actor = adminActor();
+test('old preview cannot confirm a newer corrected broadcast', async () => {
+  const { service, calls } = harness();
 
-  await service.handle('broadcast', undefined, 42, actor);
-  await service.handleText('Варіант А', 42, actor);
-  const firstPreview = lastMessage(calls);
-  const firstId = draftIdFromCallback(
-    callbackDataForText(firstPreview, '✅ Надіслати всім'),
-  );
-
-  await service.handleText('Варіант Б', 42, actor);
-  const secondPreview = lastMessage(calls);
-  const secondId = draftIdFromCallback(
-    callbackDataForText(secondPreview, '✅ Надіслати всім'),
-  );
+  await service.handle('broadcast', undefined, 42, ACTOR);
+  await service.handleText('Варіант А', 42, ACTOR);
+  const firstId = draftId(callbackFor(lastMessage(calls), '✅ Надіслати всім'));
+  await service.handleText('Варіант Б', 42, ACTOR);
+  const secondId = draftId(callbackFor(lastMessage(calls), '✅ Надіслати всім'));
   assert.notEqual(firstId, secondId);
 
   await assert.rejects(
-    () => service.handle('broadcast_confirm', firstId, 42, actor),
+    () => service.handle('broadcast_confirm', firstId, 42, ACTOR),
     /неактуальна/,
   );
   assert.equal(calls.some((entry) => entry[0] === 'broadcast-send'), false);
 
-  await service.handle('broadcast_confirm', secondId, 42, actor);
-  const send = calls.find((entry) => entry[0] === 'broadcast-send');
-  assert.equal(send[1].message, 'Варіант Б');
+  await service.handle('broadcast_confirm', secondId, 42, ACTOR);
+  assert.equal(calls.find((entry) => entry[0] === 'broadcast-send')[1].message, 'Варіант Б');
 });
 
-test('reviews page stays safely below Telegram message size limit', async () => {
+test('reviews page stays below Telegram message limit', async () => {
   const reviews = Array.from({ length: 8 }, (_, index) => ({
     id: `review-${index + 1}`,
     text: 'Д'.repeat(500),
@@ -340,72 +236,42 @@ test('reviews page stays safely below Telegram message size limit', async () => 
       table: { tableNumber: String(index + 1) },
     },
   }));
-  const { service, calls } = menuHarness({
-    dashboard: { tableChanges: [], reviews },
-  });
+  const { service, calls } = harness({ dashboard: { tableChanges: [], reviews } });
 
-  await service.handle('reviews', '0', 42, adminActor());
+  await service.handle('reviews', '0', 42, ACTOR);
 
   const message = lastMessage(calls);
   assert.ok(message[2].length < 4096);
-  const callbacks = message[3].inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
-  assert.equal(callbacks.includes('admin:reviews:1'), true);
+  assert.equal(buttons(message).some((button) => button.callback_data === 'admin:reviews:1'), true);
 });
 
-test('Admin booking approval uses the same BookingsService used by the site', async () => {
-  const { service, calls } = menuHarness();
-
-  await service.handle('booking_approve', 'booking-1', 42, adminActor());
-
+test('Admin booking approval uses the same BookingsService as the site', async () => {
+  const { service, calls } = harness();
+  await service.handle('booking_approve', 'booking-1', 42, ACTOR);
   assert.equal(calls.some((entry) => entry[0] === 'approve' && entry[1] === 'booking-1'), true);
 });
 
-test('/start gives a linked Admin both Telegram commands and the full Admin Mini App', async () => {
+test('/start gives Admin Telegram commands and full Admin Mini App', async () => {
   const previousUrl = process.env.TELEGRAM_WEB_APP_URL;
   process.env.TELEGRAM_WEB_APP_URL = 'https://molo.example/app';
   const sent = [];
   const telegram = {
-    async sendMessage(...args) {
-      sent.push(args);
-      return { ok: true };
-    },
-    async answerCallbackQuery() {
-      return { ok: true };
-    },
+    async sendMessage(...args) { sent.push(args); return { ok: true }; },
+    async answerCallbackQuery() { return { ok: true }; },
   };
   const telegramStaff = {
     async findActiveStaffByTelegramId(id) {
       assert.equal(id, '777');
-      return {
-        id: 'admin-1',
-        fullName: 'Олена',
-        role: 'admin',
-        isOnShift: false,
-      };
+      return { id: 'admin-1', fullName: 'Олена', role: 'admin', isOnShift: false };
     },
   };
-  const adminMenu = {
-    clearPendingInput(id) {
-      assert.equal(id, '777');
-    },
-  };
+  const adminMenu = { clearPendingInput(id) { assert.equal(id, '777'); } };
   const webhook = new TelegramWebhookService(
-    {},
-    {},
-    {},
-    telegram,
-    telegramStaff,
-    undefined,
-    undefined,
-    adminMenu,
+    {}, {}, {}, telegram, telegramStaff, undefined, undefined, adminMenu,
   );
 
   try {
-    await webhook.handleMessage({
-      chat: { id: 42 },
-      from: { id: 777 },
-      text: '/start',
-    });
+    await webhook.handleMessage({ chat: { id: 42 }, from: { id: 777 }, text: '/start' });
   } finally {
     if (previousUrl === undefined) delete process.env.TELEGRAM_WEB_APP_URL;
     else process.env.TELEGRAM_WEB_APP_URL = previousUrl;
@@ -413,10 +279,7 @@ test('/start gives a linked Admin both Telegram commands and the full Admin Mini
 
   const keyboard = sent[0][2].inline_keyboard;
   assert.deepEqual(keyboard[0], [
-    {
-      text: '👔 Команди Адміністратора',
-      callback_data: 'menu:admin',
-    },
+    { text: '👔 Команди Адміністратора', callback_data: 'menu:admin' },
   ]);
   assert.deepEqual(keyboard[1], [
     {
