@@ -28,7 +28,9 @@ export class TelegramWebhookController {
       data === 'menu:waiter' ||
       data.startsWith('waiter:') ||
       data === 'menu:hookah' ||
-      data.startsWith('hookah:');
+      data.startsWith('hookah:') ||
+      data === 'menu:admin' ||
+      data.startsWith('admin:');
 
     if (
       result?.ok === true &&
