@@ -106,38 +106,32 @@ test('guest call response does not wait for Telegram push and starts notificatio
   const newCall = call();
   let listed = 0;
   let notified = 0;
-  const originalConsoleInfo = console.info;
-  console.info = () => undefined;
 
-  try {
-    const controller = new WaiterCallsController(
-      {
-        async createFromGuest() {
-          return { message: 'Виклик відправлено у загальний список офіціантів', call: newCall };
-        },
-        async list() {
-          listed += 1;
-          return [newCall];
-        },
+  const controller = new WaiterCallsController(
+    {
+      async createFromGuest() {
+        return { message: 'Виклик відправлено у загальний список офіціантів', call: newCall };
       },
-      {
-        async notifyCreated(currentCall, activeCalls) {
-          notified += 1;
-          assert.equal(currentCall.id, 'call-1');
-          assert.equal(activeCalls.length, 1);
-        },
+      async list() {
+        listed += 1;
+        return [newCall];
       },
-    );
+    },
+    {
+      async notifyCreated(currentCall, activeCalls) {
+        notified += 1;
+        assert.equal(currentCall.id, 'call-1');
+        assert.equal(activeCalls.length, 1);
+      },
+    },
+  );
 
-    const result = await controller.createFromGuest({ bookingId: 'booking-1' }, 'guest-token');
-    assert.equal(result.call.id, 'call-1');
+  const result = await controller.createFromGuest({ bookingId: 'booking-1' }, 'guest-token');
+  assert.equal(result.call.id, 'call-1');
 
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(listed, 1);
-    assert.equal(notified, 1);
-  } finally {
-    console.info = originalConsoleInfo;
-  }
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(listed, 1);
+  assert.equal(notified, 1);
 });
 
 test('duplicate guest call does not send a second Telegram push', async () => {
@@ -172,9 +166,7 @@ test('duplicate guest call does not send a second Telegram push', async () => {
 test('Telegram push failure cannot undo an already saved guest call', async () => {
   const newCall = call();
   const originalConsoleError = console.error;
-  const originalConsoleInfo = console.info;
   console.error = () => undefined;
-  console.info = () => undefined;
 
   try {
     const controller = new WaiterCallsController(
@@ -199,46 +191,5 @@ test('Telegram push failure cannot undo an already saved guest call', async () =
     await new Promise((resolve) => setImmediate(resolve));
   } finally {
     console.error = originalConsoleError;
-    console.info = originalConsoleInfo;
-  }
-});
-
-test('Telegram timing diagnostics mark recipient lookup and Telegram confirmation without personal data', async () => {
-  const lines = [];
-  const originalConsoleInfo = console.info;
-  console.info = (...args) => lines.push(args.join(' '));
-
-  try {
-    const notifier = new WaiterCallTelegramNotifierService(
-      {
-        async find() {
-          return [{ id: 'waiter-1', telegramId: '101' }];
-        },
-      },
-      {
-        async sendMessage() {
-          return { ok: true };
-        },
-      },
-    );
-
-    const startedAtMs = Date.now();
-    const newCall = call();
-    await notifier.notifyCreated(newCall, [newCall], startedAtMs);
-
-    const payloads = lines
-      .filter((line) => line.startsWith('[waiter-call-timing] '))
-      .map((line) => JSON.parse(line.slice('[waiter-call-timing] '.length)));
-
-    assert.deepEqual(
-      payloads.map((payload) => payload.stage),
-      ['recipients_resolved', 'telegram_send_started', 'telegram_confirmed'],
-    );
-    assert.ok(payloads.every((payload) => payload.callId === 'call-1'));
-    assert.ok(payloads.every((payload) => Number.isInteger(payload.elapsedMs)));
-    assert.ok(lines.every((line) => !line.includes('Ататoa')));
-    assert.ok(lines.every((line) => !line.includes('101')));
-  } finally {
-    console.info = originalConsoleInfo;
   }
 });
