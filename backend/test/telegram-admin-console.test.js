@@ -110,6 +110,7 @@ function menuHarness(options = {}) {
     },
     async sendNow(payload) {
       calls.push(['broadcast-send', payload]);
+      if (options.broadcastGate) await options.broadcastGate;
       return {
         recipientCount: 2,
         deliveredCount: 1,
@@ -179,6 +180,17 @@ function keyboardTexts(messageCall) {
   return (messageCall?.[3]?.inline_keyboard || []).flat().map((button) => button.text);
 }
 
+function callbackDataForText(messageCall, text) {
+  const button = (messageCall?.[3]?.inline_keyboard || [])
+    .flat()
+    .find((item) => item.text === text);
+  return button?.callback_data || null;
+}
+
+function draftIdFromCallback(callbackData) {
+  return String(callbackData || '').split(':')[2] || null;
+}
+
 test('Admin Telegram menu shows operational counts, locations, broadcast and full Mini App', async () => {
   const { service, calls } = menuHarness({
     reschedules: [{ id: 'reschedule-1' }],
@@ -227,7 +239,7 @@ test('locations and tables show current status without status-changing Telegram 
   assert.equal(callbacks.includes('admin:table:table-15'), true);
 });
 
-test('Admin broadcast to all requires permission, preview and explicit confirmation', async () => {
+test('Admin broadcast to all requires permission, preview and explicit draft-bound confirmation', async () => {
   const { service, calls } = menuHarness();
   const actor = adminActor();
 
@@ -242,13 +254,102 @@ test('Admin broadcast to all requires permission, preview and explicit confirmat
   assert.equal(keyboardTexts(message).includes('✅ Надіслати всім'), true);
   assert.equal(calls.some((entry) => entry[0] === 'broadcast-send'), false);
 
-  await service.handle('broadcast_confirm', undefined, 42, actor, 'https://molo.example/app#admin');
+  const confirmData = callbackDataForText(message, '✅ Надіслати всім');
+  assert.match(confirmData, /^admin:broadcast_confirm:[a-f0-9]{16}$/);
+  const draftId = draftIdFromCallback(confirmData);
+  await service.handle(
+    'broadcast_confirm',
+    draftId,
+    42,
+    actor,
+    'https://molo.example/app#admin',
+  );
+
   const send = calls.find((entry) => entry[0] === 'broadcast-send');
   assert.ok(send);
   assert.equal(send[1].target, 'all_clients');
   assert.equal(send[1].message, 'Сьогодні жива музика 🎵');
   assert.equal(service.hasPendingInput('777'), false);
   assert.ok(calls.filter((entry) => entry[0] === 'permission').length >= 3);
+});
+
+test('double broadcast confirmation can deliver at most once', async () => {
+  let releaseBroadcast;
+  const broadcastGate = new Promise((resolve) => {
+    releaseBroadcast = resolve;
+  });
+  const { service, calls } = menuHarness({ broadcastGate });
+  const actor = adminActor();
+
+  await service.handle('broadcast', undefined, 42, actor);
+  await service.handleText('Одне повідомлення', 42, actor);
+  const preview = lastMessage(calls);
+  const draftId = draftIdFromCallback(
+    callbackDataForText(preview, '✅ Надіслати всім'),
+  );
+
+  const first = service.handle('broadcast_confirm', draftId, 42, actor);
+  const second = service.handle('broadcast_confirm', draftId, 42, actor);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    calls.filter((entry) => entry[0] === 'broadcast-send').length,
+    1,
+  );
+  releaseBroadcast();
+  const results = await Promise.allSettled([first, second]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+});
+
+test('old broadcast preview cannot confirm a newer corrected message', async () => {
+  const { service, calls } = menuHarness();
+  const actor = adminActor();
+
+  await service.handle('broadcast', undefined, 42, actor);
+  await service.handleText('Варіант А', 42, actor);
+  const firstPreview = lastMessage(calls);
+  const firstId = draftIdFromCallback(
+    callbackDataForText(firstPreview, '✅ Надіслати всім'),
+  );
+
+  await service.handleText('Варіант Б', 42, actor);
+  const secondPreview = lastMessage(calls);
+  const secondId = draftIdFromCallback(
+    callbackDataForText(secondPreview, '✅ Надіслати всім'),
+  );
+  assert.notEqual(firstId, secondId);
+
+  await assert.rejects(
+    () => service.handle('broadcast_confirm', firstId, 42, actor),
+    /неактуальна/,
+  );
+  assert.equal(calls.some((entry) => entry[0] === 'broadcast-send'), false);
+
+  await service.handle('broadcast_confirm', secondId, 42, actor);
+  const send = calls.find((entry) => entry[0] === 'broadcast-send');
+  assert.equal(send[1].message, 'Варіант Б');
+});
+
+test('reviews page stays safely below Telegram message size limit', async () => {
+  const reviews = Array.from({ length: 8 }, (_, index) => ({
+    id: `review-${index + 1}`,
+    text: 'Д'.repeat(500),
+    booking: {
+      client: { fullName: `Гість ${index + 1}` },
+      table: { tableNumber: String(index + 1) },
+    },
+  }));
+  const { service, calls } = menuHarness({
+    dashboard: { tableChanges: [], reviews },
+  });
+
+  await service.handle('reviews', '0', 42, adminActor());
+
+  const message = lastMessage(calls);
+  assert.ok(message[2].length < 4096);
+  const callbacks = message[3].inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
+  assert.equal(callbacks.includes('admin:reviews:1'), true);
 });
 
 test('Admin booking approval uses the same BookingsService used by the site', async () => {
