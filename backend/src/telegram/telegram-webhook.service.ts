@@ -7,6 +7,7 @@ import { TelegramService } from '../notifications/telegram.service';
 import { RestaurantService } from '../restaurant/restaurant.service';
 import type { StaffRole } from '../staff/entities/staff.entity';
 import { TelegramStaffLinkService } from '../staff/telegram-staff-link.service';
+import { TelegramHookahMenuService } from './telegram-hookah-menu.service';
 import { TelegramWaiterMenuService } from './telegram-waiter-menu.service';
 
 type CallbackRoleRule = {
@@ -38,16 +39,40 @@ const WAITER_CALLBACK_ACTIONS = [
   'table_free',
 ] as const;
 
+const HOOKAH_CALLBACK_ACTIONS = [
+  'calls',
+  'call',
+  'accept_5',
+  'accept_10',
+  'accept_20',
+  'accept_30',
+  'mine',
+  'mine_call',
+  'complete',
+  'availability_on',
+  'availability_off',
+] as const;
+
 const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
   'menu:admin': { roles: ['admin', 'owner'] },
   'menu:waiter': {
     roles: ['waiter', 'admin', 'owner'],
     requiresShift: true,
   },
+  'menu:hookah': {
+    roles: ['hookah'],
+    requiresShift: true,
+  },
   ...Object.fromEntries(
     WAITER_CALLBACK_ACTIONS.map((action) => [
       `waiter:${action}`,
       { roles: ['waiter'] as StaffRole[], requiresShift: true },
+    ]),
+  ),
+  ...Object.fromEntries(
+    HOOKAH_CALLBACK_ACTIONS.map((action) => [
+      `hookah:${action}`,
+      { roles: ['hookah'] as StaffRole[], requiresShift: true },
     ]),
   ),
   'booking:approve': { roles: ['admin', 'owner'] },
@@ -77,6 +102,7 @@ export class TelegramWebhookService {
     private readonly telegram: TelegramService,
     private readonly telegramStaff: TelegramStaffLinkService,
     private readonly waiterMenu?: TelegramWaiterMenuService,
+    private readonly hookahMenu?: TelegramHookahMenuService,
   ) {}
 
   async handleUpdate(update: any) {
@@ -128,6 +154,15 @@ export class TelegramWebhookService {
           {
             text: '👨‍🍳 Команди Офіціанта',
             callback_data: 'menu:waiter',
+          },
+        ]);
+      }
+
+      if (staff.role === 'hookah' && this.hookahMenu) {
+        rows.push([
+          {
+            text: '💨 Команди Кальянника',
+            callback_data: 'menu:hookah',
           },
         ]);
       }
@@ -243,11 +278,56 @@ export class TelegramWebhookService {
         return { ok: true };
       }
 
+      if (type === 'menu' && action === 'hookah') {
+        const hookahAppUrl = this.getWebAppUrl('hookah');
+
+        if (actorRole === 'hookah' && actor?.staffId && this.hookahMenu) {
+          await this.hookahMenu.sendMenu(
+            chatId,
+            actor.staffId,
+            hookahAppUrl,
+          );
+          return { ok: true };
+        }
+
+        await this.telegram.sendMessage(
+          chatId,
+          '💨 Панель Кальянника доступна в Mini App.',
+          hookahAppUrl
+            ? {
+                inline_keyboard: [
+                  [
+                    {
+                      text: '💨 Відкрити панель кальянника',
+                      web_app: { url: hookahAppUrl },
+                    },
+                  ],
+                ],
+              }
+            : undefined,
+        );
+        return { ok: true };
+      }
+
       if (type === 'waiter') {
         if (!this.waiterMenu) {
           throw new Error('Telegram-пульт Офіціанта не підключено');
         }
         const handled = await this.waiterMenu.handle(action, id, chatId, actor);
+        if (handled) return { ok: true };
+      }
+
+      if (type === 'hookah') {
+        if (!this.hookahMenu) {
+          throw new Error('Telegram-пульт Кальянника не підключено');
+        }
+        const handled = await this.hookahMenu.handle(
+          action,
+          id,
+          chatId,
+          actor,
+          this.getWebAppUrl('hookah'),
+        );
         if (handled) return { ok: true };
       }
 

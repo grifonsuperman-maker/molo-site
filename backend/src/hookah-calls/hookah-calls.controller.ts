@@ -7,6 +7,7 @@ import { AcceptHookahCallDto } from "./dto/accept-hookah-call.dto";
 import { CancelHookahCallDto } from "./dto/cancel-hookah-call.dto";
 import { CreateHookahCallDto } from "./dto/create-hookah-call.dto";
 import { UpdateHookahAvailabilityDto } from "./dto/update-hookah-availability.dto";
+import { HookahCallTelegramNotifierService } from "./hookah-call-telegram-notifier.service";
 import { HookahCallsService } from "./hookah-calls.service";
 import { HookahGuestAccessService } from "./hookah-guest-access.service";
 
@@ -19,6 +20,7 @@ export class HookahCallsController {
   constructor(
     private readonly service: HookahCallsService,
     private readonly guestAccess: HookahGuestAccessService,
+    private readonly telegramNotifier: HookahCallTelegramNotifierService,
   ) {}
 
   @Public()
@@ -53,7 +55,13 @@ export class HookahCallsController {
     @Headers("x-guest-booking-token") guestToken?: string,
   ) {
     await this.guestAccess.assertBookingAccess(dto.bookingId, guestToken);
-    return this.service.createFromGuest(dto);
+    const result = await this.service.createFromGuest(dto);
+
+    if (result.message === "Виклик кальянника відправлено") {
+      void this.notifyTelegramHookahWorkers(result.call);
+    }
+
+    return result;
   }
 
   @Roles("hookah", "admin", "owner")
@@ -88,5 +96,19 @@ export class HookahCallsController {
   @Post(":id/cancel")
   cancel(@Param("id") id: string, @Body() dto: CancelHookahCallDto) {
     return this.service.cancel(id, dto);
+  }
+
+  private async notifyTelegramHookahWorkers(
+    call: Awaited<ReturnType<HookahCallsService["createFromGuest"]>>["call"],
+  ) {
+    try {
+      const activeCalls = await this.service.listActive();
+      await this.telegramNotifier.notifyCreated(call, activeCalls);
+    } catch (error: any) {
+      console.error(
+        "Telegram hookah call notification failed:",
+        error?.message || error,
+      );
+    }
   }
 }
