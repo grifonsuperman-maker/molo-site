@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { AdminAttentionService } from '../bookings/admin-attention.service';
@@ -11,6 +12,8 @@ import { RestaurantService } from '../restaurant/restaurant.service';
 import { TablesService } from '../tables/tables.service';
 
 const PAGE_SIZE = 8;
+const REVIEWS_PAGE_SIZE = 4;
+const REVIEW_TEXT_LIMIT = 350;
 const BROADCAST_DRAFT_TTL_MS = 10 * 60 * 1000;
 
 const LOCATIONS = [
@@ -25,6 +28,7 @@ const LOCATIONS = [
 
 type BroadcastDraft = {
   stage: 'awaiting_text' | 'confirm';
+  id?: string;
   message?: string;
   recipientCount: number;
   expiresAt: number;
@@ -208,12 +212,11 @@ export class TelegramAdminMenuService {
       return true;
     }
     if (action === 'broadcast_confirm') {
-      await this.confirmBroadcast(chatId, actor, adminAppUrl);
+      await this.confirmBroadcast(chatId, actor, id, adminAppUrl);
       return true;
     }
     if (action === 'broadcast_cancel') {
-      this.clearPendingInput(this.actorKey(actor));
-      await this.sendMenu(chatId, actor, adminAppUrl);
+      await this.cancelBroadcast(chatId, actor, id, adminAppUrl);
       return true;
     }
     if (action === 'restaurant') {
@@ -277,8 +280,10 @@ export class TelegramAdminMenuService {
       return true;
     }
 
+    const draftId = randomBytes(8).toString('hex');
     this.broadcastDrafts.set(key, {
       stage: 'confirm',
+      id: draftId,
       message,
       recipientCount: draft.recipientCount,
       expiresAt: Date.now() + BROADCAST_DRAFT_TTL_MS,
@@ -299,13 +304,13 @@ export class TelegramAdminMenuService {
           [
             {
               text: '✅ Надіслати всім',
-              callback_data: 'admin:broadcast_confirm',
+              callback_data: `admin:broadcast_confirm:${draftId}`,
             },
           ],
           [
             {
               text: '❌ Скасувати',
-              callback_data: 'admin:broadcast_cancel',
+              callback_data: `admin:broadcast_cancel:${draftId}`,
             },
           ],
         ],
@@ -410,12 +415,12 @@ export class TelegramAdminMenuService {
     else if (action === 'booking_complete') await this.bookings.complete(id, actor);
     else return;
 
-    const notice = {
+    const notice = ({
       booking_approve: '✅ Бронювання підтверджено',
       booking_reject: '❌ Бронювання відхилено',
       booking_checkin: '⚫ Гості відмічені як прибулі',
       booking_complete: '✅ Візит завершено',
-    }[action];
+    } as Record<string, string>)[action];
     await this.sendBookings(chatId, 0, notice);
   }
 
@@ -579,10 +584,10 @@ export class TelegramAdminMenuService {
   private async sendReviews(chatId: string | number, requestedPage: number) {
     const dashboard: any = await this.attention.dashboard();
     const reviews: any[] = dashboard.reviews || [];
-    const page = this.paginate(reviews, requestedPage);
+    const page = this.paginate(reviews, requestedPage, REVIEWS_PAGE_SIZE);
     const lines = page.items.map(
       (review: any) =>
-        `• <b>${this.escapeHtml(review.booking?.client?.fullName || 'Гість')}</b> · №${this.escapeHtml(String(review.booking?.table?.tableNumber || '—'))}\n${this.escapeHtml(String(review.text || 'Без тексту').slice(0, 500))}`,
+        `• <b>${this.escapeHtml(review.booking?.client?.fullName || 'Гість')}</b> · №${this.escapeHtml(String(review.booking?.table?.tableNumber || '—'))}\n${this.escapeHtml(String(review.text || 'Без тексту').slice(0, REVIEW_TEXT_LIMIT))}`,
     );
     const keyboard: Array<Array<Record<string, unknown>>> = [];
     this.addPageButtons(keyboard, 'admin:reviews', page.pageIndex, page.totalPages);
@@ -713,6 +718,7 @@ export class TelegramAdminMenuService {
   private async confirmBroadcast(
     chatId: string | number,
     actor: AuthUser,
+    draftId: string | undefined,
     adminAppUrl?: string | null,
   ) {
     await this.permissions.assert(actor, 'adminCanSendBroadcasts');
@@ -721,17 +727,22 @@ export class TelegramAdminMenuService {
     if (
       !draft ||
       draft.stage !== 'confirm' ||
+      !draft.id ||
+      draft.id !== draftId ||
       !draft.message ||
       draft.expiresAt <= Date.now()
     ) {
-      this.broadcastDrafts.delete(key);
-      throw new BadRequestException('Чернетка розсилки застаріла. Створіть її ще раз.');
+      throw new BadRequestException(
+        'Ця кнопка підтвердження вже неактуальна. Перевірте останню версію розсилки.',
+      );
     }
+
+    this.broadcastDrafts.delete(key);
     const result = await this.broadcasts.sendNow({
       message: draft.message,
       target: 'all_clients',
     } as any);
-    this.broadcastDrafts.delete(key);
+
     await this.telegram.sendMessage(
       chatId,
       [
@@ -741,6 +752,23 @@ export class TelegramAdminMenuService {
         `Без доступного Telegram / не доставлено: <b>${result.unreachableCount}</b>`,
       ].join('\n'),
     );
+    await this.sendMenu(chatId, actor, adminAppUrl);
+  }
+
+  private async cancelBroadcast(
+    chatId: string | number,
+    actor: AuthUser,
+    draftId: string | undefined,
+    adminAppUrl?: string | null,
+  ) {
+    const key = this.actorKey(actor);
+    const draft = this.broadcastDrafts.get(key);
+    if (draftId && draft?.id && draft.id !== draftId) {
+      throw new BadRequestException(
+        'Ця кнопка скасування вже неактуальна. Відкрийте останню версію розсилки.',
+      );
+    }
+    this.broadcastDrafts.delete(key);
     await this.sendMenu(chatId, actor, adminAppUrl);
   }
 
@@ -823,12 +851,16 @@ export class TelegramAdminMenuService {
     if (row.length) keyboard.push(row);
   }
 
-  private paginate<T>(items: T[], requestedPage: number) {
-    const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  private paginate<T>(
+    items: T[],
+    requestedPage: number,
+    pageSize = PAGE_SIZE,
+  ) {
+    const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
     const pageIndex = Math.min(Math.max(0, requestedPage), totalPages - 1);
-    const start = pageIndex * PAGE_SIZE;
+    const start = pageIndex * pageSize;
     return {
-      items: items.slice(start, start + PAGE_SIZE),
+      items: items.slice(start, start + pageSize),
       pageIndex,
       totalPages,
     };
