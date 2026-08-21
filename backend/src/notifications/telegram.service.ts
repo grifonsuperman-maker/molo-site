@@ -90,6 +90,13 @@ export class TelegramService {
     });
   }
 
+  async deleteMessage(chatId: string | number, messageId: string | number) {
+    return this.call('deleteMessage', {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+  }
+
   async answerCallbackQuery(callbackQueryId: string, text?: string) {
     return this.call('answerCallbackQuery', {
       callback_query_id: callbackQueryId,
