@@ -24,12 +24,15 @@ export class TelegramWebhookController {
     const data = String(callback?.data || '');
     const chatId = callback?.message?.chat?.id;
     const messageId = callback?.message?.message_id;
-    const isWaiterNavigation =
-      data === 'menu:waiter' || data.startsWith('waiter:');
+    const isStepNavigation =
+      data === 'menu:waiter' ||
+      data.startsWith('waiter:') ||
+      data === 'menu:hookah' ||
+      data.startsWith('hookah:');
 
     if (
       result?.ok === true &&
-      isWaiterNavigation &&
+      isStepNavigation &&
       chatId &&
       messageId != null
     ) {
