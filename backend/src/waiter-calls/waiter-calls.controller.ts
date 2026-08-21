@@ -18,10 +18,12 @@ export class WaiterCallsController {
     @Body() dto: { bookingId: string },
     @Headers('x-guest-booking-token') guestToken?: string,
   ) {
+    const timingStartedAtMs = Date.now();
     const result = await this.service.createFromGuest(dto, guestToken);
 
     if (result.message !== 'Виклик вже відправлено') {
-      void this.notifyTelegramWaiters(result.call);
+      this.logTelegramTiming('call_saved', result.call.id, timingStartedAtMs);
+      void this.notifyTelegramWaiters(result.call, timingStartedAtMs);
     }
 
     return result;
@@ -70,15 +72,46 @@ export class WaiterCallsController {
     return this.service.close(id, request.user.staffId);
   }
 
-  private async notifyTelegramWaiters(call: Awaited<ReturnType<WaiterCallsService['createFromGuest']>>['call']) {
+  private async notifyTelegramWaiters(
+    call: Awaited<ReturnType<WaiterCallsService['createFromGuest']>>['call'],
+    timingStartedAtMs: number,
+  ) {
     try {
+      this.logTelegramTiming('notify_start', call.id, timingStartedAtMs);
       const activeCalls = await this.service.list();
-      await this.telegramNotifier.notifyCreated(call, activeCalls);
+      this.logTelegramTiming(
+        'active_calls_loaded',
+        call.id,
+        timingStartedAtMs,
+        { activeCount: activeCalls.length },
+      );
+      await this.telegramNotifier.notifyCreated(
+        call,
+        activeCalls,
+        timingStartedAtMs,
+      );
     } catch (error: any) {
       console.error(
         'Telegram waiter call notification failed:',
         error?.message || error,
       );
     }
+  }
+
+  private logTelegramTiming(
+    stage: string,
+    callId: string,
+    timingStartedAtMs: number,
+    details: Record<string, unknown> = {},
+  ) {
+    console.info(
+      '[waiter-call-timing]',
+      JSON.stringify({
+        stage,
+        callId,
+        elapsedMs: Date.now() - timingStartedAtMs,
+        ...details,
+      }),
+    );
   }
 }
