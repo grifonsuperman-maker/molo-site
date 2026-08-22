@@ -398,36 +398,6 @@ export class TelegramWebhookService {
         if (handled) return { ok: true };
       }
 
-      if (type === 'admin' && action === 'booking_open') {
-        if (actorRole === 'admin') await this.restaurant.adminOpenBooking();
-        else await this.restaurant.openBooking();
-        if (actor && this.adminMenu) {
-          await this.adminMenu.handle(
-            'restaurant',
-            undefined,
-            chatId,
-            actor,
-            this.getWebAppUrl('admin'),
-          );
-        }
-        return { ok: true };
-      }
-
-      if (type === 'admin' && action === 'booking_close') {
-        if (actorRole === 'admin') await this.restaurant.adminCloseBooking();
-        else await this.restaurant.closeBooking();
-        if (actor && this.adminMenu) {
-          await this.adminMenu.handle(
-            'restaurant',
-            undefined,
-            chatId,
-            actor,
-            this.getWebAppUrl('admin'),
-          );
-        }
-        return { ok: true };
-      }
-
       if (type === 'admin') {
         if (!this.adminMenu) {
           throw new Error('Telegram-пульт Адміністратора не підключено');
