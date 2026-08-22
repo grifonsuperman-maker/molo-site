@@ -686,8 +686,10 @@ export class TelegramAdminMenuService {
     if (!recipients.length) {
       throw new BadRequestException('Немає доступних гостей для розсилки');
     }
+    const draftId = randomBytes(8).toString('hex');
     this.broadcastDrafts.set(this.actorKey(actor), {
       stage: 'awaiting_text',
+      id: draftId,
       recipientCount: recipients.length,
       expiresAt: Date.now() + BROADCAST_DRAFT_TTL_MS,
     });
@@ -707,7 +709,7 @@ export class TelegramAdminMenuService {
           [
             {
               text: '❌ Скасувати',
-              callback_data: 'admin:broadcast_cancel',
+              callback_data: `admin:broadcast_cancel:${draftId}`,
             },
           ],
         ],
@@ -763,7 +765,12 @@ export class TelegramAdminMenuService {
   ) {
     const key = this.actorKey(actor);
     const draft = this.broadcastDrafts.get(key);
-    if (draftId && draft?.id && draft.id !== draftId) {
+    if (
+      !draft ||
+      !draft.id ||
+      draft.id !== draftId ||
+      draft.expiresAt <= Date.now()
+    ) {
       throw new BadRequestException(
         'Ця кнопка скасування вже неактуальна. Відкрийте останню версію розсилки.',
       );
