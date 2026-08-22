@@ -409,6 +409,30 @@ export class TelegramAdminMenuService {
     actor: AuthUser,
   ) {
     if (!id) throw new BadRequestException('Бронювання не вказано');
+
+    const bookings = await this.bookings.getToday();
+    const booking: any = bookings.find((item: any) => item.id === id);
+    if (!booking) throw new BadRequestException('Бронювання не знайдено');
+
+    const isAllowed =
+      ((action === 'booking_approve' || action === 'booking_reject') &&
+        booking.status === 'pending') ||
+      (action === 'booking_checkin' &&
+        booking.status === 'approved' &&
+        !booking.checkedInAt) ||
+      (action === 'booking_complete' &&
+        booking.status === 'approved' &&
+        Boolean(booking.checkedInAt));
+
+    if (!isAllowed) {
+      await this.sendBookings(
+        chatId,
+        0,
+        'ℹ️ Ця дія вже неактуальна. Стан бронювання вже оновлено.',
+      ).catch(() => undefined);
+      return;
+    }
+
     if (action === 'booking_approve') await this.bookings.approve(id);
     else if (action === 'booking_reject') await this.bookings.reject(id);
     else if (action === 'booking_checkin') await this.bookings.checkIn(id, actor);
@@ -421,7 +445,12 @@ export class TelegramAdminMenuService {
       booking_checkin: '⚫ Гості відмічені як прибулі',
       booking_complete: '✅ Візит завершено',
     } as Record<string, string>)[action];
-    await this.sendBookings(chatId, 0, notice);
+
+    try {
+      await this.sendBookings(chatId, 0, notice);
+    } catch {
+      await this.telegram.sendMessage(chatId, notice).catch(() => undefined);
+    }
   }
 
   private async sendReschedules(
