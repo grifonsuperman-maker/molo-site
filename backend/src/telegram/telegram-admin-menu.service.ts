@@ -167,7 +167,12 @@ export class TelegramAdminMenuService {
       await this.sendBooking(chatId, id);
       return true;
     }
-    if (action.startsWith('booking_')) {
+    if (
+      action === 'booking_approve' ||
+      action === 'booking_reject' ||
+      action === 'booking_checkin' ||
+      action === 'booking_complete'
+    ) {
       await this.runBookingAction(chatId, id, action, actor);
       return true;
     }
