@@ -20,6 +20,7 @@ import { UpgradeStaffPinAttemptsPerAttempt2026081400020 } from './migrations/202
 import { CreateWaiterCalls2026081500010 } from './migrations/2026081500010-CreateWaiterCalls';
 import { AddWaiterCallAssignmentActive2026081500015 } from './migrations/2026081500015-AddWaiterCallAssignmentActive';
 import { CloseInactiveWaiterCalls2026081500020 } from './migrations/2026081500020-CloseInactiveWaiterCalls';
+import { AddGuestReviewArchive2026082200010 } from './migrations/2026082200010-AddGuestReviewArchive';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -37,6 +38,7 @@ const staffPinMigrationOptions = {
     CreateWaiterCalls2026081500010,
     AddWaiterCallAssignmentActive2026081500015,
     CloseInactiveWaiterCalls2026081500020,
+    AddGuestReviewArchive2026082200010,
   ],
 };
 
