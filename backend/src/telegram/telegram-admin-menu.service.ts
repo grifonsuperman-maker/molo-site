@@ -795,8 +795,8 @@ export class TelegramAdminMenuService {
         `Доставлено: <b>${result.deliveredCount}</b>`,
         `Без доступного Telegram / не доставлено: <b>${result.unreachableCount}</b>`,
       ].join('\n'),
-    );
-    await this.sendMenu(chatId, actor, adminAppUrl);
+    ).catch(() => undefined);
+    await this.sendMenu(chatId, actor, adminAppUrl).catch(() => undefined);
   }
 
   private async cancelBroadcast(
