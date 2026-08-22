@@ -33,7 +33,11 @@ export class NotificationsService {
     });
 
     return staff
-      .filter((person) => Boolean(person.telegramId))
+      .filter(
+        (person) =>
+          Boolean(person.telegramId) &&
+          (person.role !== 'waiter' || person.isOnShift),
+      )
       .map((person) => person.telegramId as string);
   }
 
@@ -244,7 +248,7 @@ export class NotificationsService {
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
-      `🕒 Час бронювання: <b>${this.timeLabel(booking.bookingTime)}</b>`,
+      `🕒 Час бронювання: <b>${this.bookingTimeRange(booking)}</b>`,
       '',
       'Минуло 15 хвилин після часу бронювання.',
     ].join('\n');
