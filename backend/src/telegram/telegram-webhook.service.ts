@@ -82,9 +82,9 @@ const ADMIN_CALLBACK_ACTIONS = [
 ] as const;
 
 const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
-  'menu:admin': { roles: ['admin', 'owner'] },
+  'menu:admin': { roles: ['admin'] },
   'menu:waiter': {
-    roles: ['waiter', 'admin', 'owner'],
+    roles: ['waiter', 'admin'],
     requiresShift: true,
   },
   'menu:hookah': {
@@ -106,25 +106,25 @@ const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
   ...Object.fromEntries(
     ADMIN_CALLBACK_ACTIONS.map((action) => [
       `admin:${action}`,
-      { roles: ['admin', 'owner'] as StaffRole[] },
+      { roles: ['admin'] as StaffRole[] },
     ]),
   ),
-  'booking:approve': { roles: ['admin', 'owner'] },
-  'booking:reject': { roles: ['admin', 'owner'] },
-  'booking:cancel': { roles: ['admin', 'owner'] },
+  'booking:approve': { roles: ['admin'] },
+  'booking:reject': { roles: ['admin'] },
+  'booking:cancel': { roles: ['admin'] },
   'booking:checkin': {
-    roles: ['waiter', 'admin', 'owner'],
+    roles: ['waiter', 'admin'],
     requiresShift: true,
   },
   'booking:complete': {
-    roles: ['waiter', 'admin', 'owner'],
+    roles: ['waiter', 'admin'],
     requiresShift: true,
   },
-  'reschedule:approve': { roles: ['admin', 'owner'] },
-  'reschedule:reject': { roles: ['admin', 'owner'] },
-  'restaurant:open': { roles: ['admin', 'owner'] },
-  'restaurant:close_booking': { roles: ['admin', 'owner'] },
-  'restaurant:close_full': { roles: ['admin', 'owner'] },
+  'reschedule:approve': { roles: ['admin'] },
+  'reschedule:reject': { roles: ['admin'] },
+  'restaurant:open': { roles: ['admin'] },
+  'restaurant:close_booking': { roles: ['admin'] },
+  'restaurant:close_full': { roles: ['admin'] },
 };
 
 @Injectable()
@@ -234,7 +234,7 @@ export class TelegramWebhookService {
 
     if (telegramId && this.adminMenu?.hasPendingInput(telegramId)) {
       const staff = await this.telegramStaff.findActiveStaffByTelegramId(telegramId);
-      if (staff && (staff.role === 'admin' || staff.role === 'owner')) {
+      if (staff && staff.role === 'admin') {
         const actor = this.toAuthUser(staff, telegramId);
         try {
           const handled = await this.adminMenu.handleText(text, chatId, actor);
