@@ -248,7 +248,7 @@ export class NotificationsService {
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
       `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
       `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
-      `🕒 Час бронювання: <b>${this.bookingTimeRange(booking)}</b>`,
+      `🕒 Час бронювання: <b>${this.timeLabel(booking.bookingTime)}</b>`,
       '',
       'Минуло 15 хвилин після часу бронювання.',
     ].join('\n');
