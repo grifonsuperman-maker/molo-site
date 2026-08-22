@@ -188,7 +188,7 @@ export class TelegramWebhookService {
       const appUrl = this.getWebAppUrl(roleMenu.mode);
       const rows: Array<Array<Record<string, unknown>>> = [];
 
-      if (staff.role === 'waiter') {
+      if (staff.role === 'waiter' && staff.isOnShift) {
         rows.push([
           {
             text: '👨‍🍳 Команди Офіціанта',
