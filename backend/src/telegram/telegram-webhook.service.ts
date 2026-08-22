@@ -7,6 +7,7 @@ import { TelegramService } from '../notifications/telegram.service';
 import { RestaurantService } from '../restaurant/restaurant.service';
 import type { StaffRole } from '../staff/entities/staff.entity';
 import { TelegramStaffLinkService } from '../staff/telegram-staff-link.service';
+import { TelegramAdminMenuService } from './telegram-admin-menu.service';
 import { TelegramHookahMenuService } from './telegram-hookah-menu.service';
 import { TelegramWaiterMenuService } from './telegram-waiter-menu.service';
 
@@ -53,6 +54,33 @@ const HOOKAH_CALLBACK_ACTIONS = [
   'availability_off',
 ] as const;
 
+const ADMIN_CALLBACK_ACTIONS = [
+  'bookings',
+  'booking',
+  'booking_approve',
+  'booking_reject',
+  'booking_checkin',
+  'booking_complete',
+  'reschedules',
+  'reschedule',
+  'reschedule_approve',
+  'reschedule_reject',
+  'attention',
+  'attention_item',
+  'reviews',
+  'locations',
+  'location',
+  'table',
+  'broadcast',
+  'broadcast_confirm',
+  'broadcast_cancel',
+  'restaurant',
+  'restaurant_open',
+  'booking_open',
+  'booking_close',
+  'restaurant_close',
+] as const;
+
 const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
   'menu:admin': { roles: ['admin', 'owner'] },
   'menu:waiter': {
@@ -73,6 +101,12 @@ const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
     HOOKAH_CALLBACK_ACTIONS.map((action) => [
       `hookah:${action}`,
       { roles: ['hookah'] as StaffRole[], requiresShift: true },
+    ]),
+  ),
+  ...Object.fromEntries(
+    ADMIN_CALLBACK_ACTIONS.map((action) => [
+      `admin:${action}`,
+      { roles: ['admin', 'owner'] as StaffRole[] },
     ]),
   ),
   'booking:approve': { roles: ['admin', 'owner'] },
@@ -103,6 +137,7 @@ export class TelegramWebhookService {
     private readonly telegramStaff: TelegramStaffLinkService,
     private readonly waiterMenu?: TelegramWaiterMenuService,
     private readonly hookahMenu?: TelegramHookahMenuService,
+    private readonly adminMenu?: TelegramAdminMenuService,
   ) {}
 
   async handleUpdate(update: any) {
@@ -115,9 +150,9 @@ export class TelegramWebhookService {
     const chatId = message.chat?.id;
     const text = message.text;
     if (!chatId || !text) return { ok: true };
+    const telegramId = String(message.from?.id || '');
 
     if (text === '/start' || text.startsWith('/start ')) {
-      const telegramId = String(message.from?.id || '');
       const staff = telegramId
         ? await this.telegramStaff.findActiveStaffByTelegramId(telegramId)
         : null;
@@ -145,6 +180,10 @@ export class TelegramWebhookService {
         return { ok: true };
       }
 
+      if (staff.role === 'admin' && this.adminMenu) {
+        this.adminMenu.clearPendingInput(telegramId);
+      }
+
       const roleMenu = this.staffRoleMenu(staff.role);
       const appUrl = this.getWebAppUrl(roleMenu.mode);
       const rows: Array<Array<Record<string, unknown>>> = [];
@@ -167,6 +206,15 @@ export class TelegramWebhookService {
         ]);
       }
 
+      if (staff.role === 'admin' && this.adminMenu) {
+        rows.push([
+          {
+            text: '👔 Команди Адміністратора',
+            callback_data: 'menu:admin',
+          },
+        ]);
+      }
+
       if (appUrl) {
         rows.push([
           {
@@ -182,6 +230,23 @@ export class TelegramWebhookService {
         rows.length ? { inline_keyboard: rows } : undefined,
       );
       return { ok: true };
+    }
+
+    if (telegramId && this.adminMenu?.hasPendingInput(telegramId)) {
+      const staff = await this.telegramStaff.findActiveStaffByTelegramId(telegramId);
+      if (staff && (staff.role === 'admin' || staff.role === 'owner')) {
+        const actor = this.toAuthUser(staff, telegramId);
+        try {
+          const handled = await this.adminMenu.handleText(text, chatId, actor);
+          if (handled) return { ok: true };
+        } catch (error: any) {
+          await this.telegram.sendMessage(
+            chatId,
+            `⚠️ Помилка: ${error?.message || 'невідома помилка'}`,
+          );
+          return { ok: false };
+        }
+      }
     }
 
     return { ok: true };
@@ -217,9 +282,13 @@ export class TelegramWebhookService {
       const actor = authorization.actor;
 
       if (type === 'menu' && action === 'admin') {
-        const keyboard: Array<Array<Record<string, unknown>>> = [];
         const adminAppUrl = this.getWebAppUrl('admin');
+        if (actor && this.adminMenu) {
+          await this.adminMenu.sendMenu(chatId, actor, adminAppUrl);
+          return { ok: true };
+        }
 
+        const keyboard: Array<Array<Record<string, unknown>>> = [];
         if (adminAppUrl) {
           keyboard.push([
             {
@@ -228,7 +297,6 @@ export class TelegramWebhookService {
             },
           ]);
         }
-
         keyboard.push(
           [{ text: '🟢 Відкрити ресторан', callback_data: 'restaurant:open' }],
           [
@@ -244,7 +312,6 @@ export class TelegramWebhookService {
             },
           ],
         );
-
         await this.telegram.sendMessage(chatId, '👔 Панель адміністратора', {
           inline_keyboard: keyboard,
         });
@@ -327,6 +394,20 @@ export class TelegramWebhookService {
           chatId,
           actor,
           this.getWebAppUrl('hookah'),
+        );
+        if (handled) return { ok: true };
+      }
+
+      if (type === 'admin') {
+        if (!this.adminMenu) {
+          throw new Error('Telegram-пульт Адміністратора не підключено');
+        }
+        const handled = await this.adminMenu.handle(
+          action,
+          id,
+          chatId,
+          actor,
+          this.getWebAppUrl('admin'),
         );
         if (handled) return { ok: true };
       }
@@ -430,13 +511,17 @@ export class TelegramWebhookService {
 
     return {
       role: actor.role,
-      actor: {
-        sub: actor.id,
-        telegramId,
-        role: actor.role,
-        staffId: actor.id,
-        name: actor.fullName,
-      },
+      actor: this.toAuthUser(actor, telegramId),
+    };
+  }
+
+  private toAuthUser(staff: any, telegramId: string): AuthUser {
+    return {
+      sub: staff.id,
+      telegramId,
+      role: staff.role,
+      staffId: staff.id,
+      name: staff.fullName,
     };
   }
 
