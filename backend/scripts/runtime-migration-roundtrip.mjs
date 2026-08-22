@@ -14,27 +14,27 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
 
 const EXPECTED_REWIND_STATE = {
   5: {
-    reviewArchivedAtColumn: false,
+    reviewArchiveTable: false,
     waiterLifecycleTrigger: true,
     waiterLifecycleFunction: true,
   },
   4: {
-    reviewArchivedAtColumn: false,
+    reviewArchiveTable: false,
     waiterLifecycleTrigger: false,
     waiterLifecycleFunction: false,
   },
   3: {
-    reviewArchivedAtColumn: false,
+    reviewArchiveTable: false,
     waiterAssignmentActiveColumn: false,
     waiterAssignmentIndex: false,
     waiterStatusIndex: true,
   },
   2: {
-    reviewArchivedAtColumn: false,
+    reviewArchiveTable: false,
     waiterCallsTable: false,
   },
   1: {
-    reviewArchivedAtColumn: false,
+    reviewArchiveTable: false,
     staffPinAttemptsTable: true,
     staffPinAttemptCountColumn: true,
     staffPinWindowStartedAtColumn: true,
@@ -43,7 +43,7 @@ const EXPECTED_REWIND_STATE = {
     staffPinUpdatedAtIndex: true,
   },
   0: {
-    reviewArchivedAtColumn: false,
+    reviewArchiveTable: false,
     staffPinAttemptsTable: false,
   },
 };
@@ -114,13 +114,7 @@ async function readRewindState(dataSource) {
     SELECT
       to_regclass('public.staff_pin_attempts') IS NOT NULL AS "staffPinAttemptsTable",
       to_regclass('public.waiter_calls') IS NOT NULL AS "waiterCallsTable",
-      EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'guest_reviews'
-          AND column_name = 'archived_at'
-      ) AS "reviewArchivedAtColumn",
+      to_regclass('public.guest_review_archives') IS NOT NULL AS "reviewArchiveTable",
       EXISTS (
         SELECT 1
         FROM information_schema.columns
