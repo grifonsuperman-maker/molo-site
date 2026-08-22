@@ -8,6 +8,7 @@ import { RestaurantService } from '../restaurant/restaurant.service';
 import type { StaffRole } from '../staff/entities/staff.entity';
 import { TelegramStaffLinkService } from '../staff/telegram-staff-link.service';
 import { TelegramAdminMenuService } from './telegram-admin-menu.service';
+import { TelegramDirectorMenuService } from './telegram-director-menu.service';
 import { TelegramHookahMenuService } from './telegram-hookah-menu.service';
 import { TelegramWaiterMenuService } from './telegram-waiter-menu.service';
 
@@ -81,8 +82,34 @@ const ADMIN_CALLBACK_ACTIONS = [
   'restaurant_close',
 ] as const;
 
+const DIRECTOR_CALLBACK_ACTIONS = [
+  'bookings',
+  'booking',
+  'reschedules',
+  'reschedule',
+  'locations',
+  'location',
+  'location_page',
+  'table',
+  'team',
+  'stats',
+  'activity',
+  'broadcast',
+  'broadcast_confirm',
+  'broadcast_cancel',
+  'admin_rights',
+  'right_enable',
+  'right_disable',
+  'restaurant',
+  'restaurant_open',
+  'booking_open',
+  'booking_close',
+  'restaurant_close',
+] as const;
+
 const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
   'menu:admin': { roles: ['admin', 'owner'] },
+  'menu:director': { roles: ['owner'] },
   'menu:waiter': {
     roles: ['waiter', 'admin', 'owner'],
     requiresShift: true,
@@ -107,6 +134,12 @@ const CALLBACK_ROLE_RULES: Record<string, CallbackRoleRule> = {
     ADMIN_CALLBACK_ACTIONS.map((action) => [
       `admin:${action}`,
       { roles: ['admin', 'owner'] as StaffRole[] },
+    ]),
+  ),
+  ...Object.fromEntries(
+    DIRECTOR_CALLBACK_ACTIONS.map((action) => [
+      `director:${action}`,
+      { roles: ['owner'] as StaffRole[] },
     ]),
   ),
   'booking:approve': { roles: ['admin', 'owner'] },
@@ -138,6 +171,7 @@ export class TelegramWebhookService {
     private readonly waiterMenu?: TelegramWaiterMenuService,
     private readonly hookahMenu?: TelegramHookahMenuService,
     private readonly adminMenu?: TelegramAdminMenuService,
+    private readonly directorMenu?: TelegramDirectorMenuService,
   ) {}
 
   async handleUpdate(update: any) {
@@ -183,6 +217,9 @@ export class TelegramWebhookService {
       if (staff.role === 'admin' && this.adminMenu) {
         this.adminMenu.clearPendingInput(telegramId);
       }
+      if (staff.role === 'owner' && this.directorMenu) {
+        this.directorMenu.clearPendingInput(telegramId);
+      }
 
       const roleMenu = this.staffRoleMenu(staff.role);
       const appUrl = this.getWebAppUrl(roleMenu.mode);
@@ -215,6 +252,15 @@ export class TelegramWebhookService {
         ]);
       }
 
+      if (staff.role === 'owner' && this.directorMenu) {
+        rows.push([
+          {
+            text: '📊 Команди Директора',
+            callback_data: 'menu:director',
+          },
+        ]);
+      }
+
       if (appUrl) {
         rows.push([
           {
@@ -230,6 +276,23 @@ export class TelegramWebhookService {
         rows.length ? { inline_keyboard: rows } : undefined,
       );
       return { ok: true };
+    }
+
+    if (telegramId && this.directorMenu?.hasPendingInput(telegramId)) {
+      const staff = await this.telegramStaff.findActiveStaffByTelegramId(telegramId);
+      if (staff?.role === 'owner') {
+        const actor = this.toAuthUser(staff, telegramId);
+        try {
+          const handled = await this.directorMenu.handleText(text, chatId, actor);
+          if (handled) return { ok: true };
+        } catch (error: any) {
+          await this.telegram.sendMessage(
+            chatId,
+            `⚠️ Помилка: ${error?.message || 'невідома помилка'}`,
+          );
+          return { ok: false };
+        }
+      }
     }
 
     if (telegramId && this.adminMenu?.hasPendingInput(telegramId)) {
@@ -280,6 +343,18 @@ export class TelegramWebhookService {
 
       const actorRole = authorization.role;
       const actor = authorization.actor;
+
+      if (type === 'menu' && action === 'director') {
+        if (!actor || !this.directorMenu) {
+          throw new Error('Telegram-пульт Директора не підключено');
+        }
+        await this.directorMenu.sendMenu(
+          chatId,
+          actor,
+          this.getWebAppUrl('director'),
+        );
+        return { ok: true };
+      }
 
       if (type === 'menu' && action === 'admin') {
         const adminAppUrl = this.getWebAppUrl('admin');
@@ -408,6 +483,20 @@ export class TelegramWebhookService {
           chatId,
           actor,
           this.getWebAppUrl('admin'),
+        );
+        if (handled) return { ok: true };
+      }
+
+      if (type === 'director') {
+        if (!this.directorMenu) {
+          throw new Error('Telegram-пульт Директора не підключено');
+        }
+        const handled = await this.directorMenu.handle(
+          action,
+          id,
+          chatId,
+          actor,
+          this.getWebAppUrl('director'),
         );
         if (handled) return { ok: true };
       }
