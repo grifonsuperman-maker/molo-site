@@ -43,12 +43,12 @@ export class GuestReview {
   @Column({ name: 'responded_by_role', type: 'varchar', length: 32, nullable: true })
   respondedByRole: string | null;
 
-  @Column({ name: 'archived_at', type: 'timestamp', nullable: true })
-  archivedAt: Date | null;
-
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
+
+  @Column({ name: 'archived_at', type: 'timestamp', nullable: true })
+  archivedAt: Date | null;
 }
