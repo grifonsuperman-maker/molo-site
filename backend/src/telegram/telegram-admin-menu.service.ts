@@ -226,25 +226,25 @@ export class TelegramAdminMenuService {
     if (action === 'restaurant_open') {
       if (actor.role === 'admin') await this.restaurant.adminOpenRestaurant();
       else await this.restaurant.openRestaurant();
-      await this.sendRestaurant(chatId, actor, '🟢 Ресторан відкрито');
+      await this.sendRestaurant(chatId, actor, '🟢 Ресторан відкрито').catch(() => undefined);
       return true;
     }
     if (action === 'booking_open') {
       if (actor.role === 'admin') await this.restaurant.adminOpenBooking();
       else await this.restaurant.openBooking();
-      await this.sendRestaurant(chatId, actor, '🟢 Онлайн-бронювання відкрито');
+      await this.sendRestaurant(chatId, actor, '🟢 Онлайн-бронювання відкрито').catch(() => undefined);
       return true;
     }
     if (action === 'booking_close') {
       if (actor.role === 'admin') await this.restaurant.adminCloseBooking();
       else await this.restaurant.closeBooking();
-      await this.sendRestaurant(chatId, actor, '🔒 Онлайн-бронювання закрито');
+      await this.sendRestaurant(chatId, actor, '🔒 Онлайн-бронювання закрито').catch(() => undefined);
       return true;
     }
     if (action === 'restaurant_close') {
       if (actor.role === 'admin') await this.restaurant.adminCloseRestaurant({});
       else await this.restaurant.closeRestaurant({});
-      await this.sendRestaurant(chatId, actor, '🔴 Ресторан закрито');
+      await this.sendRestaurant(chatId, actor, '🔴 Ресторан закрито').catch(() => undefined);
       return true;
     }
 
