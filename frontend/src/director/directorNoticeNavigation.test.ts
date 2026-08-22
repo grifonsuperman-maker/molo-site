@@ -1,4 +1,4 @@
-import { directorNoticeDestination } from './directorNoticeNavigation';
+import { directorNoticeDestination } from './directorNoticeNavigation.js';
 
 function expectEqual<T>(actual: T, expected: T) {
   if (actual !== expected) {
