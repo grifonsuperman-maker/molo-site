@@ -168,7 +168,7 @@ export class NotificationsService {
     };
 
     await Promise.all([
-      this.sendToRoles(['owner', 'admin'], text, replyMarkup),
+      this.sendToRoles(['admin'], text, replyMarkup),
       this.sendToRoles(['waiter'], text),
     ]);
   }
@@ -183,7 +183,7 @@ export class NotificationsService {
       `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
     ].join('\n');
 
-    await this.sendToRoles(['owner', 'admin', 'waiter'], text);
+    await this.sendToRoles(['admin', 'waiter'], text);
   }
 
   async notifyBookingCancelled(booking: Booking) {
@@ -196,7 +196,7 @@ export class NotificationsService {
       `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
     ].join('\n');
 
-    await this.sendToRoles(['owner', 'admin', 'waiter'], text);
+    await this.sendToRoles(['admin', 'waiter'], text);
   }
 
   async notifyRescheduleRequest(request: BookingRescheduleRequest) {
@@ -221,7 +221,7 @@ export class NotificationsService {
       ],
     };
 
-    await this.sendToRoles(['owner', 'admin'], text, replyMarkup);
+    await this.sendToRoles(['admin'], text, replyMarkup);
   }
 
   async notifyGuestReportedLateness(booking: GuestReportedLatenessNotification) {
@@ -270,7 +270,7 @@ export class NotificationsService {
       inline_keyboard: [[{ text: '🔒 Закрити бронювання', callback_data: 'restaurant:close_booking' }]],
     };
 
-    return this.sendToRoles(['owner', 'admin'], text, replyMarkup);
+    return this.sendToRoles(['admin'], text, replyMarkup);
   }
 
   async notifyRestaurantCloseReminder() {
@@ -285,6 +285,6 @@ export class NotificationsService {
       inline_keyboard: [[{ text: '🔴 Закрити ресторан', callback_data: 'restaurant:close_full' }]],
     };
 
-    return this.sendToRoles(['owner', 'admin'], text, replyMarkup);
+    return this.sendToRoles(['admin'], text, replyMarkup);
   }
 }
