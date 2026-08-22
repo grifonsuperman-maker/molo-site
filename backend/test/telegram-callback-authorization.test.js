@@ -185,24 +185,45 @@ test('Admin restaurant callbacks dispatch through permission-checking admin meth
   }
 });
 
-test('Director can execute protected admin callbacks without shift requirement', async () => {
-  const { service, calls } = createHarness({
+test('Director cannot execute operational Telegram callbacks', async () => {
+  const actor = {
     role: 'owner',
     active: true,
     isArchived: false,
     isOnShift: false,
-  });
+  };
+  const cases = [
+    'menu:admin',
+    'admin:bookings:0',
+    'booking:approve:booking-1',
+    'booking:checkin:booking-1',
+    'reschedule:approve:request-1',
+    'restaurant:close_full',
+  ];
 
-  const result = await service.handleCallback(
-    callback('restaurant:close_full'),
-  );
-
-  assert.deepEqual(result, { ok: true });
-  assert.equal(calls.some((entry) => entry[0] === 'restaurant-close-full'), true);
-  assert.equal(
-    calls.some((entry) => entry[0] === 'admin-restaurant-close-full'),
-    false,
-  );
+  for (const data of cases) {
+    const { service, calls } = createHarness(actor);
+    assert.deepEqual(await service.handleCallback(callback(data)), { ok: false });
+    assert.equal(
+      calls.some((entry) =>
+        [
+          'approve',
+          'checkin',
+          'reschedule-approve',
+          'restaurant-close-full',
+          'admin-restaurant-close-full',
+        ].includes(entry[0]),
+      ),
+      false,
+    );
+    assert.equal(
+      calls.some(
+        (entry) =>
+          entry[0] === 'message' && /Недостатньо прав/.test(entry[2]),
+      ),
+      true,
+    );
+  }
 });
 
 test('Waiter on shift can check in and complete but cannot approve', async () => {
