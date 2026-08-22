@@ -48,7 +48,4 @@ export class GuestReview {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
-
-  @Column({ name: 'archived_at', type: 'timestamp', nullable: true })
-  archivedAt: Date | null;
 }
