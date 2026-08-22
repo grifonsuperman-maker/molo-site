@@ -20,6 +20,10 @@ function createService(booking, options = {}) {
       calls.push(['getToday']);
       return [booking];
     },
+    async getPendingReschedules() {
+      calls.push(['getPendingReschedules']);
+      return [];
+    },
     async approve(id) {
       calls.push(['approve', id]);
       booking.status = 'approved';
@@ -38,6 +42,15 @@ function createService(booking, options = {}) {
       calls.push(['complete', id]);
       booking.status = 'completed';
     },
+    async rejectReschedule(id) {
+      calls.push(['rescheduleReject', id]);
+    },
+  };
+
+  const rescheduleApproval = {
+    async approve(id) {
+      calls.push(['rescheduleApprove', id]);
+    },
   };
 
   const telegram = {
@@ -52,7 +65,7 @@ function createService(booking, options = {}) {
     calls,
     service: new TelegramAdminMenuService(
       bookings,
-      {},
+      rescheduleApproval,
       {},
       {},
       {},
@@ -121,5 +134,45 @@ test('stale Admin approve button cannot approve an already approved booking agai
         String(entry[2]).includes('Ця дія вже неактуальна'),
     ),
     true,
+  );
+});
+
+test('successful Admin reschedule approval stays successful when Telegram refresh fails', async () => {
+  const booking = pendingBooking();
+  const { service, calls } = createService(booking, {
+    telegramError: new Error('temporary Telegram send failure'),
+  });
+
+  const handled = await service.handle(
+    'reschedule_approve',
+    'reschedule-1',
+    42,
+    ACTOR,
+  );
+
+  assert.equal(handled, true);
+  assert.equal(
+    calls.filter((entry) => entry[0] === 'rescheduleApprove').length,
+    1,
+  );
+});
+
+test('successful Admin reschedule rejection stays successful when Telegram refresh fails', async () => {
+  const booking = pendingBooking();
+  const { service, calls } = createService(booking, {
+    telegramError: new Error('temporary Telegram send failure'),
+  });
+
+  const handled = await service.handle(
+    'reschedule_reject',
+    'reschedule-1',
+    42,
+    ACTOR,
+  );
+
+  assert.equal(handled, true);
+  assert.equal(
+    calls.filter((entry) => entry[0] === 'rescheduleReject').length,
+    1,
   );
 });
