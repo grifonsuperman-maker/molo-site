@@ -5,15 +5,21 @@ export class AddGuestReviewArchive2026082200010 implements MigrationInterface {
 
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      ALTER TABLE "guest_reviews"
-      ADD COLUMN IF NOT EXISTS "archived_at" TIMESTAMP NULL
+      CREATE TABLE IF NOT EXISTS "guest_review_archives" (
+        "guest_review_id" UUID NOT NULL,
+        "archived_at" TIMESTAMP NOT NULL,
+        CONSTRAINT "PK_guest_review_archives" PRIMARY KEY ("guest_review_id"),
+        CONSTRAINT "FK_guest_review_archives_review"
+          FOREIGN KEY ("guest_review_id")
+          REFERENCES "guest_reviews"("id")
+          ON DELETE CASCADE
+      )
     `);
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      ALTER TABLE "guest_reviews"
-      DROP COLUMN IF EXISTS "archived_at"
+      DROP TABLE IF EXISTS "guest_review_archives"
     `);
   }
 }
