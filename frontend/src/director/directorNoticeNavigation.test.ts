@@ -1,9 +1,13 @@
-import { strict as assert } from 'node:assert';
-
 import { directorNoticeDestination } from './directorNoticeNavigation';
 
-assert.equal(directorNoticeDestination('reviews:36'), 'reviews');
-assert.equal(directorNoticeDestination('pending:4'), null);
-assert.equal(directorNoticeDestination('cleaning:2'), null);
+function expectEqual<T>(actual: T, expected: T) {
+  if (actual !== expected) {
+    throw new Error(`Expected ${String(expected)}, received ${String(actual)}`);
+  }
+}
+
+expectEqual(directorNoticeDestination('reviews:36'), 'reviews');
+expectEqual(directorNoticeDestination('pending:4'), null);
+expectEqual(directorNoticeDestination('cleaning:2'), null);
 
 console.log('directorNoticeNavigation tests passed');
