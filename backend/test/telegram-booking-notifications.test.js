@@ -94,7 +94,7 @@ test('booking Telegram notifications keep phone text without broken callbacks', 
   }
 });
 
-test('new booking action buttons go only to admin and director', async () => {
+test('new booking action buttons go only to admin', async () => {
   const { service } = createNotificationsService();
   const deliveries = [];
 
@@ -106,7 +106,7 @@ test('new booking action buttons go only to admin and director', async () => {
   await service.notifyNewBooking(booking);
 
   assert.equal(deliveries.length, 2);
-  assert.deepEqual(deliveries[0].roles, ['owner', 'admin']);
+  assert.deepEqual(deliveries[0].roles, ['admin']);
   assert.deepEqual(callbacks(deliveries[0].replyMarkup), [
     'booking:approve:booking-1',
     'booking:reject:booking-1',
@@ -114,6 +114,33 @@ test('new booking action buttons go only to admin and director', async () => {
   assert.deepEqual(deliveries[1].roles, ['waiter']);
   assert.equal(deliveries[1].replyMarkup, undefined);
   assert.match(deliveries[1].text, /Нове бронювання/);
+});
+
+test('Director is excluded from operational Telegram notifications', async () => {
+  const { service } = createNotificationsService();
+  const deliveries = [];
+
+  service.sendToRoles = async (roles, text, replyMarkup) => {
+    deliveries.push({ roles, text, replyMarkup });
+    return { attempted: 1, delivered: 1, failed: 0 };
+  };
+
+  await service.notifyNewBooking(booking);
+  await service.notifyBookingApproved(booking);
+  await service.notifyBookingCancelled(booking);
+  await service.notifyRescheduleRequest({
+    id: 'request-1',
+    booking,
+    requestedDate: '2026-08-17',
+    requestedTime: '19:00',
+  });
+  await service.notifyBookingCloseReminder();
+  await service.notifyRestaurantCloseReminder();
+
+  assert.ok(deliveries.length > 0);
+  for (const delivery of deliveries) {
+    assert.equal(delivery.roles.includes('owner'), false);
+  }
 });
 
 test('guest-reported lateness Telegram notification targets only admin without buttons', async () => {
