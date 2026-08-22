@@ -524,14 +524,22 @@ export class TelegramAdminMenuService {
     action: string,
   ) {
     if (!id) throw new BadRequestException('Запит не вказано');
+
+    let notice: string;
     if (action === 'reschedule_approve') {
       await this.rescheduleApproval.approve(id);
-      await this.sendReschedules(chatId, 0, '✅ Перенесення підтверджено');
+      notice = '✅ Перенесення підтверджено';
+    } else if (action === 'reschedule_reject') {
+      await this.bookings.rejectReschedule(id, {});
+      notice = '❌ Перенесення відхилено';
+    } else {
       return;
     }
-    if (action === 'reschedule_reject') {
-      await this.bookings.rejectReschedule(id, {});
-      await this.sendReschedules(chatId, 0, '❌ Перенесення відхилено');
+
+    try {
+      await this.sendReschedules(chatId, 0, notice);
+    } catch {
+      await this.telegram.sendMessage(chatId, notice).catch(() => undefined);
     }
   }
 
