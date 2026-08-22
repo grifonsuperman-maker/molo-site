@@ -183,3 +183,35 @@ test('automatic late guest Telegram notification also targets only admin', async
     'booking:cancel:booking-1',
   ]);
 });
+
+test('off-shift waiter is excluded from operational Telegram notifications', async () => {
+  const sent = [];
+  const staffRepo = {
+    async find() {
+      return [
+        {
+          role: 'waiter',
+          telegramId: 'waiter-on-shift',
+          isOnShift: true,
+        },
+        {
+          role: 'waiter',
+          telegramId: 'waiter-off-shift',
+          isOnShift: false,
+        },
+      ];
+    },
+  };
+  const telegram = {
+    async sendMessage(...args) {
+      sent.push(args);
+      return { ok: true };
+    },
+  };
+  const service = new NotificationsService(staffRepo, telegram);
+
+  const result = await service.sendToRoles(['waiter'], 'Робоче повідомлення');
+
+  assert.deepEqual(sent.map((message) => message[0]), ['waiter-on-shift']);
+  assert.deepEqual(result, { attempted: 1, delivered: 1, failed: 0 });
+});

@@ -33,7 +33,11 @@ export class NotificationsService {
     });
 
     return staff
-      .filter((person) => Boolean(person.telegramId))
+      .filter(
+        (person) =>
+          Boolean(person.telegramId) &&
+          (person.role !== 'waiter' || person.isOnShift),
+      )
       .map((person) => person.telegramId as string);
   }
 
