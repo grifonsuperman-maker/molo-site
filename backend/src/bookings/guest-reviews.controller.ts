@@ -44,6 +44,52 @@ export class GuestReviewsController {
       .getMany();
   }
 
+  @Get('active')
+  @Roles('owner')
+  async findActive(
+    @Query('page') pageValue?: string,
+    @Query('limit') limitValue?: string,
+    @Query('q') queryValue?: string,
+  ) {
+    const page = this.positiveInteger(pageValue, 1);
+    const limit = Math.min(this.positiveInteger(limitValue, 50), 100);
+    const search = String(queryValue || '').trim().toLowerCase();
+    const query = this.reviewQuery()
+      .leftJoin(
+        'guest_review_archives',
+        'review_archive',
+        'review_archive.guest_review_id = review.id',
+      )
+      .where('review_archive.guest_review_id IS NULL');
+
+    if (search) {
+      query.andWhere(
+        `(
+          LOWER(COALESCE("client"."full_name", '')) LIKE :activeSearch
+          OR LOWER(COALESCE("review"."text", '')) LIKE :activeSearch
+          OR CAST("booking"."booking_date" AS TEXT) LIKE :activeSearch
+          OR TO_CHAR("booking"."booking_date", 'DD.MM.YYYY') LIKE :activeSearch
+          OR LOWER(COALESCE("table"."table_number", '')) LIKE :activeSearch
+        )`,
+        { activeSearch: `%${search}%` },
+      );
+    }
+
+    const [items, total] = await query
+      .orderBy('review.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      hasMore: page * limit < total,
+    };
+  }
+
   @Get('archive')
   @Roles('owner')
   async findArchive(
