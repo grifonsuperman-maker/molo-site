@@ -46,15 +46,15 @@ test('failed review searches cannot reveal cards from the previous query', () =>
 
   assert.match(
     activeLoader,
-    /if \(!append\) \{[\s\S]*if \(showLoading\) \{[\s\S]*setActiveReviews\(\[\]\);[\s\S]*setActiveResultTotal\(0\);[\s\S]*\}[\s\S]*setActivePage\(0\);[\s\S]*setActiveHasMore\(false\);/,
+    /if \(!append\) \{[\s\S]*if \(showLoading\) \{[\s\S]*setActiveReviews\(\[\]\);[\s\S]*setActiveResultTotal\(0\);[\s\S]*\}[\s\S]*setActivePage\(0\);[\s\S]*setActiveHasMore\(false\);[\s\S]*setActiveRefreshRetry\(!showLoading\);/,
   );
   assert.match(
     archiveLoader,
-    /if \(!append\) \{[\s\S]*if \(showLoading\) \{[\s\S]*setArchivedReviews\(\[\]\);[\s\S]*setArchiveResultTotal\(0\);[\s\S]*\}[\s\S]*setArchivePage\(0\);[\s\S]*setArchiveHasMore\(false\);/,
+    /if \(!append\) \{[\s\S]*if \(showLoading\) \{[\s\S]*setArchivedReviews\(\[\]\);[\s\S]*setArchiveResultTotal\(0\);[\s\S]*\}[\s\S]*setArchivePage\(0\);[\s\S]*setArchiveHasMore\(false\);[\s\S]*setArchiveRefreshRetry\(!showLoading\);/,
   );
 });
 
-test('failed mutation refresh invalidates pagination without restoring removed cards', () => {
+test('failed mutation refresh invalidates stale pagination and enables retry', () => {
   const activeLoader = sourceSection(
     'async function loadActivePage(',
     'async function loadArchivePage(',
@@ -71,6 +71,7 @@ test('failed mutation refresh invalidates pagination without restoring removed c
           }
           setActivePage(0);
           setActiveHasMore(false);
+          setActiveRefreshRetry(!showLoading);
         }`));
   assert.ok(archiveLoader.includes(`if (!append) {
           if (showLoading) {
@@ -79,7 +80,44 @@ test('failed mutation refresh invalidates pagination without restoring removed c
           }
           setArchivePage(0);
           setArchiveHasMore(false);
+          setArchiveRefreshRetry(!showLoading);
         }`));
+
+  assert.ok(activeLoader.includes('setActiveRefreshRetry(false);'));
+  assert.ok(archiveLoader.includes('setArchiveRefreshRetry(false);'));
+});
+
+test('failed mutation refresh can retry page one before loading more', () => {
+  const activeRetry = sourceSection(
+    'async function retryActiveRefresh(',
+    'async function retryArchiveRefresh(',
+  );
+  const archiveRetry = sourceSection(
+    'async function retryArchiveRefresh(',
+    'async function loadMoreActive(',
+  );
+  const managerDialog = sourceSection(
+    'const managerDialog = open ? createPortal(',
+    'const deleteDialog = deleteTarget ? createPortal(',
+  );
+
+  assertOrdered(activeRetry, [
+    "setBusy('active-retry');",
+    'await loadActivePage(1, query, false, false);',
+    'setBusy(null);',
+  ]);
+  assertOrdered(archiveRetry, [
+    "setBusy('archive-retry');",
+    'await loadArchivePage(1, query, false, false);',
+    'setBusy(null);',
+  ]);
+  assert.ok(managerDialog.includes("view === 'active' && activeRefreshRetry"));
+  assert.ok(managerDialog.includes("view === 'archive' && archiveRefreshRetry"));
+  assert.ok(managerDialog.includes("!activeRefreshRetry && activeHasMore"));
+  assert.ok(managerDialog.includes("!archiveRefreshRetry && archiveHasMore"));
+  assert.ok(managerDialog.includes("onClick={() => void retryActiveRefresh()}"));
+  assert.ok(managerDialog.includes("onClick={() => void retryArchiveRefresh()}"));
+  assert.ok(managerDialog.includes("'Спробувати ще'"));
 });
 
 test('successful review mutations reconcile the visible list before refresh', () => {
@@ -109,7 +147,7 @@ test('successful review mutations reconcile the visible list before refresh', ()
 
   const deleteMutation = sourceSection(
     'async function deleteReviewPermanently(',
-    'async function loadMoreActive(',
+    'async function retryActiveRefresh(',
   );
   assertOrdered(deleteMutation, [
     'await reviewsApi.deletePermanently(review.id);',
