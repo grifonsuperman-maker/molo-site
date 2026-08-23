@@ -26,7 +26,7 @@ export type GuestReviewRecord = {
   } | null;
 };
 
-export type GuestReviewArchivePage = {
+export type GuestReviewPage = {
   items: GuestReviewRecord[];
   total: number;
   page: number;
@@ -34,21 +34,38 @@ export type GuestReviewArchivePage = {
   hasMore: boolean;
 };
 
+export type GuestReviewArchivePage = GuestReviewPage;
+
+type GuestReviewPageOptions = {
+  page?: number;
+  limit?: number;
+  query?: string;
+};
+
 type ReviewMutationResult = {
   ok: boolean;
   id: string;
 };
 
+function getReviewPage(path: string, {
+  page = 1,
+  limit = 50,
+  query = '',
+}: GuestReviewPageOptions = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  if (query.trim()) params.set('q', query.trim());
+  return api.get<GuestReviewPage>(`${path}?${params.toString()}`);
+}
+
 export const reviewsApi = {
   getAll: () => api.get<GuestReviewRecord[]>('/guest-reviews'),
-  getArchive: ({ page = 1, limit = 50, query = '' }: { page?: number; limit?: number; query?: string } = {}) => {
-    const params = new URLSearchParams({
-      page: String(page),
-      limit: String(limit),
-    });
-    if (query.trim()) params.set('q', query.trim());
-    return api.get<GuestReviewArchivePage>(`/guest-reviews/archive?${params.toString()}`);
-  },
+  getActive: (options: GuestReviewPageOptions = {}) =>
+    getReviewPage('/guest-reviews/active', options),
+  getArchive: (options: GuestReviewPageOptions = {}) =>
+    getReviewPage('/guest-reviews/archive', options),
   respond: (id: string, text: string) =>
     api.patch<GuestReviewRecord>(
       `/guest-reviews/${encodeURIComponent(id)}/response`,
