@@ -134,13 +134,35 @@ const ownerRequest = {
   user: { role: 'owner', name: 'Директор' },
 };
 
-test('review archive mutations are owner-only', () => {
-  for (const method of ['findArchive', 'archive', 'restore', 'deletePermanently']) {
+test('review archive manager endpoints are owner-only', () => {
+  for (const method of ['findActive', 'findArchive', 'archive', 'restore', 'deletePermanently']) {
     assert.deepEqual(
       Reflect.getMetadata(ROLES_KEY, GuestReviewsController.prototype[method]),
       ['owner'],
     );
   }
+});
+
+test('active review manager supports pages beyond the first 300 reviews and displayed-date search', async () => {
+  const review = reviewFixture();
+  const { controller, pagination, archiveSearch } = createController(review, false, 451);
+
+  const result = await controller.findActive('4', '100', '23.08.2026');
+
+  assert.deepEqual(result, {
+    items: [review],
+    total: 451,
+    page: 4,
+    limit: 100,
+    hasMore: true,
+  });
+  assert.deepEqual(pagination, { skip: 300, take: 100 });
+  assert.equal(archiveSearch.length, 1);
+  assert.match(
+    archiveSearch[0].sql,
+    /TO_CHAR\("booking"\."booking_date", 'DD\.MM\.YYYY'\)/,
+  );
+  assert.equal(archiveSearch[0].params.activeSearch, '%23.08.2026%');
 });
 
 test('archive list supports pages beyond the first 300 reviews', async () => {
