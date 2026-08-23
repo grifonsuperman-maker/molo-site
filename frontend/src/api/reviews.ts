@@ -26,11 +26,27 @@ export type GuestReviewRecord = {
   } | null;
 };
 
+type ReviewMutationResult = {
+  ok: boolean;
+  id: string;
+};
+
 export const reviewsApi = {
   getAll: () => api.get<GuestReviewRecord[]>('/guest-reviews'),
+  getArchive: () => api.get<GuestReviewRecord[]>('/guest-reviews/archive'),
   respond: (id: string, text: string) =>
     api.patch<GuestReviewRecord>(
       `/guest-reviews/${encodeURIComponent(id)}/response`,
       { text },
     ),
+  archive: (id: string) =>
+    api.patch<ReviewMutationResult>(
+      `/guest-reviews/${encodeURIComponent(id)}/archive`,
+    ),
+  restore: (id: string) =>
+    api.patch<ReviewMutationResult>(
+      `/guest-reviews/${encodeURIComponent(id)}/restore`,
+    ),
+  deletePermanently: (id: string) =>
+    api.delete<ReviewMutationResult>(`/guest-reviews/${encodeURIComponent(id)}`),
 };
