@@ -10,7 +10,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { EntityManager, Repository, SelectQueryBuilder } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -92,19 +92,25 @@ export class GuestReviewsController {
     @Param('id') id: string,
     @Req() request: { user?: AuthUser },
   ) {
-    const review = await this.findReview(id);
-    const inserted = await this.reviews.query(
-      `INSERT INTO "guest_review_archives" ("guest_review_id", "archived_at")
-       VALUES ($1, NOW())
-       ON CONFLICT ("guest_review_id") DO NOTHING
-       RETURNING "guest_review_id"`,
-      [id],
-    );
-
-    if (inserted.length) {
-      await this.logs.create('Відгук переміщено до архіву', null, {
-        reviewId: review.id,
+    const result = await this.reviews.manager.transaction(async (manager) => {
+      const review = await this.findReviewForUpdate(manager, id);
+      const inserted = await manager.query(
+        `INSERT INTO "guest_review_archives" ("guest_review_id", "archived_at")
+         VALUES ($1, NOW())
+         ON CONFLICT ("guest_review_id") DO NOTHING
+         RETURNING "guest_review_id"`,
+        [id],
+      );
+      return {
+        changed: inserted.length > 0,
         guestName: review.booking?.client?.fullName || null,
+      };
+    });
+
+    if (result.changed) {
+      await this.logs.create('Відгук переміщено до архіву', null, {
+        reviewId: id,
+        guestName: result.guestName,
         performedByRole: request.user?.role,
         performedByName: request.user?.name,
       });
@@ -118,18 +124,24 @@ export class GuestReviewsController {
     @Param('id') id: string,
     @Req() request: { user?: AuthUser },
   ) {
-    const review = await this.findReview(id);
-    const removed = await this.reviews.query(
-      `DELETE FROM "guest_review_archives"
-       WHERE "guest_review_id" = $1
-       RETURNING "guest_review_id"`,
-      [id],
-    );
-
-    if (removed.length) {
-      await this.logs.create('Відгук відновлено з архіву', null, {
-        reviewId: review.id,
+    const result = await this.reviews.manager.transaction(async (manager) => {
+      const review = await this.findReviewForUpdate(manager, id);
+      const removed = await manager.query(
+        `DELETE FROM "guest_review_archives"
+         WHERE "guest_review_id" = $1
+         RETURNING "guest_review_id"`,
+        [id],
+      );
+      return {
+        changed: removed.length > 0,
         guestName: review.booking?.client?.fullName || null,
+      };
+    });
+
+    if (result.changed) {
+      await this.logs.create('Відгук відновлено з архіву', null, {
+        reviewId: id,
+        guestName: result.guestName,
         performedByRole: request.user?.role,
         performedByName: request.user?.name,
       });
@@ -143,26 +155,32 @@ export class GuestReviewsController {
     @Param('id') id: string,
     @Req() request: { user?: AuthUser },
   ) {
-    const review = await this.findReview(id);
-    if (!(await this.isArchived(id))) {
-      throw new BadRequestException(
-        'Спочатку перемістіть відгук до архіву',
-      );
-    }
+    const result = await this.reviews.manager.transaction(async (manager) => {
+      const review = await this.findReviewForUpdate(manager, id);
+      if (!(await this.isArchived(id, manager))) {
+        throw new BadRequestException(
+          'Спочатку перемістіть відгук до архіву',
+        );
+      }
 
-    const guestName = review.booking?.client?.fullName || null;
-    await this.reviews.remove(review);
+      const guestName = review.booking?.client?.fullName || null;
+      await manager.getRepository(GuestReview).remove(review);
+      return { guestName };
+    });
+
     await this.logs.create('Відгук видалено назавжди', null, {
       reviewId: id,
-      guestName,
+      guestName: result.guestName,
       performedByRole: request.user?.role,
       performedByName: request.user?.name,
     });
     return { ok: true, id };
   }
 
-  private reviewQuery(): SelectQueryBuilder<GuestReview> {
-    return this.reviews
+  private reviewQuery(
+    repository: Repository<GuestReview> = this.reviews,
+  ): SelectQueryBuilder<GuestReview> {
+    return repository
       .createQueryBuilder('review')
       .leftJoinAndSelect('review.booking', 'booking')
       .leftJoinAndSelect('booking.client', 'client')
@@ -178,15 +196,36 @@ export class GuestReviewsController {
     return review;
   }
 
-  private async isArchived(id: string): Promise<boolean> {
-    const rows = await this.reviews.query(
-      `SELECT EXISTS (
-         SELECT 1
-         FROM "guest_review_archives"
-         WHERE "guest_review_id" = $1
-       ) AS "archived"`,
-      [id],
-    );
+  private async findReviewForUpdate(manager: EntityManager, id: string) {
+    const review = await this.reviewQuery(manager.getRepository(GuestReview))
+      .where('review.id = :id', { id })
+      .setLock('pessimistic_write', undefined, ['review'])
+      .getOne();
+    if (!review) throw new NotFoundException('Відгук не знайдено');
+    return review;
+  }
+
+  private async isArchived(
+    id: string,
+    manager?: EntityManager,
+  ): Promise<boolean> {
+    const rows = manager
+      ? await manager.query(
+          `SELECT EXISTS (
+             SELECT 1
+             FROM "guest_review_archives"
+             WHERE "guest_review_id" = $1
+           ) AS "archived"`,
+          [id],
+        )
+      : await this.reviews.query(
+          `SELECT EXISTS (
+             SELECT 1
+             FROM "guest_review_archives"
+             WHERE "guest_review_id" = $1
+           ) AS "archived"`,
+          [id],
+        );
     return Boolean(rows[0]?.archived);
   }
 }
