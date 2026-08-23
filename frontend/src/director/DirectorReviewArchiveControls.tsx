@@ -133,6 +133,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
 
   function openManager() {
     invalidateRequests();
+    setLoading(true);
     setOpen(true);
     setView('active');
     setQuery('');
@@ -160,6 +161,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   function changeView(next: ReviewView) {
     if (busy || next === view) return;
     invalidateRequests();
+    setLoading(true);
     setView(next);
     setQuery('');
     setError(null);
@@ -168,6 +170,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   function changeQuery(next: string) {
     if (busy) return;
     invalidateRequests();
+    setLoading(true);
     setQuery(next);
     setError(null);
   }
