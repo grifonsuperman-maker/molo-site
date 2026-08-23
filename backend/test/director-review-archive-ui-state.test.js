@@ -46,12 +46,40 @@ test('failed review searches cannot reveal cards from the previous query', () =>
 
   assert.match(
     activeLoader,
-    /if \(!append && showLoading\) \{[\s\S]*setActiveReviews\(\[\]\);[\s\S]*setActiveResultTotal\(0\);[\s\S]*setActivePage\(0\);[\s\S]*setActiveHasMore\(false\);/,
+    /if \(!append\) \{[\s\S]*if \(showLoading\) \{[\s\S]*setActiveReviews\(\[\]\);[\s\S]*setActiveResultTotal\(0\);[\s\S]*\}[\s\S]*setActivePage\(0\);[\s\S]*setActiveHasMore\(false\);/,
   );
   assert.match(
     archiveLoader,
-    /if \(!append && showLoading\) \{[\s\S]*setArchivedReviews\(\[\]\);[\s\S]*setArchiveResultTotal\(0\);[\s\S]*setArchivePage\(0\);[\s\S]*setArchiveHasMore\(false\);/,
+    /if \(!append\) \{[\s\S]*if \(showLoading\) \{[\s\S]*setArchivedReviews\(\[\]\);[\s\S]*setArchiveResultTotal\(0\);[\s\S]*\}[\s\S]*setArchivePage\(0\);[\s\S]*setArchiveHasMore\(false\);/,
   );
+});
+
+test('failed mutation refresh invalidates pagination without restoring removed cards', () => {
+  const activeLoader = sourceSection(
+    'async function loadActivePage(',
+    'async function loadArchivePage(',
+  );
+  const archiveLoader = sourceSection(
+    'async function loadArchivePage(',
+    'useEffect(() => {',
+  );
+
+  assert.ok(activeLoader.includes(`if (!append) {
+          if (showLoading) {
+            setActiveReviews([]);
+            setActiveResultTotal(0);
+          }
+          setActivePage(0);
+          setActiveHasMore(false);
+        }`));
+  assert.ok(archiveLoader.includes(`if (!append) {
+          if (showLoading) {
+            setArchivedReviews([]);
+            setArchiveResultTotal(0);
+          }
+          setArchivePage(0);
+          setArchiveHasMore(false);
+        }`));
 });
 
 test('successful review mutations reconcile the visible list before refresh', () => {
