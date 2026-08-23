@@ -3,6 +3,7 @@ import { Archive, RotateCcw, Search, Trash2, X } from 'lucide-react';
 
 import { reviewsApi, type GuestReviewRecord } from '../api/reviews';
 
+type ReviewView = 'active' | 'archive';
 type ChangedHandler = () => void | Promise<void>;
 
 function dateLabel(value?: string | null): string {
@@ -15,49 +16,11 @@ function guestName(review: GuestReviewRecord): string {
   return review.booking?.client?.fullName || 'Гість';
 }
 
-export function ArchiveReviewButton({
-  review,
-  onChanged,
-}: {
-  review: GuestReviewRecord;
-  onChanged: ChangedHandler;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function archiveReview() {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await reviewsApi.archive(review.id);
-      await onChanged();
-    } catch (cause: any) {
-      setError(cause?.message || 'Не вдалося архівувати відгук');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="mt-3 border-t border-white/10 pt-3">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => void archiveReview()}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-100/35 bg-black/35 px-4 py-3 text-sm font-black text-amber-100 transition hover:bg-white/[0.025] active:scale-[.985] disabled:opacity-35"
-      >
-        <Archive size={16} />
-        {busy ? 'Архівуємо...' : 'Архівувати'}
-      </button>
-      {error && <p className="mt-2 text-xs text-rose-100">{error}</p>}
-    </div>
-  );
-}
-
 export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }) {
   const [open, setOpen] = useState(false);
-  const [reviews, setReviews] = useState<GuestReviewRecord[]>([]);
+  const [view, setView] = useState<ReviewView>('active');
+  const [activeReviews, setActiveReviews] = useState<GuestReviewRecord[]>([]);
+  const [archivedReviews, setArchivedReviews] = useState<GuestReviewRecord[]>([]);
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(20);
   const [loading, setLoading] = useState(false);
@@ -65,34 +28,62 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GuestReviewRecord | null>(null);
 
+  const sourceReviews = view === 'active' ? activeReviews : archivedReviews;
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return reviews;
-    return reviews.filter((review) => [
+    if (!needle) return sourceReviews;
+    return sourceReviews.filter((review) => [
       guestName(review),
       review.text,
       review.booking?.bookingDate,
       review.booking?.table?.tableNumber,
     ].filter(Boolean).join(' ').toLowerCase().includes(needle));
-  }, [reviews, query]);
+  }, [sourceReviews, query]);
 
-  async function loadArchive(showLoading = true) {
+  async function loadReviews(showLoading = true) {
     if (showLoading) setLoading(true);
     setError(null);
     try {
-      setReviews(await reviewsApi.getArchive());
+      const [active, archive] = await Promise.all([
+        reviewsApi.getAll(),
+        reviewsApi.getArchive(),
+      ]);
+      setActiveReviews(active);
+      setArchivedReviews(archive);
     } catch (cause: any) {
-      setError(cause?.message || 'Не вдалося завантажити архів відгуків');
+      setError(cause?.message || 'Не вдалося завантажити відгуки');
     } finally {
       if (showLoading) setLoading(false);
     }
   }
 
-  function openArchive() {
+  function openManager() {
     setOpen(true);
+    setView('active');
     setQuery('');
     setShown(20);
-    void loadArchive();
+    void loadReviews();
+  }
+
+  function changeView(next: ReviewView) {
+    setView(next);
+    setQuery('');
+    setShown(20);
+    setError(null);
+  }
+
+  async function archiveReview(review: GuestReviewRecord) {
+    setBusy(`archive:${review.id}`);
+    setError(null);
+    try {
+      await reviewsApi.archive(review.id);
+      await onChanged();
+      await loadReviews(false);
+    } catch (cause: any) {
+      setError(cause?.message || 'Не вдалося архівувати відгук');
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function restoreReview(review: GuestReviewRecord) {
@@ -101,7 +92,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     try {
       await reviewsApi.restore(review.id);
       await onChanged();
-      await loadArchive(false);
+      await loadReviews(false);
     } catch (cause: any) {
       setError(cause?.message || 'Не вдалося відновити відгук');
     } finally {
@@ -118,7 +109,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
       await reviewsApi.deletePermanently(review.id);
       setDeleteTarget(null);
       await onChanged();
-      await loadArchive(false);
+      await loadReviews(false);
     } catch (cause: any) {
       setError(cause?.message || 'Не вдалося видалити відгук назавжди');
     } finally {
@@ -130,11 +121,11 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     <>
       <button
         type="button"
-        onClick={openArchive}
-        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-100/35 bg-black/35 px-4 py-3 text-sm font-black text-amber-100 transition hover:bg-white/[0.025] active:scale-[.985]"
+        onClick={openManager}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-100/35 bg-black/35 px-4 py-3 text-sm font-black text-amber-100 transition hover:bg-white/[0.025] active:scale-[.985]"
       >
         <Archive size={16} />
-        Архів відгуків
+        Керувати відгуками
       </button>
 
       {open && (
@@ -149,7 +140,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
             <div className="flex items-center justify-between border-b border-white/10 p-4">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-100/45">Письмові відгуки</p>
-                <h2 className="mt-1 text-2xl font-black">Архів відгуків</h2>
+                <h2 className="mt-1 text-2xl font-black">Керування відгуками</h2>
               </div>
               <button
                 type="button"
@@ -163,7 +154,23 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
             </div>
 
             <div className="border-b border-white/10 p-4">
-              <label className="relative block">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => changeView('active')}
+                  className={`rounded-2xl border px-3 py-2.5 text-xs font-black ${view === 'active' ? 'border-amber-100/50 bg-black/45 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.1)]' : 'border-white/10 bg-black/25 text-white/45'}`}
+                >
+                  Активні · {activeReviews.length}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => changeView('archive')}
+                  className={`rounded-2xl border px-3 py-2.5 text-xs font-black ${view === 'archive' ? 'border-amber-100/50 bg-black/45 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.1)]' : 'border-white/10 bg-black/25 text-white/45'}`}
+                >
+                  Архів · {archivedReviews.length}
+                </button>
+              </div>
+              <label className="relative mt-3 block">
                 <Search size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
                 <input
                   value={query}
@@ -187,7 +194,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
                           {dateLabel(review.booking?.bookingDate)} · Стіл №{review.booking?.table?.tableNumber || '-'}
                         </p>
                       </div>
-                      <Archive size={18} className="text-amber-100/60" />
+                      <Archive size={18} className={view === 'archive' ? 'text-amber-100/60' : 'text-white/25'} />
                     </div>
                     <p className="mt-3 whitespace-pre-wrap text-sm text-white/70">{review.text}</p>
                     {review.responseText && (
@@ -196,30 +203,45 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
                         <p className="mt-2 whitespace-pre-wrap text-sm text-emerald-50">{review.responseText}</p>
                       </div>
                     )}
-                    <div className="mt-3 grid grid-cols-2 gap-2">
+
+                    {view === 'active' ? (
                       <button
                         type="button"
                         disabled={Boolean(busy)}
-                        onClick={() => void restoreReview(review)}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200/35 px-3 py-2.5 text-xs font-black text-emerald-100 disabled:opacity-35"
+                        onClick={() => void archiveReview(review)}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-100/35 px-3 py-2.5 text-xs font-black text-amber-100 disabled:opacity-35"
                       >
-                        <RotateCcw size={15} />
-                        {busy === `restore:${review.id}` ? 'Відновлюємо...' : 'Відновити'}
+                        <Archive size={15} />
+                        {busy === `archive:${review.id}` ? 'Архівуємо...' : 'Архівувати'}
                       </button>
-                      <button
-                        type="button"
-                        disabled={Boolean(busy)}
-                        onClick={() => setDeleteTarget(review)}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200/35 px-3 py-2.5 text-xs font-black text-rose-100 disabled:opacity-35"
-                      >
-                        <Trash2 size={15} />
-                        Видалити назавжди
-                      </button>
-                    </div>
+                    ) : (
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          disabled={Boolean(busy)}
+                          onClick={() => void restoreReview(review)}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200/35 px-3 py-2.5 text-xs font-black text-emerald-100 disabled:opacity-35"
+                        >
+                          <RotateCcw size={15} />
+                          {busy === `restore:${review.id}` ? 'Відновлюємо...' : 'Відновити'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(busy)}
+                          onClick={() => setDeleteTarget(review)}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200/35 px-3 py-2.5 text-xs font-black text-rose-100 disabled:opacity-35"
+                        >
+                          <Trash2 size={15} />
+                          Видалити назавжди
+                        </button>
+                      </div>
+                    )}
                   </article>
                 ))}
                 {!loading && !filtered.length && (
-                  <div className="rounded-2xl border border-dashed border-white/10 p-5 text-center text-sm text-white/30">Архів відгуків порожній</div>
+                  <div className="rounded-2xl border border-dashed border-white/10 p-5 text-center text-sm text-white/30">
+                    {view === 'active' ? 'Активних відгуків немає' : 'Архів відгуків порожній'}
+                  </div>
                 )}
               </div>
               {!loading && shown < filtered.length && (
