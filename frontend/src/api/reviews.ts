@@ -26,6 +26,14 @@ export type GuestReviewRecord = {
   } | null;
 };
 
+export type GuestReviewArchivePage = {
+  items: GuestReviewRecord[];
+  total: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
+};
+
 type ReviewMutationResult = {
   ok: boolean;
   id: string;
@@ -33,7 +41,14 @@ type ReviewMutationResult = {
 
 export const reviewsApi = {
   getAll: () => api.get<GuestReviewRecord[]>('/guest-reviews'),
-  getArchive: () => api.get<GuestReviewRecord[]>('/guest-reviews/archive'),
+  getArchive: ({ page = 1, limit = 50, query = '' }: { page?: number; limit?: number; query?: string } = {}) => {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    });
+    if (query.trim()) params.set('q', query.trim());
+    return api.get<GuestReviewArchivePage>(`/guest-reviews/archive?${params.toString()}`);
+  },
   respond: (id: string, text: string) =>
     api.patch<GuestReviewRecord>(
       `/guest-reviews/${encodeURIComponent(id)}/response`,
