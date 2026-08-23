@@ -158,7 +158,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   }
 
   function changeView(next: ReviewView) {
-    if (next === view) return;
+    if (busy || next === view) return;
     invalidateRequests();
     setView(next);
     setQuery('');
@@ -166,6 +166,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   }
 
   function changeQuery(next: string) {
+    if (busy) return;
     invalidateRequests();
     setQuery(next);
     setError(null);
@@ -280,15 +281,17 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
+              disabled={Boolean(busy)}
               onClick={() => changeView('active')}
-              className={`rounded-2xl border px-3 py-2.5 text-xs font-black ${view === 'active' ? 'border-amber-100/50 bg-black/45 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.1)]' : 'border-white/10 bg-black/25 text-white/45'}`}
+              className={`rounded-2xl border px-3 py-2.5 text-xs font-black disabled:opacity-35 ${view === 'active' ? 'border-amber-100/50 bg-black/45 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.1)]' : 'border-white/10 bg-black/25 text-white/45'}`}
             >
               Активні{activeTotal === null ? '' : ` · ${activeTotal}`}
             </button>
             <button
               type="button"
+              disabled={Boolean(busy)}
               onClick={() => changeView('archive')}
-              className={`rounded-2xl border px-3 py-2.5 text-xs font-black ${view === 'archive' ? 'border-amber-100/50 bg-black/45 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.1)]' : 'border-white/10 bg-black/25 text-white/45'}`}
+              className={`rounded-2xl border px-3 py-2.5 text-xs font-black disabled:opacity-35 ${view === 'archive' ? 'border-amber-100/50 bg-black/45 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.1)]' : 'border-white/10 bg-black/25 text-white/45'}`}
             >
               Архів{archiveTotal === null ? '' : ` · ${archiveTotal}`}
             </button>
@@ -297,9 +300,10 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
             <Search size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
             <input
               value={query}
+              disabled={Boolean(busy)}
               onChange={(event) => changeQuery(event.target.value)}
               placeholder="Ім’я, текст, дата або стіл"
-              className="h-12 w-full rounded-2xl border border-white/12 bg-black/45 pl-11 pr-4 text-sm outline-none focus:border-amber-100/40"
+              className="h-12 w-full rounded-2xl border border-white/12 bg-black/45 pl-11 pr-4 text-sm outline-none focus:border-amber-100/40 disabled:opacity-50"
             />
           </label>
         </div>
