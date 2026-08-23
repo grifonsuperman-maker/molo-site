@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Archive, RotateCcw, Search, Trash2, X } from 'lucide-react';
 
@@ -7,7 +7,7 @@ import { reviewsApi, type GuestReviewRecord } from '../api/reviews';
 type ReviewView = 'active' | 'archive';
 type ChangedHandler = () => void | Promise<void>;
 
-const ARCHIVE_PAGE_SIZE = 50;
+const REVIEW_PAGE_SIZE = 50;
 
 function dateLabel(value?: string | null): string {
   if (!value) return '-';
@@ -23,42 +23,58 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<ReviewView>('active');
   const [activeReviews, setActiveReviews] = useState<GuestReviewRecord[]>([]);
+  const [activeTotal, setActiveTotal] = useState<number | null>(null);
+  const [activeResultTotal, setActiveResultTotal] = useState(0);
+  const [activePage, setActivePage] = useState(0);
+  const [activeHasMore, setActiveHasMore] = useState(false);
   const [archivedReviews, setArchivedReviews] = useState<GuestReviewRecord[]>([]);
   const [archiveTotal, setArchiveTotal] = useState<number | null>(null);
   const [archiveResultTotal, setArchiveResultTotal] = useState(0);
   const [archivePage, setArchivePage] = useState(0);
   const [archiveHasMore, setArchiveHasMore] = useState(false);
   const [query, setQuery] = useState('');
-  const [shown, setShown] = useState(20);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GuestReviewRecord | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const activeRequestId = useRef(0);
   const archiveRequestId = useRef(0);
 
-  const filtered = useMemo(() => {
-    if (view === 'archive') return archivedReviews;
-    const needle = query.trim().toLowerCase();
-    if (!needle) return activeReviews;
-    return activeReviews.filter((review) => [
-      guestName(review),
-      review.text,
-      review.booking?.bookingDate,
-      review.booking?.table?.tableNumber,
-    ].filter(Boolean).join(' ').toLowerCase().includes(needle));
-  }, [activeReviews, archivedReviews, query, view]);
-  const visibleReviews = view === 'archive' ? filtered : filtered.slice(0, shown);
+  const visibleReviews = view === 'active' ? activeReviews : archivedReviews;
 
-  async function loadActiveReviews(showLoading = true) {
+  async function loadActivePage(
+    page: number,
+    search: string,
+    append: boolean,
+    showLoading = true,
+  ) {
+    const requestId = ++activeRequestId.current;
     if (showLoading) setLoading(true);
     setError(null);
     try {
-      setActiveReviews(await reviewsApi.getAll());
+      const result = await reviewsApi.getActive({
+        page,
+        limit: REVIEW_PAGE_SIZE,
+        query: search,
+      });
+      if (requestId !== activeRequestId.current) return;
+
+      setActiveReviews((current) => {
+        if (!append) return result.items;
+        const existing = new Set(current.map((review) => review.id));
+        return [...current, ...result.items.filter((review) => !existing.has(review.id))];
+      });
+      if (!search.trim()) setActiveTotal(result.total);
+      setActiveResultTotal(result.total);
+      setActivePage(result.page);
+      setActiveHasMore(result.hasMore);
     } catch (cause: any) {
-      setError(cause?.message || 'Не вдалося завантажити активні відгуки');
+      if (requestId === activeRequestId.current) {
+        setError(cause?.message || 'Не вдалося завантажити активні відгуки');
+      }
     } finally {
-      if (showLoading) setLoading(false);
+      if (showLoading && requestId === activeRequestId.current) setLoading(false);
     }
   }
 
@@ -74,7 +90,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     try {
       const result = await reviewsApi.getArchive({
         page,
-        limit: ARCHIVE_PAGE_SIZE,
+        limit: REVIEW_PAGE_SIZE,
         query: search,
       });
       if (requestId !== archiveRequestId.current) return;
@@ -98,19 +114,33 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   }
 
   useEffect(() => {
-    if (!open || view !== 'archive') return;
+    if (!open) return;
     const timeout = window.setTimeout(() => {
-      void loadArchivePage(1, query, false);
+      if (view === 'active') {
+        void loadActivePage(1, query, false);
+      } else {
+        void loadArchivePage(1, query, false);
+      }
     }, 250);
     return () => window.clearTimeout(timeout);
   }, [open, view, query]);
 
-  function openManager() {
+  function invalidateRequests() {
+    activeRequestId.current += 1;
     archiveRequestId.current += 1;
+    setLoading(false);
+  }
+
+  function openManager() {
+    invalidateRequests();
     setOpen(true);
     setView('active');
     setQuery('');
-    setShown(20);
+    setActiveReviews([]);
+    setActiveTotal(null);
+    setActiveResultTotal(0);
+    setActivePage(0);
+    setActiveHasMore(false);
     setArchivedReviews([]);
     setArchiveTotal(null);
     setArchiveResultTotal(0);
@@ -118,17 +148,26 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     setArchiveHasMore(false);
     setDeleteTarget(null);
     setDeleteError(null);
-    void loadActiveReviews();
+    setError(null);
+  }
+
+  function closeManager() {
+    if (busy) return;
+    invalidateRequests();
+    setOpen(false);
   }
 
   function changeView(next: ReviewView) {
-    if (next === 'active' && view === 'archive') {
-      archiveRequestId.current += 1;
-      setLoading(false);
-    }
+    if (next === view) return;
+    invalidateRequests();
     setView(next);
     setQuery('');
-    setShown(20);
+    setError(null);
+  }
+
+  function changeQuery(next: string) {
+    invalidateRequests();
+    setQuery(next);
     setError(null);
   }
 
@@ -148,8 +187,9 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     try {
       await reviewsApi.archive(review.id);
       await onChanged();
+      setActiveTotal((current) => current === null ? null : Math.max(0, current - 1));
       setArchiveTotal((current) => current === null ? null : current + 1);
-      await loadActiveReviews(false);
+      await loadActivePage(1, query, false, false);
     } catch (cause: any) {
       setError(cause?.message || 'Не вдалося архівувати відгук');
     } finally {
@@ -163,11 +203,9 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     try {
       await reviewsApi.restore(review.id);
       await onChanged();
+      setActiveTotal((current) => current === null ? null : current + 1);
       setArchiveTotal((current) => current === null ? null : Math.max(0, current - 1));
-      await Promise.all([
-        loadActiveReviews(false),
-        loadArchivePage(1, query, false, false),
-      ]);
+      await loadArchivePage(1, query, false, false);
     } catch (cause: any) {
       setError(cause?.message || 'Не вдалося відновити відгук');
     } finally {
@@ -193,6 +231,16 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     }
   }
 
+  async function loadMoreActive() {
+    if (!activeHasMore || busy) return;
+    setBusy('active-page');
+    try {
+      await loadActivePage(activePage + 1, query, true, false);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function loadMoreArchive() {
     if (!archiveHasMore || busy) return;
     setBusy('archive-page');
@@ -206,7 +254,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   const managerDialog = open ? createPortal(
     <div
       className="fixed inset-0 z-[95] bg-black/80 p-3 backdrop-blur-xl"
-      onMouseDown={() => { if (!busy) setOpen(false); }}
+      onMouseDown={closeManager}
     >
       <aside
         className="ml-auto flex h-full w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-amber-100/20 bg-[#050505]/95 shadow-[0_0_70px_rgba(251,191,36,.08)]"
@@ -221,7 +269,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
             type="button"
             aria-label="Закрити"
             disabled={Boolean(busy)}
-            onClick={() => setOpen(false)}
+            onClick={closeManager}
             className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-100/30 bg-black/45 text-amber-100 transition active:scale-95 disabled:opacity-40"
           >
             <X size={18} />
@@ -235,7 +283,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
               onClick={() => changeView('active')}
               className={`rounded-2xl border px-3 py-2.5 text-xs font-black ${view === 'active' ? 'border-amber-100/50 bg-black/45 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,.1)]' : 'border-white/10 bg-black/25 text-white/45'}`}
             >
-              Активні · {activeReviews.length}
+              Активні{activeTotal === null ? '' : ` · ${activeTotal}`}
             </button>
             <button
               type="button"
@@ -249,7 +297,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
             <Search size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
             <input
               value={query}
-              onChange={(event) => { setQuery(event.target.value); setShown(20); }}
+              onChange={(event) => changeQuery(event.target.value)}
               placeholder="Ім’я, текст, дата або стіл"
               className="h-12 w-full rounded-2xl border border-white/12 bg-black/45 pl-11 pr-4 text-sm outline-none focus:border-amber-100/40"
             />
@@ -319,13 +367,16 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
               </div>
             )}
           </div>
-          {!loading && view === 'active' && shown < filtered.length && (
+          {!loading && view === 'active' && activeHasMore && (
             <button
               type="button"
-              onClick={() => setShown((value) => value + 20)}
-              className="mt-3 w-full rounded-2xl border border-amber-100/35 bg-black/35 px-4 py-3 text-sm font-black text-amber-100"
+              disabled={Boolean(busy)}
+              onClick={() => void loadMoreActive()}
+              className="mt-3 w-full rounded-2xl border border-amber-100/35 bg-black/35 px-4 py-3 text-sm font-black text-amber-100 disabled:opacity-35"
             >
-              Показати ще · {filtered.length - shown}
+              {busy === 'active-page'
+                ? 'Завантажуємо...'
+                : `Показати ще · ${Math.max(0, activeResultTotal - activeReviews.length)}`}
             </button>
           )}
           {!loading && view === 'archive' && archiveHasMore && (
