@@ -71,6 +71,12 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
       setActiveHasMore(result.hasMore);
     } catch (cause: any) {
       if (requestId === activeRequestId.current) {
+        if (!append && showLoading) {
+          setActiveReviews([]);
+          setActiveResultTotal(0);
+          setActivePage(0);
+          setActiveHasMore(false);
+        }
         setError(cause?.message || 'Не вдалося завантажити активні відгуки');
       }
     } finally {
@@ -106,6 +112,12 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
       setArchiveHasMore(result.hasMore);
     } catch (cause: any) {
       if (requestId === archiveRequestId.current) {
+        if (!append && showLoading) {
+          setArchivedReviews([]);
+          setArchiveResultTotal(0);
+          setArchivePage(0);
+          setArchiveHasMore(false);
+        }
         setError(cause?.message || 'Не вдалося завантажити архів відгуків');
       }
     } finally {
@@ -190,9 +202,11 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     setError(null);
     try {
       await reviewsApi.archive(review.id);
-      await onChanged();
+      setActiveReviews((current) => current.filter((item) => item.id !== review.id));
+      setActiveResultTotal((current) => Math.max(0, current - 1));
       setActiveTotal((current) => current === null ? null : Math.max(0, current - 1));
       setArchiveTotal((current) => current === null ? null : current + 1);
+      await onChanged();
       await loadActivePage(1, query, false, false);
     } catch (cause: any) {
       setError(cause?.message || 'Не вдалося архівувати відгук');
@@ -206,9 +220,11 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     setError(null);
     try {
       await reviewsApi.restore(review.id);
-      await onChanged();
+      setArchivedReviews((current) => current.filter((item) => item.id !== review.id));
+      setArchiveResultTotal((current) => Math.max(0, current - 1));
       setActiveTotal((current) => current === null ? null : current + 1);
       setArchiveTotal((current) => current === null ? null : Math.max(0, current - 1));
+      await onChanged();
       await loadArchivePage(1, query, false, false);
     } catch (cause: any) {
       setError(cause?.message || 'Не вдалося відновити відгук');
@@ -224,9 +240,11 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     setDeleteError(null);
     try {
       await reviewsApi.deletePermanently(review.id);
+      setArchivedReviews((current) => current.filter((item) => item.id !== review.id));
+      setArchiveResultTotal((current) => Math.max(0, current - 1));
+      setArchiveTotal((current) => current === null ? null : Math.max(0, current - 1));
       setDeleteTarget(null);
       await onChanged();
-      setArchiveTotal((current) => current === null ? null : Math.max(0, current - 1));
       await loadArchivePage(1, query, false, false);
     } catch (cause: any) {
       setDeleteError(cause?.message || 'Не вдалося видалити відгук назавжди');
