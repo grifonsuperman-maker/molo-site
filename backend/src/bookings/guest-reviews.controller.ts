@@ -100,11 +100,16 @@ export class GuestReviewsController {
     const page = this.positiveInteger(pageValue, 1);
     const limit = Math.min(this.positiveInteger(limitValue, 50), 100);
     const search = String(queryValue || '').trim().toLowerCase();
-    const query = this.reviewQuery().innerJoin(
-      'guest_review_archives',
-      'review_archive',
-      'review_archive.guest_review_id = review.id',
-    );
+    const query = this.reviewQuery()
+      .innerJoin(
+        'guest_review_archives',
+        'review_archive',
+        'review_archive.guest_review_id = review.id',
+      )
+      .addSelect(
+        'review_archive.archived_at',
+        'reviewArchiveArchivedAt',
+      );
 
     if (search) {
       query.andWhere(
@@ -120,7 +125,7 @@ export class GuestReviewsController {
     }
 
     const [items, total] = await query
-      .orderBy('review_archive.archived_at', 'DESC')
+      .orderBy('reviewArchiveArchivedAt', 'DESC')
       .addOrderBy('review.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit)
