@@ -9,22 +9,32 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'CreateWaiterCalls2026081500010',
   'AddWaiterCallAssignmentActive2026081500015',
   'CloseInactiveWaiterCalls2026081500020',
+  'AddGuestReviewArchive2026082200010',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  5: {
+    reviewArchiveTable: false,
+    waiterLifecycleTrigger: true,
+    waiterLifecycleFunction: true,
+  },
   4: {
+    reviewArchiveTable: false,
     waiterLifecycleTrigger: false,
     waiterLifecycleFunction: false,
   },
   3: {
+    reviewArchiveTable: false,
     waiterAssignmentActiveColumn: false,
     waiterAssignmentIndex: false,
     waiterStatusIndex: true,
   },
   2: {
+    reviewArchiveTable: false,
     waiterCallsTable: false,
   },
   1: {
+    reviewArchiveTable: false,
     staffPinAttemptsTable: true,
     staffPinAttemptCountColumn: true,
     staffPinWindowStartedAtColumn: true,
@@ -33,6 +43,7 @@ const EXPECTED_REWIND_STATE = {
     staffPinUpdatedAtIndex: true,
   },
   0: {
+    reviewArchiveTable: false,
     staffPinAttemptsTable: false,
   },
 };
@@ -77,6 +88,9 @@ function loadRuntimeMigrations(require) {
   const {
     CloseInactiveWaiterCalls2026081500020,
   } = require('../dist/migrations/2026081500020-CloseInactiveWaiterCalls.js');
+  const {
+    AddGuestReviewArchive2026082200010,
+  } = require('../dist/migrations/2026082200010-AddGuestReviewArchive.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -84,6 +98,7 @@ function loadRuntimeMigrations(require) {
     CreateWaiterCalls2026081500010,
     AddWaiterCallAssignmentActive2026081500015,
     CloseInactiveWaiterCalls2026081500020,
+    AddGuestReviewArchive2026082200010,
   ];
 }
 
@@ -99,6 +114,7 @@ async function readRewindState(dataSource) {
     SELECT
       to_regclass('public.staff_pin_attempts') IS NOT NULL AS "staffPinAttemptsTable",
       to_regclass('public.waiter_calls') IS NOT NULL AS "waiterCallsTable",
+      to_regclass('public.guest_review_archives') IS NOT NULL AS "reviewArchiveTable",
       EXISTS (
         SELECT 1
         FROM information_schema.columns

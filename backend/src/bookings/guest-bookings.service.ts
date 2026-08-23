@@ -74,11 +74,24 @@ export class GuestBookingsService {
 
     if (bookings.length === 0) return [];
 
-    const reviews = await this.reviews.find({
-      where: { booking: { id: In(bookings.map((booking) => booking.id)) } } as any,
-      relations: ['booking'],
-    });
-    const reviewedIds = new Set(reviews.map((review) => review.booking.id));
+    const bookingIds = bookings.map((booking) => booking.id);
+    const [reviews, reviewHistory] = await Promise.all([
+      this.reviews.find({
+        where: { booking: { id: In(bookingIds) } } as any,
+        relations: ['booking'],
+      }),
+      this.dataSource.getRepository(BookingHistory).find({
+        where: {
+          booking: { id: In(bookingIds) },
+          action: 'guest_submitted_review',
+        } as any,
+        relations: ['booking'],
+      }),
+    ]);
+    const reviewedIds = new Set([
+      ...reviews.map((review) => review.booking.id),
+      ...reviewHistory.map((entry) => entry.booking.id),
+    ]);
     const phone = await this.restaurantPhone();
 
     const payloads = bookings.map((booking) =>
@@ -100,8 +113,20 @@ export class GuestBookingsService {
 
   async get(id: string, token: string) {
     const booking = await this.findOwnedBooking(id, token);
-    const reviewExists = await this.reviews.exist({ where: { booking: { id: booking.id } } as any });
-    return this.payload(booking, reviewExists, await this.restaurantPhone());
+    const [reviewExists, reviewWasSubmitted] = await Promise.all([
+      this.reviews.exist({ where: { booking: { id: booking.id } } as any }),
+      this.dataSource.getRepository(BookingHistory).exist({
+        where: {
+          booking: { id: booking.id },
+          action: 'guest_submitted_review',
+        } as any,
+      }),
+    ]);
+    return this.payload(
+      booking,
+      reviewExists || reviewWasSubmitted,
+      await this.restaurantPhone(),
+    );
   }
 
   async cancel(id: string, token: string, dto: GuestCancelBookingDto) {
@@ -285,6 +310,16 @@ export class GuestBookingsService {
       const reviewRepository = manager.getRepository(GuestReview);
       const existing = await reviewRepository.findOne({ where: { booking: { id: booking.id } } as any });
       if (existing) throw new ConflictException('Відгук для цього візиту вже залишено');
+
+      const reviewWasSubmitted = await manager.getRepository(BookingHistory).exist({
+        where: {
+          booking: { id: booking.id },
+          action: 'guest_submitted_review',
+        } as any,
+      });
+      if (reviewWasSubmitted) {
+        throw new ConflictException('Відгук для цього візиту вже залишено');
+      }
 
       await reviewRepository.save(
         reviewRepository.create({

@@ -38,11 +38,21 @@ export class AdminAttentionService {
         order: { createdAt: 'DESC' },
         take: 100,
       }),
-      this.reviews.find({
-        relations: ['booking', 'booking.table', 'booking.table.zone', 'booking.client'],
-        order: { createdAt: 'DESC' },
-        take: 100,
-      }),
+      this.reviews
+        .createQueryBuilder('review')
+        .leftJoinAndSelect('review.booking', 'booking')
+        .leftJoinAndSelect('booking.table', 'table')
+        .leftJoinAndSelect('table.zone', 'zone')
+        .leftJoinAndSelect('booking.client', 'client')
+        .leftJoin(
+          'guest_review_archives',
+          'review_archive',
+          'review_archive.guest_review_id = review.id',
+        )
+        .where('review_archive.guest_review_id IS NULL')
+        .orderBy('review.createdAt', 'DESC')
+        .take(100)
+        .getMany(),
     ]);
 
     return { tableChanges, reviews };
