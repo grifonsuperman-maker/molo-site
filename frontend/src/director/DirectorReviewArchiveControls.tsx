@@ -122,7 +122,10 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   }
 
   function changeView(next: ReviewView) {
-    if (next === 'active') archiveRequestId.current += 1;
+    if (next === 'active' && view === 'archive') {
+      archiveRequestId.current += 1;
+      setLoading(false);
+    }
     setView(next);
     setQuery('');
     setShown(20);
