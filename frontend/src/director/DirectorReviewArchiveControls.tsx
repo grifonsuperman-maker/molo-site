@@ -71,9 +71,11 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
       setActiveHasMore(result.hasMore);
     } catch (cause: any) {
       if (requestId === activeRequestId.current) {
-        if (!append && showLoading) {
-          setActiveReviews([]);
-          setActiveResultTotal(0);
+        if (!append) {
+          if (showLoading) {
+            setActiveReviews([]);
+            setActiveResultTotal(0);
+          }
           setActivePage(0);
           setActiveHasMore(false);
         }
@@ -112,9 +114,11 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
       setArchiveHasMore(result.hasMore);
     } catch (cause: any) {
       if (requestId === archiveRequestId.current) {
-        if (!append && showLoading) {
-          setArchivedReviews([]);
-          setArchiveResultTotal(0);
+        if (!append) {
+          if (showLoading) {
+            setArchivedReviews([]);
+            setArchiveResultTotal(0);
+          }
           setArchivePage(0);
           setArchiveHasMore(false);
         }
