@@ -14,6 +14,8 @@ function createController(review, initiallyArchived = false) {
   const removed = [];
   const logEntries = [];
   const state = { archived: initiallyArchived };
+  const transactions = [];
+  const locks = [];
 
   const queryBuilder = {
     leftJoinAndSelect() { return this; },
@@ -23,11 +25,16 @@ function createController(review, initiallyArchived = false) {
     orderBy() { return this; },
     addOrderBy() { return this; },
     take() { return this; },
+    setLock(mode, version, aliases) {
+      locks.push({ mode, aliases });
+      return this;
+    },
     async getMany() { return review ? [review] : []; },
     async getOne() { return review; },
   };
 
   const repository = {
+    manager: null,
     createQueryBuilder() {
       return queryBuilder;
     },
@@ -36,7 +43,20 @@ function createController(review, initiallyArchived = false) {
     },
     async remove(value) {
       removed.push(value);
+      state.archived = false;
       return value;
+    },
+    async query(sql) {
+      if (sql.includes('SELECT EXISTS')) {
+        return [{ archived: state.archived }];
+      }
+      throw new Error(`Unexpected repository SQL in review archive test: ${sql}`);
+    },
+  };
+
+  const manager = {
+    getRepository() {
+      return repository;
     },
     async query(sql) {
       if (sql.includes('INSERT INTO "guest_review_archives"')) {
@@ -52,9 +72,17 @@ function createController(review, initiallyArchived = false) {
       if (sql.includes('SELECT EXISTS')) {
         return [{ archived: state.archived }];
       }
-      throw new Error(`Unexpected SQL in review archive test: ${sql}`);
+      throw new Error(`Unexpected transaction SQL in review archive test: ${sql}`);
     },
   };
+
+  repository.manager = {
+    async transaction(callback) {
+      transactions.push('transaction');
+      return callback(manager);
+    },
+  };
+
   const permissions = {
     async assert() {},
   };
@@ -69,6 +97,8 @@ function createController(review, initiallyArchived = false) {
     removed,
     logEntries,
     state,
+    transactions,
+    locks,
   };
 }
 
@@ -97,7 +127,7 @@ test('review archive mutations are owner-only', () => {
 
 test('Director can archive and restore a review without deleting it', async () => {
   const review = reviewFixture();
-  const { controller, removed, state, logEntries } = createController(review);
+  const { controller, removed, state, logEntries, transactions, locks } = createController(review);
 
   assert.deepEqual(await controller.archive(review.id, ownerRequest), {
     ok: true,
@@ -114,26 +144,39 @@ test('Director can archive and restore a review without deleting it', async () =
   assert.equal(state.archived, false);
   assert.equal(removed.length, 0);
   assert.equal(logEntries.at(-1)[0], 'Відгук відновлено з архіву');
+  assert.equal(transactions.length, 2);
+  assert.deepEqual(locks, [
+    { mode: 'pessimistic_write', aliases: ['review'] },
+    { mode: 'pessimistic_write', aliases: ['review'] },
+  ]);
 });
 
 test('permanent deletion is blocked until the review is archived', async () => {
   const review = reviewFixture();
-  const { controller, removed } = createController(review);
+  const { controller, removed, transactions, locks } = createController(review);
 
   await assert.rejects(
     () => controller.deletePermanently(review.id, ownerRequest),
     /Спочатку перемістіть відгук до архіву/,
   );
   assert.equal(removed.length, 0);
+  assert.equal(transactions.length, 1);
+  assert.deepEqual(locks, [
+    { mode: 'pessimistic_write', aliases: ['review'] },
+  ]);
 });
 
 test('Director can permanently delete an archived review only', async () => {
   const review = reviewFixture();
-  const { controller, removed, logEntries } = createController(review, true);
+  const { controller, removed, logEntries, transactions, locks } = createController(review, true);
 
   const result = await controller.deletePermanently(review.id, ownerRequest);
 
   assert.deepEqual(result, { ok: true, id: review.id });
   assert.equal(removed.length, 1);
   assert.equal(logEntries.at(-1)[0], 'Відгук видалено назавжди');
+  assert.equal(transactions.length, 1);
+  assert.deepEqual(locks, [
+    { mode: 'pessimistic_write', aliases: ['review'] },
+  ]);
 });
