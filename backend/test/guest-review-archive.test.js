@@ -10,26 +10,42 @@ const {
   ROLES_KEY,
 } = require('../dist/common/decorators/roles.decorator.js');
 
-function createController(review, initiallyArchived = false) {
+function createController(review, initiallyArchived = false, archiveTotal = review ? 1 : 0) {
   const removed = [];
   const logEntries = [];
   const state = { archived: initiallyArchived };
   const transactions = [];
   const locks = [];
+  const pagination = { skip: null, take: null };
+  const archiveSearch = [];
 
   const queryBuilder = {
     leftJoinAndSelect() { return this; },
     leftJoin() { return this; },
     innerJoin() { return this; },
     where() { return this; },
+    andWhere(sql, params) {
+      archiveSearch.push({ sql, params });
+      return this;
+    },
     orderBy() { return this; },
     addOrderBy() { return this; },
-    take() { return this; },
+    skip(value) {
+      pagination.skip = value;
+      return this;
+    },
+    take(value) {
+      pagination.take = value;
+      return this;
+    },
     setLock(mode, version, aliases) {
       locks.push({ mode, aliases });
       return this;
     },
     async getMany() { return review ? [review] : []; },
+    async getManyAndCount() {
+      return [review ? [review] : [], archiveTotal];
+    },
     async getOne() { return review; },
   };
 
@@ -99,6 +115,8 @@ function createController(review, initiallyArchived = false) {
     state,
     transactions,
     locks,
+    pagination,
+    archiveSearch,
   };
 }
 
@@ -123,6 +141,24 @@ test('review archive mutations are owner-only', () => {
       ['owner'],
     );
   }
+});
+
+test('archive list supports pages beyond the first 300 reviews', async () => {
+  const review = reviewFixture();
+  const { controller, pagination, archiveSearch } = createController(review, true, 451);
+
+  const result = await controller.findArchive('4', '100', 'ТЕСТ');
+
+  assert.deepEqual(result, {
+    items: [review],
+    total: 451,
+    page: 4,
+    limit: 100,
+    hasMore: true,
+  });
+  assert.deepEqual(pagination, { skip: 300, take: 100 });
+  assert.equal(archiveSearch.length, 1);
+  assert.equal(archiveSearch[0].params.archiveSearch, '%тест%');
 });
 
 test('Director can archive and restore a review without deleting it', async () => {
