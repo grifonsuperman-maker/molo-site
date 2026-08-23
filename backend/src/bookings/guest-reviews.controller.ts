@@ -66,6 +66,7 @@ export class GuestReviewsController {
           LOWER(COALESCE("client"."full_name", '')) LIKE :archiveSearch
           OR LOWER(COALESCE("review"."text", '')) LIKE :archiveSearch
           OR CAST("booking"."booking_date" AS TEXT) LIKE :archiveSearch
+          OR TO_CHAR("booking"."booking_date", 'DD.MM.YYYY') LIKE :archiveSearch
           OR LOWER(COALESCE("table"."table_number", '')) LIKE :archiveSearch
         )`,
         { archiveSearch: `%${search}%` },
