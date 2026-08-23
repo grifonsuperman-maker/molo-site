@@ -161,6 +161,20 @@ test('archive list supports pages beyond the first 300 reviews', async () => {
   assert.equal(archiveSearch[0].params.archiveSearch, '%тест%');
 });
 
+test('archive search accepts the date format shown to the Director', async () => {
+  const review = reviewFixture();
+  const { controller, archiveSearch } = createController(review, true, 1);
+
+  await controller.findArchive('1', '50', '23.08.2026');
+
+  assert.equal(archiveSearch.length, 1);
+  assert.match(
+    archiveSearch[0].sql,
+    /TO_CHAR\("booking"\."booking_date", 'DD\.MM\.YYYY'\)/,
+  );
+  assert.equal(archiveSearch[0].params.archiveSearch, '%23.08.2026%');
+});
+
 test('Director can archive and restore a review without deleting it', async () => {
   const review = reviewFixture();
   const { controller, removed, state, logEntries, transactions, locks } = createController(review);
