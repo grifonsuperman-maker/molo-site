@@ -18,18 +18,30 @@ function createController(review, initiallyArchived = false, archiveTotal = revi
   const locks = [];
   const pagination = { skip: null, take: null };
   const archiveSearch = [];
+  const selections = [];
+  const orderBys = [];
 
   const queryBuilder = {
     leftJoinAndSelect() { return this; },
     leftJoin() { return this; },
     innerJoin() { return this; },
+    addSelect(selection, alias) {
+      selections.push({ selection, alias });
+      return this;
+    },
     where() { return this; },
     andWhere(sql, params) {
       archiveSearch.push({ sql, params });
       return this;
     },
-    orderBy() { return this; },
-    addOrderBy() { return this; },
+    orderBy(criteria, direction) {
+      orderBys.push({ criteria, direction, kind: 'orderBy' });
+      return this;
+    },
+    addOrderBy(criteria, direction) {
+      orderBys.push({ criteria, direction, kind: 'addOrderBy' });
+      return this;
+    },
     skip(value) {
       pagination.skip = value;
       return this;
@@ -117,6 +129,8 @@ function createController(review, initiallyArchived = false, archiveTotal = revi
     locks,
     pagination,
     archiveSearch,
+    selections,
+    orderBys,
   };
 }
 
@@ -167,7 +181,13 @@ test('active review manager supports pages beyond the first 300 reviews and disp
 
 test('archive list supports pages beyond the first 300 reviews', async () => {
   const review = reviewFixture();
-  const { controller, pagination, archiveSearch } = createController(review, true, 451);
+  const {
+    controller,
+    pagination,
+    archiveSearch,
+    selections,
+    orderBys,
+  } = createController(review, true, 451);
 
   const result = await controller.findArchive('4', '100', 'ТЕСТ');
 
@@ -181,6 +201,24 @@ test('archive list supports pages beyond the first 300 reviews', async () => {
   assert.deepEqual(pagination, { skip: 300, take: 100 });
   assert.equal(archiveSearch.length, 1);
   assert.equal(archiveSearch[0].params.archiveSearch, '%тест%');
+  assert.deepEqual(selections, [
+    {
+      selection: 'review_archive.archived_at',
+      alias: 'reviewArchiveArchivedAt',
+    },
+  ]);
+  assert.deepEqual(orderBys.slice(-2), [
+    {
+      criteria: 'reviewArchiveArchivedAt',
+      direction: 'DESC',
+      kind: 'orderBy',
+    },
+    {
+      criteria: 'review.createdAt',
+      direction: 'DESC',
+      kind: 'addOrderBy',
+    },
+  ]);
 });
 
 test('archive search accepts the date format shown to the Director', async () => {
