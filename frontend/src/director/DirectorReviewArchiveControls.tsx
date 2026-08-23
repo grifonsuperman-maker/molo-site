@@ -27,11 +27,13 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
   const [activeResultTotal, setActiveResultTotal] = useState(0);
   const [activePage, setActivePage] = useState(0);
   const [activeHasMore, setActiveHasMore] = useState(false);
+  const [activeRefreshRetry, setActiveRefreshRetry] = useState(false);
   const [archivedReviews, setArchivedReviews] = useState<GuestReviewRecord[]>([]);
   const [archiveTotal, setArchiveTotal] = useState<number | null>(null);
   const [archiveResultTotal, setArchiveResultTotal] = useState(0);
   const [archivePage, setArchivePage] = useState(0);
   const [archiveHasMore, setArchiveHasMore] = useState(false);
+  const [archiveRefreshRetry, setArchiveRefreshRetry] = useState(false);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -69,6 +71,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
       setActiveResultTotal(result.total);
       setActivePage(result.page);
       setActiveHasMore(result.hasMore);
+      setActiveRefreshRetry(false);
     } catch (cause: any) {
       if (requestId === activeRequestId.current) {
         if (!append) {
@@ -78,6 +81,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
           }
           setActivePage(0);
           setActiveHasMore(false);
+          setActiveRefreshRetry(!showLoading);
         }
         setError(cause?.message || 'Не вдалося завантажити активні відгуки');
       }
@@ -112,6 +116,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
       setArchiveResultTotal(result.total);
       setArchivePage(result.page);
       setArchiveHasMore(result.hasMore);
+      setArchiveRefreshRetry(false);
     } catch (cause: any) {
       if (requestId === archiveRequestId.current) {
         if (!append) {
@@ -121,6 +126,7 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
           }
           setArchivePage(0);
           setArchiveHasMore(false);
+          setArchiveRefreshRetry(!showLoading);
         }
         setError(cause?.message || 'Не вдалося завантажити архів відгуків');
       }
@@ -158,11 +164,13 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
     setActiveResultTotal(0);
     setActivePage(0);
     setActiveHasMore(false);
+    setActiveRefreshRetry(false);
     setArchivedReviews([]);
     setArchiveTotal(null);
     setArchiveResultTotal(0);
     setArchivePage(0);
     setArchiveHasMore(false);
+    setArchiveRefreshRetry(false);
     setDeleteTarget(null);
     setDeleteError(null);
     setError(null);
@@ -252,6 +260,26 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
       await loadArchivePage(1, query, false, false);
     } catch (cause: any) {
       setDeleteError(cause?.message || 'Не вдалося видалити відгук назавжди');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retryActiveRefresh() {
+    if (busy) return;
+    setBusy('active-retry');
+    try {
+      await loadActivePage(1, query, false, false);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retryArchiveRefresh() {
+    if (busy) return;
+    setBusy('archive-retry');
+    try {
+      await loadArchivePage(1, query, false, false);
     } finally {
       setBusy(null);
     }
@@ -396,7 +424,17 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
               </div>
             )}
           </div>
-          {!loading && view === 'active' && activeHasMore && (
+          {!loading && view === 'active' && activeRefreshRetry && (
+            <button
+              type="button"
+              disabled={Boolean(busy)}
+              onClick={() => void retryActiveRefresh()}
+              className="mt-3 w-full rounded-2xl border border-amber-100/35 bg-black/35 px-4 py-3 text-sm font-black text-amber-100 disabled:opacity-35"
+            >
+              {busy === 'active-retry' ? 'Оновлюємо...' : 'Спробувати ще'}
+            </button>
+          )}
+          {!loading && view === 'active' && !activeRefreshRetry && activeHasMore && (
             <button
               type="button"
               disabled={Boolean(busy)}
@@ -408,7 +446,17 @@ export function ReviewArchiveButton({ onChanged }: { onChanged: ChangedHandler }
                 : `Показати ще · ${Math.max(0, activeResultTotal - activeReviews.length)}`}
             </button>
           )}
-          {!loading && view === 'archive' && archiveHasMore && (
+          {!loading && view === 'archive' && archiveRefreshRetry && (
+            <button
+              type="button"
+              disabled={Boolean(busy)}
+              onClick={() => void retryArchiveRefresh()}
+              className="mt-3 w-full rounded-2xl border border-amber-100/35 bg-black/35 px-4 py-3 text-sm font-black text-amber-100 disabled:opacity-35"
+            >
+              {busy === 'archive-retry' ? 'Оновлюємо...' : 'Спробувати ще'}
+            </button>
+          )}
+          {!loading && view === 'archive' && !archiveRefreshRetry && archiveHasMore && (
             <button
               type="button"
               disabled={Boolean(busy)}
