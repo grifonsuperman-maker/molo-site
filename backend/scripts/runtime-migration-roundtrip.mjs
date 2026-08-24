@@ -10,30 +10,40 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'AddWaiterCallAssignmentActive2026081500015',
   'CloseInactiveWaiterCalls2026081500020',
   'AddGuestReviewArchive2026082200010',
+  'AddLogArchive2026082400010',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  6: {
+    logArchiveTable: false,
+    reviewArchiveTable: true,
+  },
   5: {
+    logArchiveTable: false,
     reviewArchiveTable: false,
     waiterLifecycleTrigger: true,
     waiterLifecycleFunction: true,
   },
   4: {
+    logArchiveTable: false,
     reviewArchiveTable: false,
     waiterLifecycleTrigger: false,
     waiterLifecycleFunction: false,
   },
   3: {
+    logArchiveTable: false,
     reviewArchiveTable: false,
     waiterAssignmentActiveColumn: false,
     waiterAssignmentIndex: false,
     waiterStatusIndex: true,
   },
   2: {
+    logArchiveTable: false,
     reviewArchiveTable: false,
     waiterCallsTable: false,
   },
   1: {
+    logArchiveTable: false,
     reviewArchiveTable: false,
     staffPinAttemptsTable: true,
     staffPinAttemptCountColumn: true,
@@ -43,6 +53,7 @@ const EXPECTED_REWIND_STATE = {
     staffPinUpdatedAtIndex: true,
   },
   0: {
+    logArchiveTable: false,
     reviewArchiveTable: false,
     staffPinAttemptsTable: false,
   },
@@ -91,6 +102,9 @@ function loadRuntimeMigrations(require) {
   const {
     AddGuestReviewArchive2026082200010,
   } = require('../dist/migrations/2026082200010-AddGuestReviewArchive.js');
+  const {
+    AddLogArchive2026082400010,
+  } = require('../dist/migrations/2026082400010-AddLogArchive.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -99,6 +113,7 @@ function loadRuntimeMigrations(require) {
     AddWaiterCallAssignmentActive2026081500015,
     CloseInactiveWaiterCalls2026081500020,
     AddGuestReviewArchive2026082200010,
+    AddLogArchive2026082400010,
   ];
 }
 
@@ -115,6 +130,7 @@ async function readRewindState(dataSource) {
       to_regclass('public.staff_pin_attempts') IS NOT NULL AS "staffPinAttemptsTable",
       to_regclass('public.waiter_calls') IS NOT NULL AS "waiterCallsTable",
       to_regclass('public.guest_review_archives') IS NOT NULL AS "reviewArchiveTable",
+      to_regclass('public.log_archives') IS NOT NULL AS "logArchiveTable",
       EXISTS (
         SELECT 1
         FROM information_schema.columns
