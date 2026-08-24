@@ -42,13 +42,8 @@ function getLogPage(path: string, {
 }
 
 async function getRecentActiveLogs() {
-  const items: LogRecord[] = [];
-  for (let page = 1; page <= 3; page += 1) {
-    const result = await getLogPage('/logs/active', { page, limit: 100 });
-    items.push(...result.items);
-    if (!result.hasMore) break;
-  }
-  return items;
+  const result = await getLogPage('/logs/active', { page: 1, limit: 300 });
+  return result.items;
 }
 
 export const logsApi = {
