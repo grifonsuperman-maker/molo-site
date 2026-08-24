@@ -38,7 +38,7 @@ export class LogsController {
   ) {
     return this.logsService.findActive(
       positiveInteger(page, 1),
-      positiveInteger(limit, 50, 100),
+      positiveInteger(limit, 50, 300),
     );
   }
 
