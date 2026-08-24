@@ -220,7 +220,7 @@ export class BookingsController {
   }
 
   @Patch(':id/waiter-transfer')
-  @Roles('admin', 'owner')
+  @Roles('waiter', 'admin', 'owner')
   waiterTransfer(@Param('id') id: string, @Body('tableId') tableId: string, @Req() request: any) {
     return this.tableLock.withTransferLock(id, tableId, () =>
       this.service.waiterTransfer(id, tableId, request.user),

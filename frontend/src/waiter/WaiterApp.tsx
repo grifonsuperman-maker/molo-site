@@ -5,7 +5,6 @@ import { staffApi, type StaffMember } from "../api/staff";
 import { tablesApi } from "../api/tables";
 import {
   waiterCallsApi,
-  type WaiterAssignment,
   type WaiterCall,
 } from "../api/waiterCalls";
 import type { Booking, TableItem } from "../api/types";
@@ -151,7 +150,6 @@ export default function WaiterApp() {
   });
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [calls, setCalls] = useState<WaiterCall[]>([]);
-  const [assignments, setAssignments] = useState<WaiterAssignment[]>([]);
   const [tab, setTab] = useState<"calls" | "mine" | "all" | "history">("calls");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -166,14 +164,12 @@ export default function WaiterApp() {
   async function load() {
     if (!staff) return;
     try {
-      const [b, c, a] = await Promise.all([
+      const [b, c] = await Promise.all([
         bookingsApi.getToday(),
         waiterCallsApi.list(),
-        waiterCallsApi.assignments(),
       ]);
       setBookings(b);
       setCalls(c);
-      setAssignments(a);
       setError("");
     } catch (x: any) {
       if (/зміну|заблокований|архівований|авторизац/i.test(x.message || ""))
@@ -190,14 +186,33 @@ export default function WaiterApp() {
     () => bookings.filter((b) => ACTIVE.has(b.status)),
     [bookings],
   );
-  const mine = useMemo(() => {
-    const ids = new Set(
-      assignments
-        .filter((a) => a.waiterId === staff?.id)
-        .map((a) => a.bookingId),
-    );
-    return active.filter((b) => ids.has(b.id));
-  }, [active, assignments, staff]);
+  const mine = useMemo(
+    () => active.filter((booking) => booking.assignedWaiterId === staff?.id),
+    [active, staff?.id],
+  );
+  const transferGroups = useMemo(() => {
+    const groups = new Map<string, TableItem[]>();
+    for (const table of tables) {
+      const location = table.zone?.name?.trim() || "Без локації";
+      const items = groups.get(location) || [];
+      items.push(table);
+      groups.set(location, items);
+    }
+
+    return [...groups.entries()]
+      .sort(([left], [right]) => left.localeCompare(right, "uk"))
+      .map(([location, items]) => ({
+        location,
+        tables: [...items].sort((left, right) => {
+          const leftNumber = Number(left.tableNumber);
+          const rightNumber = Number(right.tableNumber);
+          if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+            return leftNumber - rightNumber;
+          }
+          return String(left.tableNumber).localeCompare(String(right.tableNumber), "uk");
+        }),
+      }));
+  }, [tables]);
   async function act(key: string, job: () => Promise<unknown>) {
     try {
       setBusy(key);
@@ -355,15 +370,17 @@ export default function WaiterApp() {
                         ? [
                             "Гість прийшов",
                             () =>
-                              bookingsApi
-                                .checkIn(b.id)
-                                .then(() =>
-                                  waiterCallsApi.assign({
+                              bookingsApi.checkIn(b.id).then(async () => {
+                                try {
+                                  await waiterCallsApi.assign({
                                     bookingId: b.id,
                                     tableId: b.table?.id,
                                     tableNumber: b.table?.tableNumber,
-                                  }),
-                                ),
+                                  });
+                                } catch {
+                                  // Check-in is stored in booking history, so "Мої столи" remains correct.
+                                }
+                              }),
                             "gold",
                           ]
                         : null;
@@ -388,7 +405,7 @@ export default function WaiterApp() {
                         {time(b.bookingTime)} · {b.client?.fullName || "Гість"}
                       </p>
                       <p className="text-sm text-white/60">
-                        {loc(Number(b.table?.tableNumber || 0))} ·{" "}
+                        {b.table?.zone?.name || loc(Number(b.table?.tableNumber || 0))} ·{" "}
                         {b.guestsCount} гостей
                       </p>
                     </div>
@@ -438,30 +455,43 @@ export default function WaiterApp() {
               <p className="mt-2 text-white/60">
                 Оберіть вільний стіл для бронювання.
               </p>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                {tables.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => {
-                      if (
-                        confirm(
-                          `Пересадити гостей зі столу №${transfer.table?.tableNumber} на стіл №${t.tableNumber}?`,
-                        )
-                      )
-                        act(`t${transfer.id}`, () =>
-                          bookingsApi
-                            .waiterTransfer(transfer.id, t.id)
-                            .then(() => setTransfer(null)),
-                        );
-                    }}
-                    className="rounded-2xl border border-white/20 bg-black/30 p-4 text-left active:scale-95"
-                  >
-                    <b>Стіл №{t.tableNumber}</b>
-                    <span className="block text-sm text-white/55">
-                      {loc(Number(t.tableNumber))}
-                    </span>
-                  </button>
-                ))}
+              <div className="mt-4 space-y-5">
+                {transferGroups.length ? (
+                  transferGroups.map((group) => (
+                    <section key={group.location}>
+                      <h3 className="mb-2 text-sm font-black uppercase tracking-[.16em] text-amber-100/75">
+                        {group.location}
+                      </h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        {group.tables.map((t) => (
+                          <button
+                            key={t.id}
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Пересадити гостей зі столу №${transfer.table?.tableNumber} на стіл №${t.tableNumber}?`,
+                                )
+                              )
+                                act(`t${transfer.id}`, () =>
+                                  bookingsApi
+                                    .waiterTransfer(transfer.id, t.id)
+                                    .then(() => setTransfer(null)),
+                                );
+                            }}
+                            className="rounded-2xl border border-white/20 bg-black/30 p-4 text-left active:scale-95"
+                          >
+                            <b>Стіл №{t.tableNumber}</b>
+                            <span className="block text-sm text-white/55">
+                              до {t.seats} місць
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  ))
+                ) : (
+                  <p className="text-white/60">Вільних столів немає.</p>
+                )}
               </div>
             </div>
           </div>
