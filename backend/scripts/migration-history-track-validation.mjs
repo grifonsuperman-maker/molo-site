@@ -8,7 +8,7 @@ import {
 } from './fresh-schema-baseline-validation.mjs';
 import { EXPECTED_RUNTIME_MIGRATIONS } from './runtime-migration-roundtrip.mjs';
 
-export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe2026082300010';
+export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe2026082500010';
 export const EXPECTED_EXISTING_TRACK_AFTER_PROBE = [
   ...EXPECTED_RUNTIME_MIGRATIONS,
   FUTURE_MIGRATION_PROBE,
@@ -45,6 +45,9 @@ function loadRuntimeMigrations(require) {
   const {
     AddGuestReviewArchive2026082200010,
   } = require('../dist/migrations/2026082200010-AddGuestReviewArchive.js');
+  const {
+    AddLogArchive2026082400010,
+  } = require('../dist/migrations/2026082400010-AddLogArchive.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -53,6 +56,7 @@ function loadRuntimeMigrations(require) {
     AddWaiterCallAssignmentActive2026081500015,
     CloseInactiveWaiterCalls2026081500020,
     AddGuestReviewArchive2026082200010,
+    AddLogArchive2026082400010,
   ];
 }
 
@@ -63,7 +67,7 @@ function loadInitialBaseline(require) {
   return InitialSchemaBaseline2026081300000;
 }
 
-class MigrationHistoryProbe2026082300010 {
+class MigrationHistoryProbe2026082500010 {
   name = FUTURE_MIGRATION_PROBE;
 
   async up(queryRunner) {
@@ -123,11 +127,11 @@ export async function runMigrationHistoryTrackValidation(mode, env = process.env
   const runtimeMigrations = loadRuntimeMigrations(require);
   const migrations =
     mode === 'existing'
-      ? [...runtimeMigrations, MigrationHistoryProbe2026082300010]
+      ? [...runtimeMigrations, MigrationHistoryProbe2026082500010]
       : [
           loadInitialBaseline(require),
           ...runtimeMigrations,
-          MigrationHistoryProbe2026082300010,
+          MigrationHistoryProbe2026082500010,
         ];
 
   const expectedAfter =
