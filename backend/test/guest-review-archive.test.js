@@ -10,26 +10,54 @@ const {
   ROLES_KEY,
 } = require('../dist/common/decorators/roles.decorator.js');
 
-function createController(review, initiallyArchived = false) {
+function createController(review, initiallyArchived = false, archiveTotal = review ? 1 : 0) {
   const removed = [];
   const logEntries = [];
   const state = { archived: initiallyArchived };
   const transactions = [];
   const locks = [];
+  const pagination = { skip: null, take: null };
+  const archiveSearch = [];
+  const selections = [];
+  const orderBys = [];
 
   const queryBuilder = {
     leftJoinAndSelect() { return this; },
     leftJoin() { return this; },
     innerJoin() { return this; },
+    addSelect(selection, alias) {
+      selections.push({ selection, alias });
+      return this;
+    },
     where() { return this; },
-    orderBy() { return this; },
-    addOrderBy() { return this; },
-    take() { return this; },
+    andWhere(sql, params) {
+      archiveSearch.push({ sql, params });
+      return this;
+    },
+    orderBy(criteria, direction) {
+      orderBys.push({ criteria, direction, kind: 'orderBy' });
+      return this;
+    },
+    addOrderBy(criteria, direction) {
+      orderBys.push({ criteria, direction, kind: 'addOrderBy' });
+      return this;
+    },
+    skip(value) {
+      pagination.skip = value;
+      return this;
+    },
+    take(value) {
+      pagination.take = value;
+      return this;
+    },
     setLock(mode, version, aliases) {
       locks.push({ mode, aliases });
       return this;
     },
     async getMany() { return review ? [review] : []; },
+    async getManyAndCount() {
+      return [review ? [review] : [], archiveTotal];
+    },
     async getOne() { return review; },
   };
 
@@ -99,6 +127,10 @@ function createController(review, initiallyArchived = false) {
     state,
     transactions,
     locks,
+    pagination,
+    archiveSearch,
+    selections,
+    orderBys,
   };
 }
 
@@ -116,13 +148,91 @@ const ownerRequest = {
   user: { role: 'owner', name: 'Директор' },
 };
 
-test('review archive mutations are owner-only', () => {
-  for (const method of ['findArchive', 'archive', 'restore', 'deletePermanently']) {
+test('review archive manager endpoints are owner-only', () => {
+  for (const method of ['findActive', 'findArchive', 'archive', 'restore', 'deletePermanently']) {
     assert.deepEqual(
       Reflect.getMetadata(ROLES_KEY, GuestReviewsController.prototype[method]),
       ['owner'],
     );
   }
+});
+
+test('active review manager supports pages beyond the first 300 reviews and displayed-date search', async () => {
+  const review = reviewFixture();
+  const { controller, pagination, archiveSearch } = createController(review, false, 451);
+
+  const result = await controller.findActive('4', '100', '23.08.2026');
+
+  assert.deepEqual(result, {
+    items: [review],
+    total: 451,
+    page: 4,
+    limit: 100,
+    hasMore: true,
+  });
+  assert.deepEqual(pagination, { skip: 300, take: 100 });
+  assert.equal(archiveSearch.length, 1);
+  assert.match(
+    archiveSearch[0].sql,
+    /TO_CHAR\("booking"\."booking_date", 'DD\.MM\.YYYY'\)/,
+  );
+  assert.equal(archiveSearch[0].params.activeSearch, '%23.08.2026%');
+});
+
+test('archive list supports pages beyond the first 300 reviews', async () => {
+  const review = reviewFixture();
+  const {
+    controller,
+    pagination,
+    archiveSearch,
+    selections,
+    orderBys,
+  } = createController(review, true, 451);
+
+  const result = await controller.findArchive('4', '100', 'ТЕСТ');
+
+  assert.deepEqual(result, {
+    items: [review],
+    total: 451,
+    page: 4,
+    limit: 100,
+    hasMore: true,
+  });
+  assert.deepEqual(pagination, { skip: 300, take: 100 });
+  assert.equal(archiveSearch.length, 1);
+  assert.equal(archiveSearch[0].params.archiveSearch, '%тест%');
+  assert.deepEqual(selections, [
+    {
+      selection: 'review_archive.archived_at',
+      alias: 'reviewArchiveArchivedAt',
+    },
+  ]);
+  assert.deepEqual(orderBys.slice(-2), [
+    {
+      criteria: 'reviewArchiveArchivedAt',
+      direction: 'DESC',
+      kind: 'orderBy',
+    },
+    {
+      criteria: 'review.createdAt',
+      direction: 'DESC',
+      kind: 'addOrderBy',
+    },
+  ]);
+});
+
+test('archive search accepts the date format shown to the Director', async () => {
+  const review = reviewFixture();
+  const { controller, archiveSearch } = createController(review, true, 1);
+
+  await controller.findArchive('1', '50', '23.08.2026');
+
+  assert.equal(archiveSearch.length, 1);
+  assert.match(
+    archiveSearch[0].sql,
+    /TO_CHAR\("booking"\."booking_date", 'DD\.MM\.YYYY'\)/,
+  );
+  assert.equal(archiveSearch[0].params.archiveSearch, '%23.08.2026%');
 });
 
 test('Director can archive and restore a review without deleting it', async () => {

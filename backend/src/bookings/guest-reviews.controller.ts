@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Param,
   Patch,
+  Query,
   Req,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -43,19 +44,100 @@ export class GuestReviewsController {
       .getMany();
   }
 
+  @Get('active')
+  @Roles('owner')
+  async findActive(
+    @Query('page') pageValue?: string,
+    @Query('limit') limitValue?: string,
+    @Query('q') queryValue?: string,
+  ) {
+    const page = this.positiveInteger(pageValue, 1);
+    const limit = Math.min(this.positiveInteger(limitValue, 50), 100);
+    const search = String(queryValue || '').trim().toLowerCase();
+    const query = this.reviewQuery()
+      .leftJoin(
+        'guest_review_archives',
+        'review_archive',
+        'review_archive.guest_review_id = review.id',
+      )
+      .where('review_archive.guest_review_id IS NULL');
+
+    if (search) {
+      query.andWhere(
+        `(
+          LOWER(COALESCE("client"."full_name", '')) LIKE :activeSearch
+          OR LOWER(COALESCE("review"."text", '')) LIKE :activeSearch
+          OR CAST("booking"."booking_date" AS TEXT) LIKE :activeSearch
+          OR TO_CHAR("booking"."booking_date", 'DD.MM.YYYY') LIKE :activeSearch
+          OR LOWER(COALESCE("table"."table_number", '')) LIKE :activeSearch
+        )`,
+        { activeSearch: `%${search}%` },
+      );
+    }
+
+    const [items, total] = await query
+      .orderBy('review.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      hasMore: page * limit < total,
+    };
+  }
+
   @Get('archive')
   @Roles('owner')
-  findArchive() {
-    return this.reviewQuery()
+  async findArchive(
+    @Query('page') pageValue?: string,
+    @Query('limit') limitValue?: string,
+    @Query('q') queryValue?: string,
+  ) {
+    const page = this.positiveInteger(pageValue, 1);
+    const limit = Math.min(this.positiveInteger(limitValue, 50), 100);
+    const search = String(queryValue || '').trim().toLowerCase();
+    const query = this.reviewQuery()
       .innerJoin(
         'guest_review_archives',
         'review_archive',
         'review_archive.guest_review_id = review.id',
       )
-      .orderBy('review_archive.archived_at', 'DESC')
+      .addSelect(
+        'review_archive.archived_at',
+        'reviewArchiveArchivedAt',
+      );
+
+    if (search) {
+      query.andWhere(
+        `(
+          LOWER(COALESCE("client"."full_name", '')) LIKE :archiveSearch
+          OR LOWER(COALESCE("review"."text", '')) LIKE :archiveSearch
+          OR CAST("booking"."booking_date" AS TEXT) LIKE :archiveSearch
+          OR TO_CHAR("booking"."booking_date", 'DD.MM.YYYY') LIKE :archiveSearch
+          OR LOWER(COALESCE("table"."table_number", '')) LIKE :archiveSearch
+        )`,
+        { archiveSearch: `%${search}%` },
+      );
+    }
+
+    const [items, total] = await query
+      .orderBy('reviewArchiveArchivedAt', 'DESC')
       .addOrderBy('review.createdAt', 'DESC')
-      .take(300)
-      .getMany();
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      hasMore: page * limit < total,
+    };
   }
 
   @Patch(':id/response')
@@ -227,5 +309,10 @@ export class GuestReviewsController {
           [id],
         );
     return Boolean(rows[0]?.archived);
+  }
+
+  private positiveInteger(value: string | undefined, fallback: number) {
+    const parsed = Number.parseInt(String(value || ''), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   }
 }
