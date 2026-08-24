@@ -12,13 +12,16 @@ const controlsSource = read('frontend/src/director/DirectorStaffActionsArchiveCo
 const dockSource = read('frontend/src/director/DirectorStaffActionsArchiveDock.tsx');
 const workspaceSource = read('frontend/src/director/DirectorWorkspace.tsx');
 const panelSource = read('frontend/src/director/PremiumDirectorPanel.tsx');
+const controllerSource = read('backend/src/logs/logs.controller.ts');
 
-test('Director staff-action working feed reads only active logs while preserving last-300 scope', () => {
-  assert.match(apiSource, /getLogPage\('\/logs\/active', \{ page, limit: 100 \}\)/);
-  assert.match(apiSource, /for \(let page = 1; page <= 3; page \+= 1\)/);
+test('Director staff-action working feed reads the latest 300 active logs in one request', () => {
+  assert.match(apiSource, /getLogPage\('\/logs\/active', \{ page: 1, limit: 300 \}\)/);
+  assert.doesNotMatch(apiSource, /for \(let page = 1; page <= 3;/);
   assert.match(apiSource, /getAll: getRecentActiveLogs/);
   assert.match(apiSource, /getActive:/);
   assert.match(apiSource, /getArchive:/);
+  assert.match(controllerSource, /findActive\([\s\S]*positiveInteger\(limit, 50, 300\)/);
+  assert.match(controllerSource, /findArchive\([\s\S]*positiveInteger\(limit, 50, 100\)/);
 });
 
 test('staff-action archive UI exposes archive and permanent delete without restore', () => {
