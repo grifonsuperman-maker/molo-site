@@ -45,6 +45,9 @@ function loadRuntimeMigrations(require) {
   const {
     AddGuestReviewArchive2026082200010,
   } = require('../dist/migrations/2026082200010-AddGuestReviewArchive.js');
+  const {
+    AddLogArchive2026082400010,
+  } = require('../dist/migrations/2026082400010-AddLogArchive.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -53,6 +56,7 @@ function loadRuntimeMigrations(require) {
     AddWaiterCallAssignmentActive2026081500015,
     CloseInactiveWaiterCalls2026081500020,
     AddGuestReviewArchive2026082200010,
+    AddLogArchive2026082400010,
   ];
 }
 
