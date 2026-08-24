@@ -8,6 +8,7 @@ const runtimeHistory = [
   'AddWaiterCallAssignmentActive2026081500015',
   'CloseInactiveWaiterCalls2026081500020',
   'AddGuestReviewArchive2026082200010',
+  'AddLogArchive2026082400010',
 ];
 const baseline = 'InitialSchemaBaseline2026081300000';
 const probe = 'MigrationHistoryProbe2026082300010';
