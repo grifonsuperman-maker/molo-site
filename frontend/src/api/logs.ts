@@ -12,6 +12,51 @@ export type LogRecord = {
   createdAt: string;
 };
 
+export type LogPage = {
+  items: LogRecord[];
+  total: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
+};
+
+type LogPageOptions = {
+  page?: number;
+  limit?: number;
+};
+
+type LogMutationResult = {
+  ok: boolean;
+  id: string;
+};
+
+function getLogPage(path: string, {
+  page = 1,
+  limit = 50,
+}: LogPageOptions = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  return api.get<LogPage>(`${path}?${params.toString()}`);
+}
+
+async function getRecentActiveLogs() {
+  const items: LogRecord[] = [];
+  for (let page = 1; page <= 3; page += 1) {
+    const result = await getLogPage('/logs/active', { page, limit: 100 });
+    items.push(...result.items);
+    if (!result.hasMore) break;
+  }
+  return items;
+}
+
 export const logsApi = {
-  getAll: () => api.get<LogRecord[]>('/logs'),
+  getAll: getRecentActiveLogs,
+  getActive: (options: LogPageOptions = {}) => getLogPage('/logs/active', options),
+  getArchive: (options: LogPageOptions = {}) => getLogPage('/logs/archive', options),
+  archive: (id: string) =>
+    api.patch<LogMutationResult>(`/logs/${encodeURIComponent(id)}/archive`),
+  deletePermanently: (id: string) =>
+    api.delete<LogMutationResult>(`/logs/${encodeURIComponent(id)}`),
 };
