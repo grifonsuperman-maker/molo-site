@@ -63,6 +63,7 @@ type AdminRights = {
 
 const TAB_STORAGE_KEY = 'molo:director:active-tab';
 const NOTICE_STORAGE_KEY = 'molo:director:last-read-notices';
+const REVIEW_PAGE_SIZE = 30;
 const VALID_TABS: Tab[] = ['overview', 'bookings', 'locations', 'guests', 'blacklist', 'activity', 'stats', 'team', 'site', 'more'];
 const HOLIDAYS: Array<{ key: HolidayKey; label: string }> = [
   { key: 'new-year', label: 'Новий рік' },
@@ -211,6 +212,8 @@ export default function PremiumDirectorPanel() {
   const [menuDirty, setMenuDirty] = useState(false);
   const [holidayPickerOpen, setHolidayPickerOpen] = useState(false);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
+  const [reviewVisibleLimit, setReviewVisibleLimit] = useState(REVIEW_PAGE_SIZE);
+  const [reviewUnansweredFirst, setReviewUnansweredFirst] = useState(false);
   const [employeeToRemove, setEmployeeToRemove] = useState<StaffMember | null>(null);
   const [employeeToRestore, setEmployeeToRestore] = useState<StaffMember | null>(null);
   const [employeeToDeletePermanently, setEmployeeToDeletePermanently] = useState<StaffMember | null>(null);
@@ -219,6 +222,10 @@ export default function PremiumDirectorPanel() {
   const [lastReadSignature, setLastReadSignature] = useState(() => window.localStorage.getItem(NOTICE_STORAGE_KEY) || '');
 
   function selectTab(next: Tab) {
+    if (next === 'more') {
+      setReviewVisibleLimit(REVIEW_PAGE_SIZE);
+      setReviewUnansweredFirst(false);
+    }
     setTab(next);
     window.sessionStorage.setItem(TAB_STORAGE_KEY, next);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -289,6 +296,16 @@ export default function PremiumDirectorPanel() {
       .filter((client) => !needle || `${client.fullName} ${client.phone}`.toLowerCase().includes(needle))
       .sort((left, right) => Number(right.visitsCount || 0) - Number(left.visitsCount || 0));
   }, [clients, search]);
+  const orderedReviews = useMemo(() => {
+    if (!reviewUnansweredFirst) return reviews;
+    return [...reviews].sort((left, right) => {
+      const leftAnswered = Boolean(left.responseText);
+      const rightAnswered = Boolean(right.responseText);
+      if (leftAnswered === rightAnswered) return 0;
+      return leftAnswered ? 1 : -1;
+    });
+  }, [reviews, reviewUnansweredFirst]);
+  const visibleReviews = orderedReviews.slice(0, reviewVisibleLimit);
   const locations = useMemo(() => LOCATIONS.map((location) => {
     const tables = (map?.tables || []).filter((table) => locationKey(table.tableNumber) === location.key);
     const zone = (map?.zones || []).find((candidate) => tables.some((table) => table.zone?.id === candidate.id)) || null;
@@ -317,6 +334,8 @@ export default function PremiumDirectorPanel() {
   function openNotice(item: NoticeItem) {
     if (directorNoticeDestination(item.id) !== 'reviews') return;
     setNotificationsOpen(false);
+    setReviewVisibleLimit(REVIEW_PAGE_SIZE);
+    setReviewUnansweredFirst(true);
     setTab('more');
     window.sessionStorage.setItem(TAB_STORAGE_KEY, 'more');
     window.setTimeout(() => {
@@ -652,7 +671,7 @@ export default function PremiumDirectorPanel() {
           </section>
         )}
 
-        {tab === 'more' && <section className="space-y-3"><Heading title="Ще" subtitle="Вхід, письмові відгуки, історія та інтеграції." /><button type="button" onClick={openAccessSettings} className="flex w-full items-center justify-between rounded-[24px] border border-amber-100/35 bg-black/50 p-4 text-left text-amber-50 shadow-[0_0_32px_rgba(251,191,36,.1)] transition active:scale-[.995]"><div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-100/35 bg-black/40"><LockKeyhole size={19} className="drop-shadow-[0_0_8px_rgba(253,230,138,.8)]" /></span><div><p className="font-black">Налаштування входу</p><p className="mt-1 text-xs text-white/45">Змінити ім’я, логін або пароль</p></div></div><KeyRound size={20} className="text-amber-100/60" /></button><div id="director-reviews"><PremiumCard><Eyebrow>{reviews.length} відгуків</Eyebrow><h2 className="mt-1 text-xl font-black">Письмові відгуки гостей</h2><div className="mt-4 space-y-2">{reviews.slice(0, 30).map((review) => <article key={review.id} className="rounded-2xl border border-white/10 bg-black/30 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{review.booking?.client?.fullName || 'Гість'}</p><p className="mt-1 text-xs text-white/40">{dateLabel(review.booking?.bookingDate)} · Стіл №{review.booking?.table?.tableNumber || '-'}</p></div><MessageSquareText size={18} className="text-violet-200" /></div><p className="mt-3 whitespace-pre-wrap text-sm text-white/70">{review.text}</p>{review.responseText ? <div className="mt-3 rounded-2xl border border-emerald-200/25 bg-black/30 p-3"><Eyebrow>Відповідь</Eyebrow><p className="mt-2 whitespace-pre-wrap text-sm text-emerald-50">{review.responseText}</p></div> : <div className="mt-3"><textarea value={reviewDrafts[review.id] || ''} onChange={(event) => setReviewDrafts((current) => ({ ...current, [review.id]: event.target.value }))} placeholder="Напишіть відповідь гостю" className="min-h-24 w-full resize-none rounded-2xl border border-white/12 bg-black/45 p-3 text-sm outline-none focus:border-violet-200/40" /><OutlineAction className="mt-2 w-full" label="Відповісти" tone="violet" disabled={busy === `review:${review.id}` || !String(reviewDrafts[review.id] || '').trim()} onClick={() => void respondToReview(review)} /></div>}</article>)}{!reviews.length && <Empty text="Письмових відгуків ще немає" />}</div></PremiumCard></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"><SystemCard title="Syrve" status="Налаштовується окремою кнопкою" text="Підключення Cloud API доступне тільки Директору." tone="gold" /><SystemCard title="Expz" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /><SystemCard title="POS" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /></div></section>}
+        {tab === 'more' && <section className="space-y-3"><Heading title="Ще" subtitle="Вхід, письмові відгуки, історія та інтеграції." /><button type="button" onClick={openAccessSettings} className="flex w-full items-center justify-between rounded-[24px] border border-amber-100/35 bg-black/50 p-4 text-left text-amber-50 shadow-[0_0_32px_rgba(251,191,36,.1)] transition active:scale-[.995]"><div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-100/35 bg-black/40"><LockKeyhole size={19} className="drop-shadow-[0_0_8px_rgba(253,230,138,.8)]" /></span><div><p className="font-black">Налаштування входу</p><p className="mt-1 text-xs text-white/45">Змінити ім’я, логін або пароль</p></div></div><KeyRound size={20} className="text-amber-100/60" /></button><div id="director-reviews"><PremiumCard><Eyebrow>{reviews.length} відгуків{reviewUnansweredFirst ? ' · без відповіді спочатку' : ''}</Eyebrow><h2 className="mt-1 text-xl font-black">Письмові відгуки гостей</h2><div className="mt-4 space-y-2">{visibleReviews.map((review) => <article key={review.id} className="rounded-2xl border border-white/10 bg-black/30 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-black">{review.booking?.client?.fullName || 'Гість'}</p><p className="mt-1 text-xs text-white/40">{dateLabel(review.booking?.bookingDate)} · Стіл №{review.booking?.table?.tableNumber || '-'}</p></div><MessageSquareText size={18} className="text-violet-200" /></div><p className="mt-3 whitespace-pre-wrap text-sm text-white/70">{review.text}</p>{review.responseText ? <div className="mt-3 rounded-2xl border border-emerald-200/25 bg-black/30 p-3"><Eyebrow>Відповідь</Eyebrow><p className="mt-2 whitespace-pre-wrap text-sm text-emerald-50">{review.responseText}</p></div> : <div className="mt-3"><textarea value={reviewDrafts[review.id] || ''} onChange={(event) => setReviewDrafts((current) => ({ ...current, [review.id]: event.target.value }))} placeholder="Напишіть відповідь гостю" className="min-h-24 w-full resize-none rounded-2xl border border-white/12 bg-black/45 p-3 text-sm outline-none focus:border-violet-200/40" /><OutlineAction className="mt-2 w-full" label="Відповісти" tone="violet" disabled={busy === `review:${review.id}` || !String(reviewDrafts[review.id] || '').trim()} onClick={() => void respondToReview(review)} /></div>}</article>)}{!reviews.length && <Empty text="Письмових відгуків ще немає" />}</div>{reviewVisibleLimit < orderedReviews.length && <OutlineAction className="mt-3 w-full" label={`Показати ще · ${orderedReviews.length - reviewVisibleLimit}`} tone="violet" disabled={false} onClick={() => setReviewVisibleLimit((current) => Math.min(orderedReviews.length, current + REVIEW_PAGE_SIZE))} />}</PremiumCard></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"><SystemCard title="Syrve" status="Налаштовується окремою кнопкою" text="Підключення Cloud API доступне тільки Директору." tone="gold" /><SystemCard title="Expz" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /><SystemCard title="POS" status="Не підключено" text="Інтеграція ще не реалізована." tone="neutral" /></div></section>}
       </main>
 
       {plannerOpen && <AdminVisualTablePlanner key={plannerLocationKey} mode="director" initialLocationKey={plannerLocationKey} onClose={() => setPlannerOpen(false)} />}
