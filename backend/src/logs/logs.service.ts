@@ -19,18 +19,9 @@ export type LogPage = {
 
 @Injectable()
 export class LogsService {
-  constructor(
-    @InjectRepository(Log)
-    private readonly logsRepo: Repository<Log>,
-  ) {}
+  constructor(@InjectRepository(Log) private readonly logsRepo: Repository<Log>) {}
 
-  findAll() {
-    return this.logsRepo.find({
-      relations: ['staff'],
-      order: { createdAt: 'DESC' },
-      take: 300,
-    });
-  }
+  findAll() { return this.logsRepo.find({ relations: ['staff'], order: { createdAt: 'DESC' }, take: 300 }); }
 
   async findActive(page = 1, limit = 50): Promise<LogPage> {
     const [items, total] = await this.logsRepo
@@ -138,24 +129,20 @@ export class LogsService {
     });
   }
 
-  create(
-    action: string,
-    staff?: Staff | null,
-    details?: Record<string, unknown> | null,
-  ) {
+  create(action: string, staff?: Staff | null, details?: Record<string, unknown>) {
     const staffIdFromDetails =
-      details && typeof details.staffId === 'string'
+      !staff && typeof details?.staffId === 'string'
         ? details.staffId.trim()
         : '';
-    const staffRelation = staff || (staffIdFromDetails
-      ? ({ id: staffIdFromDetails } as Staff)
-      : null);
+    const resolvedStaff =
+      staff || (staffIdFromDetails ? ({ id: staffIdFromDetails } as Staff) : null);
 
-    const log = this.logsRepo.create({
-      action,
-      staff: staffRelation,
-      details: details || null,
-    });
-    return this.logsRepo.save(log);
+    return this.logsRepo.save(
+      this.logsRepo.create({
+        action,
+        staff: resolvedStaff,
+        details: details || null,
+      }),
+    );
   }
 }
