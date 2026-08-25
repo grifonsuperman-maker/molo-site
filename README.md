@@ -66,6 +66,7 @@ Backend перевіряє production secrets під час запуску. Dev-
 
 - `guest` — гість
 - `waiter` — офіціант
+- `hookah` — Кальянник
 - `admin` — адміністратор
 - `owner` — Директор
 
