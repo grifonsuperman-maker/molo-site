@@ -59,10 +59,6 @@ function table(id, tableNumber, status, overrides = {}) {
     tableNumber: String(tableNumber),
     status,
     isVisible: true,
-    zone: {
-      isVisible: true,
-      isClosed: false,
-    },
     ...overrides,
     zone: {
       isVisible: true,
@@ -139,13 +135,25 @@ test('future dates keep closed and hidden availability gates even with or withou
   const hiddenFree = table('hidden-free', 23, 'free', { isVisible: false });
   const zoneClosedBooked = table('zone-closed-booked', 24, 'free', { zone: { isClosed: true } });
   const zoneClosedFree = table('zone-closed-free', 25, 'free', { zone: { isClosed: true } });
+  const zoneHiddenBooked = table('zone-hidden-booked', 26, 'free', { zone: { isVisible: false } });
+  const zoneHiddenFree = table('zone-hidden-free', 27, 'free', { zone: { isVisible: false } });
 
   const service = createService(
-    [closedBooked, closedFree, hiddenBooked, hiddenFree, zoneClosedBooked, zoneClosedFree],
+    [
+      closedBooked,
+      closedFree,
+      hiddenBooked,
+      hiddenFree,
+      zoneClosedBooked,
+      zoneClosedFree,
+      zoneHiddenBooked,
+      zoneHiddenFree,
+    ],
     [
       booking('closed-booking', closedBooked, 'approved'),
       booking('hidden-booking', hiddenBooked, 'approved'),
       booking('zone-closed-booking', zoneClosedBooked, 'pending'),
+      booking('zone-hidden-booking', zoneHiddenBooked, 'approved'),
     ],
   );
 
@@ -159,7 +167,7 @@ test('future dates keep closed and hidden availability gates even with or withou
     assert.equal(result.statuses[number].status, 'closed');
     assert.equal(result.statuses[number].reason, 'closed');
   }
-  for (const number of ['22', '23']) {
+  for (const number of ['22', '23', '26', '27']) {
     assert.equal(result.statuses[number].status, 'closed');
     assert.equal(result.statuses[number].reason, 'hidden');
   }
