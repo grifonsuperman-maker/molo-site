@@ -1,2 +1,0 @@
-import { useState } from 'react';
-export function useAsyncAction(){ const [loading,setLoading]=useState(false); const [error,setError]=useState<string|null>(null); async function run<T>(action:()=>Promise<T>):Promise<T|null>{ setLoading(true); setError(null); try{return await action()}catch(e:any){setError(e?.message||'Помилка'); return null}finally{setLoading(false)} } return {loading,error,run}; }
