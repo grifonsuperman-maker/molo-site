@@ -140,26 +140,16 @@ test('home hero stays connected to protected Title rotation recognition and sche
     controllerSource.includes("image.dataset.moloFallback = '/hero-bg.jpg';"),
     'Title fallback must remain /hero-bg.jpg',
   );
-  assert.ok(
-    controllerSource.includes('syncTitle();'),
-    'Title rotation must still perform its initial sync',
+
+  assert.match(
+    controllerSource,
+    /\n\s*syncTitle\(\);\s*\n\s*const timer = window\.setInterval\(syncTitle, TITLE_SYNC_MS\);\s*\n\s*window\.addEventListener\('focus', syncTitle\);\s*\n\s*window\.addEventListener\('pageshow', syncTitle\);\s*\n\s*window\.addEventListener\('storage', syncTitle\);\s*\n\s*document\.addEventListener\('visibilitychange', syncWhenVisible\);/,
+    'Title rotation must perform its initial sync and then install its protected schedule/listeners',
   );
-  assert.ok(
-    controllerSource.includes('const timer = window.setInterval(syncTitle, TITLE_SYNC_MS);'),
-    'Title rotation must stay scheduled with TITLE_SYNC_MS',
-  );
-  for (const event of ['focus', 'pageshow', 'storage']) {
-    assert.ok(
-      controllerSource.includes(`window.addEventListener('${event}', syncTitle);`),
-      `Title rotation must still resync on ${event}`,
-    );
-  }
-  assert.ok(
-    controllerSource.includes("document.addEventListener('visibilitychange', syncWhenVisible);"),
-    'Title rotation must still resync after visibility changes',
-  );
-  assert.ok(
-    controllerSource.includes('window.clearInterval(timer);'),
-    'Title rotation timer cleanup must remain connected',
+
+  assert.match(
+    controllerSource,
+    /return \(\) => \{\s*\n\s*window\.clearInterval\(timer\);\s*\n\s*window\.removeEventListener\('focus', syncTitle\);\s*\n\s*window\.removeEventListener\('pageshow', syncTitle\);\s*\n\s*window\.removeEventListener\('storage', syncTitle\);\s*\n\s*document\.removeEventListener\('visibilitychange', syncWhenVisible\);\s*\n\s*\};/,
+    'Title rotation must keep its timer and all event-listener cleanup bound together',
   );
 });
