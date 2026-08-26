@@ -53,7 +53,7 @@ function createService(tables, activeBookings) {
   );
 }
 
-function table(id, tableNumber, status) {
+function table(id, tableNumber, status, overrides = {}) {
   return {
     id,
     tableNumber: String(tableNumber),
@@ -62,6 +62,12 @@ function table(id, tableNumber, status) {
     zone: {
       isVisible: true,
       isClosed: false,
+    },
+    ...overrides,
+    zone: {
+      isVisible: true,
+      isClosed: false,
+      ...(overrides.zone || {}),
     },
   };
 }
@@ -100,7 +106,7 @@ test('today physical occupied and cleaning statuses override booking state', asy
   assert.equal(result.statuses['9'].reason, 'physical_status_today');
 });
 
-test('future dates ignore physical today status and show booking state only', async () => {
+test('future dates ignore transient occupied and cleaning statuses and show booking state', async () => {
   const futureReserved = table('table-reserved', 8, 'occupied');
   const futureFree = table('table-free', 9, 'cleaning');
   const futurePending = table('table-pending', 10, 'occupied');
@@ -124,4 +130,37 @@ test('future dates ignore physical today status and show booking state only', as
   assert.equal(result.statuses['9'].reason, null);
   assert.equal(result.statuses['10'].status, 'pending');
   assert.equal(result.statuses['10'].reason, 'booking_conflict');
+});
+
+test('future dates keep closed and hidden availability gates even with or without bookings', async () => {
+  const closedBooked = table('closed-booked', 20, 'closed');
+  const closedFree = table('closed-free', 21, 'closed');
+  const hiddenBooked = table('hidden-booked', 22, 'free', { isVisible: false });
+  const hiddenFree = table('hidden-free', 23, 'free', { isVisible: false });
+  const zoneClosedBooked = table('zone-closed-booked', 24, 'free', { zone: { isClosed: true } });
+  const zoneClosedFree = table('zone-closed-free', 25, 'free', { zone: { isClosed: true } });
+
+  const service = createService(
+    [closedBooked, closedFree, hiddenBooked, hiddenFree, zoneClosedBooked, zoneClosedFree],
+    [
+      booking('closed-booking', closedBooked, 'approved'),
+      booking('hidden-booking', hiddenBooked, 'approved'),
+      booking('zone-closed-booking', zoneClosedBooked, 'pending'),
+    ],
+  );
+
+  const result = await service.getTableStatuses({
+    bookingDate: kyivDate(7),
+    bookingTime: '19:00',
+    durationMinutes: 120,
+  });
+
+  for (const number of ['20', '21', '24', '25']) {
+    assert.equal(result.statuses[number].status, 'closed');
+    assert.equal(result.statuses[number].reason, 'closed');
+  }
+  for (const number of ['22', '23']) {
+    assert.equal(result.statuses[number].status, 'closed');
+    assert.equal(result.statuses[number].reason, 'hidden');
+  }
 });
