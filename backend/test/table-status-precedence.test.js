@@ -134,6 +134,32 @@ test('today physical occupied and cleaning statuses override booking state', asy
   assert.equal(result.statuses['9'].reason, 'physical_status_today');
 });
 
+test('today free tables show approved and pending booking state, otherwise free', async () => {
+  const reserved = table('today-reserved', 10, 'free');
+  const pending = table('today-pending', 11, 'free');
+  const free = table('today-free', 12, 'free');
+  const service = createService(
+    [reserved, pending, free],
+    [
+      booking('today-approved-booking', reserved, 'approved'),
+      booking('today-pending-booking', pending, 'pending'),
+    ],
+  );
+
+  const result = await service.getTableStatuses({
+    bookingDate: kyivDate(),
+    bookingTime: '19:00',
+    durationMinutes: 120,
+  });
+
+  assert.equal(result.statuses['10'].status, 'reserved');
+  assert.equal(result.statuses['10'].reason, 'booking_conflict');
+  assert.equal(result.statuses['11'].status, 'pending');
+  assert.equal(result.statuses['11'].reason, 'booking_conflict');
+  assert.equal(result.statuses['12'].status, 'free');
+  assert.equal(result.statuses['12'].reason, null);
+});
+
 test('future dates ignore transient occupied and cleaning statuses and show booking state', async () => {
   const futureReserved = table('table-reserved', 8, 'occupied');
   const futureFree = table('table-free', 9, 'cleaning');
