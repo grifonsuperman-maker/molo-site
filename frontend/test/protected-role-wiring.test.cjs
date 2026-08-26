@@ -4,11 +4,35 @@ const path = require('node:path');
 const test = require('node:test');
 
 const FRONTEND_ROOT = path.resolve(__dirname, '..');
+const FRONTEND_SRC = path.join(FRONTEND_ROOT, 'src');
 
 function read(relativePath) {
   return fs
     .readFileSync(path.join(FRONTEND_ROOT, relativePath), 'utf8')
     .replace(/\r\n/g, '\n');
+}
+
+function sourceFiles(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolutePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFiles(absolutePath);
+    if (!entry.isFile() || !/\.(?:ts|tsx)$/.test(entry.name)) return [];
+    return [absolutePath];
+  });
+}
+
+function findUniqueSource(marker, directory = FRONTEND_SRC) {
+  const matches = sourceFiles(directory).filter((absolutePath) =>
+    fs.readFileSync(absolutePath, 'utf8').includes(marker),
+  );
+
+  assert.equal(
+    matches.length,
+    1,
+    `Expected exactly one current source for protected marker ${marker}, found ${matches.length}`,
+  );
+
+  return fs.readFileSync(matches[0], 'utf8').replace(/\r\n/g, '\n');
 }
 
 function buttonBlock(source, marker) {
@@ -24,21 +48,23 @@ function buttonBlock(source, marker) {
   return source.slice(start, end + endMarker.length);
 }
 
-function modeRenderBlock(source, mode) {
-  const marker = `{mode === "${mode}"`;
-  const start = source.indexOf(marker);
-  assert.notEqual(start, -1, `Protected render branch is missing for ${mode}`);
+function assertModeRendersWorkspace(source, mode, workspace, label) {
+  const workspaceIndex = source.indexOf(workspace);
+  assert.notEqual(workspaceIndex, -1, `${label} workspace render is missing: ${workspace}`);
 
-  const nextMode = source.indexOf('\n          {mode === "', start + marker.length);
-  const suspenseEnd = source.indexOf('</Suspense>', start);
-  const end = nextMode === -1 ? suspenseEnd : nextMode;
-  assert.notEqual(end, -1, `Protected render branch end is missing for ${mode}`);
+  const modeMarker = `{mode === "${mode}"`;
+  const modeIndex = source.lastIndexOf(modeMarker, workspaceIndex);
+  assert.notEqual(modeIndex, -1, `${label} workspace must stay guarded by ${mode}`);
 
-  return source.slice(start, end);
+  const otherModeIndex = source.lastIndexOf('{mode === "', workspaceIndex);
+  assert.equal(
+    otherModeIndex,
+    modeIndex,
+    `${label} workspace must stay inside its matching ${mode} render branch`,
+  );
 }
 
 test('each protected role button selects and renders its matching workspace', () => {
-  const app = read('src/App.tsx');
   const roles = [
     ['guest', 'Гість', '<GuestApp />', 'const GuestApp = lazy(() => import("./guest/GuestApp"));'],
     ['waiter', 'Офіціант', '<WaiterApp />', 'const WaiterApp = lazy(() => import("./waiter/WaiterAppV2"));'],
@@ -48,42 +74,38 @@ test('each protected role button selects and renders its matching workspace', ()
   ];
 
   for (const [mode, label, workspace, importMarker] of roles) {
-    assert.ok(app.includes(importMarker), `${label} protected workspace import changed`);
+    const importSource = findUniqueSource(importMarker);
+    assert.ok(importSource.includes(importMarker), `${label} protected workspace import changed`);
 
-    const button = buttonBlock(app, `onClick={() => changeMode("${mode}")}`);
-    assert.ok(button.includes(`onClick={() => changeMode("${mode}")}`), `${label} button must select ${mode}`);
+    const handler = `onClick={() => changeMode("${mode}")}`;
+    const buttonSource = findUniqueSource(handler);
+    const button = buttonBlock(buttonSource, handler);
+    assert.ok(button.includes(handler), `${label} button must select ${mode}`);
     assert.match(button, new RegExp(`>\\s*${label}\\s*</button>`), `${label} label must stay bound to ${mode}`);
 
-    const render = modeRenderBlock(app, mode);
-    assert.ok(render.includes(workspace), `${label} mode must render ${workspace}`);
+    const renderSource = findUniqueSource(workspace);
+    assertModeRendersWorkspace(renderSource, mode, workspace, label);
   }
 });
 
 test('waiter Occupied and Free labels stay bound to their matching status arguments', () => {
-  const waiterTables = read('src/waiter/WaiterTablesByLocation.tsx');
+  const waiterDirectory = path.join(FRONTEND_SRC, 'waiter');
+  const occupiedHandler = "onClick={() => void setStatus(selectedTable, 'occupied')}";
+  const freeHandler = "onClick={() => void setStatus(selectedTable, 'free')}";
+  const waiterTables = findUniqueSource('tablesApi.waiterStatus(table.id, status)', waiterDirectory);
+  const occupiedSource = findUniqueSource(occupiedHandler, waiterDirectory);
+  const freeSource = findUniqueSource(freeHandler, waiterDirectory);
   const tablesApi = read('src/api/tables.ts');
 
   assert.ok(waiterTables.includes('tablesApi.waiterStatus(table.id, status)'));
   assert.ok(tablesApi.includes('`/tables/${id}/waiter-status`'));
 
-  const occupiedButton = buttonBlock(
-    waiterTables,
-    "onClick={() => void setStatus(selectedTable, 'occupied')}",
-  );
-  assert.ok(
-    occupiedButton.includes("onClick={() => void setStatus(selectedTable, 'occupied')}"),
-    'Зайнятий must send occupied',
-  );
+  const occupiedButton = buttonBlock(occupiedSource, occupiedHandler);
+  assert.ok(occupiedButton.includes(occupiedHandler), 'Зайнятий must send occupied');
   assert.match(occupiedButton, />\s*Зайнятий\s*<\/button>/, 'occupied action must stay on Зайнятий');
 
-  const freeButton = buttonBlock(
-    waiterTables,
-    "onClick={() => void setStatus(selectedTable, 'free')}",
-  );
-  assert.ok(
-    freeButton.includes("onClick={() => void setStatus(selectedTable, 'free')}"),
-    'Вільний must send free',
-  );
+  const freeButton = buttonBlock(freeSource, freeHandler);
+  assert.ok(freeButton.includes(freeHandler), 'Вільний must send free');
   assert.match(freeButton, />\s*Вільний\s*<\/button>/, 'free action must stay on Вільний');
 
   assert.equal(waiterTables.includes('tablesApi.occupied('), false);
