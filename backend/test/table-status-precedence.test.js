@@ -79,6 +79,38 @@ function booking(id, tableValue, status) {
   };
 }
 
+test('today hidden and closed gates override transient status and booking conflict', async () => {
+  const hiddenOccupied = table('hidden-occupied', 4, 'occupied', { isVisible: false });
+  const hiddenZoneCleaning = table('hidden-zone-cleaning', 5, 'cleaning', { zone: { isVisible: false } });
+  const closedTable = table('closed-table', 6, 'closed');
+  const closedZoneOccupied = table('closed-zone-occupied', 7, 'occupied', { zone: { isClosed: true } });
+
+  const service = createService(
+    [hiddenOccupied, hiddenZoneCleaning, closedTable, closedZoneOccupied],
+    [
+      booking('hidden-occupied-booking', hiddenOccupied, 'approved'),
+      booking('hidden-zone-booking', hiddenZoneCleaning, 'pending'),
+      booking('closed-table-booking', closedTable, 'approved'),
+      booking('closed-zone-booking', closedZoneOccupied, 'pending'),
+    ],
+  );
+
+  const result = await service.getTableStatuses({
+    bookingDate: kyivDate(),
+    bookingTime: '19:00',
+    durationMinutes: 120,
+  });
+
+  assert.equal(result.statuses['4'].status, 'closed');
+  assert.equal(result.statuses['4'].reason, 'hidden');
+  assert.equal(result.statuses['5'].status, 'closed');
+  assert.equal(result.statuses['5'].reason, 'hidden');
+  assert.equal(result.statuses['6'].status, 'closed');
+  assert.equal(result.statuses['6'].reason, 'closed');
+  assert.equal(result.statuses['7'].status, 'closed');
+  assert.equal(result.statuses['7'].reason, 'closed');
+});
+
 test('today physical occupied and cleaning statuses override booking state', async () => {
   const occupied = table('table-occupied', 8, 'occupied');
   const cleaning = table('table-cleaning', 9, 'cleaning');
