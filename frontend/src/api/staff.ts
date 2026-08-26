@@ -236,7 +236,4 @@ export const staffApi = {
 
   deletePermanently: (id: string) =>
     api.delete<{ id: string }>(`/staff/${id}/permanent`),
-
-  remove: (id: string) =>
-    api.delete<StaffMember>(`/staff/${id}`),
 };
