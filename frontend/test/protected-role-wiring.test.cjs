@@ -50,13 +50,21 @@ function buttonBlock(source, marker) {
   return source.slice(start, end + endMarker.length);
 }
 
-function isInsideRenderedJsx(node) {
+function isInsideRenderedJsxChild(node) {
   let current = node.parent;
-  let sawJsxExpression = false;
+  let renderedJsxExpression = false;
 
   while (current) {
-    if (ts.isJsxExpression(current)) sawJsxExpression = true;
-    if (ts.isReturnStatement(current)) return sawJsxExpression;
+    if (ts.isJsxAttribute(current)) return false;
+
+    if (ts.isJsxExpression(current)) {
+      const container = current.parent;
+      if (ts.isJsxElement(container) || ts.isJsxFragment(container)) {
+        renderedJsxExpression = true;
+      }
+    }
+
+    if (ts.isReturnStatement(current)) return renderedJsxExpression;
     if (
       ts.isVariableDeclaration(current) ||
       ts.isFunctionDeclaration(current) ||
@@ -89,7 +97,7 @@ function assertModeRendersWorkspace(source, mode, workspace, label) {
       node.left.left.getText(sourceFile) === 'mode' &&
       node.left.right.getText(sourceFile).replace(/["']/g, '') === mode &&
       node.right.getText(sourceFile).includes(workspace) &&
-      isInsideRenderedJsx(node)
+      isInsideRenderedJsxChild(node)
     ) {
       matchedBranch = true;
     }
@@ -100,7 +108,7 @@ function assertModeRendersWorkspace(source, mode, workspace, label) {
   visit(sourceFile);
   assert.ok(
     matchedBranch,
-    `${label} workspace must stay inside a rendered ${mode} JSX branch`,
+    `${label} workspace must stay inside a rendered ${mode} JSX child branch`,
   );
 }
 
@@ -276,8 +284,8 @@ test('home hero stays connected to protected Title rotation recognition and sche
   );
   assert.match(
     controllerSource,
-    /const syncTitle = \(\) => \{\s*const nextTitleImage = chooseTitleImage\(\);\s*setTitleImage\(/,
-    'Mounted SitePhotoController sync path must keep calling chooseTitleImage()',
+    /const syncTitle = \(\) => \{\s*const nextTitleImage = chooseTitleImage\(\);\s*setTitleImage\(\(current\) =>\s*current === nextTitleImage \? current : nextTitleImage,\s*\);\s*\};/,
+    'Mounted SitePhotoController must flow the chooser result into Title state',
   );
 
   assert.match(
