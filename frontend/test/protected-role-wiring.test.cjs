@@ -50,6 +50,26 @@ function buttonBlock(source, marker) {
   return source.slice(start, end + endMarker.length);
 }
 
+function isInsideRenderedJsx(node) {
+  let current = node.parent;
+  let sawJsxExpression = false;
+
+  while (current) {
+    if (ts.isJsxExpression(current)) sawJsxExpression = true;
+    if (ts.isReturnStatement(current)) return sawJsxExpression;
+    if (
+      ts.isVariableDeclaration(current) ||
+      ts.isFunctionDeclaration(current) ||
+      ts.isArrowFunction(current)
+    ) {
+      return false;
+    }
+    current = current.parent;
+  }
+
+  return false;
+}
+
 function assertModeRendersWorkspace(source, mode, workspace, label) {
   const sourceFile = ts.createSourceFile(
     `${mode}.tsx`,
@@ -68,7 +88,8 @@ function assertModeRendersWorkspace(source, mode, workspace, label) {
       node.left.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
       node.left.left.getText(sourceFile) === 'mode' &&
       node.left.right.getText(sourceFile).replace(/["']/g, '') === mode &&
-      node.right.getText(sourceFile).includes(workspace)
+      node.right.getText(sourceFile).includes(workspace) &&
+      isInsideRenderedJsx(node)
     ) {
       matchedBranch = true;
     }
@@ -79,7 +100,7 @@ function assertModeRendersWorkspace(source, mode, workspace, label) {
   visit(sourceFile);
   assert.ok(
     matchedBranch,
-    `${label} workspace must stay inside its matching ${mode} render branch`,
+    `${label} workspace must stay inside a rendered ${mode} JSX branch`,
   );
 }
 
@@ -247,6 +268,16 @@ test('home hero stays connected to protected Title rotation recognition and sche
   assert.ok(
     controllerSource.includes("image.dataset.moloFallback = '/hero-bg.jpg';"),
     'Title fallback must remain /hero-bg.jpg',
+  );
+  assert.match(
+    controllerSource,
+    /const \[titleImage, setTitleImage\] = useState\(\(\) => chooseTitleImage\(\)\);/,
+    'Mounted SitePhotoController must initialize Title state through chooseTitleImage()',
+  );
+  assert.match(
+    controllerSource,
+    /const syncTitle = \(\) => \{\s*const nextTitleImage = chooseTitleImage\(\);\s*setTitleImage\(/,
+    'Mounted SitePhotoController sync path must keep calling chooseTitleImage()',
   );
 
   assert.match(
