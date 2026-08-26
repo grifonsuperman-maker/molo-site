@@ -6,7 +6,6 @@ export const restaurantApi = {
 
   // Директор: повний доступ
   open: () => api.post('/restaurant/open'),
-  openBooking: () => api.post('/restaurant/open-booking'),
   closeBooking: () => api.post('/restaurant/close-booking'),
   close: (message?: string) => api.post('/restaurant/close', { message }),
   update: (body: Partial<Restaurant>) => api.patch('/restaurant', body),
