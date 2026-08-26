@@ -273,12 +273,12 @@ test('every protected production poll stays exactly 15 seconds', () => {
 
   assert.ok(guestServices.includes('const POLLING_INTERVAL_MS = 15_000;'));
   assert.ok(
-    guestServices.includes('void loadWaiterStatus(true);\n    }, POLLING_INTERVAL_MS);'),
-    'Guest waiter status poll must use the protected 15-second interval',
+    guestServices.includes('const interval = window.setInterval(() => {\n      void loadWaiterStatus(true);\n    }, POLLING_INTERVAL_MS);'),
+    'Guest waiter status must keep a repeating 15-second interval',
   );
   assert.ok(
-    guestServices.includes('void loadHookahStatus(true);\n    }, POLLING_INTERVAL_MS);'),
-    'Guest hookah status poll must use the protected 15-second interval',
+    guestServices.includes('const interval = window.setInterval(() => {\n      void loadHookahStatus(true);\n    }, POLLING_INTERVAL_MS);'),
+    'Guest hookah status must keep a repeating 15-second interval',
   );
 
   assert.ok(
