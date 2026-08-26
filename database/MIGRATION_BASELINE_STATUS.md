@@ -41,12 +41,12 @@ Backend успішно стартував у цьому режимі. Після
 4. `AddWaiterCallAssignmentActive2026081500015`;
 5. `CloseInactiveWaiterCalls2026081500020`.
 
-Після цього baseline runtime migration list було розширено ще двома migrations:
+Після цієї перевірки до runtime migration list були додані:
 
-6. `AddGuestReviewArchive2026082200010`;
-7. `AddLogArchive2026082400010`.
+- `AddGuestReviewArchive2026082200010`;
+- `AddLogArchive2026082400010`.
 
-Станом на поточний `main` `AppModule` реєструє сім runtime migration classes. Історичний snapshot вище навмисно залишається з п'ятьма migration rows, тому що саме такий стан було перевірено 18 серпня.
+Актуальний runtime migration list визначається кодом `AppModule` та `EXPECTED_RUNTIME_MIGRATIONS` у `backend/scripts/runtime-migration-roundtrip.mjs`. Історичний snapshot вище навмисно залишається з п'ятьма migration rows, тому що саме такий стан було перевірено 18 серпня.
 
 У `backend/src/migrations` є також старіші migration-файли, які не входять до поточного runtime migration list. Їх не можна автоматично реєструвати, позначати виконаними або запускати поверх production без окремого schema audit та перевірки походження кожної зміни.
 
