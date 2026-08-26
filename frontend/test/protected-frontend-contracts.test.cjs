@@ -108,9 +108,65 @@ test('guest map geometry, table numbers, click zones and map image paths stay un
   );
 });
 
-test('protected status colors stay unchanged', () => {
+test('guest contour rendering and click behavior stay unchanged', () => {
+  const guestDirectory = path.join(FRONTEND_ROOT, 'src', 'guest');
+  const shapeSource = findUniqueSource('function shapeRenderData(', guestDirectory);
+  const contourSource = findUniqueSource('function VisibleContour(', guestDirectory);
+  const clickSource = findUniqueSource('function ClickZone(', guestDirectory);
+
+  assertIncludesAll(
+    shapeSource,
+    [
+      "tag: 'polygon'",
+      'pointList(expandPolygon(shape.points, shape.expand ?? 0))',
+      "tag: 'ellipse'",
+      'rx: shape.rx + (shape.expand ?? 0)',
+      'ry: shape.ry + (shape.expand ?? 0)',
+      "tag: 'path'",
+      'd: ellipsePath(shape)',
+    ],
+    'Protected table shape rendering',
+  );
+
+  assertIncludesAll(
+    contourSource,
+    [
+      'strokeWidth={22} strokeOpacity={0.28}',
+      'strokeWidth={13} strokeOpacity={0.78}',
+      'strokeWidth={6} strokeOpacity={1}',
+      'stroke="white" strokeWidth={2} strokeOpacity={0.65}',
+      "pointerEvents: 'none' as const",
+    ],
+    'Protected visible table contour',
+  );
+
+  assertIncludesAll(
+    clickSource,
+    [
+      "className: 'molo-svg-hit'",
+      'fillOpacity: 0',
+      "stroke: 'none'",
+      "pointerEvents: 'all' as const",
+      "role: 'button'",
+      'tabIndex: 0',
+      'onClick: () => onPick(table)',
+      "if (event.key === 'Enter' || event.key === ' ')",
+      'onPick(table)',
+      "if (data.tag === 'polygon') return <polygon points={data.points} {...commonProps} />;",
+      "if (data.tag === 'ellipse') return <ellipse cx={data.cx} cy={data.cy} rx={data.rx} ry={data.ry} {...commonProps} />;",
+      'return <path d={data.d} {...commonProps} />;',
+    ],
+    'Protected table click zone',
+  );
+});
+
+test('protected status colors and hidden free-table outlines stay unchanged', () => {
   const guestDirectory = path.join(FRONTEND_ROOT, 'src', 'guest');
   const source = findUniqueSource('const STATUS_COLORS:', guestDirectory);
+  const visibilitySource = findUniqueSource(
+    "const shouldShowVisibleNeon = isActive || status !== 'free';",
+    guestDirectory,
+  );
 
   assertIncludesAll(
     source,
@@ -124,6 +180,15 @@ test('protected status colors stay unchanged', () => {
       "free: '#ffffff'",
     ],
     'Protected table status color',
+  );
+
+  assert.ok(
+    visibilitySource.includes("const shouldShowVisibleNeon = isActive || status !== 'free';"),
+    'Free table outlines must stay hidden unless the table is actively selected',
+  );
+  assert.ok(
+    visibilitySource.includes('{shouldShowVisibleNeon && ('),
+    'VisibleContour must stay gated by the protected visibility predicate',
   );
 });
 
@@ -181,6 +246,11 @@ test('every protected production poll stays exactly 15 seconds', () => {
   const waiterTables = read('src/waiter/WaiterTablesByLocation.tsx');
   const waiterApp = read('src/waiter/WaiterAppV2.tsx');
   const waiterAlert = read('src/waiter/WaiterCallAlertController.tsx');
+  const hookahApp = read('src/hookah/HookahApp.tsx');
+  const adminAttention = read('src/admin/AdminAttentionPanel.tsx');
+  const adminTables = read('src/admin/AdminTablesByLocation.tsx');
+  const compactAdmin = read('src/admin/CompactAdminPanel.tsx');
+  const directorPanel = read('src/director/PremiumDirectorPanel.tsx');
   const photos = read('src/theme/SitePhotoController.tsx');
 
   assertIncludesAll(
@@ -228,6 +298,37 @@ test('every protected production poll stays exactly 15 seconds', () => {
   assert.ok(
     waiterAlert.includes('window.setInterval(() => void checkCalls(), POLLING_MS)'),
     'Waiter call alert poll must use the protected 15-second interval',
+  );
+
+  assert.ok(
+    hookahApp.includes('void loadCalls(true);\n    }, 15_000);'),
+    'Hookah app poll must stay exactly 15 seconds',
+  );
+
+  for (const [label, source, call] of [
+    [
+      'Admin attention',
+      adminAttention,
+      'window.setInterval(() => void load(true), POLLING_MS)',
+    ],
+    [
+      'Admin tables',
+      adminTables,
+      'window.setInterval(() => void load(true), POLLING_MS)',
+    ],
+    [
+      'Compact admin',
+      compactAdmin,
+      'window.setInterval(() => void loadAll(true), POLLING_MS)',
+    ],
+  ]) {
+    assert.ok(source.includes('const POLLING_MS = 15_000;'), `${label} poll constant must stay 15 seconds`);
+    assert.ok(source.includes(call), `${label} poll must use the protected 15-second interval`);
+  }
+
+  assert.ok(
+    directorPanel.includes('window.setInterval(() => void load(true), 15_000)'),
+    'Director panel poll must stay exactly 15 seconds',
   );
 
   assert.ok(
