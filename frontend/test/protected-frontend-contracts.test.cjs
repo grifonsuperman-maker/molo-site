@@ -1,39 +1,99 @@
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
 const FRONTEND_ROOT = path.resolve(__dirname, '..');
+const REPOSITORY_ROOT = path.resolve(FRONTEND_ROOT, '..');
+const PROTECTED_BASELINE_COMMIT = '0b0b0f6fa292a9aa87aaa34867832df8a932f6ab';
 
 function read(relativePath) {
-  return fs.readFileSync(path.join(FRONTEND_ROOT, relativePath), 'utf8').replace(/\r\n/g, '\n');
+  return fs
+    .readFileSync(path.join(FRONTEND_ROOT, relativePath), 'utf8')
+    .replace(/\r\n/g, '\n');
 }
 
-function extractArray(source, marker) {
+function readBaseline(relativePath) {
+  return execFileSync(
+    'git',
+    ['show', `${PROTECTED_BASELINE_COMMIT}:frontend/${relativePath}`],
+    { cwd: REPOSITORY_ROOT, encoding: 'utf8' },
+  ).replace(/\r\n/g, '\n');
+}
+
+function sourceFiles(directory = path.join(FRONTEND_ROOT, 'src')) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolutePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFiles(absolutePath);
+    if (!entry.isFile() || !/\.(?:ts|tsx)$/.test(entry.name)) return [];
+    return [absolutePath];
+  });
+}
+
+function findUniqueSource(marker) {
+  const matches = sourceFiles().filter((absolutePath) =>
+    fs.readFileSync(absolutePath, 'utf8').includes(marker),
+  );
+
+  assert.equal(
+    matches.length,
+    1,
+    `Expected exactly one current source for protected marker ${marker}, found ${matches.length}`,
+  );
+
+  return fs.readFileSync(matches[0], 'utf8').replace(/\r\n/g, '\n');
+}
+
+function extractBalanced(source, marker, opening, closing) {
   const markerIndex = source.indexOf(marker);
   assert.notEqual(markerIndex, -1, `Protected marker is missing: ${marker}`);
 
   const equalsIndex = source.indexOf('=', markerIndex);
   assert.notEqual(equalsIndex, -1, `Protected assignment is missing: ${marker}`);
 
-  const start = source.indexOf('[', equalsIndex);
-  assert.notEqual(start, -1, `Protected array is missing: ${marker}`);
+  const start = source.indexOf(opening, equalsIndex);
+  assert.notEqual(start, -1, `Protected value is missing: ${marker}`);
 
   let depth = 0;
+  let quote = null;
+  let escaped = false;
+
   for (let index = start; index < source.length; index += 1) {
-    if (source[index] === '[') depth += 1;
-    if (source[index] === ']') {
+    const character = source[index];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character;
+      continue;
+    }
+
+    if (character === opening) depth += 1;
+    if (character === closing) {
       depth -= 1;
       if (depth === 0) return source.slice(start, index + 1);
     }
   }
 
-  assert.fail(`Protected array is not closed: ${marker}`);
+  assert.fail(`Protected value is not closed: ${marker}`);
 }
 
-function sha256(value) {
-  return crypto.createHash('sha256').update(value).digest('hex');
+function extractArray(source, marker) {
+  return extractBalanced(source, marker, '[', ']');
+}
+
+function extractObject(source, marker) {
+  return extractBalanced(source, marker, '{', '}');
 }
 
 function assertIncludesAll(source, values, label) {
@@ -42,73 +102,50 @@ function assertIncludesAll(source, values, label) {
   }
 }
 
-// The first CI run reports the current main fingerprint; the final PR pins it below.
-const EXPECTED_GUEST_MAP_SHA256 = '__CAPTURE_FROM_CURRENT_MAIN__';
-
 test('guest map geometry, table numbers, click zones and map image paths stay unchanged', () => {
-  const guestApp = read('src/guest/GuestApp.tsx');
-  const locations = extractArray(guestApp, 'const LOCATIONS: LocationMap[]');
-  const actual = sha256(locations);
-
-  assert.equal(
-    actual,
-    EXPECTED_GUEST_MAP_SHA256,
-    `Protected guest map changed. actual=${actual}`,
+  const baseline = extractArray(
+    readBaseline('src/guest/GuestApp.tsx'),
+    'const LOCATIONS: LocationMap[]',
   );
+  const current = extractArray(
+    findUniqueSource('const LOCATIONS: LocationMap[]'),
+    'const LOCATIONS: LocationMap[]',
+  );
+
+  assert.equal(current, baseline, 'Protected guest map definition changed');
 });
 
 test('protected status colors stay unchanged', () => {
-  const guestApp = read('src/guest/GuestApp.tsx');
-
-  assertIncludesAll(
-    guestApp,
-    [
-      "active: '#facc15'",
-      "pending: '#38bdf8'",
-      "reserved: '#fb923c'",
-      "occupied: '#ff3b4f'",
-      "cleaning: '#67e8f9'",
-      "closed: '#bdbdbd'",
-      "free: '#ffffff'",
-    ],
-    'Protected table status color',
+  const baseline = extractObject(
+    readBaseline('src/guest/GuestApp.tsx'),
+    'const STATUS_COLORS:',
   );
+  const current = extractObject(
+    findUniqueSource('const STATUS_COLORS:'),
+    'const STATUS_COLORS:',
+  );
+
+  assert.equal(current, baseline, 'Protected table status colors changed');
 });
 
 test('SitePhotoController and protected title/theme image paths stay connected', () => {
   const app = read('src/App.tsx');
-  const photos = read('src/theme/SitePhotoController.tsx');
+  const baselinePhotos = readBaseline('src/theme/SitePhotoController.tsx');
+  const currentTitleSource = findUniqueSource('const TITLE_IMAGES =');
+  const currentThemeSource = findUniqueSource('const DAY_TO_NIGHT:');
 
   assert.ok(app.includes('import SitePhotoController from "./theme/SitePhotoController";'));
   assert.ok(app.includes('<SitePhotoController />'));
 
-  assertIncludesAll(
-    photos,
-    [
-      "'/hero-bg.jpg'",
-      "'/maps/title/title-02.png'",
-      "'/maps/title/title-03.png'",
-      "'/maps/title/title-04.png'",
-      "'/maps/title/title-05.png'",
-      "'/maps/title/title-06.png'",
-      "'/maps/title/title-07.png'",
-      "'/maps/title/title-08.png'",
-      "'/maps/title/title-11.png'",
-      "'/maps/title/title-12.png'",
-      "'/maps/title/title-13.png'",
-      "'/maps/title/title-14.png'",
-      "'/maps/title/title-15.png'",
-      "'/maps/territory-bg.png': '/maps/themes/night/territory.png'",
-      "'/maps/waterfront-bg.png': '/maps/themes/night/waterfront.png'",
-      "'/maps/hall-bg-numbered.png': '/maps/themes/night/hall.png'",
-      "'/maps/canopy-day-numbered.png': '/maps/themes/night/canopy.png'",
-      "'/maps/gazebo-day-numbered.png': '/maps/themes/night/gazebo.png'",
-      "'/maps/rotang-day-numbered.png': '/maps/themes/night/rotang.png'",
-      "'/maps/embankment-day-numbered.png': '/maps/themes/night/embankment.png'",
-      "'/maps/glass-gazebo-day-numbered.png': '/maps/themes/night/glass-gazebo.png'",
-      "'/maps/water-gazebo-day-numbered.png': '/maps/themes/night/water-gazebo.png'",
-    ],
-    'Protected photo path',
+  assert.equal(
+    extractArray(currentTitleSource, 'const TITLE_IMAGES ='),
+    extractArray(baselinePhotos, 'const TITLE_IMAGES ='),
+    'Protected Title image list changed',
+  );
+  assert.equal(
+    extractObject(currentThemeSource, 'const DAY_TO_NIGHT:'),
+    extractObject(baselinePhotos, 'const DAY_TO_NIGHT:'),
+    'Protected day/night image path mapping changed',
   );
 });
 
@@ -151,8 +188,8 @@ test('waiter walk-in Occupied / Free behavior keeps using guarded waiter-status 
   const waiterTables = read('src/waiter/WaiterTablesByLocation.tsx');
   const tablesApi = read('src/api/tables.ts');
 
-  assert.ok(waiterTables.includes("tablesApi.waiterStatus(table.id, status)"));
-  assert.ok(tablesApi.includes("`/tables/${id}/waiter-status`"));
+  assert.ok(waiterTables.includes('tablesApi.waiterStatus(table.id, status)'));
+  assert.ok(tablesApi.includes('`/tables/${id}/waiter-status`'));
   assert.ok(waiterTables.includes('>Зайнятий</button>'));
   assert.ok(waiterTables.includes('>Вільний</button>'));
   assert.equal(waiterTables.includes('tablesApi.occupied('), false);
