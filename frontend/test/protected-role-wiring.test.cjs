@@ -111,3 +111,30 @@ test('waiter Occupied and Free labels stay bound to their matching status argume
   assert.equal(waiterTables.includes('tablesApi.occupied('), false);
   assert.equal(waiterTables.includes('tablesApi.free('), false);
 });
+
+test('home hero stays connected to protected Title rotation recognition', () => {
+  const guestDirectory = path.join(FRONTEND_SRC, 'guest');
+  const themeDirectory = path.join(FRONTEND_SRC, 'theme');
+  const heroSource = findUniqueSource('src="/hero-bg.jpg"', guestDirectory);
+  const controllerSource = findUniqueSource(
+    "image.dataset.moloTitle === 'true' || TITLE_IMAGES.includes(currentPath)",
+    themeDirectory,
+  );
+
+  const heroIndex = heroSource.indexOf('src="/hero-bg.jpg"');
+  const homeIndex = heroSource.lastIndexOf("{step === 'home' && (", heroIndex);
+  assert.notEqual(homeIndex, -1, 'Protected /hero-bg.jpg must stay rendered on the guest home screen');
+
+  assert.ok(
+    controllerSource.includes("image.dataset.moloTitle === 'true' || TITLE_IMAGES.includes(currentPath)"),
+    'SitePhotoController must keep recognizing protected Title paths',
+  );
+  assert.ok(
+    controllerSource.includes("image.dataset.moloTitle = 'true';"),
+    'Recognized Title images must keep receiving the moloTitle marker',
+  );
+  assert.ok(
+    controllerSource.includes("image.dataset.moloFallback = '/hero-bg.jpg';"),
+    'Title fallback must remain /hero-bg.jpg',
+  );
+});
