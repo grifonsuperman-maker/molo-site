@@ -42,6 +42,7 @@ function assertIncludesAll(source, values, label) {
   }
 }
 
+// The first CI run reports the current main fingerprint; the final PR pins it below.
 const EXPECTED_GUEST_MAP_SHA256 = '__CAPTURE_FROM_CURRENT_MAIN__';
 
 test('guest map geometry, table numbers, click zones and map image paths stay unchanged', () => {
