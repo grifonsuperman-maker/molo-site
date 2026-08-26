@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
+const ts = require('typescript');
 
 const FRONTEND_ROOT = path.resolve(__dirname, '..');
 const FRONTEND_SRC = path.join(FRONTEND_ROOT, 'src');
@@ -49,19 +51,125 @@ function buttonBlock(source, marker) {
 }
 
 function assertModeRendersWorkspace(source, mode, workspace, label) {
-  const workspaceIndex = source.indexOf(workspace);
-  assert.notEqual(workspaceIndex, -1, `${label} workspace render is missing: ${workspace}`);
+  const sourceFile = ts.createSourceFile(
+    `${mode}.tsx`,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let matchedBranch = false;
 
-  const modeMarker = `{mode === "${mode}"`;
-  const modeIndex = source.lastIndexOf(modeMarker, workspaceIndex);
-  assert.notEqual(modeIndex, -1, `${label} workspace must stay guarded by ${mode}`);
+  function visit(node) {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
+      ts.isBinaryExpression(node.left) &&
+      node.left.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
+      node.left.left.getText(sourceFile) === 'mode' &&
+      node.left.right.getText(sourceFile).replace(/["']/g, '') === mode &&
+      node.right.getText(sourceFile).includes(workspace)
+    ) {
+      matchedBranch = true;
+    }
 
-  const otherModeIndex = source.lastIndexOf('{mode === "', workspaceIndex);
-  assert.equal(
-    otherModeIndex,
-    modeIndex,
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  assert.ok(
+    matchedBranch,
     `${label} workspace must stay inside its matching ${mode} render branch`,
   );
+}
+
+function loadTitleRotationRuntime(source) {
+  const sourceFile = ts.createSourceFile(
+    'SitePhotoController.tsx',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const wantedVariables = new Set([
+    'TITLE_ROTATION_MS',
+    'TITLE_SYNC_MS',
+    'TITLE_STORAGE_KEY',
+    'TITLE_IMAGES',
+  ]);
+  const wantedFunctions = new Set([
+    'titleBucket',
+    'readTitleState',
+    'writeTitleState',
+    'seededRandom',
+    'fallbackTitleIndex',
+    'chooseTitleImage',
+  ]);
+  const declarations = [];
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isVariableStatement(statement)) {
+      const names = statement.declarationList.declarations
+        .map((declaration) => declaration.name)
+        .filter(ts.isIdentifier)
+        .map((identifier) => identifier.text);
+      if (names.some((name) => wantedVariables.has(name))) {
+        declarations.push(statement.getText(sourceFile));
+      }
+      continue;
+    }
+
+    if (
+      ts.isFunctionDeclaration(statement) &&
+      statement.name &&
+      wantedFunctions.has(statement.name.text)
+    ) {
+      declarations.push(statement.getText(sourceFile));
+    }
+  }
+
+  for (const name of [...wantedVariables, ...wantedFunctions]) {
+    assert.ok(
+      declarations.some((declaration) => declaration.includes(name)),
+      `Protected Title rotation declaration is missing: ${name}`,
+    );
+  }
+
+  const executableSource = `${declarations.join('\n\n')}\n\nmodule.exports = { TITLE_ROTATION_MS, TITLE_SYNC_MS, TITLE_IMAGES, chooseTitleImage };`;
+  const compiled = ts.transpileModule(executableSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+  }).outputText;
+
+  let now = 0;
+  const storage = new Map();
+  const deterministicMath = Object.create(Math);
+  deterministicMath.random = () => 0;
+  const sandbox = {
+    module: { exports: {} },
+    exports: {},
+    localStorage: {
+      getItem(key) {
+        return storage.has(key) ? storage.get(key) : null;
+      },
+      setItem(key, value) {
+        storage.set(key, String(value));
+      },
+    },
+    Date: { now: () => now },
+    Math: deterministicMath,
+  };
+
+  vm.runInNewContext(compiled, sandbox, { filename: 'title-rotation-runtime.cjs' });
+
+  return {
+    api: sandbox.module.exports,
+    setNow(value) {
+      now = value;
+    },
+  };
 }
 
 test('each protected role button selects and renders its matching workspace', () => {
@@ -152,4 +260,36 @@ test('home hero stays connected to protected Title rotation recognition and sche
     /return \(\) => \{\s*\n\s*window\.clearInterval\(timer\);\s*\n\s*window\.removeEventListener\('focus', syncTitle\);\s*\n\s*window\.removeEventListener\('pageshow', syncTitle\);\s*\n\s*window\.removeEventListener\('storage', syncTitle\);\s*\n\s*document\.removeEventListener\('visibilitychange', syncWhenVisible\);\s*\n\s*\};/,
     'Title rotation must keep its timer and all event-listener cleanup bound together',
   );
+});
+
+test('protected Title rotation advances only at the expected 20-minute cadence', () => {
+  const themeDirectory = path.join(FRONTEND_SRC, 'theme');
+  const controllerSource = findUniqueSource('function chooseTitleImage()', themeDirectory);
+  const runtime = loadTitleRotationRuntime(controllerSource);
+  const {
+    TITLE_ROTATION_MS,
+    TITLE_SYNC_MS,
+    TITLE_IMAGES,
+    chooseTitleImage,
+  } = runtime.api;
+
+  assert.equal(TITLE_ROTATION_MS, 20 * 60 * 1000, 'Title rotation cadence must remain 20 minutes');
+  assert.equal(TITLE_SYNC_MS, 30 * 1000, 'Title sync cadence must remain 30 seconds');
+  assert.ok(Array.isArray(TITLE_IMAGES) && TITLE_IMAGES.length > 1, 'Protected Title image rotation needs multiple images');
+
+  const bucketStart = 1_000 * TITLE_ROTATION_MS;
+  runtime.setNow(bucketStart);
+  const first = chooseTitleImage();
+
+  runtime.setNow(bucketStart + TITLE_ROTATION_MS - 1);
+  const sameBucket = chooseTitleImage();
+  assert.equal(sameBucket, first, 'Title must remain stable inside one rotation bucket');
+
+  runtime.setNow(bucketStart + TITLE_ROTATION_MS);
+  const second = chooseTitleImage();
+  assert.notEqual(second, first, 'Title must advance when the next 20-minute bucket starts');
+
+  runtime.setNow(bucketStart + 2 * TITLE_ROTATION_MS);
+  const third = chooseTitleImage();
+  assert.notEqual(third, second, 'Consecutive Title buckets must not repeat the previous image');
 });
