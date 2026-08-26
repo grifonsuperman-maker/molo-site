@@ -14,7 +14,7 @@ function read(relativePath) {
     .replace(/\r\n/g, '\n');
 }
 
-function sourceFiles(directory = path.join(FRONTEND_ROOT, 'src')) {
+function sourceFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const absolutePath = path.join(directory, entry.name);
     if (entry.isDirectory()) return sourceFiles(absolutePath);
@@ -23,8 +23,8 @@ function sourceFiles(directory = path.join(FRONTEND_ROOT, 'src')) {
   });
 }
 
-function findUniqueSource(marker) {
-  const matches = sourceFiles().filter((absolutePath) =>
+function findUniqueSource(marker, directory) {
+  const matches = sourceFiles(directory).filter((absolutePath) =>
     fs.readFileSync(absolutePath, 'utf8').includes(marker),
   );
 
@@ -91,7 +91,11 @@ function assertIncludesAll(source, values, label) {
 }
 
 test('guest map geometry, table numbers, click zones and map image paths stay unchanged', () => {
-  const currentSource = findUniqueSource('const LOCATIONS: LocationMap[]');
+  const guestDirectory = path.join(FRONTEND_ROOT, 'src', 'guest');
+  const currentSource = findUniqueSource(
+    'const LOCATIONS: LocationMap[]',
+    guestDirectory,
+  );
   const currentMap = extractArray(
     currentSource,
     'const LOCATIONS: LocationMap[]',
@@ -105,7 +109,8 @@ test('guest map geometry, table numbers, click zones and map image paths stay un
 });
 
 test('protected status colors stay unchanged', () => {
-  const source = findUniqueSource('const STATUS_COLORS:');
+  const guestDirectory = path.join(FRONTEND_ROOT, 'src', 'guest');
+  const source = findUniqueSource('const STATUS_COLORS:', guestDirectory);
 
   assertIncludesAll(
     source,
@@ -124,7 +129,8 @@ test('protected status colors stay unchanged', () => {
 
 test('SitePhotoController and protected title/theme image paths stay connected', () => {
   const app = read('src/App.tsx');
-  const photos = findUniqueSource('const TITLE_IMAGES =');
+  const themeDirectory = path.join(FRONTEND_ROOT, 'src', 'theme');
+  const photos = findUniqueSource('const TITLE_IMAGES =', themeDirectory);
 
   assert.ok(app.includes('import SitePhotoController from "./theme/SitePhotoController";'));
   assert.ok(app.includes('<SitePhotoController />'));
