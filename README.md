@@ -6,7 +6,9 @@ Telegram Mini App + Web Admin Panel + Backend API для бронювання с
 
 - Гостьовий Telegram Mini App
 - Панель офіціанта
+- Панель Кальянника
 - Адмін-панель
+- Пульт Директора
 - Backend API на NestJS
 - Telegram Bot webhook
 - PostgreSQL
@@ -43,9 +45,18 @@ npm run dev
 https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://your-domain.com/api/telegram/webhook
 ```
 
-## Важливо
+## Production
 
-Це стартова MVP-збірка. Перед реальним запуском треба додати авторизацію Telegram, права доступу, production hosting, SSL, резервні копії та тестування.
+Актуальний приклад production-змінних знаходиться в `backend/.env.production.example`.
+
+У production:
+
+- `JWT_SECRET` обов'язковий;
+- `TELEGRAM_WEBHOOK_SECRET` обов'язковий;
+- `DB_SYNCHRONIZE=false`;
+- `ALLOW_DEV_AUTH=false`.
+
+Backend перевіряє production secrets під час запуску. Dev-auth не повинен використовуватись у production.
 
 ## Авторизація та ролі
 
@@ -55,6 +66,7 @@ https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://your-dom
 
 - `guest` — гість
 - `waiter` — офіціант
+- `hookah` — Кальянник
 - `admin` — адміністратор
 - `owner` — Директор
 
@@ -74,20 +86,20 @@ POST /api/auth/telegram
 
 ### Локальне тестування без Telegram
 
-У `.env` backend можна залишити:
+Dev-auth дозволений тільки для локальної development-сесії:
 
 ```env
+NODE_ENV=development
 ALLOW_DEV_AUTH=true
 ```
 
-Тоді frontend може зайти через `devTelegramId`.
+У production і на Render dev-auth заблокований незалежно від значення `ALLOW_DEV_AUTH`.
 
 ### Захист API
 
 - Публічні маршрути позначені `@Public()`.
 - Службові маршрути захищені JWT.
 - Права доступу задаються через `@Roles(...)`.
-
 
 ## Автоматичні нагадування
 
