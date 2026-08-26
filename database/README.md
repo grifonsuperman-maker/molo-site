@@ -69,7 +69,7 @@ Production `molo-backend` на commit `fd3a733f5c65ae01045f4aa8e903531e9673842f`
 
 ## Fresh-only initial migration
 
-`InitialSchemaBaseline2026081300000` призначена **лише для нової disposable/щойно створеної БД**, щоб відтворити pre-runtime MOLO schema, після чого застосовуються поточні 5 runtime migrations.
+`InitialSchemaBaseline2026081300000` призначена **лише для нової disposable/щойно створеної БД**, щоб відтворити pre-runtime MOLO schema, після чого застосовуються поточні runtime migrations із `EXPECTED_RUNTIME_MIGRATIONS`.
 
 Вона навмисно не намагається автоматично визнати існуючу production schema baseline-станом:
 
@@ -87,8 +87,8 @@ Initial baseline **не потрібно заднім числом додава�
 
 Підтримуються два окремі шляхи:
 
-- existing production: поточні 5 runtime migration rows → наступні runtime migrations;
-- fresh database: `InitialSchemaBaseline2026081300000` → поточні 5 runtime migrations → наступні runtime migrations.
+- existing production: наявна runtime migration history без initial baseline → наступні runtime migrations;
+- fresh database: `InitialSchemaBaseline2026081300000` → поточні runtime migrations → наступні runtime migrations.
 
 Disposable PostgreSQL CI перевіряє обидва шляхи реальною майбутньою probe-migration: вона повинна застосуватися як наступна migration і коректно відкотитися першою. Для existing-production шляху CI додатково доводить, що initial baseline row відсутній, а після probe apply/undo schema повертається точно до current reference.
 
@@ -100,7 +100,7 @@ Disposable PostgreSQL CI перевіряє обидва шляхи реальн
 
 - production/Render повинен мати `DB_SYNCHRONIZE=false`; запуск із відсутнім значенням або `true` має бути заблокований до підключення TypeORM;
 - старі migration-файли не реєструються і не запускаються;
-- production migration history залишається з поточними 5 runtime rows; initial baseline row туди не вставляється;
+- initial baseline row не вставляється в production migration history, а наявна runtime history не переписується вручну;
 - production schema і production data guard-перевіркою не змінюються;
 - `database/schema.sql` не використовується як джерело істини;
 - fresh-only baseline не підключений до runtime.
