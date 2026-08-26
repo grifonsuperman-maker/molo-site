@@ -115,15 +115,24 @@ test('waiter Occupied and Free labels stay bound to their matching status argume
 test('home hero stays connected to protected Title rotation recognition', () => {
   const guestDirectory = path.join(FRONTEND_SRC, 'guest');
   const themeDirectory = path.join(FRONTEND_SRC, 'theme');
-  const heroSource = findUniqueSource('src="/hero-bg.jpg"', guestDirectory);
+  const homeMarker = "{step === 'home' && (";
+  const nextStepMarker = "{step === 'location_choice' && (";
+  const heroSource = findUniqueSource(homeMarker, guestDirectory);
   const controllerSource = findUniqueSource(
     "image.dataset.moloTitle === 'true' || TITLE_IMAGES.includes(currentPath)",
     themeDirectory,
   );
 
-  const heroIndex = heroSource.indexOf('src="/hero-bg.jpg"');
-  const homeIndex = heroSource.lastIndexOf("{step === 'home' && (", heroIndex);
-  assert.notEqual(homeIndex, -1, 'Protected /hero-bg.jpg must stay rendered on the guest home screen');
+  const homeStart = heroSource.indexOf(homeMarker);
+  const homeEnd = heroSource.indexOf(nextStepMarker, homeStart + homeMarker.length);
+  assert.notEqual(homeStart, -1, 'Protected guest home branch is missing');
+  assert.notEqual(homeEnd, -1, 'Protected guest home branch boundary is missing');
+
+  const homeBlock = heroSource.slice(homeStart, homeEnd);
+  assert.ok(
+    homeBlock.includes('src="/hero-bg.jpg"'),
+    'Protected /hero-bg.jpg must stay rendered inside the guest home screen branch',
+  );
 
   assert.ok(
     controllerSource.includes("image.dataset.moloTitle === 'true' || TITLE_IMAGES.includes(currentPath)"),
