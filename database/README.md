@@ -69,7 +69,7 @@ Production `molo-backend` на commit `fd3a733f5c65ae01045f4aa8e903531e9673842f`
 
 ## Fresh-only initial migration
 
-`InitialSchemaBaseline2026081300000` призначена **лише для нової disposable/щойно створеної БД**, щоб відтворити pre-runtime MOLO schema, після чого застосовуються поточні runtime migrations із `EXPECTED_RUNTIME_MIGRATIONS` (зараз їх сім).
+`InitialSchemaBaseline2026081300000` призначена **лише для нової disposable/щойно створеної БД**, щоб відтворити pre-runtime MOLO schema, після чого застосовуються поточні runtime migrations із `EXPECTED_RUNTIME_MIGRATIONS`.
 
 Вона навмисно не намагається автоматично визнати існуючу production schema baseline-станом:
 
