@@ -112,26 +112,20 @@ test('waiter Occupied and Free labels stay bound to their matching status argume
   assert.equal(waiterTables.includes('tablesApi.free('), false);
 });
 
-test('home hero stays connected to protected Title rotation recognition', () => {
+test('home hero stays connected to protected Title rotation recognition and scheduling', () => {
   const guestDirectory = path.join(FRONTEND_SRC, 'guest');
   const themeDirectory = path.join(FRONTEND_SRC, 'theme');
   const homeMarker = "{step === 'home' && (";
-  const nextStepMarker = "{step === 'location_choice' && (";
   const heroSource = findUniqueSource(homeMarker, guestDirectory);
   const controllerSource = findUniqueSource(
     "image.dataset.moloTitle === 'true' || TITLE_IMAGES.includes(currentPath)",
     themeDirectory,
   );
 
-  const homeStart = heroSource.indexOf(homeMarker);
-  const homeEnd = heroSource.indexOf(nextStepMarker, homeStart + homeMarker.length);
-  assert.notEqual(homeStart, -1, 'Protected guest home branch is missing');
-  assert.notEqual(homeEnd, -1, 'Protected guest home branch boundary is missing');
-
-  const homeBlock = heroSource.slice(homeStart, homeEnd);
-  assert.ok(
-    homeBlock.includes('src="/hero-bg.jpg"'),
-    'Protected /hero-bg.jpg must stay rendered inside the guest home screen branch',
+  assert.match(
+    heroSource,
+    /\{step === 'home' && \(\s*<section\b[^>]*>\s*<img\s+src="\/hero-bg\.jpg"/s,
+    'Protected /hero-bg.jpg must stay rendered directly inside the guest home screen branch',
   );
 
   assert.ok(
@@ -145,5 +139,27 @@ test('home hero stays connected to protected Title rotation recognition', () => 
   assert.ok(
     controllerSource.includes("image.dataset.moloFallback = '/hero-bg.jpg';"),
     'Title fallback must remain /hero-bg.jpg',
+  );
+  assert.ok(
+    controllerSource.includes('syncTitle();'),
+    'Title rotation must still perform its initial sync',
+  );
+  assert.ok(
+    controllerSource.includes('const timer = window.setInterval(syncTitle, TITLE_SYNC_MS);'),
+    'Title rotation must stay scheduled with TITLE_SYNC_MS',
+  );
+  for (const event of ['focus', 'pageshow', 'storage']) {
+    assert.ok(
+      controllerSource.includes(`window.addEventListener('${event}', syncTitle);`),
+      `Title rotation must still resync on ${event}`,
+    );
+  }
+  assert.ok(
+    controllerSource.includes("document.addEventListener('visibilitychange', syncWhenVisible);"),
+    'Title rotation must still resync after visibility changes',
+  );
+  assert.ok(
+    controllerSource.includes('window.clearInterval(timer);'),
+    'Title rotation timer cleanup must remain connected',
   );
 });
