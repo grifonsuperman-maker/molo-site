@@ -130,13 +130,14 @@ test('protected status colors stay unchanged', () => {
 test('SitePhotoController and protected title/theme image paths stay connected', () => {
   const app = read('src/App.tsx');
   const themeDirectory = path.join(FRONTEND_ROOT, 'src', 'theme');
-  const photos = findUniqueSource('const TITLE_IMAGES =', themeDirectory);
+  const titleSource = findUniqueSource('const TITLE_IMAGES =', themeDirectory);
+  const dayNightSource = findUniqueSource('const DAY_TO_NIGHT:', themeDirectory);
 
   assert.ok(app.includes('import SitePhotoController from "./theme/SitePhotoController";'));
   assert.ok(app.includes('<SitePhotoController />'));
 
   assertIncludesAll(
-    photos,
+    titleSource,
     [
       "'/hero-bg.jpg'",
       "'/maps/title/title-02.png'",
@@ -151,6 +152,13 @@ test('SitePhotoController and protected title/theme image paths stay connected',
       "'/maps/title/title-13.png'",
       "'/maps/title/title-14.png'",
       "'/maps/title/title-15.png'",
+    ],
+    'Protected Title image path',
+  );
+
+  assertIncludesAll(
+    dayNightSource,
+    [
       "'/maps/territory-bg.png': '/maps/themes/night/territory.png'",
       "'/maps/waterfront-bg.png': '/maps/themes/night/waterfront.png'",
       "'/maps/hall-bg-numbered.png': '/maps/themes/night/hall.png'",
@@ -161,22 +169,71 @@ test('SitePhotoController and protected title/theme image paths stay connected',
       "'/maps/glass-gazebo-day-numbered.png': '/maps/themes/night/glass-gazebo.png'",
       "'/maps/water-gazebo-day-numbered.png': '/maps/themes/night/water-gazebo.png'",
     ],
-    'Protected photo path',
+    'Protected day/night image path',
   );
 });
 
-test('exact 15-second polling guards stay in protected working flows', () => {
+test('every protected production poll stays exactly 15 seconds', () => {
+  const guestApp = read('src/guest/GuestApp.tsx');
   const guestServices = read('src/guest/GuestBookingServiceActions.tsx');
+  const guestHookah = read('src/guest/GuestHookahCallPanel.tsx');
   const guestDecision = read('src/guest/GuestBookingDecisionController.tsx');
   const waiterTables = read('src/waiter/WaiterTablesByLocation.tsx');
   const waiterApp = read('src/waiter/WaiterAppV2.tsx');
+  const waiterAlert = read('src/waiter/WaiterCallAlertController.tsx');
   const photos = read('src/theme/SitePhotoController.tsx');
 
+  assertIncludesAll(
+    guestApp,
+    [
+      'window.setInterval(refreshPublicSettings, 15000)',
+      'window.setInterval(refreshBookingStatus, 15000)',
+    ],
+    'GuestApp 15-second poll',
+  );
+
   assert.ok(guestServices.includes('const POLLING_INTERVAL_MS = 15_000;'));
+  assert.ok(
+    guestServices.includes('void loadWaiterStatus(true);\n    }, POLLING_INTERVAL_MS);'),
+    'Guest waiter status poll must use the protected 15-second interval',
+  );
+  assert.ok(
+    guestServices.includes('void loadHookahStatus(true);\n    }, POLLING_INTERVAL_MS);'),
+    'Guest hookah status poll must use the protected 15-second interval',
+  );
+
+  assert.ok(
+    guestHookah.includes('void loadStatus(true);\n    }, 15_000);'),
+    'Guest hookah panel poll must stay exactly 15 seconds',
+  );
+
   assert.ok(guestDecision.includes('const POLLING_MS = 15_000;'));
+  assert.ok(
+    guestDecision.includes('window.setInterval(() => void load(), POLLING_MS)'),
+    'Guest booking decision poll must use the protected 15-second interval',
+  );
+
   assert.ok(waiterTables.includes('const POLLING_MS = 15_000;'));
-  assert.ok(waiterApp.includes('window.setInterval(() => void load(), 15000)'));
-  assert.ok(photos.includes('window.setInterval(refreshMode, 15_000)'));
+  assert.ok(
+    waiterTables.includes('window.setInterval(() => void load(true), POLLING_MS)'),
+    'Waiter table poll must use the protected 15-second interval',
+  );
+
+  assert.ok(
+    waiterApp.includes('window.setInterval(() => void load(), 15000)'),
+    'Waiter app poll must stay exactly 15 seconds',
+  );
+
+  assert.ok(waiterAlert.includes('const POLLING_MS = 15_000;'));
+  assert.ok(
+    waiterAlert.includes('window.setInterval(() => void checkCalls(), POLLING_MS)'),
+    'Waiter call alert poll must use the protected 15-second interval',
+  );
+
+  assert.ok(
+    photos.includes('window.setInterval(refreshMode, 15_000)'),
+    'Site photo mode poll must stay exactly 15 seconds',
+  );
 });
 
 test('role test switch and real role workspaces stay connected', () => {
