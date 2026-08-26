@@ -1,4 +1,4 @@
-import { api, setAccessToken, clearAccessToken } from './client';
+import { api, setAccessToken } from './client';
 
 export type AuthRole = 'guest' | 'waiter' | 'hookah' | 'admin' | 'owner';
 
@@ -27,8 +27,4 @@ export const authApi = {
     setAccessToken(result.accessToken);
     return result;
   },
-
-  me: () => api.get<AuthUser>('/auth/me'),
-
-  logout: () => clearAccessToken(),
 };
