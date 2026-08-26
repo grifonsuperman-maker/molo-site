@@ -113,6 +113,10 @@ test('guest contour rendering and click behavior stay unchanged', () => {
   const shapeSource = findUniqueSource('function shapeRenderData(', guestDirectory);
   const contourSource = findUniqueSource('function VisibleContour(', guestDirectory);
   const clickSource = findUniqueSource('function ClickZone(', guestDirectory);
+  const mapRenderSource = findUniqueSource(
+    '<ClickZone table={visualTable} onPick={selectVisualTable} />',
+    guestDirectory,
+  );
 
   assertIncludesAll(
     shapeSource,
@@ -157,6 +161,11 @@ test('guest contour rendering and click behavior stay unchanged', () => {
       'return <path d={data.d} {...commonProps} />;',
     ],
     'Protected table click zone',
+  );
+
+  assert.ok(
+    mapRenderSource.includes('<ClickZone table={visualTable} onPick={selectVisualTable} />'),
+    'Protected ClickZone must stay wired into every rendered guest map table',
   );
 });
 
@@ -273,8 +282,8 @@ test('every protected production poll stays exactly 15 seconds', () => {
   );
 
   assert.ok(
-    guestHookah.includes('void loadStatus(true);\n    }, 15_000);'),
-    'Guest hookah panel poll must stay exactly 15 seconds',
+    guestHookah.includes('const interval = window.setInterval(() => {\n      void loadStatus(true);\n    }, 15_000);'),
+    'Guest hookah panel must keep a repeating 15-second interval',
   );
 
   assert.ok(guestDecision.includes('const POLLING_MS = 15_000;'));
@@ -301,8 +310,8 @@ test('every protected production poll stays exactly 15 seconds', () => {
   );
 
   assert.ok(
-    hookahApp.includes('void loadCalls(true);\n    }, 15_000);'),
-    'Hookah app poll must stay exactly 15 seconds',
+    hookahApp.includes('const interval = window.setInterval(() => {\n      void loadCalls(true);\n    }, 15_000);'),
+    'Hookah app must keep a repeating 15-second interval',
   );
 
   for (const [label, source, call] of [
