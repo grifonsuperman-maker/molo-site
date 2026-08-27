@@ -43,7 +43,7 @@ import { reviewsApi, type GuestReviewRecord } from '../api/reviews';
 import { staffApi, type StaffMember } from '../api/staff';
 import type { Booking, Client, FullMapResponse, HolidayKey, Restaurant, SiteMode } from '../api/types';
 import TelegramStaffInvitePanel from '../staff/TelegramStaffInvitePanel';
-import { directorNoticeDestination } from './directorNoticeNavigation';
+import { directorNoticeDestination } from './services/directorNoticeNavigation';
 
 type Tab = 'overview' | 'bookings' | 'locations' | 'guests' | 'blacklist' | 'activity' | 'stats' | 'team' | 'site' | 'more';
 type BookingFilter = 'all' | 'pending' | 'approved' | 'completed' | 'cancelled' | 'no_show';
