@@ -139,10 +139,10 @@ function assertModeRendersWorkspace(source, mode, workspace, label) {
   );
 }
 
-function runRoleButton(appSource, handlerSource, initialMode) {
+function runRoleButton(changeModeSource, handlerSource, initialMode) {
   const sourceFile = ts.createSourceFile(
-    'App.tsx',
-    appSource,
+    'protected-change-mode.tsx',
+    changeModeSource,
     ts.ScriptTarget.Latest,
     true,
     ts.ScriptKind.TSX,
@@ -357,6 +357,7 @@ test('each protected role button selects and renders its matching workspace', ()
     ['admin', 'Адмін', '<AdminWorkspace />', 'const AdminWorkspace = lazy(() => import("./admin/AdminWorkspace"));'],
     ['director', 'Директор', '<DirectorWorkspace />', 'const DirectorWorkspace = lazy(() => import("./director/DirectorWorkspace"));'],
   ];
+  const changeModeSource = findUniqueSource('function changeMode(nextMode: Mode)');
 
   for (const [mode, label, workspace, importMarker] of roles) {
     const importSource = findUniqueSource(importMarker);
@@ -369,7 +370,7 @@ test('each protected role button selects and renders its matching workspace', ()
     assert.match(button, new RegExp(`>\\s*${label}\\s*</button>`), `${label} label must stay bound to ${mode}`);
 
     const runtime = runRoleButton(
-      buttonSource,
+      changeModeSource,
       onClickExpression(button),
       mode === 'guest' ? 'waiter' : 'guest',
     );
