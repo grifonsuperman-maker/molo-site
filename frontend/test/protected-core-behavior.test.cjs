@@ -282,8 +282,41 @@ function numericValue(expression, sourceFile) {
   return null;
 }
 
-function productionIntervalDelays() {
-  const delays = [];
+function unwrapVoidExpression(expression) {
+  let current = expression;
+  while (current.kind === ts.SyntaxKind.VoidExpression) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function intervalCallbackSignature(callback, sourceFile) {
+  if (ts.isIdentifier(callback)) return callback.text;
+  if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return null;
+
+  let expression = null;
+  if (ts.isBlock(callback.body)) {
+    if (callback.body.statements.length !== 1) return null;
+    const statement = callback.body.statements[0];
+    if (!ts.isExpressionStatement(statement)) return null;
+    expression = statement.expression;
+  } else {
+    expression = callback.body;
+  }
+
+  const directExpression = unwrapVoidExpression(expression);
+  if (!ts.isCallExpression(directExpression) || !ts.isIdentifier(directExpression.expression)) {
+    return null;
+  }
+
+  const args = directExpression.arguments
+    .map((argument) => argument.getText(sourceFile).replace(/\s+/g, ''))
+    .join(',');
+  return `${directExpression.expression.text}(${args})`;
+}
+
+function productionIntervals() {
+  const intervals = [];
 
   for (const absolutePath of sourceFiles(SOURCE_ROOT)) {
     const { sourceFile } = parseSourceFile(absolutePath);
@@ -297,8 +330,11 @@ function productionIntervalDelays() {
           node.expression.getText(sourceFile) === 'setInterval'
         )
       ) {
-        const delay = numericValue(node.arguments[1], sourceFile);
-        delays.push({ file: absolutePath, delay });
+        intervals.push({
+          file: path.relative(FRONTEND_ROOT, absolutePath),
+          signature: intervalCallbackSignature(node.arguments[0], sourceFile),
+          delay: numericValue(node.arguments[1], sourceFile),
+        });
       }
       ts.forEachChild(node, visit);
     }
@@ -306,7 +342,7 @@ function productionIntervalDelays() {
     visit(sourceFile);
   }
 
-  return delays;
+  return intervals;
 }
 
 test('guest map click selects the exact real or fallback table from the click zone', () => {
@@ -571,13 +607,36 @@ test('guest service buttons create waiter and hookah calls only for the current 
   assert.equal(hookahMutationVersion.current, 2);
 });
 
-test('all currently protected recurring production pollers remain exactly 15 seconds', () => {
-  const intervals = productionIntervalDelays();
-  const fifteenSecond = intervals.filter(({ delay }) => delay === 15_000);
+test('each protected recurring production poller remains exactly 15 seconds', () => {
+  const intervals = productionIntervals();
+  const protectedPollers = [
+    { label: 'Guest public settings', signature: 'refreshPublicSettings', count: 1 },
+    { label: 'Guest booking status', signature: 'refreshBookingStatus', count: 1 },
+    { label: 'Guest waiter status', signature: 'loadWaiterStatus(true)', count: 1 },
+    { label: 'Guest hookah service status', signature: 'loadHookahStatus(true)', count: 1 },
+    { label: 'Guest hookah panel status', signature: 'loadStatus(true)', count: 1 },
+    { label: 'Unforced load pollers', signature: 'load()', count: 2 },
+    { label: 'Forced load pollers', signature: 'load(true)', count: 4 },
+    { label: 'Waiter call alerts', signature: 'checkCalls()', count: 1 },
+    { label: 'Hookah calls', signature: 'loadCalls(true)', count: 1 },
+    { label: 'Compact admin', signature: 'loadAll(true)', count: 1 },
+    { label: 'Site photo mode', signature: 'refreshMode', count: 1 },
+  ];
 
-  assert.equal(
-    fifteenSecond.length,
-    15,
-    `Expected the current 15 protected 15-second pollers, found ${fifteenSecond.length}`,
-  );
+  for (const poller of protectedPollers) {
+    const matches = intervals.filter(({ signature }) => signature === poller.signature);
+    assert.equal(
+      matches.length,
+      poller.count,
+      `${poller.label} protected poller count changed: expected ${poller.count}, found ${matches.length}`,
+    );
+
+    for (const interval of matches) {
+      assert.equal(
+        interval.delay,
+        15_000,
+        `${poller.label} poll in ${interval.file} must stay exactly 15 seconds`,
+      );
+    }
+  }
 });
