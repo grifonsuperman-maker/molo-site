@@ -315,6 +315,38 @@ function intervalCallbackSignature(callback, sourceFile) {
   return `${directExpression.expression.text}(${args})`;
 }
 
+function namedIntervalScope(node, sourceFile) {
+  let current = node.parent;
+
+  while (current) {
+    if (ts.isFunctionDeclaration(current) && current.name) {
+      return {
+        name: current.name.text,
+        source: current.getText(sourceFile),
+      };
+    }
+
+    if (
+      (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) &&
+      ts.isVariableDeclaration(current.parent) &&
+      current.parent.initializer === current &&
+      ts.isIdentifier(current.parent.name)
+    ) {
+      return {
+        name: current.parent.name.text,
+        source: current.parent.getText(sourceFile),
+      };
+    }
+
+    current = current.parent;
+  }
+
+  return {
+    name: '<module>',
+    source: sourceFile.getText(),
+  };
+}
+
 function productionIntervals() {
   const intervals = [];
 
@@ -330,10 +362,13 @@ function productionIntervals() {
           node.expression.getText(sourceFile) === 'setInterval'
         )
       ) {
+        const scope = namedIntervalScope(node, sourceFile);
         intervals.push({
           file: path.relative(FRONTEND_ROOT, absolutePath),
           signature: intervalCallbackSignature(node.arguments[0], sourceFile),
           delay: numericValue(node.arguments[1], sourceFile),
+          scopeName: scope.name,
+          scopeSource: scope.source,
         });
       }
       ts.forEachChild(node, visit);
@@ -610,33 +645,66 @@ test('guest service buttons create waiter and hookah calls only for the current 
 test('each protected recurring production poller remains exactly 15 seconds', () => {
   const intervals = productionIntervals();
   const protectedPollers = [
-    { label: 'Guest public settings', signature: 'refreshPublicSettings', count: 1 },
-    { label: 'Guest booking status', signature: 'refreshBookingStatus', count: 1 },
-    { label: 'Guest waiter status', signature: 'loadWaiterStatus(true)', count: 1 },
-    { label: 'Guest hookah service status', signature: 'loadHookahStatus(true)', count: 1 },
-    { label: 'Guest hookah panel status', signature: 'loadStatus(true)', count: 1 },
-    { label: 'Unforced load pollers', signature: 'load()', count: 2 },
-    { label: 'Forced load pollers', signature: 'load(true)', count: 4 },
-    { label: 'Waiter call alerts', signature: 'checkCalls()', count: 1 },
-    { label: 'Hookah calls', signature: 'loadCalls(true)', count: 1 },
-    { label: 'Compact admin', signature: 'loadAll(true)', count: 1 },
-    { label: 'Site photo mode', signature: 'refreshMode', count: 1 },
+    { label: 'Guest public settings', signature: 'refreshPublicSettings' },
+    { label: 'Guest booking status', signature: 'refreshBookingStatus' },
+    { label: 'Guest waiter status', signature: 'loadWaiterStatus(true)' },
+    { label: 'Guest hookah service status', signature: 'loadHookahStatus(true)' },
+    { label: 'Guest hookah panel status', signature: 'loadStatus(true)' },
+    {
+      label: 'Guest booking decision',
+      signature: 'load()',
+      markers: ['bookingsApi.guestList'],
+    },
+    {
+      label: 'Waiter dashboard',
+      signature: 'load()',
+      markers: ['bookingsApi.getToday()', 'waiterCallsApi.list()'],
+    },
+    {
+      label: 'Waiter tables',
+      signature: 'load(true)',
+      markers: ['tablesApi.getAll()'],
+    },
+    {
+      label: 'Admin attention',
+      signature: 'load(true)',
+      markers: ['adminAttentionApi.get()'],
+    },
+    {
+      label: 'Admin tables',
+      signature: 'load(true)',
+      markers: ['mapApi.get()', 'bookingsApi.tableStatuses'],
+    },
+    {
+      label: 'Director dashboard',
+      signature: 'load(true)',
+      markers: ['analyticsApi.today()', 'analyticsApi.hourlyLoad(selectedDate)'],
+    },
+    { label: 'Waiter call alerts', signature: 'checkCalls()' },
+    { label: 'Hookah calls', signature: 'loadCalls(true)' },
+    { label: 'Compact admin', signature: 'loadAll(true)' },
+    { label: 'Site photo mode', signature: 'refreshMode' },
   ];
 
   for (const poller of protectedPollers) {
-    const matches = intervals.filter(({ signature }) => signature === poller.signature);
-    assert.equal(
-      matches.length,
-      poller.count,
-      `${poller.label} protected poller count changed: expected ${poller.count}, found ${matches.length}`,
+    const markers = poller.markers || [];
+    const matches = intervals.filter(
+      (interval) =>
+        interval.signature === poller.signature &&
+        markers.every((marker) => interval.scopeSource.includes(marker)),
     );
 
-    for (const interval of matches) {
-      assert.equal(
-        interval.delay,
-        15_000,
-        `${poller.label} poll in ${interval.file} must stay exactly 15 seconds`,
-      );
-    }
+    assert.equal(
+      matches.length,
+      1,
+      `${poller.label} protected poller must resolve to exactly one live call site, found ${matches.length}`,
+    );
+
+    const [interval] = matches;
+    assert.equal(
+      interval.delay,
+      15_000,
+      `${poller.label} poll in ${interval.scopeName} (${interval.file}) must stay exactly 15 seconds`,
+    );
   }
 });
