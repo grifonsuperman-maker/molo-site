@@ -16,35 +16,51 @@ function sourceFiles(directory) {
   });
 }
 
-function findFunctionSource(name) {
+function parseSourceFile(absolutePath) {
+  const source = fs.readFileSync(absolutePath, 'utf8');
+  return ts.createSourceFile(
+    absolutePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    absolutePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+}
+
+function functionsNamed(sourceFile, name) {
   const matches = [];
 
-  for (const absolutePath of sourceFiles(SOURCE_ROOT)) {
-    const source = fs.readFileSync(absolutePath, 'utf8');
-    const sourceFile = ts.createSourceFile(
-      absolutePath,
-      source,
-      ts.ScriptTarget.Latest,
-      true,
-      absolutePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-    );
-
-    function visit(node) {
-      if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
-        matches.push(node.getText(sourceFile));
-      }
-      ts.forEachChild(node, visit);
+  function visit(node) {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
+      matches.push(node.getText(sourceFile).replace(/^export\s+/, ''));
     }
-
-    visit(sourceFile);
+    ts.forEachChild(node, visit);
   }
 
-  assert.equal(matches.length, 1, `Expected exactly one ${name} production function, found ${matches.length}`);
-  return matches[0];
+  visit(sourceFile);
+  return matches;
 }
 
 function loadDurationFormatter() {
-  const source = `${findFunctionSource('hourWord')}\n${findFunctionSource('formatDuration')}`;
+  const matches = [];
+
+  for (const absolutePath of sourceFiles(SOURCE_ROOT)) {
+    const sourceFile = parseSourceFile(absolutePath);
+    const formatters = functionsNamed(sourceFile, 'formatDuration');
+    if (formatters.length > 0) {
+      matches.push({ absolutePath, sourceFile, formatters });
+    }
+  }
+
+  assert.equal(matches.length, 1, `Expected formatDuration in exactly one production file, found ${matches.length}`);
+
+  const [{ sourceFile, formatters }] = matches;
+  assert.equal(formatters.length, 1, `Expected exactly one formatDuration function in its production file, found ${formatters.length}`);
+
+  const hourWords = functionsNamed(sourceFile, 'hourWord');
+  assert.equal(hourWords.length, 1, `Expected exactly one hourWord beside formatDuration, found ${hourWords.length}`);
+
+  const source = `${hourWords[0]}\n${formatters[0]}`;
   const javascript = ts.transpileModule(source, {
     compilerOptions: {
       target: ts.ScriptTarget.ES2020,
