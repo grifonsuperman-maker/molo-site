@@ -5,7 +5,7 @@ const test = require('node:test');
 const ts = require('typescript');
 
 const FRONTEND_ROOT = path.resolve(__dirname, '..');
-const SOURCE_ROOT = path.join(FRONTEND_ROOT, 'src');
+const SOURCE_ROOT = path.join(FRONTEND_ROOT, 'src', 'guest');
 const FUNCTION_NAMES = ['timeToMinutes', 'minutesToTime', 'addMinutesToTime'];
 
 function sourceFiles(directory) {
@@ -61,12 +61,12 @@ function loadTimeMath() {
     assert.equal(
       matches.length,
       1,
-      `Expected ${name} in exactly one production file, found ${matches.length}: ${locations.join(', ')}`,
+      `Expected ${name} in exactly one guest production file, found ${matches.length}: ${locations.join(', ')}`,
     );
   }
 
   const locations = new Set(FUNCTION_NAMES.map((name) => matchesByName.get(name)[0].absolutePath));
-  assert.equal(locations.size, 1, 'Expected guest time helpers to live together in one production file');
+  assert.equal(locations.size, 1, 'Expected guest time helpers to live together in one guest production file');
 
   const source = FUNCTION_NAMES.map((name) => matchesByName.get(name)[0].source).join('\n');
   const javascript = ts.transpileModule(source, {
