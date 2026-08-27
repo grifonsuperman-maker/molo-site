@@ -166,7 +166,16 @@ function runRoleButton(appSource, handlerSource, initialMode) {
   const executableSource = `
     let mode = ${JSON.stringify(initialMode)};
     const telegramAuth = { isTelegram: false };
-    const window = { location: { hash: '#' + mode } };
+    let locationHash = '#' + mode;
+    const window = {
+      location: {
+        get hash() { return locationHash; },
+        set hash(value) {
+          const normalized = String(value);
+          locationHash = normalized.startsWith('#') ? normalized : '#' + normalized;
+        },
+      },
+    };
     let selectedMode = mode;
     let clearCount = 0;
     function clearRoleSession() { clearCount += 1; }
