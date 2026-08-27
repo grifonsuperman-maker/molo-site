@@ -114,6 +114,40 @@ function isSetIntervalCallee(expression) {
   );
 }
 
+function unwrapVoidExpression(expression) {
+  let current = expression;
+
+  while (current.kind === ts.SyntaxKind.VoidExpression) {
+    current = current.expression;
+  }
+
+  return current;
+}
+
+function directIntervalCallbackSignature(callback, sourceFile) {
+  if (ts.isIdentifier(callback)) return callback.text;
+  if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return null;
+
+  let expression = null;
+  if (ts.isBlock(callback.body)) {
+    if (callback.body.statements.length !== 1) return null;
+    const statement = callback.body.statements[0];
+    if (!ts.isExpressionStatement(statement)) return null;
+    expression = statement.expression;
+  } else {
+    expression = callback.body;
+  }
+
+  const directExpression = unwrapVoidExpression(expression);
+  if (!ts.isCallExpression(directExpression)) return null;
+  if (!ts.isIdentifier(directExpression.expression)) return null;
+
+  const args = directExpression.arguments
+    .map((argument) => argument.getText(sourceFile).replace(/\s+/g, ''))
+    .join(',');
+  return `${directExpression.expression.text}(${args})`;
+}
+
 function collectSetIntervals() {
   const intervals = [];
 
@@ -129,7 +163,7 @@ function collectSetIntervals() {
       ) {
         intervals.push({
           file: path.relative(FRONTEND_ROOT, absolutePath),
-          callback: node.arguments[0].getText(sourceFile).replace(/\s+/g, ''),
+          signature: directIntervalCallbackSignature(node.arguments[0], sourceFile),
           delay: resolveIntervalDelay(node.arguments[1], sourceFile, constants),
         });
       }
@@ -356,24 +390,24 @@ test('SitePhotoController and protected title/theme image paths stay connected',
 test('every protected production poll stays exactly 15 seconds after module extraction', () => {
   const intervals = collectSetIntervals();
   const protectedPollers = [
-    { label: 'Guest public settings', marker: 'refreshPublicSettings', count: 1 },
-    { label: 'Guest booking status', marker: 'refreshBookingStatus', count: 1 },
-    { label: 'Guest waiter status', marker: 'voidloadWaiterStatus(true)', count: 1 },
-    { label: 'Guest hookah service status', marker: 'voidloadHookahStatus(true)', count: 1 },
-    { label: 'Guest hookah panel status', marker: 'voidloadStatus(true)', count: 1 },
-    { label: 'Unforced load pollers', marker: 'voidload()', count: 2 },
-    { label: 'Forced load pollers', marker: 'voidload(true)', count: 4 },
-    { label: 'Waiter call alerts', marker: 'voidcheckCalls()', count: 1 },
-    { label: 'Hookah calls', marker: 'voidloadCalls(true)', count: 1 },
-    { label: 'Compact admin', marker: 'voidloadAll(true)', count: 1 },
-    { label: 'Site photo mode', marker: 'refreshMode', count: 1 },
+    { label: 'Guest public settings', signature: 'refreshPublicSettings', count: 1 },
+    { label: 'Guest booking status', signature: 'refreshBookingStatus', count: 1 },
+    { label: 'Guest waiter status', signature: 'loadWaiterStatus(true)', count: 1 },
+    { label: 'Guest hookah service status', signature: 'loadHookahStatus(true)', count: 1 },
+    { label: 'Guest hookah panel status', signature: 'loadStatus(true)', count: 1 },
+    { label: 'Unforced load pollers', signature: 'load()', count: 2 },
+    { label: 'Forced load pollers', signature: 'load(true)', count: 4 },
+    { label: 'Waiter call alerts', signature: 'checkCalls()', count: 1 },
+    { label: 'Hookah calls', signature: 'loadCalls(true)', count: 1 },
+    { label: 'Compact admin', signature: 'loadAll(true)', count: 1 },
+    { label: 'Site photo mode', signature: 'refreshMode', count: 1 },
   ];
   const matchedIndexes = new Set();
 
   for (const poller of protectedPollers) {
     const matches = intervals
       .map((interval, index) => ({ interval, index }))
-      .filter(({ interval }) => interval.callback.includes(poller.marker));
+      .filter(({ interval }) => interval.signature === poller.signature);
 
     assert.equal(
       matches.length,
