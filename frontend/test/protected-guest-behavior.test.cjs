@@ -16,18 +16,24 @@ function sourceFiles(directory) {
   });
 }
 
+function parseSourceFile(absolutePath) {
+  const source = fs.readFileSync(absolutePath, 'utf8').replace(/\r\n/g, '\n');
+  const sourceFile = ts.createSourceFile(
+    absolutePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    absolutePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+
+  return { source, sourceFile };
+}
+
 function findCallableSource(name) {
   const matches = [];
 
   for (const absolutePath of sourceFiles(SOURCE_ROOT)) {
-    const source = fs.readFileSync(absolutePath, 'utf8').replace(/\r\n/g, '\n');
-    const sourceFile = ts.createSourceFile(
-      absolutePath,
-      source,
-      ts.ScriptTarget.Latest,
-      true,
-      absolutePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-    );
+    const { sourceFile } = parseSourceFile(absolutePath);
 
     function visit(node) {
       if (
@@ -82,6 +88,116 @@ function compileCallable(name, callableSource, dependencies) {
   );
 
   return factory(...dependencyNames.map((dependencyName) => dependencies[dependencyName]));
+}
+
+function unwrapExpression(expression) {
+  let current = expression;
+
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+
+  return current;
+}
+
+function findNearestVariableInitializer(sourceFile, name, beforePosition) {
+  let best = null;
+
+  function visit(node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === name &&
+      node.initializer &&
+      node.getStart(sourceFile) < beforePosition
+    ) {
+      if (!best || node.getStart(sourceFile) > best.getStart(sourceFile)) {
+        best = node;
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return best?.initializer || null;
+}
+
+function expressionResolvesToCall(expression, callableName, sourceFile, beforePosition, seen = new Set()) {
+  const current = unwrapExpression(expression);
+
+  if (
+    ts.isCallExpression(current) &&
+    ts.isIdentifier(current.expression) &&
+    current.expression.text === callableName
+  ) {
+    return true;
+  }
+
+  if (!ts.isIdentifier(current) || seen.has(current.text)) return false;
+  seen.add(current.text);
+
+  const initializer = findNearestVariableInitializer(
+    sourceFile,
+    current.text,
+    beforePosition,
+  );
+  if (!initializer) return false;
+
+  return expressionResolvesToCall(
+    initializer,
+    callableName,
+    sourceFile,
+    initializer.getStart(sourceFile),
+    seen,
+  );
+}
+
+function findRenderedContourColorBindings() {
+  const bindings = [];
+
+  for (const absolutePath of sourceFiles(SOURCE_ROOT)) {
+    const { sourceFile } = parseSourceFile(absolutePath);
+
+    function visit(node) {
+      if (
+        (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) &&
+        node.tagName.getText(sourceFile) === 'VisibleContour'
+      ) {
+        const colorAttribute = node.attributes.properties.find(
+          (property) => ts.isJsxAttribute(property) && property.name.text === 'color',
+        );
+        assert.ok(colorAttribute, 'Rendered VisibleContour must keep a color prop');
+        assert.ok(
+          colorAttribute.initializer && ts.isJsxExpression(colorAttribute.initializer),
+          'Rendered VisibleContour color prop must stay expression-bound',
+        );
+        assert.ok(
+          colorAttribute.initializer.expression,
+          'Rendered VisibleContour color expression must not be empty',
+        );
+
+        bindings.push({
+          file: absolutePath,
+          sourceFile,
+          expression: colorAttribute.initializer.expression,
+          position: node.getStart(sourceFile),
+        });
+      }
+
+      ts.forEachChild(node, visit);
+    }
+
+    visit(sourceFile);
+  }
+
+  assert.ok(bindings.length > 0, 'Expected at least one rendered VisibleContour');
+  return bindings;
 }
 
 function runSelectVisualTableScenario(callableSource, { visualTable, realTable, fallbackTable }) {
@@ -211,4 +327,18 @@ test('guest table statuses resolve to the protected neon colors and selected col
     colors.active,
     'Selected table must use the protected selected color',
   );
+});
+
+test('rendered guest contours receive the protected color helper result', () => {
+  for (const binding of findRenderedContourColorBindings()) {
+    assert.ok(
+      expressionResolvesToCall(
+        binding.expression,
+        'getTableNeonColor',
+        binding.sourceFile,
+        binding.position,
+      ),
+      `VisibleContour color must resolve directly from getTableNeonColor in ${binding.file}`,
+    );
+  }
 });
