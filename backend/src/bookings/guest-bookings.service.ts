@@ -177,6 +177,14 @@ export class GuestBookingsService {
         throw new ConflictException('Запізнення вже повідомлено');
       }
 
+      const rescheduleRepository = manager.getRepository(BookingRescheduleRequest);
+      const existingPendingRequest = await rescheduleRepository.findOne({
+        where: { booking: { id: booking.id }, status: 'pending' } as any,
+      });
+      if (existingPendingRequest) {
+        throw new ConflictException('Для цієї броні вже очікує підтвердження запит на перенесення');
+      }
+
       const bookingAt = this.kyivLocalDateTimeToUtc(booking.bookingDate, booking.bookingTime);
       if (Date.now() < bookingAt.getTime() + 60_000) {
         throw new BadRequestException('Повідомити про запізнення можна через хвилину після часу бронювання');
@@ -191,7 +199,6 @@ export class GuestBookingsService {
       booking.expectedArrivalAt = expectedArrivalAt;
       await manager.getRepository(Booking).save(booking);
 
-      const rescheduleRepository = manager.getRepository(BookingRescheduleRequest);
       const request = await rescheduleRepository.save(
         rescheduleRepository.create({
           booking,
