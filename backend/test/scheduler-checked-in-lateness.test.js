@@ -1,0 +1,118 @@
+require('reflect-metadata');
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const {
+  SchedulesService,
+} = require('../dist/schedules/schedules.service.js');
+
+function createHarness(booking, { claimAffected = 1 } = {}) {
+  const calls = [];
+  const bookingsRepo = {
+    async find() {
+      calls.push(['find']);
+      return [booking];
+    },
+    async update(criteria, patch) {
+      calls.push(['update', criteria, patch]);
+      return { affected: claimAffected };
+    },
+  };
+  const restaurantRepo = {};
+  const notifications = {
+    async notifyLateGuest(value) {
+      calls.push(['notify', value.id]);
+    },
+  };
+  const logs = {
+    async create(message) {
+      calls.push(['log', message]);
+    },
+  };
+
+  const service = new SchedulesService(
+    bookingsRepo,
+    restaurantRepo,
+    notifications,
+    logs,
+  );
+  service.getKyivClock = () => ({
+    date: '2026-08-27',
+    time: '19:20',
+    minutes: 19 * 60 + 20,
+  });
+
+  return { service, calls };
+}
+
+test('automatic lateness does not notify a guest who already checked in', async () => {
+  const booking = {
+    id: 'booking-checked-in',
+    bookingDate: '2026-08-27',
+    bookingTime: '19:00',
+    status: 'approved',
+    checkedInAt: new Date('2026-08-27T15:58:00.000Z'),
+    lateNotifiedAt: null,
+    table: { tableNumber: '8' },
+    client: { fullName: 'Гість' },
+  };
+  const { service, calls } = createHarness(booking);
+
+  await service.checkLateGuests();
+
+  assert.equal(booking.lateNotifiedAt, null);
+  assert.deepEqual(calls, [['find']]);
+});
+
+test('automatic lateness still notifies an approved guest who has not checked in', async () => {
+  const booking = {
+    id: 'booking-late',
+    bookingDate: '2026-08-27',
+    bookingTime: '19:00',
+    status: 'approved',
+    checkedInAt: null,
+    lateNotifiedAt: null,
+    table: { tableNumber: '8' },
+    client: { fullName: 'Гість' },
+  };
+  const { service, calls } = createHarness(booking);
+
+  await service.checkLateGuests();
+
+  assert.ok(booking.lateNotifiedAt instanceof Date);
+  assert.equal(calls[0][0], 'find');
+  assert.equal(calls[1][0], 'update');
+  assert.equal(calls[1][1].id, 'booking-late');
+  assert.equal(calls[1][1].status, 'approved');
+  assert.equal(calls[1][1].checkedInAt._type, 'isNull');
+  assert.equal(calls[1][1].lateNotifiedAt._type, 'isNull');
+  assert.strictEqual(calls[1][2].lateNotifiedAt, booking.lateNotifiedAt);
+  assert.deepEqual(calls.slice(2), [
+    ['notify', 'booking-late'],
+    ['log', 'Відправлено сповіщення про запізнення гостя'],
+  ]);
+});
+
+test('automatic lateness does not notify when check-in wins after the initial read', async () => {
+  const booking = {
+    id: 'booking-raced-check-in',
+    bookingDate: '2026-08-27',
+    bookingTime: '19:00',
+    status: 'approved',
+    checkedInAt: null,
+    lateNotifiedAt: null,
+    table: { tableNumber: '8' },
+    client: { fullName: 'Гість' },
+  };
+  const { service, calls } = createHarness(booking, { claimAffected: 0 });
+
+  await service.checkLateGuests();
+
+  assert.equal(booking.lateNotifiedAt, null);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][0], 'find');
+  assert.equal(calls[1][0], 'update');
+  assert.equal(calls[1][1].checkedInAt._type, 'isNull');
+  assert.equal(calls[1][1].lateNotifiedAt._type, 'isNull');
+});
