@@ -6,7 +6,7 @@ import "./waiter/waiter-legacy-theme.css";
 import "./waiter/waiter-call-alert.css";
 import "./admin/admin-neon-theme.css";
 import SitePhotoController from "./theme/SitePhotoController";
-import MoloSplash from "./theme/MoloSplash";
+import MoloSplash from "./theme/components/MoloSplash";
 import { useTelegramAuth } from "./auth/useTelegramAuth";
 import TelegramStaffLinkGate, {
   readTelegramStaffInviteToken,
