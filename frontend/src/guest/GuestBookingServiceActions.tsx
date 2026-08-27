@@ -14,7 +14,7 @@ import {
   isGuestServiceBookingForToday,
   isGuestServiceStatusSnapshotCurrent,
   shouldRefreshGuestServiceStatusOnVisibility,
-} from './waiterCallVisibility';
+} from './services/waiterCallVisibility';
 
 const POLLING_INTERVAL_MS = 15_000;
 const BURST_DURATION_MS = 720;
