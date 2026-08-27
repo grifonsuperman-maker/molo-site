@@ -24,6 +24,7 @@ import { usePersistentState } from '../hooks/usePersistentState';
 import GuestBookingServiceActions from './GuestBookingServiceActions';
 import GuestHookahCallPanel from './GuestHookahCallPanel';
 import { formatDuration } from './services/durationFormat';
+import { addMinutesToTime } from './services/timeMath';
 const FALLBACK_MENU =
   'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
 
@@ -414,22 +415,6 @@ function createFallbackTable(tableNumber: number, seats: number): TableItem {
     isVisible: true,
   };
 }
-function timeToMinutes(value: string): number {
-  const [hours = '0', minutes = '0'] = value.split(':');
-  return Number(hours) * 60 + Number(minutes);
-}
-
-function minutesToTime(value: number): string {
-  const normalized = ((value % 1440) + 1440) % 1440;
-  const hours = Math.floor(normalized / 60);
-  const minutes = normalized % 60;
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-}
-
-function addMinutesToTime(value: string, minutes: number): string {
-  return minutesToTime(timeToMinutes(value) + minutes);
-}
-
 function getTableNeonColor(status: TableStatus, active: boolean) {
   if (active) return STATUS_COLORS.active;
   return STATUS_COLORS[status];
