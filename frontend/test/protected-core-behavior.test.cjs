@@ -347,7 +347,7 @@ test('guest map click selects the exact real or fallback table from the click zo
 });
 
 test('role buttons send their own mode through the real changeMode action', () => {
-  const { source } = findCallableSource('changeMode');
+  const { source } = findCallableSource('changeMode', 'clearRoleSession(telegramAuth.isTelegram)');
   const roles = [
     ['Гість', 'guest'],
     ['Офіціант', 'waiter'],
@@ -521,7 +521,7 @@ test('guest service buttons create waiter and hookah calls only for the current 
   assert.equal(waiterState.activeCall.id, 'waiter-call');
   assert.equal(waiterMutationVersion.current, 2);
 
-  const hookahSource = findCallableSource('callHookahWorker').source;
+  const hookahSource = findCallableSource('callHookahWorker', 'hookahMutationVersion.current').source;
   let hookahBookingId = null;
   let hookahState = null;
   const hookahMutationVersion = { current: 0 };
