@@ -50,6 +50,34 @@ function buttonBlock(source, marker) {
   return source.slice(start, end + endMarker.length);
 }
 
+function onClickExpression(buttonSource) {
+  const sourceFile = ts.createSourceFile(
+    'protected-button.tsx',
+    `const __button = (${buttonSource});`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let expression = null;
+
+  function visit(node) {
+    if (
+      ts.isJsxAttribute(node) &&
+      node.name.getText(sourceFile) === 'onClick' &&
+      node.initializer &&
+      ts.isJsxExpression(node.initializer) &&
+      node.initializer.expression
+    ) {
+      expression = node.initializer.expression.getText(sourceFile);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  assert.ok(expression, 'Protected role button must keep an executable onClick expression');
+  return expression;
+}
+
 function isInsideRenderedJsxChild(node) {
   let current = node.parent;
   let renderedJsxExpression = false;
@@ -65,11 +93,10 @@ function isInsideRenderedJsxChild(node) {
     }
 
     if (ts.isReturnStatement(current)) return renderedJsxExpression;
-    if (
-      ts.isVariableDeclaration(current) ||
-      ts.isFunctionDeclaration(current) ||
-      ts.isArrowFunction(current)
-    ) {
+    if (ts.isArrowFunction(current)) {
+      return !ts.isBlock(current.body) && renderedJsxExpression;
+    }
+    if (ts.isVariableDeclaration(current) || ts.isFunctionDeclaration(current)) {
       return false;
     }
     current = current.parent;
@@ -109,6 +136,118 @@ function assertModeRendersWorkspace(source, mode, workspace, label) {
   assert.ok(
     matchedBranch,
     `${label} workspace must stay inside a rendered ${mode} JSX child branch`,
+  );
+}
+
+function runRoleButton(appSource, handlerSource, initialMode) {
+  const sourceFile = ts.createSourceFile(
+    'App.tsx',
+    appSource,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let changeModeDeclaration = null;
+
+  function visit(node) {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name &&
+      node.name.text === 'changeMode'
+    ) {
+      changeModeDeclaration = node.getText(sourceFile);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  assert.ok(changeModeDeclaration, 'Protected changeMode function is missing');
+
+  const executableSource = `
+    let mode = ${JSON.stringify(initialMode)};
+    const telegramAuth = { isTelegram: false };
+    const window = { location: { hash: '#' + mode } };
+    let selectedMode = mode;
+    let clearCount = 0;
+    function clearRoleSession() { clearCount += 1; }
+    function setMode(nextMode) {
+      selectedMode = typeof nextMode === 'function' ? nextMode(selectedMode) : nextMode;
+      mode = selectedMode;
+    }
+    ${changeModeDeclaration}
+    const __handler = ${handlerSource};
+    __handler();
+    module.exports = { hash: window.location.hash, selectedMode, clearCount };
+  `;
+  const compiled = ts.transpileModule(executableSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+  }).outputText;
+  const sandbox = {
+    module: { exports: {} },
+    exports: {},
+  };
+
+  vm.runInNewContext(compiled, sandbox, { filename: 'protected-role-button-runtime.cjs' });
+  return sandbox.module.exports;
+}
+
+function assertTitleImageAppliedToDom(source) {
+  const sourceFile = ts.createSourceFile(
+    'SitePhotoController.tsx',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let applyPhotosBody = '';
+  let titleEffectWired = false;
+
+  function visit(node) {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name &&
+      node.name.text === 'applyPhotos'
+    ) {
+      applyPhotosBody = node.getText(sourceFile);
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(sourceFile) === 'useEffect' &&
+      node.arguments.length >= 2 &&
+      ts.isArrayLiteralExpression(node.arguments[1])
+    ) {
+      const effectText = node.arguments[0].getText(sourceFile);
+      const dependencies = node.arguments[1].elements.map((element) =>
+        element.getText(sourceFile),
+      );
+
+      if (
+        dependencies.includes('theme') &&
+        dependencies.includes('titleImage') &&
+        /applyPhotos\(\s*theme\s*,\s*titleImage\s*\)/.test(effectText) &&
+        /\bupdate\(\);/.test(effectText)
+      ) {
+        titleEffectWired = true;
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  assert.ok(applyPhotosBody, 'Protected applyPhotos function is missing');
+  assert.match(
+    applyPhotosBody,
+    /image\.setAttribute\(\s*['"]src['"]\s*,\s*titleImage\s*\)/,
+    'applyPhotos must keep applying the current titleImage to the rendered image src',
+  );
+  assert.ok(
+    titleEffectWired,
+    'Mounted SitePhotoController must flow titleImage through applyPhotos(theme, titleImage)',
   );
 }
 
@@ -220,6 +359,15 @@ test('each protected role button selects and renders its matching workspace', ()
     assert.ok(button.includes(handler), `${label} button must select ${mode}`);
     assert.match(button, new RegExp(`>\\s*${label}\\s*</button>`), `${label} label must stay bound to ${mode}`);
 
+    const runtime = runRoleButton(
+      buttonSource,
+      onClickExpression(button),
+      mode === 'guest' ? 'waiter' : 'guest',
+    );
+    assert.equal(runtime.selectedMode, mode, `${label} button must make ${mode} the selected mode`);
+    assert.equal(runtime.hash, `#${mode}`, `${label} button must write #${mode} to the location hash`);
+    assert.equal(runtime.clearCount, 1, `${label} role change must preserve the existing session-clear transition`);
+
     const renderSource = findUniqueSource(workspace);
     assertModeRendersWorkspace(renderSource, mode, workspace, label);
   }
@@ -287,6 +435,7 @@ test('home hero stays connected to protected Title rotation recognition and sche
     /const syncTitle = \(\) => \{\s*const nextTitleImage = chooseTitleImage\(\);\s*setTitleImage\(\(current\) =>\s*current === nextTitleImage \? current : nextTitleImage,\s*\);\s*\};/,
     'Mounted SitePhotoController must flow the chooser result into Title state',
   );
+  assertTitleImageAppliedToDom(controllerSource);
 
   assert.match(
     controllerSource,
