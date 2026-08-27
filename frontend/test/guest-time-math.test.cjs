@@ -12,7 +12,7 @@ function sourceFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const absolutePath = path.join(directory, entry.name);
     if (entry.isDirectory()) return sourceFiles(absolutePath);
-    if (!entry.isFile() || !/\.(?:ts|tsx)$/.test(entry.name)) return [];
+    if (!entry.isFile() || !/\.(?:ts|tsx)$/.test(entry.name) || /\.test\.(?:ts|tsx)$/.test(entry.name)) return [];
     return [absolutePath];
   });
 }
