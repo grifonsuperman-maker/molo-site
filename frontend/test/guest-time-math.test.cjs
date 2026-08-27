@@ -57,7 +57,12 @@ function loadTimeMath() {
 
   for (const name of FUNCTION_NAMES) {
     const matches = matchesByName.get(name);
-    assert.equal(matches.length, 1, `Expected ${name} in exactly one production file, found ${matches.length}`);
+    const locations = matches.map(({ absolutePath }) => path.relative(FRONTEND_ROOT, absolutePath));
+    assert.equal(
+      matches.length,
+      1,
+      `Expected ${name} in exactly one production file, found ${matches.length}: ${locations.join(', ')}`,
+    );
   }
 
   const locations = new Set(FUNCTION_NAMES.map((name) => matchesByName.get(name)[0].absolutePath));
