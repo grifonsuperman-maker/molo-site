@@ -15,7 +15,7 @@ import { resolveTelegramMode } from "./telegram/telegramRuntime";
 
 const GuestApp = lazy(() => import("./guest/GuestApp"));
 const GuestBookingDecisionController = lazy(
-  () => import("./guest/GuestBookingDecisionController"),
+  () => import("./guest/components/GuestBookingDecisionController"),
 );
 const GuestReviewDismissController = lazy(
   () => import("./guest/GuestReviewDismissController"),

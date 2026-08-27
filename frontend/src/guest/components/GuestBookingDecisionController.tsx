@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { bookingsApi, type GuestBooking } from '../api/bookings';
+import { bookingsApi, type GuestBooking } from '../../api/bookings';
 
 const POLLING_MS = 15_000;
 const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
