@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 
 import { Booking } from '../bookings/entities/booking.entity';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
@@ -205,9 +205,22 @@ export class SchedulesService {
         continue;
       }
 
-      booking.lateNotifiedAt = new Date();
+      const lateNotifiedAt = new Date();
+      const claim = await this.bookingsRepo.update(
+        {
+          id: booking.id,
+          status: 'approved',
+          checkedInAt: IsNull(),
+          lateNotifiedAt: IsNull(),
+        },
+        { lateNotifiedAt },
+      );
 
-      await this.bookingsRepo.save(booking);
+      if (!claim.affected) {
+        continue;
+      }
+
+      booking.lateNotifiedAt = lateNotifiedAt;
       await this.notificationsService.notifyLateGuest(booking);
 
       await this.logsService.create('Відправлено сповіщення про запізнення гостя', null, {
