@@ -23,6 +23,7 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 import { usePersistentState } from '../hooks/usePersistentState';
 import GuestBookingServiceActions from './GuestBookingServiceActions';
 import GuestHookahCallPanel from './GuestHookahCallPanel';
+import { formatDuration } from './services/durationFormat';
 const FALLBACK_MENU =
   'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
 
@@ -413,24 +414,6 @@ function createFallbackTable(tableNumber: number, seats: number): TableItem {
     isVisible: true,
   };
 }
-function hourWord(hours: number): string {
-  if (hours === 1) return 'година';
-  if (hours >= 2 && hours <= 4) return 'години';
-  return 'годин';
-}
-
-function formatDuration(minutes: number): string {
-  if (minutes < 60) return `${minutes} хв`;
-
-  const hours = minutes / 60;
-
-  if (Number.isInteger(hours)) {
-    return `${hours} ${hourWord(hours)}`;
-  }
-
-  return `${String(hours).replace('.', ',')} години`;
-}
-
 function timeToMinutes(value: string): number {
   const [hours = '0', minutes = '0'] = value.split(':');
   return Number(hours) * 60 + Number(minutes);
