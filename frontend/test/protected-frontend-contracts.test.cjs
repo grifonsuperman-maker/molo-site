@@ -3,8 +3,10 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const ts = require('typescript');
 
 const FRONTEND_ROOT = path.resolve(__dirname, '..');
+const SOURCE_ROOT = path.join(FRONTEND_ROOT, 'src');
 const EXPECTED_GUEST_MAP_SHA256 =
   '0fa112eabf80af7b4857e5b0a5ffcdf9f6b24ab27f3bfea45286338594a5ceae';
 
@@ -35,6 +37,110 @@ function findUniqueSource(marker, directory) {
   );
 
   return fs.readFileSync(matches[0], 'utf8').replace(/\r\n/g, '\n');
+}
+
+function parseSourceFile(absolutePath) {
+  const source = fs.readFileSync(absolutePath, 'utf8').replace(/\r\n/g, '\n');
+  const sourceFile = ts.createSourceFile(
+    absolutePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    absolutePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+
+  return { source, sourceFile };
+}
+
+function collectNumericConstants(sourceFile) {
+  const constants = new Map();
+
+  function visit(node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer
+    ) {
+      const initializer = unwrapNumericExpression(node.initializer);
+      if (ts.isNumericLiteral(initializer)) {
+        constants.set(
+          node.name.text,
+          Number(initializer.getText(sourceFile).replace(/_/g, '')),
+        );
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return constants;
+}
+
+function unwrapNumericExpression(expression) {
+  let current = expression;
+
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+
+  return current;
+}
+
+function resolveIntervalDelay(expression, sourceFile, constants) {
+  if (!expression) return null;
+  const current = unwrapNumericExpression(expression);
+
+  if (ts.isNumericLiteral(current)) {
+    return Number(current.getText(sourceFile).replace(/_/g, ''));
+  }
+
+  if (ts.isIdentifier(current) && constants.has(current.text)) {
+    return constants.get(current.text);
+  }
+
+  return null;
+}
+
+function isSetIntervalCallee(expression) {
+  return (
+    (ts.isPropertyAccessExpression(expression) && expression.name.text === 'setInterval') ||
+    (ts.isIdentifier(expression) && expression.text === 'setInterval')
+  );
+}
+
+function collectSetIntervals() {
+  const intervals = [];
+
+  for (const absolutePath of sourceFiles(SOURCE_ROOT)) {
+    const { sourceFile } = parseSourceFile(absolutePath);
+    const constants = collectNumericConstants(sourceFile);
+
+    function visit(node) {
+      if (
+        ts.isCallExpression(node) &&
+        isSetIntervalCallee(node.expression) &&
+        node.arguments.length >= 2
+      ) {
+        intervals.push({
+          file: path.relative(FRONTEND_ROOT, absolutePath),
+          callback: node.arguments[0].getText(sourceFile).replace(/\s+/g, ''),
+          delay: resolveIntervalDelay(node.arguments[1], sourceFile, constants),
+        });
+      }
+
+      ts.forEachChild(node, visit);
+    }
+
+    visit(sourceFile);
+  }
+
+  return intervals;
 }
 
 function extractArray(source, marker) {
@@ -247,102 +353,48 @@ test('SitePhotoController and protected title/theme image paths stay connected',
   );
 });
 
-test('every protected production poll stays exactly 15 seconds', () => {
-  const guestApp = read('src/guest/GuestApp.tsx');
-  const guestServices = read('src/guest/GuestBookingServiceActions.tsx');
-  const guestHookah = read('src/guest/GuestHookahCallPanel.tsx');
-  const guestDecision = read('src/guest/GuestBookingDecisionController.tsx');
-  const waiterTables = read('src/waiter/WaiterTablesByLocation.tsx');
-  const waiterApp = read('src/waiter/WaiterAppV2.tsx');
-  const waiterAlert = read('src/waiter/WaiterCallAlertController.tsx');
-  const hookahApp = read('src/hookah/HookahApp.tsx');
-  const adminAttention = read('src/admin/AdminAttentionPanel.tsx');
-  const adminTables = read('src/admin/AdminTablesByLocation.tsx');
-  const compactAdmin = read('src/admin/CompactAdminPanel.tsx');
-  const directorPanel = read('src/director/PremiumDirectorPanel.tsx');
-  const photos = read('src/theme/SitePhotoController.tsx');
+test('every protected production poll stays exactly 15 seconds after module extraction', () => {
+  const intervals = collectSetIntervals();
+  const protectedPollers = [
+    { label: 'Guest public settings', marker: 'refreshPublicSettings', count: 1 },
+    { label: 'Guest booking status', marker: 'refreshBookingStatus', count: 1 },
+    { label: 'Guest waiter status', marker: 'voidloadWaiterStatus(true)', count: 1 },
+    { label: 'Guest hookah service status', marker: 'voidloadHookahStatus(true)', count: 1 },
+    { label: 'Guest hookah panel status', marker: 'voidloadStatus(true)', count: 1 },
+    { label: 'Unforced load pollers', marker: 'voidload()', count: 2 },
+    { label: 'Forced load pollers', marker: 'voidload(true)', count: 4 },
+    { label: 'Waiter call alerts', marker: 'voidcheckCalls()', count: 1 },
+    { label: 'Hookah calls', marker: 'voidloadCalls(true)', count: 1 },
+    { label: 'Compact admin', marker: 'voidloadAll(true)', count: 1 },
+    { label: 'Site photo mode', marker: 'refreshMode', count: 1 },
+  ];
+  const matchedIndexes = new Set();
 
-  assertIncludesAll(
-    guestApp,
-    [
-      'window.setInterval(refreshPublicSettings, 15000)',
-      'window.setInterval(refreshBookingStatus, 15000)',
-    ],
-    'GuestApp 15-second poll',
-  );
+  for (const poller of protectedPollers) {
+    const matches = intervals
+      .map((interval, index) => ({ interval, index }))
+      .filter(({ interval }) => interval.callback.includes(poller.marker));
 
-  assert.ok(guestServices.includes('const POLLING_INTERVAL_MS = 15_000;'));
-  assert.ok(
-    guestServices.includes('const interval = window.setInterval(() => {\n      void loadWaiterStatus(true);\n    }, POLLING_INTERVAL_MS);'),
-    'Guest waiter status must keep a repeating 15-second interval',
-  );
-  assert.ok(
-    guestServices.includes('const interval = window.setInterval(() => {\n      void loadHookahStatus(true);\n    }, POLLING_INTERVAL_MS);'),
-    'Guest hookah status must keep a repeating 15-second interval',
-  );
+    assert.equal(
+      matches.length,
+      poller.count,
+      `${poller.label} protected poller count changed: expected ${poller.count}, found ${matches.length}`,
+    );
 
-  assert.ok(
-    guestHookah.includes('const interval = window.setInterval(() => {\n      void loadStatus(true);\n    }, 15_000);'),
-    'Guest hookah panel must keep a repeating 15-second interval',
-  );
-
-  assert.ok(guestDecision.includes('const POLLING_MS = 15_000;'));
-  assert.ok(
-    guestDecision.includes('window.setInterval(() => void load(), POLLING_MS)'),
-    'Guest booking decision poll must use the protected 15-second interval',
-  );
-
-  assert.ok(waiterTables.includes('const POLLING_MS = 15_000;'));
-  assert.ok(
-    waiterTables.includes('window.setInterval(() => void load(true), POLLING_MS)'),
-    'Waiter table poll must use the protected 15-second interval',
-  );
-
-  assert.ok(
-    waiterApp.includes('window.setInterval(() => void load(), 15000)'),
-    'Waiter app poll must stay exactly 15 seconds',
-  );
-
-  assert.ok(waiterAlert.includes('const POLLING_MS = 15_000;'));
-  assert.ok(
-    waiterAlert.includes('window.setInterval(() => void checkCalls(), POLLING_MS)'),
-    'Waiter call alert poll must use the protected 15-second interval',
-  );
-
-  assert.ok(
-    hookahApp.includes('const interval = window.setInterval(() => {\n      void loadCalls(true);\n    }, 15_000);'),
-    'Hookah app must keep a repeating 15-second interval',
-  );
-
-  for (const [label, source, call] of [
-    [
-      'Admin attention',
-      adminAttention,
-      'window.setInterval(() => void load(true), POLLING_MS)',
-    ],
-    [
-      'Admin tables',
-      adminTables,
-      'window.setInterval(() => void load(true), POLLING_MS)',
-    ],
-    [
-      'Compact admin',
-      compactAdmin,
-      'window.setInterval(() => void loadAll(true), POLLING_MS)',
-    ],
-  ]) {
-    assert.ok(source.includes('const POLLING_MS = 15_000;'), `${label} poll constant must stay 15 seconds`);
-    assert.ok(source.includes(call), `${label} poll must use the protected 15-second interval`);
+    for (const { interval, index } of matches) {
+      matchedIndexes.add(index);
+      assert.equal(
+        interval.delay,
+        15_000,
+        `${poller.label} poll in ${interval.file} must stay exactly 15 seconds`,
+      );
+    }
   }
 
-  assert.ok(
-    directorPanel.includes('window.setInterval(() => void load(true), 15_000)'),
-    'Director panel poll must stay exactly 15 seconds',
-  );
-
-  assert.ok(
-    photos.includes('window.setInterval(refreshMode, 15_000)'),
-    'Site photo mode poll must stay exactly 15 seconds',
+  assert.equal(
+    matchedIndexes.size,
+    15,
+    `Expected 15 protected production pollers across the source tree, found ${matchedIndexes.size}`,
   );
 });
 
