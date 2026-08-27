@@ -12,7 +12,7 @@ import {
 } from '../api/waiterCalls';
 import type { Booking } from '../api/types';
 import WaiterTablesByLocation from './WaiterTablesByLocation';
-import { waiterAssignmentsFromBookings } from './waiterAssignments';
+import { waiterAssignmentsFromBookings } from './services/waiterAssignments';
 
 const SESSION_KEY = 'molo_waiter_staff';
 const SHIFT_ENDED_KEY = 'molo_waiter_shift_ended_name';

@@ -1,4 +1,4 @@
-import type { Booking } from '../api/types';
+import type { Booking } from '../../api/types';
 
 export type BookingWaiterAssignment = {
   bookingId: string;
