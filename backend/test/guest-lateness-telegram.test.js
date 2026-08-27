@@ -17,6 +17,19 @@ function createController({ notificationError = null } = {}) {
     latenessHours: 0,
     latenessMinutes: 15,
   };
+  const rescheduleRequest = {
+    id: 'reschedule-1',
+    booking: {
+      id: 'booking-1',
+      bookingDate: '2026-08-16',
+      bookingTime: '16:37',
+      table: { tableNumber: '8' },
+      client: { fullName: 'Гість', phone: '+380000000000' },
+    },
+    requestedDate: '2026-08-16',
+    requestedTime: '16:52:00',
+    status: 'pending',
+  };
 
   const guestService = {
     async reportLateness(id, token, dto) {
@@ -24,12 +37,13 @@ function createController({ notificationError = null } = {}) {
       return {
         message: 'Адміністратора та офіціанта повідомлено про запізнення',
         booking,
+        rescheduleRequest,
       };
     },
   };
 
   const notifications = {
-    async notifyGuestReportedLateness(payload) {
+    async notifyRescheduleRequest(payload) {
       calls.push({ type: 'notify', payload });
       if (notificationError) throw notificationError;
     },
@@ -37,6 +51,7 @@ function createController({ notificationError = null } = {}) {
 
   return {
     booking,
+    rescheduleRequest,
     calls,
     controller: new BookingsController(
       {},
@@ -50,8 +65,8 @@ function createController({ notificationError = null } = {}) {
   };
 }
 
-test('guest lateness sends the saved booking to Telegram notification after report succeeds', async () => {
-  const { booking, calls, controller } = createController();
+test('guest lateness sends the pending reschedule request to Telegram after report succeeds', async () => {
+  const { booking, rescheduleRequest, calls, controller } = createController();
 
   const result = await controller.guestLateness(
     'booking-1',
@@ -60,12 +75,13 @@ test('guest lateness sends the saved booking to Telegram notification after repo
   );
 
   assert.deepEqual(calls.map((call) => call.type), ['report', 'notify']);
-  assert.equal(calls[1].payload, booking);
-  assert.equal(result.message, 'Адміністратора повідомлено про запізнення');
+  assert.equal(calls[1].payload, rescheduleRequest);
+  assert.equal(result.message, 'Запит на перенесення надіслано адміністратору');
   assert.equal(result.booking, booking);
+  assert.equal('rescheduleRequest' in result, false);
 });
 
-test('Telegram failure does not undo an already saved guest lateness report', async () => {
+test('Telegram failure does not undo an already saved guest lateness reschedule request', async () => {
   const { booking, calls, controller } = createController({
     notificationError: new Error('telegram unavailable'),
   });
@@ -80,8 +96,9 @@ test('Telegram failure does not undo an already saved guest lateness report', as
     );
 
     assert.deepEqual(calls.map((call) => call.type), ['report', 'notify']);
-    assert.equal(result.message, 'Адміністратора повідомлено про запізнення');
+    assert.equal(result.message, 'Запит на перенесення надіслано адміністратору');
     assert.equal(result.booking, booking);
+    assert.equal('rescheduleRequest' in result, false);
   } finally {
     console.error = originalConsoleError;
   }
