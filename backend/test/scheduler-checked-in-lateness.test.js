@@ -7,16 +7,16 @@ const {
   SchedulesService,
 } = require('../dist/schedules/schedules.service.js');
 
-function createHarness(booking) {
+function createHarness(booking, { claimAffected = 1 } = {}) {
   const calls = [];
   const bookingsRepo = {
     async find() {
       calls.push(['find']);
       return [booking];
     },
-    async save(value) {
-      calls.push(['save', value.id]);
-      return value;
+    async update(criteria, patch) {
+      calls.push(['update', criteria, patch]);
+      return { affected: claimAffected };
     },
   };
   const restaurantRepo = {};
@@ -81,10 +81,38 @@ test('automatic lateness still notifies an approved guest who has not checked in
   await service.checkLateGuests();
 
   assert.ok(booking.lateNotifiedAt instanceof Date);
-  assert.deepEqual(calls, [
-    ['find'],
-    ['save', 'booking-late'],
+  assert.equal(calls[0][0], 'find');
+  assert.equal(calls[1][0], 'update');
+  assert.equal(calls[1][1].id, 'booking-late');
+  assert.equal(calls[1][1].status, 'approved');
+  assert.equal(calls[1][1].checkedInAt._type, 'isNull');
+  assert.equal(calls[1][1].lateNotifiedAt._type, 'isNull');
+  assert.strictEqual(calls[1][2].lateNotifiedAt, booking.lateNotifiedAt);
+  assert.deepEqual(calls.slice(2), [
     ['notify', 'booking-late'],
     ['log', 'Відправлено сповіщення про запізнення гостя'],
   ]);
+});
+
+test('automatic lateness does not notify when check-in wins after the initial read', async () => {
+  const booking = {
+    id: 'booking-raced-check-in',
+    bookingDate: '2026-08-27',
+    bookingTime: '19:00',
+    status: 'approved',
+    checkedInAt: null,
+    lateNotifiedAt: null,
+    table: { tableNumber: '8' },
+    client: { fullName: 'Гість' },
+  };
+  const { service, calls } = createHarness(booking, { claimAffected: 0 });
+
+  await service.checkLateGuests();
+
+  assert.equal(booking.lateNotifiedAt, null);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][0], 'find');
+  assert.equal(calls[1][0], 'update');
+  assert.equal(calls[1][1].checkedInAt._type, 'isNull');
+  assert.equal(calls[1][1].lateNotifiedAt._type, 'isNull');
 });
