@@ -17,6 +17,7 @@ function createHarness({
   bookingDate,
   bookingTime,
   bookingAtIso,
+  existingPendingRequest = null,
 }) {
   const booking = {
     id: 'booking-1',
@@ -42,13 +43,18 @@ function createHarness({
       phone: '+380000000000',
     },
   };
-  const requests = [];
+  const requests = existingPendingRequest ? [existingPendingRequest] : [];
   const bookingRepository = {
     async save(value) {
       return value;
     },
   };
   const rescheduleRepository = {
+    async findOne({ where }) {
+      return requests.find((request) =>
+        request.booking?.id === where.booking?.id && request.status === where.status,
+      ) || null;
+    },
     create(value) {
       return { ...value };
     },
@@ -141,4 +147,39 @@ test('guest lateness reschedule request rolls over to the next Kyiv date after m
   assert.equal(requests.length, 1);
   assert.equal(requests[0].requestedDate, '2026-08-28');
   assert.equal(requests[0].requestedTime, '01:00:00');
+});
+
+test('guest lateness rejects a second pending reschedule request without changing booking fields', async () => {
+  const existingPendingRequest = {
+    id: 'reschedule-existing',
+    booking: { id: 'booking-1' },
+    requestedDate: '2026-08-16',
+    requestedTime: '17:00:00',
+    status: 'pending',
+  };
+  const { booking, requests, service } = createHarness({
+    bookingDate: '2026-08-16',
+    bookingTime: '16:37:00',
+    bookingAtIso: '2026-08-16T13:37:00.000Z',
+    existingPendingRequest,
+  });
+
+  await assert.rejects(
+    () => withNow('2026-08-16T13:39:00.000Z', () =>
+      service.reportLateness('booking-1', 'guest-token', { hours: 0, minutes: 15 }),
+    ),
+    (error) => {
+      assert.equal(error?.getStatus?.(), 409);
+      assert.equal(error?.message, 'Для цієї броні вже очікує підтвердження запит на перенесення');
+      return true;
+    },
+  );
+
+  assert.equal(booking.bookingTime, '16:37:00');
+  assert.equal(booking.lateNotifiedAt, null);
+  assert.equal(booking.latenessHours, null);
+  assert.equal(booking.latenessMinutes, null);
+  assert.equal(booking.expectedArrivalAt, null);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0], existingPendingRequest);
 });
