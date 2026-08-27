@@ -16,6 +16,7 @@ import { GuestChangeTableDto } from './dto/guest-change-table.dto';
 import { GuestLatenessDto } from './dto/guest-lateness.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
 import { BookingHistory } from './entities/booking-history.entity';
+import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 
@@ -163,7 +164,7 @@ export class GuestBookingsService {
       throw new BadRequestException('Вкажіть запізнення від 1 хвилини до 12 годин');
     }
 
-    await this.dataSource.transaction(async (manager) => {
+    const rescheduleRequest = await this.dataSource.transaction(async (manager) => {
       const booking = await this.findOwnedBooking(id, token, manager, true);
 
       if (booking.status !== 'approved' || booking.checkedInAt) {
@@ -176,28 +177,52 @@ export class GuestBookingsService {
         throw new ConflictException('Запізнення вже повідомлено');
       }
 
+      const rescheduleRepository = manager.getRepository(BookingRescheduleRequest);
+      const existingPendingRequest = await rescheduleRepository.findOne({
+        where: { booking: { id: booking.id }, status: 'pending' } as any,
+      });
+      if (existingPendingRequest) {
+        throw new ConflictException('Для цієї броні вже очікує підтвердження запит на перенесення');
+      }
+
       const bookingAt = this.kyivLocalDateTimeToUtc(booking.bookingDate, booking.bookingTime);
       if (Date.now() < bookingAt.getTime() + 60_000) {
         throw new BadRequestException('Повідомити про запізнення можна через хвилину після часу бронювання');
       }
 
       const previousData = this.snapshot(booking);
+      const expectedArrivalAt = new Date(bookingAt.getTime() + totalMinutes * 60_000);
+      const expectedArrival = this.kyivParts(expectedArrivalAt);
       booking.lateNotifiedAt = new Date();
       booking.latenessHours = Number(dto.hours);
       booking.latenessMinutes = Number(dto.minutes);
-      booking.expectedArrivalAt = new Date(bookingAt.getTime() + totalMinutes * 60_000);
+      booking.expectedArrivalAt = expectedArrivalAt;
       await manager.getRepository(Booking).save(booking);
+
+      const request = await rescheduleRepository.save(
+        rescheduleRepository.create({
+          booking,
+          requestedDate: expectedArrival.date,
+          requestedTime: `${String(expectedArrival.hour).padStart(2, '0')}:${String(expectedArrival.minute).padStart(2, '0')}:00`,
+          status: 'pending',
+          adminComment: null,
+          resolvedAt: null,
+        }),
+      );
 
       await this.saveHistory(manager, booking, 'guest_reported_lateness', {
         previousData,
         newData: this.snapshot(booking),
         reason: `Запізнення ${dto.hours} год ${dto.minutes} хв`,
       });
+
+      return request;
     });
 
     return {
       message: 'Адміністратора та офіціанта повідомлено про запізнення',
       booking: await this.get(id, token),
+      rescheduleRequest,
     };
   }
 

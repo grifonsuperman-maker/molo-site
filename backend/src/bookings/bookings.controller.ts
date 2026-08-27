@@ -125,17 +125,17 @@ export class BookingsController {
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestLatenessDto,
   ) {
-    const result = await this.guestService.reportLateness(id, token, dto);
+    const { rescheduleRequest, ...result } = await this.guestService.reportLateness(id, token, dto);
 
     try {
-      await this.notifications.notifyGuestReportedLateness(result.booking);
+      await this.notifications.notifyRescheduleRequest(rescheduleRequest);
     } catch (error) {
-      console.error('Telegram guest lateness notification failed', error);
+      console.error('Telegram guest lateness reschedule notification failed', error);
     }
 
     return {
       ...result,
-      message: 'Адміністратора повідомлено про запізнення',
+      message: 'Запит на перенесення надіслано адміністратору',
     };
   }
 
