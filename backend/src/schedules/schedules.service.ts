@@ -194,7 +194,7 @@ export class SchedulesService {
     });
 
     for (const booking of bookings) {
-      if (booking.lateNotifiedAt) {
+      if (booking.lateNotifiedAt || booking.checkedInAt) {
         continue;
       }
 
