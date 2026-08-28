@@ -7,7 +7,12 @@ export function setAccessToken(token: string) {
 }
 
 export function getAccessToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
 }
 
 export function clearAccessToken() {

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
 import { Repository } from 'typeorm';
@@ -1047,13 +1047,48 @@ export class BookingsService {
   }
 
   async rejectReschedule(requestId: string, dto: RejectRescheduleDto) {
-    const request = await this.reschedules.findOne({ where: { id: requestId } });
-    if (!request) throw new NotFoundException('Запит не знайдено');
+    return this.bookings.manager.transaction(async (manager) => {
+      const requestRepository = manager.getRepository(BookingRescheduleRequest);
+      const bookingRepository = manager.getRepository(Booking);
 
-    request.status = 'rejected';
-    request.adminComment = dto.adminComment || null;
-    request.resolvedAt = new Date();
-    await this.reschedules.save(request);
-    return { message: 'Перенесення відхилено' };
+      const preview = await requestRepository.findOne({
+        where: { id: requestId },
+        relations: ['booking'],
+      });
+      if (!preview) throw new NotFoundException('Запит не знайдено');
+
+      const booking = await bookingRepository.findOne({
+        where: { id: preview.booking.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
+      const request = await requestRepository.findOne({
+        where: { id: requestId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!request) throw new NotFoundException('Запит не знайдено');
+      if (request.status !== 'pending') {
+        throw new ConflictException('Цей запит уже опрацьовано');
+      }
+
+      const adminComment = String(dto?.adminComment || '').trim() || null;
+      request.status = 'rejected';
+      request.adminComment = adminComment;
+      request.resolvedAt = new Date();
+
+      booking.guestNotification = {
+        type: 'booking_updated',
+        title: 'Перенесення відхилено',
+        message:
+          adminComment ||
+          `Адміністратор не підтвердив перенесення бронювання. Ваш час залишається ${booking.bookingDate} о ${this.formatTimeLabel(booking.bookingTime)}.`,
+        createdAt: new Date().toISOString(),
+      };
+
+      await bookingRepository.save(booking);
+      await requestRepository.save(request);
+      return { message: 'Перенесення відхилено' };
+    });
   }
 }
