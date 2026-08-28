@@ -12,17 +12,44 @@ import { randomUUID } from 'crypto';
 
 import { Roles } from '../common/decorators/roles.decorator';
 import { AdminAttentionService } from './admin-attention.service';
+import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
+import { BookingsService } from './bookings.service';
 
 @Roles('owner', 'admin')
 @Controller('admin-attention')
 export class AdminAttentionController {
   private readonly logger = new Logger(AdminAttentionController.name);
 
-  constructor(private readonly attention: AdminAttentionService) {}
+  constructor(
+    private readonly attention: AdminAttentionService,
+    private readonly bookings: BookingsService,
+    private readonly rescheduleApproval: BookingRescheduleApprovalService,
+  ) {}
 
   @Get()
   dashboard() {
     return this.attention.dashboard();
+  }
+
+  @Get('reschedules')
+  @Roles('admin')
+  reschedules() {
+    return this.bookings.getPendingReschedules();
+  }
+
+  @Patch('reschedule/:requestId/approve')
+  @Roles('admin')
+  approveReschedule(@Param('requestId') requestId: string) {
+    return this.rescheduleApproval.approve(requestId);
+  }
+
+  @Patch('reschedule/:requestId/reject')
+  @Roles('admin')
+  rejectReschedule(
+    @Param('requestId') requestId: string,
+    @Body('adminComment') adminComment?: string,
+  ) {
+    return this.bookings.rejectReschedule(requestId, { adminComment });
   }
 
   @Patch('table-change/:requestId/approve')
