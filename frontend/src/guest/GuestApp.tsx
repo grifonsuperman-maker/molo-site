@@ -15,6 +15,7 @@ import {
 import type { FullMapResponse, Restaurant, TableItem, Zone } from '../api/types';
 import { bookingsApi } from '../api/bookings';
 import type { TableRuntimeStatus, BookingPublicStatus, GuestBooking, GuestBookingToken } from '../api/bookings';
+import { readGuestBrowserAccess } from '../api/guestAccessRuntime';
 import { mapApi } from '../api/map';
 import { restaurantApi } from '../api/restaurant';
 import { waiterCallsApi } from '../api/waiterCalls';
@@ -147,6 +148,17 @@ function readStoredGuestBookings(): GuestBookingToken[] {
   } catch {
     return [];
   }
+}
+
+function readGuestBookingAccess(): GuestBookingToken[] {
+  const storedByBookingId = new Map(
+    readStoredGuestBookings().map((booking) => [booking.bookingId, booking]),
+  );
+
+  return readGuestBrowserAccess().bookings.map((booking) => ({
+    ...booking,
+    createdAt: storedByBookingId.get(booking.bookingId)?.createdAt || new Date().toISOString(),
+  }));
 }
 
 function saveGuestBooking(booking: GuestBookingToken) {
@@ -610,7 +622,7 @@ export default function GuestApp() {
   const [dateStatuses, setDateStatuses] = useState<Record<string, TableRuntimeStatus>>({});
   const [legacyBookingId] = useState<string | null>(readStoredBookingId);
   const [lastBookingId, setLastBookingId] = useState<string | null>(legacyBookingId);
-  const [guestBookings, setGuestBookings] = useState<GuestBookingToken[]>(readStoredGuestBookings);
+  const [guestBookings, setGuestBookings] = useState<GuestBookingToken[]>(readGuestBookingAccess);
   const [guestDeviceId] = useState(getGuestDeviceId);
   const [myBookings, setMyBookings] = useState<GuestBooking[]>([]);
   const [showMyBookings, setShowMyBookings] = useState(false);
@@ -1214,7 +1226,7 @@ export default function GuestApp() {
         createdAt: new Date().toISOString(),
       };
       saveGuestBooking(booking);
-      setGuestBookings(readStoredGuestBookings());
+      setGuestBookings(readGuestBookingAccess());
       setLastBookingId(result.bookingId);
       setBookingStatus(null);
       setWaiterCallStatus(null);
