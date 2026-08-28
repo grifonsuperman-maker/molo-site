@@ -183,6 +183,75 @@ test('storage merge keeps a runtime-only newest booking ahead of 100 persisted b
   );
 });
 
+test('storage refresh drops stale cached storage entries in favor of newer persisted bookings', () => {
+  const runtime = loadRuntimeModule();
+  const values = new Map([
+    ['molo:guest:device-id:v1', 'device-stored'],
+  ]);
+  const oldBookings = Array.from({ length: 100 }, (_, index) => ({
+    bookingId: `booking-old-${index}`,
+    token: `token-old-${index}`,
+  }));
+  const newBookings = Array.from({ length: 100 }, (_, index) => ({
+    bookingId: `booking-new-${index}`,
+    token: `token-new-${index}`,
+  }));
+  values.set('molo:guest:bookings:v1', JSON.stringify(oldBookings));
+
+  withWindow(
+    {
+      localStorage: {
+        getItem(key) {
+          return values.get(key) || null;
+        },
+      },
+    },
+    () => {
+      assert.equal(runtime.readGuestBrowserAccess().bookings[0].bookingId, 'booking-old-0');
+
+      values.set('molo:guest:bookings:v1', JSON.stringify(newBookings));
+      const refreshed = runtime.readGuestBrowserAccess();
+
+      assert.equal(refreshed.bookings.length, 100);
+      assert.equal(refreshed.bookings[0].bookingId, 'booking-new-0');
+      assert.equal(refreshed.bookings[99].bookingId, 'booking-new-99');
+      assert.equal(
+        refreshed.bookings.some((booking) => booking.bookingId.startsWith('booking-old-')),
+        false,
+      );
+    },
+  );
+});
+
+test('storage ignores malformed non-string booking credentials before applying the cap', () => {
+  const runtime = loadRuntimeModule();
+  const malformed = Array.from({ length: 100 }, (_, index) => ({
+    bookingId: index,
+    token: { value: index },
+  }));
+  const validBooking = { bookingId: 'booking-valid', token: 'token-valid' };
+  const values = new Map([
+    ['molo:guest:device-id:v1', 'device-stored'],
+    ['molo:guest:bookings:v1', JSON.stringify([...malformed, validBooking])],
+  ]);
+
+  withWindow(
+    {
+      localStorage: {
+        getItem(key) {
+          return values.get(key) || null;
+        },
+      },
+    },
+    () => {
+      assert.deepEqual(runtime.readGuestBrowserAccess(), {
+        guestDeviceId: 'device-stored',
+        bookings: [validBooking],
+      });
+    },
+  );
+});
+
 test('booking creation captures the returned guest token in tab memory', () => {
   const bookingsSource = fs.readFileSync(
     path.resolve(__dirname, '../src/api/bookings.ts'),
