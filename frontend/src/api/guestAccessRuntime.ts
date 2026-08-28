@@ -31,16 +31,22 @@ export function rememberGuestRuntimeAccess(
   const normalizedDeviceId = String(guestDeviceId || '').trim();
   if (normalizedDeviceId) runtimeGuestDeviceId = normalizedDeviceId;
 
-  const byBookingId = new Map(
-    runtimeBookings.map((booking) => [booking.bookingId, booking]),
-  );
+  const incomingBookings: GuestRuntimeBookingAccess[] = [];
+  const incomingBookingIds = new Set<string>();
 
   for (const value of bookings) {
     const booking = normalizeBookingAccess(value);
-    if (booking) byBookingId.set(booking.bookingId, booking);
+    if (!booking || incomingBookingIds.has(booking.bookingId)) continue;
+    incomingBookingIds.add(booking.bookingId);
+    incomingBookings.push(booking);
   }
 
-  runtimeBookings = [...byBookingId.values()].slice(-MAX_RUNTIME_BOOKINGS);
+  runtimeBookings = [
+    ...incomingBookings,
+    ...runtimeBookings.filter(
+      (booking) => !incomingBookingIds.has(booking.bookingId),
+    ),
+  ].slice(0, MAX_RUNTIME_BOOKINGS);
 }
 
 export function getGuestRuntimeAccess(): GuestRuntimeAccess {
@@ -65,8 +71,17 @@ export function readGuestBrowserAccess(): GuestRuntimeAccess {
           .map(normalizeBookingAccess)
           .filter((booking): booking is GuestRuntimeBookingAccess => Boolean(booking))
       : [];
+    const storedBookingIds = new Set(
+      storedBookings.map((booking) => booking.bookingId),
+    );
+    const runtimeOnlyBookings = runtime.bookings.filter(
+      (booking) => !storedBookingIds.has(booking.bookingId),
+    );
 
-    rememberGuestRuntimeAccess(storedDeviceId, storedBookings);
+    rememberGuestRuntimeAccess(storedDeviceId, [
+      ...runtimeOnlyBookings,
+      ...storedBookings,
+    ]);
   } catch {
     // Guest access captured in this tab remains usable when browser storage is blocked.
   }
