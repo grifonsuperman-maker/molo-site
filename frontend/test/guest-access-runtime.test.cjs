@@ -91,6 +91,30 @@ test('guest runtime access caches valid storage before storage becomes unavailab
   });
 });
 
+test('guest runtime access preserves device id when booking storage JSON is malformed', () => {
+  const runtime = loadRuntimeModule();
+  const values = new Map([
+    ['molo:guest:device-id:v1', 'device-stored'],
+    ['molo:guest:bookings:v1', '{malformed-json'],
+  ]);
+
+  withWindow(
+    {
+      localStorage: {
+        getItem(key) {
+          return values.get(key) || null;
+        },
+      },
+    },
+    () => {
+      assert.deepEqual(runtime.readGuestBrowserAccess(), {
+        guestDeviceId: 'device-stored',
+        bookings: [],
+      });
+    },
+  );
+});
+
 test('guest runtime access keeps the newest 100 bookings', () => {
   const runtime = loadRuntimeModule();
   const existing = Array.from({ length: 100 }, (_, index) => ({
