@@ -14,6 +14,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AdminAttentionService } from './admin-attention.service';
 import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { BookingsService } from './bookings.service';
+import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
 
 @Roles('owner', 'admin')
 @Controller('admin-attention')
@@ -37,19 +38,19 @@ export class AdminAttentionController {
     return this.bookings.getPendingReschedules();
   }
 
-  @Patch('reschedule/:requestId/approve')
+  @Patch('reschedules/:requestId/approve')
   @Roles('admin')
   approveReschedule(@Param('requestId') requestId: string) {
     return this.rescheduleApproval.approve(requestId);
   }
 
-  @Patch('reschedule/:requestId/reject')
+  @Patch('reschedules/:requestId/reject')
   @Roles('admin')
   rejectReschedule(
     @Param('requestId') requestId: string,
-    @Body('adminComment') adminComment?: string,
+    @Body() dto: RejectRescheduleDto,
   ) {
-    return this.bookings.rejectReschedule(requestId, { adminComment });
+    return this.bookings.rejectReschedule(requestId, dto);
   }
 
   @Patch('table-change/:requestId/approve')
