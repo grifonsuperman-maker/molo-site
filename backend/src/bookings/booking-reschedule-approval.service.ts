@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { TableEntity } from '../tables/entities/table.entity';
@@ -45,7 +50,7 @@ export class BookingRescheduleApprovalService {
         });
         if (!request) throw new NotFoundException('Запит не знайдено');
         if (request.status !== 'pending') {
-          throw new BadRequestException('Цей запит уже опрацьовано');
+          throw new ConflictException('Цей запит уже опрацьовано');
         }
 
         const booking = await bookingRepository.findOne({
@@ -136,6 +141,12 @@ export class BookingRescheduleApprovalService {
 
         booking.bookingDate = request.requestedDate;
         booking.bookingTime = requestedTime;
+        booking.guestNotification = {
+          type: 'booking_updated',
+          title: 'Перенесення підтверджено',
+          message: `Ваше бронювання перенесено на ${request.requestedDate} о ${this.timeLabel(requestedTime)}.`,
+          createdAt: new Date().toISOString(),
+        };
         await bookingRepository.save(booking);
 
         request.status = 'approved';
