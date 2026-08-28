@@ -65,12 +65,21 @@ export function readGuestBrowserAccess(): GuestRuntimeAccess {
     const storedDeviceId = String(
       storage.getItem(GUEST_DEVICE_ID_STORAGE_KEY) || '',
     ).trim();
-    const parsed = JSON.parse(storage.getItem(GUEST_BOOKINGS_STORAGE_KEY) || '[]');
-    const storedBookings = Array.isArray(parsed)
-      ? parsed
-          .map(normalizeBookingAccess)
-          .filter((booking): booking is GuestRuntimeBookingAccess => Boolean(booking))
-      : [];
+
+    rememberGuestRuntimeAccess(storedDeviceId);
+
+    let storedBookings: GuestRuntimeBookingAccess[] = [];
+    try {
+      const parsed = JSON.parse(storage.getItem(GUEST_BOOKINGS_STORAGE_KEY) || '[]');
+      storedBookings = Array.isArray(parsed)
+        ? parsed
+            .map(normalizeBookingAccess)
+            .filter((booking): booking is GuestRuntimeBookingAccess => Boolean(booking))
+        : [];
+    } catch {
+      storedBookings = [];
+    }
+
     const storedBookingIds = new Set(
       storedBookings.map((booking) => booking.bookingId),
     );
@@ -78,7 +87,7 @@ export function readGuestBrowserAccess(): GuestRuntimeAccess {
       (booking) => !storedBookingIds.has(booking.bookingId),
     );
 
-    rememberGuestRuntimeAccess(storedDeviceId, [
+    rememberGuestRuntimeAccess('', [
       ...runtimeOnlyBookings,
       ...storedBookings,
     ]);
