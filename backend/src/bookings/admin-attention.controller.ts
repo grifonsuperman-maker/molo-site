@@ -12,17 +12,42 @@ import { randomUUID } from 'crypto';
 
 import { Roles } from '../common/decorators/roles.decorator';
 import { AdminAttentionService } from './admin-attention.service';
+import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
+import { BookingsService } from './bookings.service';
+import { RejectRescheduleDto } from './dto/reject-reschedule.dto';
 
 @Roles('owner', 'admin')
 @Controller('admin-attention')
 export class AdminAttentionController {
   private readonly logger = new Logger(AdminAttentionController.name);
 
-  constructor(private readonly attention: AdminAttentionService) {}
+  constructor(
+    private readonly attention: AdminAttentionService,
+    private readonly bookings: BookingsService,
+    private readonly rescheduleApproval: BookingRescheduleApprovalService,
+  ) {}
 
   @Get()
   dashboard() {
     return this.attention.dashboard();
+  }
+
+  @Get('reschedules')
+  reschedules() {
+    return this.bookings.getPendingReschedules();
+  }
+
+  @Patch('reschedules/:requestId/approve')
+  approveReschedule(@Param('requestId') requestId: string) {
+    return this.rescheduleApproval.approve(requestId);
+  }
+
+  @Patch('reschedules/:requestId/reject')
+  rejectReschedule(
+    @Param('requestId') requestId: string,
+    @Body() dto: RejectRescheduleDto,
+  ) {
+    return this.bookings.rejectReschedule(requestId, dto);
   }
 
   @Patch('table-change/:requestId/approve')
