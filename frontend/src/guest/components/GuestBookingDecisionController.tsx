@@ -8,6 +8,8 @@ const GUEST_DEVICE_ID_STORAGE_KEY = 'molo:guest:device-id:v1';
 const TABLE_CHANGE_TITLES = new Set([
   'Новий стіл підтверджено',
   'Поточний стіл залишено',
+  'Перенесення підтверджено',
+  'Перенесення відхилено',
 ]);
 
 type StoredBookingAccess = {
