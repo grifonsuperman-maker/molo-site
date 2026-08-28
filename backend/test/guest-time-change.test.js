@@ -27,11 +27,22 @@ function createServiceHarness({ existingPendingRequest = null, status = 'approve
     durationMinutes: 120,
     checkedInAt,
   };
+  const bookingWithRelations = {
+    ...booking,
+    table: { id: 'table-1', tableNumber: '8' },
+    client: { id: 'client-1', fullName: 'Гість', phone: '+380000000000' },
+  };
   const requests = existingPendingRequest ? [existingPendingRequest] : [];
+  let relationLoadObserved = false;
 
   const bookingRepository = {
-    async findOne({ where }) {
-      return where.id === booking.id ? booking : null;
+    async findOne({ where, relations }) {
+      if (where.id !== booking.id) return null;
+      if (relations) {
+        relationLoadObserved = true;
+        return bookingWithRelations;
+      }
+      return booking;
     },
   };
   const rescheduleRepository = {
@@ -85,11 +96,23 @@ function createServiceHarness({ existingPendingRequest = null, status = 'approve
   const service = new GuestTimeChangeService(dataSource, guestBookings);
   service.kyivDate = () => '2026-08-28';
 
-  return { booking, requests, service };
+  return {
+    booking,
+    bookingWithRelations,
+    requests,
+    service,
+    relationLoadObserved: () => relationLoadObserved,
+  };
 }
 
 test('guest time change creates only a pending same-date arrival-time request', async () => {
-  const { booking, requests, service } = createServiceHarness();
+  const {
+    booking,
+    bookingWithRelations,
+    requests,
+    service,
+    relationLoadObserved,
+  } = createServiceHarness();
 
   const result = await service.request('booking-1', 'guest-token', {
     requestedDate: '2026-08-28',
@@ -103,7 +126,11 @@ test('guest time change creates only a pending same-date arrival-time request', 
   assert.equal(requests[0].status, 'pending');
   assert.equal(requests[0].requestedDate, '2026-08-28');
   assert.equal(requests[0].requestedTime, '20:15:00');
-  assert.equal(requests[0].booking, booking);
+  assert.equal(requests[0].booking, bookingWithRelations);
+  assert.equal(requests[0].booking.table.tableNumber, '8');
+  assert.equal(requests[0].booking.client.fullName, 'Гість');
+  assert.equal(requests[0].booking.client.phone, '+380000000000');
+  assert.equal(relationLoadObserved(), true);
   assert.equal(result.rescheduleRequest, requests[0]);
   assert.equal(result.booking.bookingTime, '19:00:00');
   assert.equal(result.booking.durationMinutes, 120);
