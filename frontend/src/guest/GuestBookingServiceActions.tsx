@@ -1,7 +1,8 @@
 import { BellRing, Flame } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { GuestBooking } from '../api/bookings';
+import { bookingsApi, type GuestBooking } from '../api/bookings';
+import { readGuestBrowserAccess } from '../api/guestAccessRuntime';
 import {
   hookahCallsApi,
   type GuestHookahStatus,
@@ -52,6 +53,9 @@ export default function GuestBookingServiceActions({
   const [hookahError, setHookahError] = useState<string | null>(null);
   const [waiterMessage, setWaiterMessage] = useState<string | null>(null);
   const [hookahMessage, setHookahMessage] = useState<string | null>(null);
+  const [decisionAcknowledging, setDecisionAcknowledging] = useState(false);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [dismissedDecisionKey, setDismissedDecisionKey] = useState<string | null>(null);
   const [burst, setBurst] = useState<ServiceKind | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const burstTimer = useRef<number | null>(null);
@@ -59,6 +63,24 @@ export default function GuestBookingServiceActions({
   const hookahStatusRequestId = useRef(0);
   const waiterMutationVersion = useRef(0);
   const hookahMutationVersion = useRef(0);
+
+  const decisionNotification =
+    booking.guestNotification?.type === 'reschedule_decision' &&
+    !booking.guestNotification.acknowledgedAt
+      ? booking.guestNotification
+      : null;
+  const decisionKey = decisionNotification
+    ? [
+        decisionNotification.createdAt || '',
+        decisionNotification.decision || '',
+        decisionNotification.title || '',
+        decisionNotification.message || '',
+      ].join('|')
+    : null;
+  const visibleDecisionNotification =
+    decisionNotification && decisionKey !== dismissedDecisionKey
+      ? decisionNotification
+      : null;
 
   const loadWaiterStatus = useCallback(async (silent = false) => {
     const requestId = ++waiterStatusRequestId.current;
@@ -202,6 +224,29 @@ export default function GuestBookingServiceActions({
     }, BURST_DURATION_MS);
   }
 
+  async function acknowledgeDecision() {
+    if (!visibleDecisionNotification || !decisionKey) return;
+    const token = readGuestBrowserAccess().bookings.find(
+      (item) => item.bookingId === booking.bookingId,
+    )?.token;
+
+    if (!token) {
+      setDecisionError('Не вдалося підтвердити повідомлення. Оновіть сторінку.');
+      return;
+    }
+
+    try {
+      setDecisionAcknowledging(true);
+      setDecisionError(null);
+      await bookingsApi.guestAcknowledgeNotification(booking.bookingId, token);
+      setDismissedDecisionKey(decisionKey);
+    } catch (ackError) {
+      setDecisionError(errorText(ackError));
+    } finally {
+      setDecisionAcknowledging(false);
+    }
+  }
+
   async function callWaiter() {
     if (!bookingIsToday || !waiterStatus?.canCall || waiterStatus.activeCall) {
       return;
@@ -322,6 +367,34 @@ export default function GuestBookingServiceActions({
       className="mt-4"
       aria-label="Виклик персоналу для цього бронювання"
     >
+      {visibleDecisionNotification && (
+        <div
+          className="mb-3 rounded-2xl border border-white/15 bg-white/8 p-3 text-left"
+          aria-live="polite"
+        >
+          <p className="text-sm font-black text-white">
+            {visibleDecisionNotification.decision === 'approved' ? '✅ ' : '❌ '}
+            {visibleDecisionNotification.title || 'Рішення щодо зміни часу'}
+          </p>
+          {visibleDecisionNotification.message && (
+            <p className="mt-1 text-xs leading-relaxed text-white/70">
+              {visibleDecisionNotification.message}
+            </p>
+          )}
+          {decisionError && (
+            <p className="mt-2 text-xs text-red-200">{decisionError}</p>
+          )}
+          <button
+            type="button"
+            onClick={() => void acknowledgeDecision()}
+            disabled={decisionAcknowledging}
+            className="mt-3 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-bold text-white disabled:opacity-60"
+          >
+            {decisionAcknowledging ? 'Зберігаємо…' : 'Зрозуміло'}
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <button
           type="button"

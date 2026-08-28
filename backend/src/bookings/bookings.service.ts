@@ -1047,9 +1047,22 @@ export class BookingsService {
   }
 
   async rejectReschedule(requestId: string, dto: RejectRescheduleDto) {
-    return this.reschedules.manager.transaction(async (manager) => {
-      const repository = manager.getRepository(BookingRescheduleRequest);
-      const request = await repository.findOne({
+    const result = await this.reschedules.manager.transaction(async (manager) => {
+      const requestRepository = manager.getRepository(BookingRescheduleRequest);
+      const preview = await requestRepository.findOne({
+        where: { id: requestId },
+        relations: ['booking'],
+      });
+      if (!preview?.booking?.id) throw new NotFoundException('Запит не знайдено');
+
+      const bookingRepository = manager.getRepository(Booking);
+      const lockedBooking = await bookingRepository.findOne({
+        where: { id: preview.booking.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedBooking) throw new NotFoundException('Бронювання не знайдено');
+
+      const request = await requestRepository.findOne({
         where: { id: requestId },
         lock: { mode: 'pessimistic_write' },
       });
@@ -1058,11 +1071,48 @@ export class BookingsService {
         throw new BadRequestException('Цей запит уже опрацьовано');
       }
 
+      const booking = await bookingRepository.findOne({
+        where: { id: lockedBooking.id },
+        relations: ['client'],
+      });
+      if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
+      const adminComment = String(dto.adminComment || '').trim() || null;
+      const currentTimeLabel = this.formatTimeLabel(booking.bookingTime);
+      booking.guestNotification = {
+        type: 'reschedule_decision',
+        decision: 'rejected',
+        title: 'Зміну часу не підтверджено',
+        message: adminComment
+          ? `Бронювання залишається на ${currentTimeLabel}. Причина: ${adminComment}`
+          : `Бронювання залишається на ${currentTimeLabel}.`,
+        reason: adminComment || undefined,
+        createdAt: new Date().toISOString(),
+      };
+      await bookingRepository.save(booking);
+
       request.status = 'rejected';
-      request.adminComment = dto.adminComment || null;
+      request.adminComment = adminComment;
       request.resolvedAt = new Date();
-      await repository.save(request);
-      return { message: 'Перенесення відхилено' };
+      await requestRepository.save(request);
+
+      return {
+        message: 'Перенесення відхилено',
+        booking,
+        adminComment,
+      };
     });
+
+    await this.safeNotify(() =>
+      this.notifications.notifyGuestRescheduleDecision({
+        telegramId: result.booking.client?.telegramId || null,
+        decision: 'rejected',
+        bookingDate: result.booking.bookingDate,
+        bookingTime: result.booking.bookingTime,
+        adminComment: result.adminComment,
+      }),
+    );
+
+    return { message: result.message };
   }
 }
