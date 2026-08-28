@@ -102,6 +102,22 @@ test('booking creation captures the returned guest token in tab memory', () => {
   assert.match(bookingsSource, /token: result\.guestAccessToken/);
 });
 
+test('GuestApp keeps per-booking tokens from shared guest runtime access', () => {
+  const guestAppSource = fs.readFileSync(
+    path.resolve(__dirname, '../src/guest/GuestApp.tsx'),
+    'utf8',
+  );
+
+  assert.match(guestAppSource, /readGuestBrowserAccess/);
+  assert.match(guestAppSource, /function readGuestBookingAccess\(\)/);
+  assert.match(guestAppSource, /readGuestBrowserAccess\(\)\.bookings/);
+  assert.match(
+    guestAppSource,
+    /useState<GuestBookingToken\[\]>\(readGuestBookingAccess\)/,
+  );
+  assert.match(guestAppSource, /setGuestBookings\(readGuestBookingAccess\(\)\)/);
+});
+
 test('booking decision polling uses safe shared guest access without direct storage reads', () => {
   const decisionSource = fs.readFileSync(
     path.resolve(__dirname, '../src/guest/components/GuestBookingDecisionController.tsx'),
