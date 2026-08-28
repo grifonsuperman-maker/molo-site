@@ -1,4 +1,5 @@
 import { api } from './client';
+import { rememberGuestRuntimeAccess } from './guestAccessRuntime';
 import type { Booking } from './types';
 
 export type CreateBookingPayload = {
@@ -201,8 +202,8 @@ function buildTableStatusesQuery(params: {
 }
 
 export const bookingsApi = {
-  create: (payload: CreateBookingPayload) =>
-    api.post<{
+  create: async (payload: CreateBookingPayload) => {
+    const result = await api.post<{
       message: string;
       bookingId: string;
       guestAccessToken: string;
@@ -212,7 +213,13 @@ export const bookingsApi = {
       availableFrom: string | null;
       durationMinutes: number;
       cleanupMinutes: number;
-    }>('/bookings', payload),
+    }>('/bookings', payload);
+
+    rememberGuestRuntimeAccess(payload.guestDeviceId, [
+      { bookingId: result.bookingId, token: result.guestAccessToken },
+    ]);
+    return result;
+  },
 
   availability: (params: {
     tableId: string;

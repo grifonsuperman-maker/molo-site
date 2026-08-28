@@ -1,49 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { bookingsApi, type GuestBooking } from '../../api/bookings';
+import { readGuestBrowserAccess } from '../../api/guestAccessRuntime';
 
 const POLLING_MS = 15_000;
-const GUEST_BOOKINGS_STORAGE_KEY = 'molo:guest:bookings:v1';
-const GUEST_DEVICE_ID_STORAGE_KEY = 'molo:guest:device-id:v1';
 const TABLE_CHANGE_TITLES = new Set([
   'Новий стіл підтверджено',
   'Поточний стіл залишено',
 ]);
-
-type StoredBookingAccess = {
-  bookingId: string;
-  token: string;
-};
 
 type Decision = {
   booking: GuestBooking;
   token: string | null;
 };
 
-function readStoredAccess(): StoredBookingAccess[] {
-  try {
-    const value = JSON.parse(window.localStorage.getItem(GUEST_BOOKINGS_STORAGE_KEY) || '[]');
-    if (!Array.isArray(value)) return [];
-
-    return value.filter(
-      (item): item is StoredBookingAccess =>
-        typeof item?.bookingId === 'string' &&
-        Boolean(item.bookingId) &&
-        typeof item?.token === 'string' &&
-        Boolean(item.token),
-    );
-  } catch {
-    return [];
-  }
-}
-
 export default function GuestBookingDecisionController() {
   const [decision, setDecision] = useState<Decision | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const access = readStoredAccess();
-    const guestDeviceId = window.localStorage.getItem(GUEST_DEVICE_ID_STORAGE_KEY) || '';
+    const { guestDeviceId, bookings: access } = readGuestBrowserAccess();
     if (!guestDeviceId && access.length === 0) {
       setDecision(null);
       return;
