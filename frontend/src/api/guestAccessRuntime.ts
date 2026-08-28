@@ -14,14 +14,35 @@ const MAX_RUNTIME_BOOKINGS = 100;
 
 let runtimeGuestDeviceId = '';
 let runtimeBookings: GuestRuntimeBookingAccess[] = [];
+const runtimeOnlyBookingIds = new Set<string>();
 
 function normalizeBookingAccess(value: unknown): GuestRuntimeBookingAccess | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as { bookingId?: unknown; token?: unknown };
-  const bookingId = String(candidate.bookingId || '').trim();
-  const token = String(candidate.token || '').trim();
+  if (
+    typeof candidate.bookingId !== 'string' ||
+    typeof candidate.token !== 'string'
+  ) {
+    return null;
+  }
+
+  const bookingId = candidate.bookingId.trim();
+  const token = candidate.token.trim();
   if (!bookingId || !token) return null;
   return { bookingId, token };
+}
+
+function capRuntimeBookings(bookings: GuestRuntimeBookingAccess[]) {
+  runtimeBookings = bookings.slice(0, MAX_RUNTIME_BOOKINGS);
+  const retainedBookingIds = new Set(
+    runtimeBookings.map((booking) => booking.bookingId),
+  );
+
+  for (const bookingId of runtimeOnlyBookingIds) {
+    if (!retainedBookingIds.has(bookingId)) {
+      runtimeOnlyBookingIds.delete(bookingId);
+    }
+  }
 }
 
 export function rememberGuestRuntimeAccess(
@@ -38,15 +59,16 @@ export function rememberGuestRuntimeAccess(
     const booking = normalizeBookingAccess(value);
     if (!booking || incomingBookingIds.has(booking.bookingId)) continue;
     incomingBookingIds.add(booking.bookingId);
+    runtimeOnlyBookingIds.add(booking.bookingId);
     incomingBookings.push(booking);
   }
 
-  runtimeBookings = [
+  capRuntimeBookings([
     ...incomingBookings,
     ...runtimeBookings.filter(
       (booking) => !incomingBookingIds.has(booking.bookingId),
     ),
-  ].slice(0, MAX_RUNTIME_BOOKINGS);
+  ]);
 }
 
 export function getGuestRuntimeAccess(): GuestRuntimeAccess {
@@ -66,7 +88,7 @@ export function readGuestBrowserAccess(): GuestRuntimeAccess {
       storage.getItem(GUEST_DEVICE_ID_STORAGE_KEY) || '',
     ).trim();
 
-    rememberGuestRuntimeAccess(storedDeviceId);
+    if (storedDeviceId) runtimeGuestDeviceId = storedDeviceId;
 
     let storedBookings: GuestRuntimeBookingAccess[] = [];
     try {
@@ -83,13 +105,25 @@ export function readGuestBrowserAccess(): GuestRuntimeAccess {
     const storedBookingIds = new Set(
       storedBookings.map((booking) => booking.bookingId),
     );
+
+    for (const bookingId of storedBookingIds) {
+      runtimeOnlyBookingIds.delete(bookingId);
+    }
+
     const runtimeOnlyBookings = runtime.bookings.filter(
-      (booking) => !storedBookingIds.has(booking.bookingId),
+      (booking) =>
+        runtimeOnlyBookingIds.has(booking.bookingId) &&
+        !storedBookingIds.has(booking.bookingId),
+    );
+    const runtimeOnlyIds = new Set(
+      runtimeOnlyBookings.map((booking) => booking.bookingId),
     );
 
-    rememberGuestRuntimeAccess('', [
+    capRuntimeBookings([
       ...runtimeOnlyBookings,
-      ...storedBookings,
+      ...storedBookings.filter(
+        (booking) => !runtimeOnlyIds.has(booking.bookingId),
+      ),
     ]);
   } catch {
     // Guest access captured in this tab remains usable when browser storage is blocked.
