@@ -91,6 +91,74 @@ test('guest runtime access caches valid storage before storage becomes unavailab
   });
 });
 
+test('guest runtime access keeps the newest 100 bookings', () => {
+  const runtime = loadRuntimeModule();
+  const existing = Array.from({ length: 100 }, (_, index) => ({
+    bookingId: `booking-${index}`,
+    token: `token-${index}`,
+  }));
+
+  runtime.rememberGuestRuntimeAccess('device-1', existing);
+  runtime.rememberGuestRuntimeAccess('device-1', [
+    { bookingId: 'booking-new', token: 'token-new' },
+  ]);
+
+  const access = runtime.getGuestRuntimeAccess();
+  assert.equal(access.bookings.length, 100);
+  assert.deepEqual(access.bookings[0], {
+    bookingId: 'booking-new',
+    token: 'token-new',
+  });
+  assert.equal(access.bookings[1].bookingId, 'booking-0');
+  assert.equal(access.bookings[99].bookingId, 'booking-98');
+  assert.equal(
+    access.bookings.some((booking) => booking.bookingId === 'booking-99'),
+    false,
+  );
+});
+
+test('storage merge keeps a runtime-only newest booking ahead of 100 persisted bookings', () => {
+  const runtime = loadRuntimeModule();
+  const storedBookings = Array.from({ length: 100 }, (_, index) => ({
+    bookingId: `booking-stored-${index}`,
+    token: `token-stored-${index}`,
+  }));
+  runtime.rememberGuestRuntimeAccess('device-runtime', [
+    { bookingId: 'booking-runtime-new', token: 'token-runtime-new' },
+  ]);
+
+  const values = new Map([
+    ['molo:guest:device-id:v1', 'device-stored'],
+    ['molo:guest:bookings:v1', JSON.stringify(storedBookings)],
+  ]);
+
+  withWindow(
+    {
+      localStorage: {
+        getItem(key) {
+          return values.get(key) || null;
+        },
+      },
+    },
+    () => {
+      const access = runtime.readGuestBrowserAccess();
+      assert.equal(access.bookings.length, 100);
+      assert.deepEqual(access.bookings[0], {
+        bookingId: 'booking-runtime-new',
+        token: 'token-runtime-new',
+      });
+      assert.equal(access.bookings[1].bookingId, 'booking-stored-0');
+      assert.equal(access.bookings[99].bookingId, 'booking-stored-98');
+      assert.equal(
+        access.bookings.some(
+          (booking) => booking.bookingId === 'booking-stored-99',
+        ),
+        false,
+      );
+    },
+  );
+});
+
 test('booking creation captures the returned guest token in tab memory', () => {
   const bookingsSource = fs.readFileSync(
     path.resolve(__dirname, '../src/api/bookings.ts'),
