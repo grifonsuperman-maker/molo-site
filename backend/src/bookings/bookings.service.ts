@@ -1047,13 +1047,22 @@ export class BookingsService {
   }
 
   async rejectReschedule(requestId: string, dto: RejectRescheduleDto) {
-    const request = await this.reschedules.findOne({ where: { id: requestId } });
-    if (!request) throw new NotFoundException('Запит не знайдено');
+    return this.reschedules.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(BookingRescheduleRequest);
+      const request = await repository.findOne({
+        where: { id: requestId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!request) throw new NotFoundException('Запит не знайдено');
+      if (request.status !== 'pending') {
+        throw new BadRequestException('Цей запит уже опрацьовано');
+      }
 
-    request.status = 'rejected';
-    request.adminComment = dto.adminComment || null;
-    request.resolvedAt = new Date();
-    await this.reschedules.save(request);
-    return { message: 'Перенесення відхилено' };
+      request.status = 'rejected';
+      request.adminComment = dto.adminComment || null;
+      request.resolvedAt = new Date();
+      await repository.save(request);
+      return { message: 'Перенесення відхилено' };
+    });
   }
 }
