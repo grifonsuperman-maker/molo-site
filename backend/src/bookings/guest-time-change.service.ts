@@ -57,9 +57,17 @@ export class GuestTimeChangeService {
         );
       }
 
+      // Lock уже утримується на базовому рядку booking. Відношення дочитуємо
+      // окремо, щоб Telegram-сповіщення отримало стіл та дані гостя без JOIN-lock.
+      const bookingWithRelations = await bookingRepository.findOne({
+        where: { id: booking.id },
+        relations: ['table', 'client'],
+      });
+      if (!bookingWithRelations) throw new NotFoundException('Бронювання не знайдено');
+
       return rescheduleRepository.save(
         rescheduleRepository.create({
-          booking,
+          booking: bookingWithRelations,
           requestedDate: booking.bookingDate,
           requestedTime,
           status: 'pending',
