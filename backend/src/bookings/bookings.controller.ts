@@ -15,8 +15,10 @@ import { GuestCancelBookingDto } from './dto/guest-cancel-booking.dto';
 import { GuestChangeTableDto } from './dto/guest-change-table.dto';
 import { GuestLatenessDto } from './dto/guest-lateness.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
+import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 import { GuestBookingsService } from './guest-bookings.service';
 import { GuestTelegramLinkService } from './guest-telegram-link.service';
+import { GuestTimeChangeService } from './guest-time-change.service';
 
 @Controller('bookings')
 export class BookingsController {
@@ -28,7 +30,16 @@ export class BookingsController {
     private readonly availabilityBlocks: AvailabilityBlocksService,
     private readonly adminAttention: AdminAttentionService,
     private readonly notifications: NotificationsService,
+    private readonly guestTimeChange: GuestTimeChangeService,
   ) {}
+
+  private withGuestArrivalTimeCapabilities<T extends { status?: string; checkedInAt?: unknown }>(booking: T) {
+    return {
+      ...booking,
+      canGuestChangeTime: booking.status === 'approved' && !booking.checkedInAt,
+      canReportLateness: false,
+    };
+  }
 
   @Public()
   @Post()
@@ -55,8 +66,9 @@ export class BookingsController {
 
   @Public()
   @Post('guest/list')
-  guestList(@Body() dto: GuestBookingListDto) {
-    return this.guestService.list(dto);
+  async guestList(@Body() dto: GuestBookingListDto) {
+    const bookings = await this.guestService.list(dto);
+    return bookings.map((booking) => this.withGuestArrivalTimeCapabilities(booking));
   }
 
   @Patch(':id/guest/telegram')
@@ -101,11 +113,12 @@ export class BookingsController {
 
   @Public()
   @Get(':id/guest')
-  guestBooking(
+  async guestBooking(
     @Param('id') id: string,
     @Headers('x-guest-booking-token') token: string,
   ) {
-    return this.guestService.get(id, token);
+    const booking = await this.guestService.get(id, token);
+    return this.withGuestArrivalTimeCapabilities(booking);
   }
 
   @Public()
@@ -136,6 +149,28 @@ export class BookingsController {
     return {
       ...result,
       message: 'Запит на перенесення надіслано адміністратору',
+    };
+  }
+
+  @Public()
+  @Patch(':id/guest/change-time')
+  async guestChangeTime(
+    @Param('id') id: string,
+    @Headers('x-guest-booking-token') token: string,
+    @Body() dto: RequestRescheduleDto,
+  ) {
+    const { rescheduleRequest, booking, ...result } = await this.guestTimeChange.request(id, token, dto);
+
+    try {
+      await this.notifications.notifyRescheduleRequest(rescheduleRequest);
+    } catch (error) {
+      console.error('Telegram guest time-change reschedule notification failed', error);
+    }
+
+    return {
+      ...result,
+      booking: this.withGuestArrivalTimeCapabilities(booking),
+      message: 'Запит на зміну часу надіслано адміністратору',
     };
   }
 
