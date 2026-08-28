@@ -30,6 +30,7 @@ import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
 import { GuestReviewsController } from './guest-reviews.controller';
 import { GuestTelegramLinkService } from './guest-telegram-link.service';
+import { GuestTimeChangeService } from './guest-time-change.service';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { GuestTelegramLinkService } from './guest-telegram-link.service';
   providers: [
     BookingsService,
     GuestBookingsService,
+    GuestTimeChangeService,
     GuestTelegramLinkService,
     BookingExpirationService,
     BookingRescheduleApprovalService,
