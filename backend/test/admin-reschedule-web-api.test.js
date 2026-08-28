@@ -45,18 +45,11 @@ test('admin reschedule rejection delegates to the existing rejection service', a
     },
   };
   const controller = new AdminAttentionController({}, bookings, {});
+  const payload = { adminComment: 'Час уже зайнятий' };
 
-  const result = await controller.rejectReschedule(
-    'reschedule-1',
-    'Час уже зайнятий',
-  );
+  const result = await controller.rejectReschedule('reschedule-1', payload);
 
-  assert.deepEqual(calls, [
-    {
-      requestId: 'reschedule-1',
-      payload: { adminComment: 'Час уже зайнятий' },
-    },
-  ]);
+  assert.deepEqual(calls, [{ requestId: 'reschedule-1', payload }]);
   assert.deepEqual(result, { message: 'Перенесення відхилено' });
 });
 
