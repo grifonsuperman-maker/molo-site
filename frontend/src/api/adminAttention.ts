@@ -12,6 +12,17 @@ export type AdminTableChangeRequest = {
   booking: Booking;
 };
 
+export type AdminRescheduleRequest = {
+  id: string;
+  requestedDate: string;
+  requestedTime: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
+  adminComment: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  booking: Booking;
+};
+
 export type AdminGuestReview = {
   id: string;
   text: string;
@@ -36,6 +47,11 @@ function encode(value: string) {
 
 export const adminAttentionApi = {
   get: () => api.get<AdminAttentionDashboard>('/admin-attention'),
+  getReschedules: () => api.get<AdminRescheduleRequest[]>('/admin-attention/reschedules'),
+  approveReschedule: (requestId: string) =>
+    api.patch<ActionResponse>(`/admin-attention/reschedules/${encode(requestId)}/approve`, {}),
+  rejectReschedule: (requestId: string, adminComment?: string) =>
+    api.patch<ActionResponse>(`/admin-attention/reschedules/${encode(requestId)}/reject`, { adminComment }),
   approveTableChange: (requestId: string, tableId: string) =>
     api.patch<ActionResponse>(`/admin-attention/table-change/${encode(requestId)}/approve`, { tableId }),
   rejectTableChange: (requestId: string, adminComment?: string) =>
