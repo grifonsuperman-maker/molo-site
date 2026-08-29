@@ -22,12 +22,15 @@ jobs:
         with:
           node-version: 24
       - name: Apply scoped review patch
-        run: python3 scripts/apply_guest_visit_review_fixes.py
+        run: |
+          python3 scripts/apply_guest_visit_review_fixes.py
+          python3 scripts/apply_guest_visit_test_fixups.py
       - name: Remove temporary patch files
         run: |
           rm .github/workflows/guest-visit-review-fixes.yml
           rm .github/workflows/guest-visit-review-fixes-run.yml
           rm scripts/apply_guest_visit_review_fixes.py
+          rm scripts/apply_guest_visit_test_fixups.py
       - name: Install backend dependencies
         run: npm --prefix backend ci
       - name: Install frontend dependencies
@@ -53,9 +56,11 @@ jobs:
             backend/src/bookings/guest-telegram-link.service.ts \
             backend/test/guest-visit-stats.test.js \
             backend/test/guest-telegram-completed-reassign.test.js \
+            backend/test/booking-completion-actor.test.js \
             .github/workflows/guest-visit-review-fixes.yml \
             .github/workflows/guest-visit-review-fixes-run.yml \
-            scripts/apply_guest_visit_review_fixes.py
+            scripts/apply_guest_visit_review_fixes.py \
+            scripts/apply_guest_visit_test_fixups.py
           git diff --cached --check
           git commit -m "fix: make guest visit stats consistent"
           git show --check HEAD
