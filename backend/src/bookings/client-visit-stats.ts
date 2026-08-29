@@ -3,6 +3,7 @@ import { EntityManager } from 'typeorm';
 import { Client } from '../clients/entities/client.entity';
 import { Booking } from './entities/booking.entity';
 
+// This helper runs inside a transaction; the client row lock serializes derived visit counters.
 export async function refreshClientVisitStats(
   manager: EntityManager,
   clientId: string,
