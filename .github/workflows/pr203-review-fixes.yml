@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Apply scoped review patch
         run: python3 scripts/pr203_review_fix_v2.py
@@ -59,4 +59,4 @@ jobs:
           git show --check HEAD
           git push origin HEAD:fix/guest-visit-identity
 
-# retry after generated newline escaping fix
+# retry after test fixture fixes
