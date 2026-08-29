@@ -108,7 +108,10 @@ export class ZonesService implements OnModuleInit {
   }
 
   async findAll() {
-    return this.ensureDefaultLocations();
+    return this.zones.find({
+      relations: ['tables'],
+      order: { createdAt: 'ASC' },
+    });
   }
 
   private async restaurant() {
