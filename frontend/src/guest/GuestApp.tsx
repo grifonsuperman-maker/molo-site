@@ -1277,6 +1277,10 @@ export default function GuestApp() {
     );
   }
 
+  const hasGuestTopBanner = Boolean(
+    activeMyBookings.length > 0 || unreadNotificationBookings.length > 0 || completedReviewAccess,
+  );
+
   return (
     <div
       className={`molo-mode-${siteMode} min-h-[100dvh] bg-black text-white`}
@@ -1387,7 +1391,7 @@ export default function GuestApp() {
       {siteMode === 'holiday' && <div className="molo-holiday-lights" aria-hidden="true" />}
 
       {step !== 'home' && (
-        <div className="fixed left-4 top-20 z-[100]">
+        <div className={`fixed left-4 z-[100] ${hasGuestTopBanner ? 'top-52' : 'top-20'}`}>
           <button
             type="button"
             onClick={goBack}
@@ -1399,7 +1403,7 @@ export default function GuestApp() {
         </div>
       )}
 
-      {(activeMyBookings.length > 0 || unreadNotificationBookings.length > 0 || completedReviewAccess) && (
+      {hasGuestTopBanner && (
         <aside
           className={`fixed left-1/2 z-[95] w-[calc(100%-24px)] max-w-md -translate-x-1/2 ${
             step === 'home' ? 'top-3' : 'top-16'

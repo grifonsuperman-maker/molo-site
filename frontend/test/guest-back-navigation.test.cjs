@@ -9,7 +9,10 @@ const source = fs.readFileSync(
 );
 
 test('guest back button is lower, clickable, and keeps the existing goBack action', () => {
-  assert.match(source, /fixed left-4 top-20 z-\[100\]/);
+  assert.match(source, /const hasGuestTopBanner = Boolean/);
+  assert.ok(source.includes(`hasGuestTopBanner ? 'top-52' : 'top-20'`));
+  assert.match(source, /\{hasGuestTopBanner && \(/);
+  assert.doesNotMatch(source, /fixed left-4 top-20 z-\[100\]/);
   assert.match(source, /type="button"\s+onClick=\{goBack\}/);
   assert.doesNotMatch(source, /fixed left-4 top-4 z-\[80\]/);
 });
