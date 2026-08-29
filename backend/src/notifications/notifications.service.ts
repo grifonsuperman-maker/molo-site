@@ -14,6 +14,14 @@ type GuestReportedLatenessNotification = {
   latenessMinutes?: number | null;
 };
 
+type GuestRescheduleDecisionNotification = {
+  telegramId?: string | null;
+  decision: 'approved' | 'rejected';
+  bookingDate: string;
+  bookingTime: string;
+  adminComment?: string | null;
+};
+
 export type NotificationDeliverySummary = {
   attempted: number;
   delivered: number;
@@ -71,6 +79,13 @@ export class NotificationsService {
     if (!time) return '-';
     const [hours = '00', minutes = '00'] = String(time).split(':');
     return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
+  }
+
+  private escapeHtml(value: string) {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 
   private latenessLabel(hoursValue: number | null | undefined, minutesValue: number | null | undefined) {
@@ -226,6 +241,35 @@ export class NotificationsService {
     };
 
     await this.sendToRoles(['admin'], text, replyMarkup);
+  }
+
+  async notifyGuestRescheduleDecision(
+    notification: GuestRescheduleDecisionNotification,
+  ): Promise<NotificationDeliverySummary> {
+    const telegramId = String(notification.telegramId || '').trim();
+    if (!telegramId) {
+      return { attempted: 0, delivered: 0, failed: 0 };
+    }
+
+    const approved = notification.decision === 'approved';
+    const adminComment = String(notification.adminComment || '').trim();
+    const escapedAdminComment = this.escapeHtml(adminComment);
+    const text = [
+      approved
+        ? '✅ <b>Зміну часу бронювання підтверджено</b>'
+        : '❌ <b>Зміну часу бронювання не підтверджено</b>',
+      '',
+      approved
+        ? `📅 Нова дата: <b>${notification.bookingDate}</b>`
+        : `📅 Бронювання: <b>${notification.bookingDate}</b>`,
+      approved
+        ? `🕒 Новий час: <b>${this.timeLabel(notification.bookingTime)}</b>`
+        : `🕒 Час залишається: <b>${this.timeLabel(notification.bookingTime)}</b>`,
+      !approved && adminComment ? `💬 Причина: ${escapedAdminComment}` : null,
+    ].filter(Boolean).join('\n');
+
+    await this.telegramService.sendMessage(telegramId, text);
+    return { attempted: 1, delivered: 1, failed: 0 };
   }
 
   async notifyGuestReportedLateness(booking: GuestReportedLatenessNotification) {

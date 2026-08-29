@@ -133,8 +133,11 @@ export type GuestBooking = {
   canReportLateness?: boolean;
   canLeaveReview?: boolean;
   guestNotification?: {
+    type?: string;
+    decision?: 'approved' | 'rejected';
     title?: string;
     message?: string;
+    createdAt?: string;
     acknowledgedAt?: string | null;
   } | null;
 };

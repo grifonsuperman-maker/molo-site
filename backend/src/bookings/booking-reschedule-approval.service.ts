@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
+import { NotificationsService } from '../notifications/notifications.service';
 import { TableEntity } from '../tables/entities/table.entity';
 import { AvailabilityBlock } from './entities/availability-block.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
@@ -12,11 +13,14 @@ const CLEANUP_MINUTES = 15;
 
 @Injectable()
 export class BookingRescheduleApprovalService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async approve(requestId: string) {
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const result = await this.dataSource.transaction(async (manager) => {
         const requestRepository = manager.getRepository(BookingRescheduleRequest);
         const preview = await requestRepository.findOne({
           where: { id: requestId },
@@ -50,7 +54,7 @@ export class BookingRescheduleApprovalService {
 
         const booking = await bookingRepository.findOne({
           where: { id: lockedBooking.id },
-          relations: ['table'],
+          relations: ['table', 'client'],
         });
         if (!booking) throw new NotFoundException('Бронювання не знайдено');
         if (!booking.table?.id) {
@@ -136,14 +140,27 @@ export class BookingRescheduleApprovalService {
 
         booking.bookingDate = request.requestedDate;
         booking.bookingTime = requestedTime;
+        booking.guestNotification = {
+          type: 'reschedule_decision',
+          decision: 'approved',
+          title: 'Зміну часу підтверджено',
+          message: `Нове бронювання: ${request.requestedDate} о ${this.timeLabel(requestedTime)}.`,
+          createdAt: new Date().toISOString(),
+        };
         await bookingRepository.save(booking);
 
         request.status = 'approved';
         request.resolvedAt = new Date();
         await requestRepository.save(request);
 
-        return { message: 'Перенесення підтверджено' };
+        return { message: 'Перенесення підтверджено', booking };
       });
+
+      await this.notifyGuestDecision(result.booking).catch((error) => {
+        console.error('Guest reschedule approval notification failed', error);
+      });
+
+      return { message: result.message };
     } catch (error: any) {
       if (error?.code === '23505') {
         throw new BadRequestException(
@@ -152,6 +169,15 @@ export class BookingRescheduleApprovalService {
       }
       throw error;
     }
+  }
+
+  private async notifyGuestDecision(booking: Booking) {
+    await this.notifications.notifyGuestRescheduleDecision({
+      telegramId: booking.client?.telegramId || null,
+      decision: 'approved',
+      bookingDate: booking.bookingDate,
+      bookingTime: booking.bookingTime,
+    });
   }
 
   private async lockSlot(

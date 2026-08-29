@@ -17,10 +17,11 @@ export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 
 export type BookingSource = 'mini_app' | 'phone' | 'admin_manual';
 
 export interface GuestBookingNotification {
-  type: 'manual_change' | 'no_show' | 'lateness_overdue' | 'booking_updated';
+  type: 'manual_change' | 'no_show' | 'lateness_overdue' | 'booking_updated' | 'reschedule_decision';
   title: string;
   message?: string;
   reason?: string;
+  decision?: 'approved' | 'rejected';
   previousTableNumber?: string | null;
   newTableNumber?: string | null;
   createdAt: string;
