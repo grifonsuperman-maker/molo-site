@@ -1,0 +1,878 @@
+name: Apply waiter table state fixes
+
+on:
+  push:
+    branches:
+      - fix/waiter-table-state-sync
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/waiter-table-state-sync
+          fetch-depth: 0
+
+      - name: Apply fixes
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          waiter_service = r'''import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+          import { InjectRepository } from '@nestjs/typeorm';
+          import { IsNull, Not, Repository } from 'typeorm';
+
+          import { Booking } from '../bookings/entities/booking.entity';
+          import { BookingHistory } from '../bookings/entities/booking-history.entity';
+
+          type WaiterCallStatus = 'new' | 'accepted' | 'closed';
+
+          export type WaiterCall = {
+            id: string;
+            bookingId: string;
+            tableId: string | null;
+            tableNumber: string | null;
+            clientName: string | null;
+            waiterId: string | null;
+            waiterName: string | null;
+            status: WaiterCallStatus;
+            createdAt: string;
+            acceptedAt: string | null;
+            closedAt: string | null;
+          };
+
+          type WaiterAssignment = {
+            bookingId: string;
+            tableId: string | null;
+            tableNumber: string | null;
+            waiterId: string;
+            waiterName: string;
+            assignedAt: string;
+          };
+
+          @Injectable()
+          export class WaiterCallsService {
+            private calls: WaiterCall[] = [];
+            private assignments: WaiterAssignment[] = [];
+
+            constructor(
+              @InjectRepository(Booking)
+              private readonly bookings: Repository<Booking>,
+              @InjectRepository(BookingHistory)
+              private readonly histories: Repository<BookingHistory>,
+            ) {}
+
+            private now() {
+              return new Date().toISOString();
+            }
+
+            private makeId() {
+              return `call_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+            }
+
+            private async getBooking(bookingId: string) {
+              const booking = await this.bookings.findOne({
+                where: { id: bookingId },
+                relations: ['table', 'client'],
+              });
+
+              if (!booking) throw new NotFoundException('Бронювання не знайдено');
+              return booking;
+            }
+
+            private findMemoryAssignment(booking: Booking) {
+              const tableId = booking.table?.id || null;
+              const tableNumber = booking.table?.tableNumber || null;
+
+              return [...this.assignments]
+                .reverse()
+                .find((assignment) => {
+                  if (assignment.bookingId === booking.id) return true;
+                  if (tableId && assignment.tableId === tableId) return true;
+                  if (tableNumber && assignment.tableNumber === tableNumber) return true;
+                  return false;
+                }) || null;
+            }
+
+            private async findPersistedAssignment(booking: Booking): Promise<WaiterAssignment | null> {
+              const history = await this.histories
+                .createQueryBuilder('history')
+                .leftJoin('history.booking', 'booking')
+                .where('booking.id = :bookingId', { bookingId: booking.id })
+                .andWhere('history.action IN (:...actions)', {
+                  actions: ['waiter_assigned', 'booking_checked_in'],
+                })
+                .andWhere('history.actorStaffId IS NOT NULL')
+                .orderBy('history.createdAt', 'DESC')
+                .getOne();
+
+              if (!history?.actorStaffId) return null;
+
+              return {
+                bookingId: booking.id,
+                tableId: booking.table?.id || null,
+                tableNumber: booking.table?.tableNumber || null,
+                waiterId: history.actorStaffId,
+                waiterName: history.actorName || 'Офіціант',
+                assignedAt: new Date(history.createdAt).toISOString(),
+              };
+            }
+
+            private async findAssignment(booking: Booking) {
+              return this.findMemoryAssignment(booking) || this.findPersistedAssignment(booking);
+            }
+
+            private rememberAssignment(
+              booking: Booking,
+              waiterId: string,
+              waiterName: string,
+              assignedAt = this.now(),
+            ) {
+              const assignment: WaiterAssignment = {
+                bookingId: booking.id,
+                tableId: booking.table?.id || null,
+                tableNumber: booking.table?.tableNumber || null,
+                waiterId,
+                waiterName: waiterName || 'Офіціант',
+                assignedAt,
+              };
+
+              this.assignments = this.assignments.filter(
+                (item) =>
+                  item.bookingId !== assignment.bookingId &&
+                  (!assignment.tableId || item.tableId !== assignment.tableId) &&
+                  (!assignment.tableNumber || item.tableNumber !== assignment.tableNumber),
+              );
+              this.assignments.push(assignment);
+              return assignment;
+            }
+
+            private async persistAssignment(booking: Booking, assignment: WaiterAssignment) {
+              await this.histories.save(
+                this.histories.create({
+                  booking,
+                  action: 'waiter_assigned',
+                  actorRole: 'waiter',
+                  actorStaffId: assignment.waiterId,
+                  actorName: assignment.waiterName,
+                  previousData: null,
+                  newData: {
+                    tableId: assignment.tableId,
+                    tableNumber: assignment.tableNumber,
+                    assignedAt: assignment.assignedAt,
+                  },
+                  reason: null,
+                  isManualMode: true,
+                }),
+              );
+            }
+
+            async assign(dto: {
+              bookingId: string;
+              tableId?: string | null;
+              tableNumber?: string | null;
+              waiterId: string;
+              waiterName: string;
+            }) {
+              if (!dto.bookingId) throw new BadRequestException('bookingId обовʼязковий');
+              if (!dto.waiterId) throw new BadRequestException('waiterId обовʼязковий');
+
+              const booking = await this.getBooking(dto.bookingId);
+              const assignment = this.rememberAssignment(
+                {
+                  ...booking,
+                  table: booking.table
+                    ? {
+                        ...booking.table,
+                        id: dto.tableId || booking.table.id,
+                        tableNumber: dto.tableNumber || booking.table.tableNumber,
+                      }
+                    : booking.table,
+                },
+                dto.waiterId,
+                dto.waiterName,
+              );
+              await this.persistAssignment(booking, assignment);
+
+              return {
+                message: 'Офіціанта закріплено за столом',
+                assignment,
+              };
+            }
+
+            async guestStatus(bookingId: string) {
+              const booking = await this.getBooking(bookingId);
+              const tableStatus = booking.table?.status || null;
+              const canCall = booking.status === 'approved' && tableStatus === 'occupied';
+
+              const activeCall =
+                this.calls.find(
+                  (call) => call.bookingId === booking.id && call.status !== 'closed',
+                ) || null;
+
+              const assignment = await this.findAssignment(booking);
+
+              return {
+                bookingId: booking.id,
+                tableNumber: booking.table?.tableNumber || null,
+                bookingStatus: booking.status,
+                tableStatus,
+                canCall,
+                waiterAssigned: Boolean(assignment),
+                waiterName: assignment?.waiterName || null,
+                activeCall,
+              };
+            }
+
+            async createFromGuest(dto: { bookingId: string }) {
+              if (!dto.bookingId) throw new BadRequestException('bookingId обовʼязковий');
+
+              const booking = await this.getBooking(dto.bookingId);
+              const status = await this.guestStatus(booking.id);
+
+              if (!status.canCall) {
+                throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
+              }
+
+              const existing = this.calls.find(
+                (call) => call.bookingId === booking.id && call.status !== 'closed',
+              );
+
+              if (existing) {
+                return {
+                  message: 'Виклик вже відправлено',
+                  call: existing,
+                };
+              }
+
+              const assignment = await this.findAssignment(booking);
+              const call: WaiterCall = {
+                id: this.makeId(),
+                bookingId: booking.id,
+                tableId: booking.table?.id || null,
+                tableNumber: booking.table?.tableNumber || null,
+                clientName: booking.client?.fullName || null,
+                waiterId: assignment?.waiterId || null,
+                waiterName: assignment?.waiterName || null,
+                status: 'new',
+                createdAt: this.now(),
+                acceptedAt: null,
+                closedAt: null,
+              };
+
+              this.calls.unshift(call);
+
+              return {
+                message: assignment
+                  ? `Виклик відправлено офіціанту ${assignment.waiterName}`
+                  : 'Виклик відправлено у загальний список офіціантів',
+                call,
+              };
+            }
+
+            list(waiterId?: string) {
+              const active = this.calls.filter((call) => call.status !== 'closed');
+              if (!waiterId) return active;
+              return active.filter((call) => !call.waiterId || call.waiterId === waiterId);
+            }
+
+            async myAssignments(waiterId: string) {
+              if (!waiterId) return [];
+
+              const activeBookings = await this.bookings.find({
+                where: {
+                  status: 'approved',
+                  checkedInAt: Not(IsNull()),
+                },
+                relations: ['table'],
+                order: { updatedAt: 'DESC' },
+                take: 200,
+              });
+
+              const result: WaiterAssignment[] = [];
+              for (const booking of activeBookings) {
+                const assignment = await this.findAssignment(booking);
+                if (assignment?.waiterId === waiterId) result.push(assignment);
+                if (result.length >= 50) break;
+              }
+              return result;
+            }
+
+            detachBooking(bookingId: string) {
+              this.assignments = this.assignments.filter((assignment) => assignment.bookingId !== bookingId);
+            }
+
+            moveBookingToTable(bookingId: string, tableId: string, tableNumber: string) {
+              for (const call of this.calls) {
+                if (call.bookingId === bookingId && call.status !== 'closed') {
+                  call.tableId = tableId;
+                  call.tableNumber = tableNumber;
+                }
+              }
+
+              for (const assignment of this.assignments) {
+                if (assignment.bookingId === bookingId) {
+                  assignment.tableId = tableId;
+                  assignment.tableNumber = tableNumber;
+                }
+              }
+            }
+
+            closeActiveCallsAndDetachBooking(bookingId: string) {
+              const closedAt = this.now();
+              for (const call of this.calls) {
+                if (call.bookingId === bookingId && (call.status === 'new' || call.status === 'accepted')) {
+                  call.status = 'closed';
+                  call.closedAt = closedAt;
+                }
+              }
+              this.detachBooking(bookingId);
+            }
+
+            async accept(id: string, dto: { waiterId: string; waiterName: string }) {
+              const call = this.calls.find((item) => item.id === id);
+              if (!call) throw new NotFoundException('Виклик не знайдено');
+              if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
+              if (!dto.waiterId) throw new BadRequestException('waiterId обовʼязковий');
+              if (call.waiterId && call.waiterId !== dto.waiterId) {
+                throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+              }
+              if (call.status === 'accepted') {
+                return { message: 'Виклик вже прийнято', call };
+              }
+
+              call.status = 'accepted';
+              call.waiterId = dto.waiterId;
+              call.waiterName = dto.waiterName || 'Офіціант';
+              call.acceptedAt = this.now();
+
+              const booking = await this.getBooking(call.bookingId);
+              const assignment = this.rememberAssignment(
+                booking,
+                dto.waiterId,
+                dto.waiterName,
+                call.acceptedAt,
+              );
+              await this.persistAssignment(booking, assignment);
+
+              return { message: 'Виклик прийнято', call };
+            }
+
+            close(id: string, waiterId: string) {
+              const call = this.calls.find((item) => item.id === id);
+              if (!call) throw new NotFoundException('Виклик не знайдено');
+              if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
+              if (call.status !== 'accepted') throw new BadRequestException('Спочатку прийміть виклик');
+              if (!waiterId) throw new BadRequestException('waiterId обовʼязковий');
+              if (call.waiterId !== waiterId) {
+                throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+              }
+
+              call.status = 'closed';
+              call.closedAt = this.now();
+              return { message: 'Виклик закрито', call };
+            }
+          }
+          '''
+          Path('backend/src/waiter-calls/waiter-calls.service.ts').write_text(waiter_service, encoding='utf-8')
+
+          module_path = Path('backend/src/waiter-calls/waiter-calls.module.ts')
+          module = module_path.read_text(encoding='utf-8')
+          module = module.replace(
+              "import { Booking } from '../bookings/entities/booking.entity';\n",
+              "import { Booking } from '../bookings/entities/booking.entity';\nimport { BookingHistory } from '../bookings/entities/booking-history.entity';\n",
+          ).replace(
+              'imports: [TypeOrmModule.forFeature([Booking])],',
+              'imports: [TypeOrmModule.forFeature([Booking, BookingHistory])],',
+          )
+          module_path.write_text(module, encoding='utf-8')
+
+          controller_path = Path('backend/src/bookings/bookings.controller.ts')
+          controller = controller_path.read_text(encoding='utf-8')
+          old_checkin = """  checkIn(@Param('id') id: string) {
+              return this.service.checkIn(id);
+            }
+          """
+          new_checkin = """  checkIn(@Param('id') id: string, @Req() request: any) {
+              return this.service.checkIn(id, request.user);
+            }
+          """
+          if old_checkin not in controller:
+              raise SystemExit('checkIn controller block not found')
+          controller_path.write_text(controller.replace(old_checkin, new_checkin), encoding='utf-8')
+
+          bookings_path = Path('backend/src/bookings/bookings.service.ts')
+          bookings = bookings_path.read_text(encoding='utf-8')
+          checkin_start = bookings.index('  async checkIn(id: string) {')
+          checkin_end = bookings.index('\n  async complete(id: string)', checkin_start)
+          new_checkin_service = r'''  async checkIn(id: string, actor?: AuthUser) {
+            const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+            if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
+            const previousData = this.bookingSnapshot(booking);
+            booking.status = 'approved';
+            if (!booking.approvedAt) booking.approvedAt = new Date();
+            if (!booking.checkedInAt) booking.checkedInAt = new Date();
+            await this.bookings.save(booking);
+            await this.saveHistory(booking, 'booking_checked_in', actor?.role || 'admin', previousData, this.bookingSnapshot(booking));
+            await this.setTableStatusOnlyForToday(booking.table, 'occupied', booking.bookingDate, true);
+            if (actor?.staffId) {
+              await this.waiterCalls.assign({
+                bookingId: booking.id,
+                tableId: booking.table?.id || null,
+                tableNumber: booking.table?.tableNumber || null,
+                waiterId: actor.staffId,
+                waiterName: actor.name || 'Офіціант',
+              });
+            }
+            await this.safeLog('Гості прийшли', { bookingId: id, waiterId: actor?.staffId || null });
+            return { message: 'Гості відмічені як присутні' };
+          }
+          '''
+          bookings = bookings[:checkin_start] + new_checkin_service + bookings[checkin_end:]
+
+          transfer_start = bookings.index('  /** Moves an approved booking')
+          transfer_end = bookings.index('\n  async requestReschedule', transfer_start)
+          new_transfer = r'''  /** Moves an approved booking while preserving the active visit and waiter assignment. */
+          async waiterTransfer(id: string, tableId: string, actor: AuthUser) {
+            if (!tableId) throw new BadRequestException('Оберіть новий стіл');
+
+            const result = await this.bookings.manager.transaction(async (manager) => {
+              const booking = await manager
+                .getRepository(Booking)
+                .createQueryBuilder('booking')
+                .leftJoinAndSelect('booking.table', 'table')
+                .leftJoinAndSelect('booking.client', 'client')
+                .where('booking.id = :id', { id })
+                .setLock('pessimistic_write', undefined, ['booking'])
+                .getOne();
+              if (!booking || booking.status !== 'approved' || !booking.table) {
+                throw new BadRequestException('Пересадка доступна лише для підтвердженого бронювання');
+              }
+              if (booking.bookingDate !== this.restaurantDateToday()) {
+                throw new BadRequestException('Пересадка через пульт офіціанта доступна лише для бронювання на сьогодні');
+              }
+
+              const tableRepository = manager.getRepository(TableEntity);
+              const nextTable = await tableRepository
+                .createQueryBuilder('table')
+                .where('table.id = :tableId', { tableId })
+                .setLock('pessimistic_write')
+                .getOne();
+              if (!nextTable || !nextTable.isVisible || nextTable.status !== 'free') {
+                throw new BadRequestException('Обраний стіл закритий або зайнятий');
+              }
+              if (nextTable.id === booking.table.id) throw new BadRequestException('Оберіть інший стіл');
+              if (Number(nextTable.seats) < Number(booking.guestsCount)) {
+                throw new BadRequestException('Обраний стіл не вміщує всіх гостей');
+              }
+
+              const availability = await this.checkAvailability({
+                tableId: nextTable.id,
+                bookingDate: booking.bookingDate,
+                bookingTime: booking.bookingTime,
+                durationMinutes: booking.durationMinutes,
+              } as CheckAvailabilityDto);
+              if (!availability.isAvailable) {
+                throw new BadRequestException('Цей стіл має конфлікт у часі бронювання');
+              }
+
+              const oldTable = await tableRepository
+                .createQueryBuilder('table')
+                .where('table.id = :oldTableId', { oldTableId: booking.table.id })
+                .setLock('pessimistic_write')
+                .getOne();
+              if (!oldTable) throw new BadRequestException('Попередній стіл не знайдено');
+
+              const previousData = this.bookingSnapshot(booking);
+              const checkedIn = Boolean(booking.checkedInAt);
+              booking.table = nextTable;
+              await manager.getRepository(Booking).save(booking);
+
+              if (booking.bookingDate === this.restaurantDateToday()) {
+                if (
+                  oldTable.status !== 'closed' &&
+                  (checkedIn || !['occupied', 'cleaning'].includes(oldTable.status))
+                ) {
+                  oldTable.status = 'free';
+                }
+                nextTable.status = checkedIn ? 'occupied' : 'reserved';
+                await tableRepository.save([oldTable, nextTable]);
+              }
+
+              await manager.getRepository(BookingHistory).save(
+                manager.getRepository(BookingHistory).create({
+                  booking,
+                  action: 'waiter_table_transfer',
+                  actorRole: actor.role,
+                  actorStaffId: actor.staffId || null,
+                  actorName: actor.name || null,
+                  previousData,
+                  newData: this.bookingSnapshot(booking),
+                  reason: `Стіл №${oldTable.tableNumber} → №${nextTable.tableNumber}`,
+                  isManualMode: true,
+                }),
+              );
+              await this.safeLog('Пересадка гостей', {
+                bookingId: booking.id,
+                oldTable: oldTable.tableNumber,
+                newTable: nextTable.tableNumber,
+                author: actor.name || actor.staffId || null,
+              });
+
+              return {
+                message: 'Гостей пересаджено на новий стіл',
+                tableId: nextTable.id,
+                tableNumber: nextTable.tableNumber,
+              };
+            });
+
+            this.waiterCalls.moveBookingToTable(id, result.tableId, result.tableNumber);
+            return { message: result.message };
+          }
+          '''
+          bookings = bookings[:transfer_start] + new_transfer + bookings[transfer_end:]
+          bookings_path.write_text(bookings, encoding='utf-8')
+
+          waiter_app_path = Path('frontend/src/waiter/WaiterApp.tsx')
+          waiter_app = waiter_app_path.read_text(encoding='utf-8')
+          waiter_app = waiter_app.replace(
+              'const time = (v?: string | null) => String(v || "--:--").slice(0, 5);',
+              'const time = (v?: string | null) => String(v || "--:--").slice(0, 5);\nconst tableOrder = (value: string | number) => {\n  const number = Number(value);\n  return Number.isFinite(number) ? number : Number.MAX_SAFE_INTEGER;\n};',
+          )
+          old_transfer_load = '''      setTables(
+                (await tablesApi.getAll()).filter(
+                  (t) => t.status === "free" && t.isVisible,
+                ),
+              );'''
+          new_transfer_load = '''      setTables(
+                (await tablesApi.getAll())
+                  .filter(
+                    (t) =>
+                      t.status === "free" &&
+                      t.isVisible &&
+                      Number(t.seats) >= Number(b.guestsCount),
+                  )
+                  .sort(
+                    (left, right) =>
+                      tableOrder(left.tableNumber) - tableOrder(right.tableNumber) ||
+                      String(left.tableNumber).localeCompare(String(right.tableNumber), "uk-UA"),
+                  ),
+              );'''
+          if old_transfer_load not in waiter_app:
+              raise SystemExit('openTransfer block not found')
+          waiter_app = waiter_app.replace(old_transfer_load, new_transfer_load)
+          old_checkin_action = '''                            () =>
+                              bookingsApi
+                                .checkIn(b.id)
+                                .then(() =>
+                                  waiterCallsApi.assign({
+                                    bookingId: b.id,
+                                    tableId: b.table?.id,
+                                    tableNumber: b.table?.tableNumber,
+                                  }),
+                                ),'''
+          new_checkin_action = '''                            () => bookingsApi.checkIn(b.id),'''
+          if old_checkin_action not in waiter_app:
+              raise SystemExit('frontend checkIn action block not found')
+          waiter_app = waiter_app.replace(old_checkin_action, new_checkin_action)
+          old_modal_text = '''              <p className="mt-2 text-white/60">
+                Оберіть вільний стіл для бронювання.
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {tables.map((t) => ('''
+          new_modal_text = '''              <p className="mt-2 text-white/60">
+                Оберіть вільний стіл для бронювання. Столи відсортовані за номером.
+              </p>
+              {error && (
+                <p className="mt-3 rounded-2xl border border-red-300/40 p-3 text-red-100">
+                  {error}
+                </p>
+              )}
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {tables.length ? tables.map((t) => ('''
+          if old_modal_text not in waiter_app:
+              raise SystemExit('transfer modal header block not found')
+          waiter_app = waiter_app.replace(old_modal_text, new_modal_text)
+          waiter_app = waiter_app.replace(
+              '''                ))}
+              </div>
+            </div>
+          </div>
+        )}''',
+              '''                )) : (
+                  <p className="col-span-2 text-white/60">
+                    Немає вільних столів потрібної місткості.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}''',
+              1,
+          )
+          waiter_app_path.write_text(waiter_app, encoding='utf-8')
+
+          bookings_spec = r'''import { strict as assert } from 'node:assert';
+          import { test } from 'node:test';
+          import { BookingsService } from './bookings.service';
+          import { Booking } from './entities/booking.entity';
+          import { BookingHistory } from './entities/booking-history.entity';
+          import { TableEntity } from '../tables/entities/table.entity';
+
+          function queryBuilder<T>(value: T) {
+            return {
+              leftJoinAndSelect() { return this; },
+              where() { return this; },
+              setLock() { return this; },
+              getOne: async () => value,
+            };
+          }
+
+          function createService(booking: Booking, oldTable: TableEntity, nextTable: TableEntity) {
+            const savedTables: TableEntity[][] = [];
+            const moved: Array<{ bookingId: string; tableId: string; tableNumber: string }> = [];
+            const manager = {
+              getRepository: (entity: unknown) => {
+                if (entity === Booking) {
+                  return {
+                    createQueryBuilder: () => queryBuilder(booking),
+                    save: async () => booking,
+                  };
+                }
+                if (entity === TableEntity) {
+                  let call = 0;
+                  return {
+                    createQueryBuilder: () => {
+                      call += 1;
+                      return queryBuilder(call === 1 ? nextTable : oldTable);
+                    },
+                    save: async (tables: TableEntity[]) => savedTables.push(tables),
+                  };
+                }
+                if (entity === BookingHistory) {
+                  return { create: (history: unknown) => history, save: async () => undefined };
+                }
+                throw new Error('Unexpected repository');
+              },
+            };
+
+            const service = new BookingsService(
+              { manager: { transaction: async (work: (value: typeof manager) => Promise<unknown>) => work(manager) } } as any,
+              {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+              {
+                moveBookingToTable: (bookingId: string, tableId: string, tableNumber: string) => {
+                  moved.push({ bookingId, tableId, tableNumber });
+                },
+              } as any,
+            );
+            (service as any).restaurantDateToday = () => '2026-07-23';
+            (service as any).checkAvailability = async () => ({ isAvailable: true });
+            (service as any).safeLog = async () => undefined;
+            return { service, savedTables, moved };
+          }
+
+          test('waiterTransfer preserves unrelated occupied source for a not checked-in booking', async () => {
+            const oldTable = { id: 'old', tableNumber: '1', status: 'occupied', isVisible: true } as TableEntity;
+            const nextTable = { id: 'next', tableNumber: '2', status: 'free', isVisible: true, seats: 4 } as TableEntity;
+            const booking = {
+              id: 'booking', status: 'approved', bookingDate: '2026-07-23', bookingTime: '19:00:00',
+              durationMinutes: 120, guestsCount: 2, checkedInAt: null, table: oldTable, client: null,
+            } as Booking;
+            const { service, moved } = createService(booking, oldTable, nextTable);
+
+            await service.waiterTransfer(booking.id, nextTable.id, { sub: 'waiter', telegramId: '', role: 'waiter' });
+
+            assert.equal(oldTable.status, 'occupied');
+            assert.equal(nextTable.status, 'reserved');
+            assert.equal(booking.checkedInAt, null);
+            assert.deepEqual(moved, [{ bookingId: booking.id, tableId: nextTable.id, tableNumber: nextTable.tableNumber }]);
+          });
+
+          test('waiterTransfer moves a checked-in visit from occupied to occupied', async () => {
+            const checkedInAt = new Date('2026-07-23T16:00:00.000Z');
+            const oldTable = { id: 'old', tableNumber: '8', status: 'occupied', isVisible: true } as TableEntity;
+            const nextTable = { id: 'next', tableNumber: '1', status: 'free', isVisible: true, seats: 4 } as TableEntity;
+            const booking = {
+              id: 'booking', status: 'approved', bookingDate: '2026-07-23', bookingTime: '19:00:00',
+              durationMinutes: 120, guestsCount: 2, checkedInAt, table: oldTable, client: null,
+            } as Booking;
+            const { service, moved } = createService(booking, oldTable, nextTable);
+
+            await service.waiterTransfer(booking.id, nextTable.id, {
+              sub: 'waiter', telegramId: '', staffId: 'waiter-1', name: 'Олександр', role: 'waiter',
+            });
+
+            assert.equal(oldTable.status, 'free');
+            assert.equal(nextTable.status, 'occupied');
+            assert.equal(booking.checkedInAt, checkedInAt);
+            assert.equal(booking.table?.id, nextTable.id);
+            assert.deepEqual(moved, [{ bookingId: booking.id, tableId: nextTable.id, tableNumber: nextTable.tableNumber }]);
+          });
+
+          test('waiterTransfer preserves a closed source table', async () => {
+            const oldTable = { id: 'old', tableNumber: '1', status: 'closed', isVisible: true } as TableEntity;
+            const nextTable = { id: 'next', tableNumber: '2', status: 'free', isVisible: true, seats: 4 } as TableEntity;
+            const booking = {
+              id: 'booking', status: 'approved', bookingDate: '2026-07-23', bookingTime: '19:00:00',
+              durationMinutes: 120, guestsCount: 2, checkedInAt: null, table: oldTable, client: null,
+            } as Booking;
+            const { service } = createService(booking, oldTable, nextTable);
+
+            await service.waiterTransfer(booking.id, nextTable.id, { sub: 'waiter', telegramId: '', role: 'waiter' });
+
+            assert.equal(oldTable.status, 'closed');
+            assert.equal(nextTable.status, 'reserved');
+          });
+          '''
+          Path('backend/src/bookings/bookings.service.spec.ts').write_text(bookings_spec, encoding='utf-8')
+
+          waiter_spec = r'''import { strict as assert } from 'node:assert';
+          import { test } from 'node:test';
+
+          import { WaiterCallsService } from './waiter-calls.service';
+
+          function historyRepository(history: any = null) {
+            return {
+              create: (value: any) => value,
+              save: async (value: any) => value,
+              createQueryBuilder: () => ({
+                leftJoin() { return this; },
+                where() { return this; },
+                andWhere() { return this; },
+                orderBy() { return this; },
+                getOne: async () => history,
+              }),
+            };
+          }
+
+          test('moveBookingToTable keeps active call and waiter assignment on the new table', () => {
+            const service = new WaiterCallsService({} as any, historyRepository() as any);
+            (service as any).calls = [{
+              id: 'call', bookingId: 'booking', tableId: 'old', tableNumber: '8', clientName: null,
+              waiterId: 'waiter-1', waiterName: 'Олександр', status: 'new', createdAt: new Date().toISOString(),
+              acceptedAt: null, closedAt: null,
+            }];
+            (service as any).assignments = [{
+              bookingId: 'booking', tableId: 'old', tableNumber: '8', waiterId: 'waiter-1',
+              waiterName: 'Олександр', assignedAt: new Date().toISOString(),
+            }];
+
+            service.moveBookingToTable('booking', 'new', '1');
+
+            assert.equal((service as any).calls[0].status, 'new');
+            assert.equal((service as any).calls[0].tableId, 'new');
+            assert.equal((service as any).calls[0].tableNumber, '1');
+            assert.equal((service as any).assignments[0].tableId, 'new');
+          });
+
+          test('myAssignments restores the waiter table from persisted history', async () => {
+            const booking = {
+              id: 'booking', status: 'approved', checkedInAt: new Date(), updatedAt: new Date(),
+              table: { id: 'table-1', tableNumber: '1', status: 'occupied' },
+            } as any;
+            const bookings = { find: async () => [booking] };
+            const histories = historyRepository({
+              actorStaffId: 'waiter-1', actorName: 'Олександр', createdAt: new Date(),
+            });
+            const service = new WaiterCallsService(bookings as any, histories as any);
+
+            const result = await service.myAssignments('waiter-1');
+
+            assert.equal(result.length, 1);
+            assert.equal(result[0].bookingId, booking.id);
+            assert.equal(result[0].tableNumber, '1');
+          });
+
+          test('accept rejects a waiter when a new call is assigned to another waiter', async () => {
+            const service = new WaiterCallsService({} as any, historyRepository() as any);
+            (service as any).calls = [{
+              id: 'call', bookingId: 'booking', tableId: 'table-1', tableNumber: '1', clientName: null,
+              waiterId: 'waiter-1', waiterName: 'Офіціант 1', status: 'new', createdAt: new Date().toISOString(),
+              acceptedAt: null, closedAt: null,
+            }];
+
+            await assert.rejects(
+              () => service.accept('call', { waiterId: 'waiter-2', waiterName: 'Офіціант 2' }),
+              (error: any) => error.getStatus() === 403,
+            );
+            assert.equal((service as any).calls[0].status, 'new');
+          });
+
+          test('accept persists the waiter assignment', async () => {
+            const booking = { id: 'booking', table: { id: 'table-1', tableNumber: '1' } } as any;
+            const bookings = { findOne: async () => booking };
+            const saved: any[] = [];
+            const histories = historyRepository();
+            histories.save = async (value: any) => { saved.push(value); return value; };
+            const service = new WaiterCallsService(bookings as any, histories as any);
+            (service as any).calls = [{
+              id: 'call', bookingId: 'booking', tableId: 'table-1', tableNumber: '1', clientName: null,
+              waiterId: null, waiterName: null, status: 'new', createdAt: new Date().toISOString(),
+              acceptedAt: null, closedAt: null,
+            }];
+
+            const result = await service.accept('call', { waiterId: 'waiter-1', waiterName: 'Олександр' });
+
+            assert.equal(result.call.status, 'accepted');
+            assert.equal(saved[0].action, 'waiter_assigned');
+            assert.equal(saved[0].actorStaffId, 'waiter-1');
+          });
+
+          test('close rejects a new call until it has been accepted', () => {
+            const service = new WaiterCallsService({} as any, historyRepository() as any);
+            (service as any).calls = [{
+              id: 'call', bookingId: 'booking', tableId: 'table-1', tableNumber: '1', clientName: null,
+              waiterId: null, waiterName: null, status: 'new', createdAt: new Date().toISOString(),
+              acceptedAt: null, closedAt: null,
+            }];
+            assert.throws(() => service.close('call', 'waiter-1'), /Спочатку прийміть виклик/);
+          });
+          '''
+          Path('backend/src/waiter-calls/waiter-calls.service.spec.ts').write_text(waiter_spec, encoding='utf-8')
+          PY
+
+      - name: Verify, commit and clean workflow
+        shell: bash
+        run: |
+          set +e
+          report=waiter-fix-report.txt
+          : > "$report"
+          overall=0
+          run_check() {
+            name="$1"
+            shift
+            echo "===== $name =====" >> "$report"
+            "$@" >> "$report" 2>&1
+            code=$?
+            echo "exit=$code" >> "$report"
+            echo >> "$report"
+            if [ "$code" -ne 0 ]; then overall=1; fi
+          }
+
+          run_check "backend install" npm --prefix backend install --include=dev --package-lock=false --no-audit --no-fund
+          run_check "frontend install" npm --prefix frontend install --package-lock=false --no-audit --no-fund
+          run_check "backend build" npm --prefix backend run build
+          run_check "frontend build" npm --prefix frontend run build
+          run_check "backend focused tests" bash -lc 'cd backend && node --test -r ts-node/register src/bookings/bookings.service.spec.ts src/waiter-calls/waiter-calls.service.spec.ts'
+          run_check "diff check" git diff --check
+
+          rm -f .github/workflows/export-waiter-fix-source.yml
+          git config user.name "MOLO Fix Bot"
+          git config user.email "actions@github.com"
+          if [ "$overall" -eq 0 ]; then
+            rm -f "$report"
+            message="Fix waiter table state synchronization"
+          else
+            message="WIP waiter table state synchronization diagnostics"
+          fi
+          git add -A
+          git commit -m "$message"
+          git push origin HEAD:fix/waiter-table-state-sync
