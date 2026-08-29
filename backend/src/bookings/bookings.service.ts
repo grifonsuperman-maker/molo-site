@@ -69,13 +69,10 @@ export class BookingsService {
   }
 
   private async findClientByPhone(phone: string) {
-    const exact = await this.clients.findOne({ where: { phone } });
-    if (exact) return exact;
-
     const phoneCandidates = this.phoneIdentityCandidates(phone);
     if (!phoneCandidates.length) return null;
 
-    return this.clients.findOne({
+    const matches = await this.clients.find({
       where: {
         phone: Raw(
           (alias) =>
@@ -85,6 +82,30 @@ export class BookingsService {
       },
       order: { createdAt: 'ASC' },
     });
+    if (!matches.length) return null;
+
+    const telegramIds = new Set(
+      matches
+        .map((client) => String(client.telegramId || '').trim())
+        .filter(Boolean),
+    );
+
+    if (telegramIds.size > 1) {
+      return matches.find((client) => client.phone === phone) || matches[0];
+    }
+
+    const canonical =
+      matches.find((client) => Boolean(client.telegramId)) || matches[0];
+    const blacklisted = matches.find((client) => client.isBlacklisted);
+    if (blacklisted) {
+      canonical.isBlacklisted = true;
+      canonical.blacklistReason =
+        canonical.blacklistReason || blacklisted.blacklistReason || null;
+      canonical.blacklistedAt =
+        canonical.blacklistedAt || blacklisted.blacklistedAt || null;
+    }
+
+    return canonical;
   }
 
   private hashGuestDeviceId(guestDeviceId: string) {

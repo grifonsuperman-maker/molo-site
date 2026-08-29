@@ -15,12 +15,12 @@ test('guest identity reuses a client across Ukrainian local and international ph
     fullName: 'Іван',
     phone: '067 123 45 67',
   };
-  const lookupValues = [];
+  const lookups = [];
 
   const clients = {
-    async findOne({ where }) {
-      lookupValues.push(where.phone);
-      return typeof where.phone === 'string' ? null : existingClient;
+    async find(options) {
+      lookups.push(options);
+      return [existingClient];
     },
   };
 
@@ -39,7 +39,7 @@ test('guest identity reuses a client across Ukrainian local and international ph
   const client = await service.findClientByPhone('+380 (67) 123-45-67');
 
   assert.equal(client, existingClient);
-  assert.equal(lookupValues.length, 2);
+  assert.equal(lookups.length, 1);
   assert.deepEqual(
     service.phoneIdentityCandidates('+380 (67) 123-45-67'),
     ['380671234567', '0671234567'],
