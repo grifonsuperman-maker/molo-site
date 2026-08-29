@@ -24,10 +24,10 @@ jobs:
           node-version: 22
 
       - name: Apply scoped review patch
-        run: python3 scripts/pr203_review_fix.py
+        run: python3 scripts/pr203_review_fix_v2.py
 
       - name: Remove temporary patch files
-        run: rm .github/workflows/pr203-review-fixes.yml scripts/pr203_review_fix.py
+        run: rm .github/workflows/pr203-review-fixes.yml scripts/pr203_review_fix.py scripts/pr203_review_fix_v2.py
 
       - name: Install backend dependencies
         run: npm --prefix backend ci
