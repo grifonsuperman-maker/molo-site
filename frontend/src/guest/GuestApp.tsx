@@ -1,6 +1,6 @@
 // MOLO GUEST FIX: persistence + custom duration only
-import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode, KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode, KeyboardEvent, TouchEvent } from 'react';
 
 import {
   ArrowLeft,
@@ -600,6 +600,7 @@ function ClickZone({ table, onPick }: { table: VisualTable; onPick: (table: Visu
 
 export default function GuestApp() {
   const [step, setStep] = usePersistentState<Step>('molo:guest:step', 'home');
+  const backSwipeStart = useRef<{ x: number; y: number } | null>(null);
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [map, setMap] = useState<FullMapResponse | null>(null);
   const [selectedLocationKey, setSelectedLocationKey] = usePersistentState(
@@ -1042,6 +1043,35 @@ export default function GuestApp() {
     setStep('home');
   }
 
+  function handleBackSwipeStart(event: TouchEvent<HTMLDivElement>) {
+    backSwipeStart.current = null;
+    if (step === 'home' || event.touches.length !== 1) return;
+
+    const touch = event.touches[0];
+    if (touch.clientX > 64) return;
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('input, textarea, select, button, a, label, [role="button"]')) return;
+
+    backSwipeStart.current = { x: touch.clientX, y: touch.clientY };
+  }
+
+  function handleBackSwipeEnd(event: TouchEvent<HTMLDivElement>) {
+    const start = backSwipeStart.current;
+    backSwipeStart.current = null;
+    if (!start || step === 'home' || event.changedTouches.length !== 1) return;
+
+    const touch = event.changedTouches[0];
+    const deltaX = touch.clientX - start.x;
+    const deltaY = Math.abs(touch.clientY - start.y);
+
+    if (deltaX >= 72 && deltaX > deltaY * 1.25) goBack();
+  }
+
+  function cancelBackSwipe() {
+    backSwipeStart.current = null;
+  }
+
   function openCustomDuration() {
     setIsCustomDuration(true);
 
@@ -1247,8 +1277,17 @@ export default function GuestApp() {
     );
   }
 
+  const hasGuestTopBanner = Boolean(
+    activeMyBookings.length > 0 || unreadNotificationBookings.length > 0 || completedReviewAccess,
+  );
+
   return (
-    <div className={`molo-mode-${siteMode} min-h-[100dvh] bg-black text-white`}>
+    <div
+      className={`molo-mode-${siteMode} min-h-[100dvh] bg-black text-white`}
+      onTouchStart={handleBackSwipeStart}
+      onTouchEnd={handleBackSwipeEnd}
+      onTouchCancel={cancelBackSwipe}
+    >
       <style>
         {`
           @keyframes moloFadeIn {
@@ -1352,8 +1391,9 @@ export default function GuestApp() {
       {siteMode === 'holiday' && <div className="molo-holiday-lights" aria-hidden="true" />}
 
       {step !== 'home' && (
-        <div className="fixed left-4 top-4 z-[80]">
+        <div className={`fixed left-4 z-[100] ${hasGuestTopBanner ? 'top-52' : 'top-20'}`}>
           <button
+            type="button"
             onClick={goBack}
             className="molo-button inline-flex items-center gap-2 rounded-full border border-amber-200/70 bg-black/30 px-4 py-2 text-sm text-amber-100 shadow-xl backdrop-blur-md"
           >
@@ -1363,7 +1403,7 @@ export default function GuestApp() {
         </div>
       )}
 
-      {(activeMyBookings.length > 0 || unreadNotificationBookings.length > 0 || completedReviewAccess) && (
+      {hasGuestTopBanner && (
         <aside
           className={`fixed left-1/2 z-[95] w-[calc(100%-24px)] max-w-md -translate-x-1/2 ${
             step === 'home' ? 'top-3' : 'top-16'
