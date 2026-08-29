@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 24
       - name: Apply scoped backend patch
-        run: git apply --whitespace=error-all .github/guest-visit-identity.patch
+        run: git apply --recount --whitespace=error-all .github/guest-visit-identity.patch
       - name: Remove temporary patch files
         run: rm .github/guest-visit-identity.patch .github/workflows/guest-visit-identity-patch.yml
       - name: Install backend dependencies
