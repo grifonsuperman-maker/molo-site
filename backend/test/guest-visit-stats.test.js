@@ -91,18 +91,20 @@ test('completing visits keeps completedAt stable and refreshes stats under row l
   const clientSaves = [];
 
   const bookingRepo = {
-    async findOne({ lock }) {
-      bookingLocks.push(lock?.mode || null);
-      return booking;
-    },
     async save(value) {
       return value;
     },
     createQueryBuilder() {
       return {
+        leftJoinAndSelect() { return this; },
         leftJoin() { return this; },
         where() { return this; },
         andWhere() { return this; },
+        setLock(mode, version, tables) {
+          bookingLocks.push({ mode, version, tables });
+          return this;
+        },
+        async getOne() { return booking; },
         async getMany() { return [previousBooking, booking]; },
       };
     },
@@ -171,7 +173,10 @@ test('completing visits keeps completedAt stable and refreshes stats under row l
   assert.equal(client.totalGuests, 5);
   assert.equal(booking.completedAt, firstCompletedAt);
   assert.equal(client.lastVisitAt, firstLastVisitAt);
-  assert.deepEqual(bookingLocks, ['pessimistic_write', 'pessimistic_write']);
+  assert.deepEqual(bookingLocks, [
+    { mode: 'pessimistic_write', version: undefined, tables: ['booking'] },
+    { mode: 'pessimistic_write', version: undefined, tables: ['booking'] },
+  ]);
   assert.deepEqual(clientLocks, ['pessimistic_write', 'pessimistic_write']);
   assert.equal(clientSaves.length, 2);
   assert.deepEqual(

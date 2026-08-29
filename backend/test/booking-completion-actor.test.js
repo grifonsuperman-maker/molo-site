@@ -35,10 +35,26 @@ test('booking completion history records the real waiter', async () => {
   };
   const savedHistory = [];
   const logged = [];
+  const completionLockCalls = [];
 
   const bookingRepository = {
-    async findOne() {
-      return booking;
+    createQueryBuilder(alias) {
+      assert.equal(alias, 'booking');
+      return {
+        leftJoinAndSelect() {
+          return this;
+        },
+        where() {
+          return this;
+        },
+        setLock(mode, version, tables) {
+          completionLockCalls.push({ mode, version, tables });
+          return this;
+        },
+        async getOne() {
+          return booking;
+        },
+      };
     },
     async save(value) {
       return value;
@@ -90,6 +106,9 @@ test('booking completion history records the real waiter', async () => {
   const result = await service.complete('booking-1', waiterActor);
 
   assert.deepEqual(result, { message: 'Стіл звільнено' });
+  assert.deepEqual(completionLockCalls, [
+    { mode: 'pessimistic_write', version: undefined, tables: ['booking'] },
+  ]);
   assert.equal(savedHistory.length, 1);
   assert.equal(savedHistory[0].action, 'booking_completed');
   assert.equal(savedHistory[0].actorRole, 'waiter');

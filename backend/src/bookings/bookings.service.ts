@@ -1110,11 +1110,14 @@ export class BookingsService {
 
   async complete(id: string, actor?: AuthUser) {
     const { booking, previousData } = await this.bookings.manager.transaction(async (manager) => {
-      const booking = await manager.getRepository(Booking).findOne({
-        where: { id },
-        relations: ['table', 'client'],
-        lock: { mode: 'pessimistic_write' },
-      });
+      const booking = await manager
+        .getRepository(Booking)
+        .createQueryBuilder('booking')
+        .leftJoinAndSelect('booking.table', 'table')
+        .leftJoinAndSelect('booking.client', 'client')
+        .where('booking.id = :id', { id })
+        .setLock('pessimistic_write', undefined, ['booking'])
+        .getOne();
       if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
       const previousData = this.bookingSnapshot(booking);
