@@ -16,6 +16,17 @@ export type CreateBookingPayload = {
   wishes?: string;
 };
 
+export type CreateAdminManualBookingPayload = {
+  tableId: string;
+  fullName: string;
+  phone: string;
+  bookingDate: string;
+  bookingTime: string;
+  guestsCount: number;
+  durationMinutes?: number;
+  wishes?: string;
+};
+
 export type BookingAvailability = {
   tableId: string;
   tableNumber: string;
@@ -223,6 +234,19 @@ export const bookingsApi = {
     ]);
     return result;
   },
+
+  createManual: (payload: CreateAdminManualBookingPayload) =>
+    api.post<{
+      message: string;
+      bookingId: string;
+      status: string;
+      bookingDate: string;
+      bookingTime: string;
+      departureTime: string;
+      availableFrom: string;
+      durationMinutes: number;
+      cleanupMinutes: number;
+    }>('/bookings/admin/manual', payload),
 
   availability: (params: {
     tableId: string;

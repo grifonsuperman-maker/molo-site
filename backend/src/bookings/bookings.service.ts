@@ -8,6 +8,7 @@ import { BookingRescheduleRequest } from './entities/booking-reschedule-request.
 import { Client } from '../clients/entities/client.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
+import { CreateAdminManualBookingDto } from './dto/create-admin-manual-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
@@ -74,6 +75,33 @@ export class BookingsService {
     if (duplicate) {
       throw new BadRequestException('На цю дату вже є активне бронювання з цього пристрою або номера телефону');
     }
+  }
+
+  private async assertNoActivePhoneBooking(bookingDate: string, phone: string) {
+    const normalizedPhone = this.normalizePhone(phone);
+    if (!normalizedPhone) {
+      throw new BadRequestException('Вкажіть коректний номер телефону');
+    }
+
+    const activeBookings = await this.bookings
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.client', 'client')
+      .addSelect('booking.guestPhoneNormalized')
+      .where('booking.bookingDate = :bookingDate', { bookingDate })
+      .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
+      .getMany();
+
+    const duplicate = activeBookings.some(
+      (booking) =>
+        booking.guestPhoneNormalized === normalizedPhone ||
+        this.normalizePhone(booking.client?.phone) === normalizedPhone,
+    );
+
+    if (duplicate) {
+      throw new BadRequestException('На цю дату вже є активне бронювання з цього номера телефону');
+    }
+
+    return normalizedPhone;
   }
 
   private normalizeDuration(durationMinutes?: number) {
@@ -649,6 +677,109 @@ export class BookingsService {
       }
       console.error('Booking create failed:', error);
       throw new BadRequestException(`Booking error: ${error?.message || 'unknown error'}`);
+    }
+  }
+
+  async createManual(dto: CreateAdminManualBookingDto, actor?: AuthUser) {
+    try {
+      const bookingDate = this.normalizeBookingDate(dto.bookingDate);
+      const guestPhoneNormalized = await this.assertNoActivePhoneBooking(bookingDate, dto.phone);
+
+      const table = await this.tables.findOne({
+        where: { id: dto.tableId },
+        relations: ['zone'],
+      });
+      if (!table) throw new NotFoundException('Стіл не знайдено');
+      await this.assertTableCanBeBooked(table);
+
+      let client = await this.clients.findOne({ where: { phone: dto.phone } });
+      if (!client) {
+        client = await this.clients.save(
+          this.clients.create({ fullName: dto.fullName, phone: dto.phone }),
+        );
+      }
+      if (client.isBlacklisted) {
+        throw new BadRequestException('Бронювання з цього номера недоступне');
+      }
+
+      const timeInfo = await this.assertNoTimeConflict(
+        table.id,
+        bookingDate,
+        dto.bookingTime,
+        dto.durationMinutes,
+      );
+      const wishes = [
+        `Час відпочинку: ${timeInfo.durationMinutes} хв (${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel})`,
+        `Підготовка столу після гостей: ${timeInfo.cleanupMinutes} хв, наступний гість з ${timeInfo.availableFromLabel}`,
+        dto.wishes || '',
+      ].filter(Boolean).join('\n');
+
+      // Ручне бронювання Адміністратора не залежить від перемикача онлайн-бронювання.
+      const booking = await this.bookings.save(
+        this.bookings.create({
+          table,
+          client,
+          guestAccessTokenHash: null,
+          guestDeviceIdHash: null,
+          guestPhoneNormalized,
+          bookingDate,
+          bookingTime: timeInfo.bookingTime,
+          durationMinutes: timeInfo.durationMinutes,
+          guestsCount: dto.guestsCount,
+          wishes,
+          status: 'approved',
+          source: 'admin_manual',
+          approvedAt: new Date(),
+        }),
+      );
+
+      await this.saveHistory(
+        booking,
+        'booking_created',
+        actor?.role || 'admin',
+        null,
+        this.bookingSnapshot(booking),
+        null,
+        actor || null,
+      );
+      await this.setTableStatusOnlyForToday(table, 'reserved', bookingDate);
+      await this.safeLog('Створено ручне бронювання', {
+        bookingId: booking.id,
+        tableNumber: table.tableNumber,
+        clientName: client.fullName,
+        bookingDate,
+        time: `${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel}`,
+        durationMinutes: timeInfo.durationMinutes,
+        source: 'admin_manual',
+        actorRole: actor?.role || null,
+        actorStaffId: actor?.staffId || null,
+        actorName: actor?.name || null,
+      });
+
+      return {
+        message: 'Бронювання створено та підтверджено',
+        bookingId: booking.id,
+        status: booking.status,
+        bookingDate,
+        bookingTime: timeInfo.bookingTime,
+        departureTime: timeInfo.departureTime,
+        availableFrom: timeInfo.availableFrom,
+        durationMinutes: timeInfo.durationMinutes,
+        cleanupMinutes: timeInfo.cleanupMinutes,
+      };
+    } catch (error: any) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
+      if (
+        (error?.code || error?.driverError?.code) === '23505' &&
+        (error?.constraint || error?.driverError?.constraint) ===
+          'UQ_bookings_active_guest_phone_date'
+      ) {
+        throw new BadRequestException('На цю дату вже є активне бронювання з цього номера телефону');
+      }
+      console.error('Manual booking create failed:', error);
+      throw new BadRequestException(
+        `Не вдалося створити бронювання: ${error?.message || 'невідома помилка'}`,
+      );
     }
   }
 

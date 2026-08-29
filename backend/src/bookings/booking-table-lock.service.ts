@@ -22,7 +22,10 @@ export class BookingTableLockService {
     private readonly tableChangeRequests: Repository<BookingTableChangeRequest>,
   ) {}
 
-  async withCreateLock<T>(dto: CreateBookingDto, work: () => Promise<T>) {
+  async withCreateLock<T>(
+    dto: Pick<CreateBookingDto, 'tableId' | 'tableNumber' | 'bookingDate'>,
+    work: () => Promise<T>,
+  ) {
     const tableKey = await this.resolveTableKey(dto.tableId, dto.tableNumber);
     return this.withLocks([[tableKey, dto.bookingDate]], work);
   }
