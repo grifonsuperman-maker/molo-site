@@ -1,0 +1,342 @@
+name: Apply guest visit identity fix
+
+on:
+  push:
+    branches:
+      - fix/guest-visit-identity
+    paths:
+      - .github/workflows/guest-visit-identity-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/guest-visit-identity
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Apply scoped backend patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/src/bookings/bookings.service.ts')
+          text = path.read_text()
+
+          anchor = """  private normalizePhone(phone: string | null | undefined) {
+    return String(phone || '').replace(/\\D/g, '');
+  }
+
+"""
+          replacement = anchor + """  private phoneIdentityCandidates(phone: string | null | undefined) {
+    const digits = this.normalizePhone(phone);
+    if (!digits) return [];
+
+    if (/^0\\d{9}$/.test(digits)) {
+      return [digits, `38${digits}`];
+    }
+    if (/^380\\d{9}$/.test(digits)) {
+      return [digits, digits.slice(2)];
+    }
+    return [digits];
+  }
+
+  private async findClientByPhone(phone: string) {
+    const exact = await this.clients.findOne({ where: { phone } });
+    if (exact) return exact;
+
+    const phoneCandidates = this.phoneIdentityCandidates(phone);
+    if (!phoneCandidates.length) return null;
+
+    return this.clients
+      .createQueryBuilder('client')
+      .where(
+        `regexp_replace(client.phone, '[^0-9]', '', 'g') IN (:...phoneCandidates)`,
+        { phoneCandidates },
+      )
+      .orderBy('client.createdAt', 'ASC')
+      .getOne();
+  }
+
+"""
+          if text.count(anchor) != 1:
+              raise SystemExit('normalizePhone anchor mismatch')
+          text = text.replace(anchor, replacement, 1)
+
+          old_guest = """      let client = await this.clients.findOne({ where: { phone: dto.phone } });
+      if (!client) client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
+"""
+          new_guest = """      let client = await this.findClientByPhone(dto.phone);
+      if (!client) client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
+"""
+          if text.count(old_guest) != 1:
+              raise SystemExit('guest client lookup mismatch')
+          text = text.replace(old_guest, new_guest, 1)
+
+          old_manual = """      let client = await this.clients.findOne({ where: { phone: dto.phone } });
+      if (!client) {
+        client = await this.clients.save(
+          this.clients.create({ fullName: dto.fullName, phone: dto.phone }),
+        );
+      }
+"""
+          new_manual = """      let client = await this.findClientByPhone(dto.phone);
+      if (!client) {
+        client = await this.clients.save(
+          this.clients.create({ fullName: dto.fullName, phone: dto.phone }),
+        );
+      }
+"""
+          if text.count(old_manual) != 1:
+              raise SystemExit('manual client lookup mismatch')
+          text = text.replace(old_manual, new_manual, 1)
+
+          notify_anchor = """  private async safeNotify(action: () => Promise<unknown>) {
+    try {
+      await action();
+    } catch (error) {
+      console.error('Booking notification failed:', error);
+    }
+  }
+
+"""
+          stats_helper = notify_anchor + """  private async refreshClientVisitStats(clientId: string) {
+    const client = await this.clients.findOne({ where: { id: clientId } });
+    if (!client) return;
+
+    const completedBookings = await this.bookings
+      .createQueryBuilder('booking')
+      .leftJoin('booking.client', 'client')
+      .where('client.id = :clientId', { clientId })
+      .andWhere('booking.status = :status', { status: 'completed' })
+      .getMany();
+
+    client.visitsCount = completedBookings.length;
+    client.totalGuests = completedBookings.reduce(
+      (sum, item) => sum + Number(item.guestsCount || 0),
+      0,
+    );
+    client.lastVisitAt = completedBookings.reduce<Date | null>((latest, item) => {
+      if (!item.completedAt) return latest;
+      if (!latest || item.completedAt.getTime() > latest.getTime()) return item.completedAt;
+      return latest;
+    }, null);
+
+    await this.clients.save(client);
+  }
+
+"""
+          if text.count(notify_anchor) != 1:
+              raise SystemExit('safeNotify anchor mismatch')
+          text = text.replace(notify_anchor, stats_helper, 1)
+
+          complete_old = """    const previousData = this.bookingSnapshot(booking);
+    booking.status = 'completed';
+    booking.completedAt = new Date();
+    await this.bookings.save(booking);
+"""
+          complete_new = """    const previousData = this.bookingSnapshot(booking);
+    booking.status = 'completed';
+    booking.completedAt = new Date();
+    await this.bookings.save(booking);
+    if (booking.client?.id) {
+      await this.refreshClientVisitStats(booking.client.id);
+    }
+"""
+          if text.count(complete_old) != 1:
+              raise SystemExit('complete anchor mismatch')
+          text = text.replace(complete_old, complete_new, 1)
+
+          path.write_text(text)
+
+          test = Path('backend/test/guest-visit-stats.test.js')
+          test.write_text(r'''require('reflect-metadata');
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { BookingsService } = require('../dist/bookings/bookings.service.js');
+
+function noopRepository() {
+  return {};
+}
+
+test('guest identity reuses a client across Ukrainian local and international phone formats', async () => {
+  const existingClient = {
+    id: 'client-1',
+    fullName: 'Іван',
+    phone: '067 123 45 67',
+  };
+  let queryParams = null;
+  let queryCalls = 0;
+
+  const clients = {
+    async findOne({ where }) {
+      if (where.phone) return null;
+      return null;
+    },
+    createQueryBuilder() {
+      queryCalls += 1;
+      return {
+        where(_sql, params) {
+          queryParams = params;
+          return this;
+        },
+        orderBy() { return this; },
+        async getOne() { return existingClient; },
+      };
+    },
+  };
+
+  const service = new BookingsService(
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    clients,
+    noopRepository(),
+    noopRepository(),
+    {},
+    {},
+    {},
+  );
+
+  const client = await service.findClientByPhone('+380 (67) 123-45-67');
+
+  assert.equal(client, existingClient);
+  assert.equal(queryCalls, 1);
+  assert.deepEqual(queryParams.phoneCandidates, ['380671234567', '0671234567']);
+});
+
+test('completing visits recalculates one visit per completed booking without double counting', async () => {
+  const client = {
+    id: 'client-1',
+    fullName: 'Іван',
+    phone: '+380671234567',
+    visitsCount: 0,
+    totalGuests: 0,
+    lastVisitAt: null,
+  };
+  const olderCompletedAt = new Date('2098-12-01T20:00:00.000Z');
+  const booking = {
+    id: 'booking-current',
+    status: 'approved',
+    bookingDate: '2099-01-01',
+    bookingTime: '19:00:00',
+    durationMinutes: 120,
+    wishes: '',
+    guestsCount: 3,
+    client,
+    table: {
+      id: 'table-1',
+      tableNumber: '8',
+      status: 'occupied',
+    },
+    checkedInAt: new Date('2099-01-01T17:00:00.000Z'),
+    cancelledAt: null,
+    cancellationReason: null,
+    completedAt: null,
+    expectedArrivalAt: null,
+  };
+  const previousBooking = {
+    id: 'booking-old',
+    status: 'completed',
+    guestsCount: 2,
+    completedAt: olderCompletedAt,
+  };
+  const clientSaves = [];
+
+  const bookings = {
+    async findOne() { return booking; },
+    async save(value) { return value; },
+    createQueryBuilder() {
+      return {
+        leftJoin() { return this; },
+        where() { return this; },
+        andWhere() { return this; },
+        async getMany() { return [previousBooking, booking]; },
+      };
+    },
+  };
+  const histories = {
+    create(value) { return value; },
+    async save(value) { return value; },
+  };
+  const clients = {
+    async findOne({ where }) {
+      return where.id === client.id ? client : null;
+    },
+    async save(value) {
+      clientSaves.push({
+        visitsCount: value.visitsCount,
+        totalGuests: value.totalGuests,
+        lastVisitAt: value.lastVisitAt,
+      });
+      return value;
+    },
+  };
+  const tables = {
+    async save() {
+      throw new Error('future booking must not change today table status');
+    },
+  };
+  const logs = { async create() {} };
+
+  const service = new BookingsService(
+    bookings,
+    histories,
+    {},
+    clients,
+    tables,
+    {},
+    logs,
+    {},
+    {},
+  );
+
+  await service.complete('booking-current');
+  const firstCompletedAt = booking.completedAt;
+  await service.complete('booking-current');
+
+  assert.equal(client.visitsCount, 2);
+  assert.equal(client.totalGuests, 5);
+  assert.equal(client.lastVisitAt, firstCompletedAt);
+  assert.equal(clientSaves.length, 2);
+  assert.deepEqual(
+    clientSaves.map((item) => [item.visitsCount, item.totalGuests]),
+    [[2, 5], [2, 5]],
+  );
+});
+''')
+          PY
+
+          rm .github/workflows/guest-visit-identity-patch.yml
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Build frontend
+        run: npm --prefix frontend run build
+      - name: Test backend
+        run: npm --prefix backend test
+      - name: Test frontend
+        run: npm --prefix frontend test
+      - name: Check whitespace
+        run: git diff --check
+      - name: Commit scoped fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/bookings/bookings.service.ts backend/test/guest-visit-stats.test.js .github/workflows/guest-visit-identity-patch.yml
+          git commit -m "fix: count repeat guest visits by stable identity"
+          git show --check HEAD
+          git push origin HEAD:fix/guest-visit-identity
