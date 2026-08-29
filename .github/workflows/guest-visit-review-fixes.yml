@@ -1,0 +1,526 @@
+name: Apply guest visit review fixes
+
+on:
+  push:
+    branches:
+      - fix/guest-visit-identity
+    paths:
+      - .github/workflows/guest-visit-review-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/guest-visit-identity
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Apply scoped review fixes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          bookings_path = Path('backend/src/bookings/bookings.service.ts')
+          bookings = bookings_path.read_text()
+
+          import_anchor = "import type { AuthUser } from '../auth/types/auth-user.type';\n"
+          import_line = "import { refreshClientVisitStats } from './client-visit-stats';\n"
+          if import_line not in bookings:
+              if bookings.count(import_anchor) != 1:
+                  raise SystemExit('BookingsService import anchor mismatch')
+              bookings = bookings.replace(import_anchor, import_anchor + import_line, 1)
+
+          old_stats = '''  private async refreshClientVisitStats(clientId: string) {
+            const client = await this.clients.findOne({ where: { id: clientId } });
+            if (!client) return;
+
+            const completedBookings = await this.bookings
+              .createQueryBuilder('booking')
+              .leftJoin('booking.client', 'client')
+              .where('client.id = :clientId', { clientId })
+              .andWhere('booking.status = :status', { status: 'completed' })
+              .getMany();
+
+            client.visitsCount = completedBookings.length;
+            client.totalGuests = completedBookings.reduce(
+              (sum, item) => sum + Number(item.guestsCount || 0),
+              0,
+            );
+            client.lastVisitAt = completedBookings.reduce<Date | null>((latest, item) => {
+              if (!item.completedAt) return latest;
+              if (!latest || item.completedAt.getTime() > latest.getTime()) return item.completedAt;
+              return latest;
+            }, null);
+
+            await this.clients.save(client);
+          }
+
+          '''
+          if bookings.count(old_stats) != 1:
+              raise SystemExit('BookingsService stats helper anchor mismatch')
+          bookings = bookings.replace(old_stats, '', 1)
+
+          old_complete = '''  async complete(id: string, actor?: AuthUser) {
+            const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
+            if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
+            const previousData = this.bookingSnapshot(booking);
+            booking.status = 'completed';
+            booking.completedAt = new Date();
+            await this.bookings.save(booking);
+            if (booking.client?.id) {
+              await this.refreshClientVisitStats(booking.client.id);
+            }
+            await this.saveHistory(
+              booking,
+              'booking_completed',
+              actor?.role || 'admin',
+              previousData,
+              this.bookingSnapshot(booking),
+              null,
+              actor || null,
+            );
+            await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate, true);
+            await this.safeLog('Стіл звільнено', {
+              bookingId: id,
+              staffId: actor?.staffId || null,
+              staffName: actor?.name || null,
+              role: actor?.role || 'admin',
+            });
+            return { message: 'Стіл звільнено' };
+          }
+'''
+          new_complete = '''  async complete(id: string, actor?: AuthUser) {
+            const { booking, previousData } = await this.bookings.manager.transaction(async (manager) => {
+              const booking = await manager.getRepository(Booking).findOne({
+                where: { id },
+                relations: ['table', 'client'],
+                lock: { mode: 'pessimistic_write' },
+              });
+              if (!booking) throw new NotFoundException('Бронювання не знайдено');
+
+              const previousData = this.bookingSnapshot(booking);
+              booking.status = 'completed';
+              if (!booking.completedAt) booking.completedAt = new Date();
+              await manager.getRepository(Booking).save(booking);
+              if (booking.client?.id) {
+                await refreshClientVisitStats(manager, booking.client.id);
+              }
+
+              return { booking, previousData };
+            });
+
+            await this.saveHistory(
+              booking,
+              'booking_completed',
+              actor?.role || 'admin',
+              previousData,
+              this.bookingSnapshot(booking),
+              null,
+              actor || null,
+            );
+            await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate, true);
+            await this.safeLog('Стіл звільнено', {
+              bookingId: id,
+              staffId: actor?.staffId || null,
+              staffName: actor?.name || null,
+              role: actor?.role || 'admin',
+            });
+            return { message: 'Стіл звільнено' };
+          }
+'''
+          if bookings.count(old_complete) != 1:
+              raise SystemExit('BookingsService complete anchor mismatch')
+          bookings = bookings.replace(old_complete, new_complete, 1)
+          bookings_path.write_text(bookings)
+
+          stats_path = Path('backend/src/bookings/client-visit-stats.ts')
+          if stats_path.exists():
+              raise SystemExit('client-visit-stats.ts already exists')
+          stats_path.write_text('''import { EntityManager } from 'typeorm';
+
+          import { Client } from '../clients/entities/client.entity';
+          import { Booking } from './entities/booking.entity';
+
+          export async function refreshClientVisitStats(
+            manager: EntityManager,
+            clientId: string,
+          ) {
+            const clients = manager.getRepository(Client);
+            const client = await clients.findOne({
+              where: { id: clientId },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (!client) return;
+
+            const completedBookings = await manager
+              .getRepository(Booking)
+              .createQueryBuilder('booking')
+              .leftJoin('booking.client', 'client')
+              .where('client.id = :clientId', { clientId })
+              .andWhere('booking.status = :status', { status: 'completed' })
+              .getMany();
+
+            client.visitsCount = completedBookings.length;
+            client.totalGuests = completedBookings.reduce(
+              (sum, item) => sum + Number(item.guestsCount || 0),
+              0,
+            );
+            client.lastVisitAt = completedBookings.reduce<Date | null>((latest, item) => {
+              if (!item.completedAt) return latest;
+              if (!latest || item.completedAt.getTime() > latest.getTime()) {
+                return item.completedAt;
+              }
+              return latest;
+            }, null);
+
+            await clients.save(client);
+          }
+          '''.replace('\n          ', '\n').lstrip())
+
+          telegram_path = Path('backend/src/bookings/guest-telegram-link.service.ts')
+          telegram = telegram_path.read_text()
+          telegram_import_anchor = "import { Booking } from './entities/booking.entity';\n"
+          telegram_import_line = "import { refreshClientVisitStats } from './client-visit-stats';\n"
+          if telegram_import_line not in telegram:
+              if telegram.count(telegram_import_anchor) != 1:
+                  raise SystemExit('Telegram service import anchor mismatch')
+              telegram = telegram.replace(
+                  telegram_import_anchor,
+                  telegram_import_anchor + telegram_import_line,
+                  1,
+              )
+
+          old_reassign = '''      const linkedClient = await clients.findOne({ where: { telegramId } });
+                if (linkedClient && linkedClient.id !== client.id) {
+                  booking.client = linkedClient;
+                  await manager.getRepository(Booking).save(booking);
+                  return this.linkedResponse();
+                }
+'''
+          new_reassign = '''      const linkedClient = await clients.findOne({ where: { telegramId } });
+                if (linkedClient && linkedClient.id !== client.id) {
+                  const previousClientId = client.id;
+                  booking.client = linkedClient;
+                  await manager.getRepository(Booking).save(booking);
+
+                  if (booking.status === 'completed') {
+                    await refreshClientVisitStats(manager, previousClientId);
+                    await refreshClientVisitStats(manager, linkedClient.id);
+                  }
+
+                  return this.linkedResponse();
+                }
+'''
+          if telegram.count(old_reassign) != 1:
+              raise SystemExit('Telegram reassignment anchor mismatch')
+          telegram = telegram.replace(old_reassign, new_reassign, 1)
+          telegram_path.write_text(telegram)
+
+          visit_test_path = Path('backend/test/guest-visit-stats.test.js')
+          visit_test = visit_test_path.read_text()
+          marker = "test('completing visits recalculates one visit per completed booking without double counting', async () => {"
+          if visit_test.count(marker) != 1:
+              raise SystemExit('guest visit test marker mismatch')
+          prefix = visit_test.split(marker, 1)[0]
+          replacement_test = r'''test('completing visits keeps completedAt stable and refreshes stats under row locks', async () => {
+            const client = {
+              id: 'client-1',
+              fullName: 'Іван',
+              phone: '+380671234567',
+              visitsCount: 0,
+              totalGuests: 0,
+              lastVisitAt: null,
+            };
+            const olderCompletedAt = new Date('2098-12-01T20:00:00.000Z');
+            const booking = {
+              id: 'booking-current',
+              status: 'approved',
+              bookingDate: '2099-01-01',
+              bookingTime: '19:00:00',
+              durationMinutes: 120,
+              wishes: '',
+              guestsCount: 3,
+              client,
+              table: {
+                id: 'table-1',
+                tableNumber: '8',
+                status: 'occupied',
+              },
+              checkedInAt: new Date('2099-01-01T17:00:00.000Z'),
+              cancelledAt: null,
+              cancellationReason: null,
+              completedAt: null,
+              expectedArrivalAt: null,
+            };
+            const previousBooking = {
+              id: 'booking-old',
+              status: 'completed',
+              guestsCount: 2,
+              completedAt: olderCompletedAt,
+            };
+            const clientSaves = [];
+            const bookingLocks = [];
+            const clientLocks = [];
+
+            const bookingRepo = {
+              async findOne({ lock }) {
+                bookingLocks.push(lock?.mode || null);
+                return booking;
+              },
+              async save(value) { return value; },
+              createQueryBuilder() {
+                return {
+                  leftJoin() { return this; },
+                  where() { return this; },
+                  andWhere() { return this; },
+                  async getMany() { return [previousBooking, booking]; },
+                };
+              },
+            };
+            const clientRepo = {
+              async findOne({ where, lock }) {
+                clientLocks.push(lock?.mode || null);
+                return where.id === client.id ? client : null;
+              },
+              async save(value) {
+                clientSaves.push({
+                  visitsCount: value.visitsCount,
+                  totalGuests: value.totalGuests,
+                  lastVisitAt: value.lastVisitAt,
+                });
+                return value;
+              },
+            };
+            const manager = {
+              getRepository(entity) {
+                if (entity?.name === 'Booking') return bookingRepo;
+                if (entity?.name === 'Client') return clientRepo;
+                throw new Error(`Unexpected repository: ${entity?.name}`);
+              },
+            };
+            const bookings = {
+              manager: {
+                transaction: async (callback) => callback(manager),
+              },
+            };
+            const histories = {
+              create(value) { return value; },
+              async save(value) { return value; },
+            };
+            const tables = {
+              async save() {
+                throw new Error('future booking must not change today table status');
+              },
+            };
+            const logs = { async create() {} };
+
+            const service = new BookingsService(
+              bookings,
+              histories,
+              {},
+              {},
+              tables,
+              {},
+              logs,
+              {},
+              {},
+            );
+
+            await service.complete('booking-current');
+            const firstCompletedAt = booking.completedAt;
+            const firstLastVisitAt = client.lastVisitAt;
+
+            assert.equal(client.visitsCount, 2);
+            assert.equal(client.totalGuests, 5);
+            assert.ok(firstCompletedAt instanceof Date);
+            assert.equal(firstLastVisitAt, firstCompletedAt);
+
+            await service.complete('booking-current');
+
+            assert.equal(client.visitsCount, 2);
+            assert.equal(client.totalGuests, 5);
+            assert.equal(booking.completedAt, firstCompletedAt);
+            assert.equal(client.lastVisitAt, firstLastVisitAt);
+            assert.deepEqual(bookingLocks, ['pessimistic_write', 'pessimistic_write']);
+            assert.deepEqual(clientLocks, ['pessimistic_write', 'pessimistic_write']);
+            assert.equal(clientSaves.length, 2);
+            assert.deepEqual(
+              clientSaves.map((item) => [item.visitsCount, item.totalGuests]),
+              [[2, 5], [2, 5]],
+            );
+          });
+          '''.replace('\n          ', '\n').lstrip()
+          visit_test_path.write_text(prefix + replacement_test)
+
+          telegram_test_path = Path('backend/test/guest-telegram-link.test.js')
+          telegram_test = telegram_test_path.read_text()
+
+          old_client = '''  const client = {
+            id: 'client-1',
+            telegramId: options.clientTelegramId ?? null,
+          };
+          const booking = { id: bookingId, client: { id: client.id } };
+'''
+          new_client = '''  const client = {
+            id: 'client-1',
+            telegramId: options.clientTelegramId ?? null,
+            visitsCount: options.clientVisitsCount ?? 0,
+            totalGuests: options.clientTotalGuests ?? 0,
+            lastVisitAt: options.clientLastVisitAt ?? null,
+          };
+          const booking = {
+            id: bookingId,
+            client: { id: client.id },
+            status: options.bookingStatus ?? 'approved',
+            guestsCount: options.bookingGuestsCount ?? 2,
+            completedAt: options.bookingCompletedAt ?? null,
+          };
+'''
+          if telegram_test.count(old_client) != 1:
+              raise SystemExit('Telegram test client fixture mismatch')
+          telegram_test = telegram_test.replace(old_client, new_client, 1)
+
+          old_query_tail = '''    async getOne() {
+              if (options.bookingMissing) return null;
+              return (
+                bookingParams.bookingId === bookingId &&
+                bookingParams.guestAccessTokenHash === hashToken(guestToken)
+              ) ? booking : null;
+            },
+          };
+'''
+          new_query_tail = '''    async getOne() {
+              if (options.bookingMissing) return null;
+              return (
+                bookingParams.bookingId === bookingId &&
+                bookingParams.guestAccessTokenHash === hashToken(guestToken)
+              ) ? booking : null;
+            },
+            leftJoin() { return this; },
+            async getMany() {
+              if (booking.status !== 'completed') return [];
+              return booking.client?.id === bookingParams.clientId ? [booking] : [];
+            },
+          };
+'''
+          if telegram_test.count(old_query_tail) != 1:
+              raise SystemExit('Telegram test booking query fixture mismatch')
+          telegram_test = telegram_test.replace(old_query_tail, new_query_tail, 1)
+
+          old_find_one = '''    findOne: async ({ where }) => {
+              if (where.telegramId !== telegramId) return null;
+              if (options.linkedClient) return options.linkedClient;
+              if (
+                options.linkedClientAfterRetry &&
+                transactionCalls >= 2
+              ) {
+                return options.linkedClientAfterRetry;
+              }
+              return null;
+            },
+'''
+          new_find_one = '''    findOne: async ({ where }) => {
+              if (where.id) {
+                if (where.id === client.id) return client;
+                if (options.linkedClient?.id === where.id) return options.linkedClient;
+                if (options.linkedClientAfterRetry?.id === where.id) {
+                  return options.linkedClientAfterRetry;
+                }
+                return null;
+              }
+              if (where.telegramId !== telegramId) return null;
+              if (options.linkedClient) return options.linkedClient;
+              if (
+                options.linkedClientAfterRetry &&
+                transactionCalls >= 2
+              ) {
+                return options.linkedClientAfterRetry;
+              }
+              return null;
+            },
+'''
+          if telegram_test.count(old_find_one) != 1:
+              raise SystemExit('Telegram test client findOne fixture mismatch')
+          telegram_test = telegram_test.replace(old_find_one, new_find_one, 1)
+
+          extra_test = r'''
+          test('Telegram reassignment refreshes completed-visit stats for both clients', async () => {
+            const completedAt = new Date('2099-02-03T20:00:00.000Z');
+            const linkedClient = {
+              id: 'client-2',
+              telegramId: '123456789',
+              visitsCount: 0,
+              totalGuests: 0,
+              lastVisitAt: null,
+            };
+            const state = createState({
+              linkedClient,
+              bookingStatus: 'completed',
+              bookingGuestsCount: 4,
+              bookingCompletedAt: completedAt,
+              clientVisitsCount: 1,
+              clientTotalGuests: 4,
+              clientLastVisitAt: completedAt,
+            });
+
+            const result = await state.service.link(
+              state.bookingId,
+              state.guestToken,
+              guestUser(),
+            );
+
+            assert.equal(result.linked, true);
+            assert.equal(state.booking.client, linkedClient);
+            assert.equal(state.client.visitsCount, 0);
+            assert.equal(state.client.totalGuests, 0);
+            assert.equal(state.client.lastVisitAt, null);
+            assert.equal(linkedClient.visitsCount, 1);
+            assert.equal(linkedClient.totalGuests, 4);
+            assert.equal(linkedClient.lastVisitAt, completedAt);
+            assert.equal(state.bookingSaveCalls(), 1);
+            assert.equal(state.clientSaveCalls(), 2);
+          });
+          '''.replace('\n          ', '\n')
+          if "Telegram reassignment refreshes completed-visit stats for both clients" in telegram_test:
+              raise SystemExit('Telegram completed reassignment test already exists')
+          telegram_test_path.write_text(telegram_test.rstrip() + '\n' + extra_test.lstrip())
+          PY
+
+          rm .github/workflows/guest-visit-review-fixes.yml
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Build frontend
+        run: npm --prefix frontend run build
+      - name: Test backend
+        run: npm --prefix backend test
+      - name: Test frontend
+        run: npm --prefix frontend test
+      - name: Check whitespace
+        run: git diff --check
+      - name: Commit review fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/bookings/bookings.service.ts \
+                  backend/src/bookings/client-visit-stats.ts \
+                  backend/src/bookings/guest-telegram-link.service.ts \
+                  backend/test/guest-visit-stats.test.js \
+                  backend/test/guest-telegram-link.test.js \
+                  .github/workflows/guest-visit-review-fixes.yml
+          git commit -m "fix: make guest visit stats consistent"
+          git show --check HEAD
+          git push origin HEAD:fix/guest-visit-identity
