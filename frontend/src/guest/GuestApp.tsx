@@ -1045,6 +1045,7 @@ export default function GuestApp() {
 
   function handleBackSwipeStart(event: TouchEvent<HTMLDivElement>) {
     backSwipeStart.current = null;
+    if (showMyBookings || externalReviewOffer) return;
     if (step === 'home' || event.touches.length !== 1) return;
 
     const touch = event.touches[0];
@@ -1059,7 +1060,7 @@ export default function GuestApp() {
   function handleBackSwipeEnd(event: TouchEvent<HTMLDivElement>) {
     const start = backSwipeStart.current;
     backSwipeStart.current = null;
-    if (!start || step === 'home' || event.changedTouches.length !== 1) return;
+    if (!start || showMyBookings || externalReviewOffer || step === 'home' || event.changedTouches.length !== 1) return;
 
     const touch = event.changedTouches[0];
     const deltaX = touch.clientX - start.x;
