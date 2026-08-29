@@ -1,0 +1,55 @@
+name: Apply iPhone admin phone window.open patch
+
+on:
+  push:
+    branches:
+      - fix/iphone-admin-phone-window-open
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/iphone-admin-phone-window-open
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Apply exact scoped patch
+        run: python .github/scripts/apply-iphone-admin-phone-window-open.py
+
+      - name: Remove temporary patch tooling
+        run: |
+          rm -f .github/scripts/apply-iphone-admin-phone-window-open.py
+          rm -f .github/workflows/apply-iphone-admin-phone-window-open.yml
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Run frontend tests
+        run: npm --prefix frontend test
+
+      - name: Build frontend
+        run: npm --prefix frontend run build
+
+      - name: Check diff whitespace
+        run: git diff --check
+
+      - name: Commit scoped fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: open admin phone via window.open on iPhone'
+          git show --check HEAD
+          git push origin HEAD:fix/iphone-admin-phone-window-open
