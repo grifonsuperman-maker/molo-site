@@ -1,0 +1,85 @@
+name: Fix guest back banner overlap
+
+on:
+  push:
+    branches:
+      - fix/guest-back-navigation
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/guest-back-navigation
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Apply booking banner spacing fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app = Path('frontend/src/guest/GuestApp.tsx')
+          text = app.read_text()
+
+          return_anchor = "  return (\n    <div\n      className={`molo-mode-${siteMode} min-h-[100dvh] bg-black text-white`}\n"
+          return_replacement = "  const hasGuestTopBanner = Boolean(\n    activeMyBookings.length > 0 || unreadNotificationBookings.length > 0 || completedReviewAccess,\n  );\n\n  return (\n    <div\n      className={`molo-mode-${siteMode} min-h-[100dvh] bg-black text-white`}\n"
+          if text.count(return_anchor) != 1:
+              raise SystemExit(f'Expected one root return anchor, found {text.count(return_anchor)}')
+          text = text.replace(return_anchor, return_replacement, 1)
+
+          old_button = '        <div className="fixed left-4 top-20 z-[100]">'
+          new_button = "        <div className={`fixed left-4 z-[100] ${hasGuestTopBanner ? 'top-52' : 'top-20'}`}>"
+          if text.count(old_button) != 1:
+              raise SystemExit(f'Expected one back button wrapper, found {text.count(old_button)}')
+          text = text.replace(old_button, new_button, 1)
+
+          old_banner = "      {(activeMyBookings.length > 0 || unreadNotificationBookings.length > 0 || completedReviewAccess) && ("
+          new_banner = "      {hasGuestTopBanner && ("
+          if text.count(old_banner) != 1:
+              raise SystemExit(f'Expected one booking banner condition, found {text.count(old_banner)}')
+          text = text.replace(old_banner, new_banner, 1)
+          app.write_text(text)
+
+          test = Path('frontend/test/guest-back-navigation.test.cjs')
+          test_text = test.read_text()
+          old_assert = "  assert.match(source, /fixed left-4 top-20 z-\\[100\\]/);\n"
+          new_assert = "  assert.match(source, /const hasGuestTopBanner = Boolean/);\n  assert.ok(source.includes(`hasGuestTopBanner ? 'top-52' : 'top-20'`));\n  assert.match(source, /\\{hasGuestTopBanner && \\(/);\n  assert.doesNotMatch(source, /fixed left-4 top-20 z-\\[100\\]/);\n"
+          if test_text.count(old_assert) != 1:
+              raise SystemExit(f'Expected one old button-position assertion, found {test_text.count(old_assert)}')
+          test.write_text(test_text.replace(old_assert, new_assert, 1))
+          PY
+      - name: Remove temporary workflow
+        run: rm .github/workflows/fix-guest-back-banner.yml
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Build frontend
+        run: npm --prefix frontend run build
+      - name: Test backend
+        run: npm --prefix backend test
+      - name: Test frontend
+        run: npm --prefix frontend test
+      - name: Check whitespace
+        run: git diff --check
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/guest/GuestApp.tsx frontend/test/guest-back-navigation.test.cjs .github/workflows/fix-guest-back-banner.yml
+          git commit -m "fix: keep guest back button clear of booking banner"
+          git show --check HEAD
+          git push origin HEAD:fix/guest-back-navigation
