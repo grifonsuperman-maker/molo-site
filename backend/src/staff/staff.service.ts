@@ -575,14 +575,65 @@ export class StaffService implements OnModuleInit {
   }
 
   private async assertDirectorNotLocked(director: Staff) {
-    if (!director.directorLockedUntil) return;
+    let [state] = await this.staffRepo.query(
+      `SELECT director_failed_login_attempts, director_locked_until
+       FROM staff
+       WHERE id = $1`,
+      [director.id],
+    );
 
-    const lockedUntil = new Date(director.directorLockedUntil);
+    if (!state) {
+      throw new UnauthorizedException('Директора не знайдено');
+    }
+
+    director.directorFailedLoginAttempts = Number(
+      state.director_failed_login_attempts || 0,
+    );
+    director.directorLockedUntil = state.director_locked_until
+      ? new Date(state.director_locked_until)
+      : null;
+
+    let lockedUntil = director.directorLockedUntil;
+    if (!lockedUntil) return;
+
     if (lockedUntil.getTime() <= Date.now()) {
-      director.directorFailedLoginAttempts = 0;
-      director.directorLockedUntil = null;
-      await this.staffRepo.save(director);
-      return;
+      const resetRows = await this.staffRepo.query(
+        `UPDATE staff
+         SET director_failed_login_attempts = 0,
+             director_locked_until = NULL
+         WHERE id = $1
+           AND director_locked_until IS NOT NULL
+           AND director_locked_until <= NOW()
+         RETURNING director_failed_login_attempts, director_locked_until`,
+        [director.id],
+      );
+
+      if (resetRows[0]) {
+        director.directorFailedLoginAttempts = 0;
+        director.directorLockedUntil = null;
+        return;
+      }
+
+      [state] = await this.staffRepo.query(
+        `SELECT director_failed_login_attempts, director_locked_until
+         FROM staff
+         WHERE id = $1`,
+        [director.id],
+      );
+
+      if (!state) {
+        throw new UnauthorizedException('Директора не знайдено');
+      }
+
+      director.directorFailedLoginAttempts = Number(
+        state.director_failed_login_attempts || 0,
+      );
+      director.directorLockedUntil = state.director_locked_until
+        ? new Date(state.director_locked_until)
+        : null;
+      lockedUntil = director.directorLockedUntil;
+
+      if (!lockedUntil || lockedUntil.getTime() <= Date.now()) return;
     }
 
     const minutes = Math.max(
@@ -595,20 +646,44 @@ export class StaffService implements OnModuleInit {
   }
 
   private async registerDirectorLoginFailure(director: Staff): Promise<never> {
-    director.directorFailedLoginAttempts =
-      Number(director.directorFailedLoginAttempts || 0) + 1;
+    const [state] = await this.staffRepo.query(
+      `UPDATE staff
+       SET director_failed_login_attempts = director_failed_login_attempts + 1,
+           director_locked_until = CASE
+             WHEN director_failed_login_attempts + 1 >= $2 THEN
+               CASE
+                 WHEN director_locked_until IS NULL OR director_locked_until <= NOW()
+                   THEN NOW() + ($3 * INTERVAL '1 minute')
+                 ELSE director_locked_until
+               END
+             ELSE director_locked_until
+           END
+       WHERE id = $1
+       RETURNING director_failed_login_attempts, director_locked_until`,
+      [
+        director.id,
+        DIRECTOR_MAX_FAILED_ATTEMPTS,
+        DIRECTOR_LOCK_MINUTES,
+      ],
+    );
+
+    if (!state) {
+      throw new UnauthorizedException('Директора не знайдено');
+    }
+
+    director.directorFailedLoginAttempts = Number(
+      state.director_failed_login_attempts || 0,
+    );
+    director.directorLockedUntil = state.director_locked_until
+      ? new Date(state.director_locked_until)
+      : null;
 
     if (director.directorFailedLoginAttempts >= DIRECTOR_MAX_FAILED_ATTEMPTS) {
-      director.directorLockedUntil = new Date(
-        Date.now() + DIRECTOR_LOCK_MINUTES * 60_000,
-      );
-      await this.staffRepo.save(director);
       throw new UnauthorizedException(
         `Забагато невдалих спроб. Вхід заблоковано на ${DIRECTOR_LOCK_MINUTES} хв.`,
       );
     }
 
-    await this.staffRepo.save(director);
     const attemptsLeft =
       DIRECTOR_MAX_FAILED_ATTEMPTS - director.directorFailedLoginAttempts;
     throw new UnauthorizedException(
