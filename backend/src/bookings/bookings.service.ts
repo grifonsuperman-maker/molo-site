@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
-import { Repository } from 'typeorm';
+import { Raw, Repository } from 'typeorm';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
@@ -52,6 +52,38 @@ export class BookingsService {
 
   private normalizePhone(phone: string | null | undefined) {
     return String(phone || '').replace(/\D/g, '');
+  }
+
+  private phoneIdentityCandidates(phone: string | null | undefined) {
+    const digits = this.normalizePhone(phone);
+    if (!digits) return [];
+
+    if (/^0\d{9}$/.test(digits)) {
+      return [digits, `38${digits}`];
+    }
+    if (/^380\d{9}$/.test(digits)) {
+      return [digits, digits.slice(2)];
+    }
+    return [digits];
+  }
+
+  private async findClientByPhone(phone: string) {
+    const exact = await this.clients.findOne({ where: { phone } });
+    if (exact) return exact;
+
+    const phoneCandidates = this.phoneIdentityCandidates(phone);
+    if (!phoneCandidates.length) return null;
+
+    return this.clients.findOne({
+      where: {
+        phone: Raw(
+          (alias) =>
+            `regexp_replace(${alias}, '[^0-9]', '', 'g') IN (:...phoneCandidates)`,
+          { phoneCandidates },
+        ),
+      },
+      order: { createdAt: 'ASC' },
+    });
   }
 
   private hashGuestDeviceId(guestDeviceId: string) {
@@ -364,6 +396,31 @@ export class BookingsService {
     }
   }
 
+  private async refreshClientVisitStats(clientId: string) {
+    const client = await this.clients.findOne({ where: { id: clientId } });
+    if (!client) return;
+
+    const completedBookings = await this.bookings
+      .createQueryBuilder('booking')
+      .leftJoin('booking.client', 'client')
+      .where('client.id = :clientId', { clientId })
+      .andWhere('booking.status = :status', { status: 'completed' })
+      .getMany();
+
+    client.visitsCount = completedBookings.length;
+    client.totalGuests = completedBookings.reduce(
+      (sum, item) => sum + Number(item.guestsCount || 0),
+      0,
+    );
+    client.lastVisitAt = completedBookings.reduce<Date | null>((latest, item) => {
+      if (!item.completedAt) return latest;
+      if (!latest || item.completedAt.getTime() > latest.getTime()) return item.completedAt;
+      return latest;
+    }, null);
+
+    await this.clients.save(client);
+  }
+
   private async saveHistory(
     booking: Booking,
     action: string,
@@ -604,7 +661,7 @@ export class BookingsService {
       const table = await this.resolveTableForBooking(dto);
       await this.assertTableCanBeBooked(table);
 
-      let client = await this.clients.findOne({ where: { phone: dto.phone } });
+      let client = await this.findClientByPhone(dto.phone);
       if (!client) client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
       if (client.isBlacklisted) throw new BadRequestException('Бронювання з цього номера недоступне');
 
@@ -692,7 +749,7 @@ export class BookingsService {
       if (!table) throw new NotFoundException('Стіл не знайдено');
       await this.assertTableCanBeBooked(table);
 
-      let client = await this.clients.findOne({ where: { phone: dto.phone } });
+      let client = await this.findClientByPhone(dto.phone);
       if (!client) {
         client = await this.clients.save(
           this.clients.create({ fullName: dto.fullName, phone: dto.phone }),
@@ -1052,6 +1109,9 @@ export class BookingsService {
     booking.status = 'completed';
     booking.completedAt = new Date();
     await this.bookings.save(booking);
+    if (booking.client?.id) {
+      await this.refreshClientVisitStats(booking.client.id);
+    }
     await this.saveHistory(
       booking,
       'booking_completed',
