@@ -8,8 +8,10 @@ export type TelegramAuthRole =
 
 export type TelegramWebApp = {
   initData?: string;
+  platform?: string;
   ready?: () => void;
   expand?: () => void;
+  requestFullscreen?: () => void;
   setHeaderColor?: (color: string) => void;
   setBackgroundColor?: (color: string) => void;
 };
@@ -28,6 +30,18 @@ export function getTelegramWebApp() {
 
 export function isTelegramMiniApp() {
   return Boolean(getTelegramWebApp()?.initData);
+}
+
+export function expandTelegramWebApp(webApp: TelegramWebApp | undefined) {
+  webApp?.expand?.();
+
+  if (webApp?.platform !== 'ios') return;
+
+  try {
+    webApp.requestFullscreen?.();
+  } catch {
+    // Older iOS Telegram clients keep the existing expanded mode.
+  }
 }
 
 export function resolveTelegramMode(
