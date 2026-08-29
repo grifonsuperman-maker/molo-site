@@ -29,3 +29,8 @@ test('guest pages support a deliberate right swipe from the left edge', () => {
   assert.match(source, /deltaX > deltaY \* 1\.25/);
   assert.match(source, /goBack\(\);/);
 });
+
+test('guest back swipe does not move the page under an open guest modal', () => {
+  assert.ok(source.includes(`if (showMyBookings || externalReviewOffer) return;`));
+  assert.ok(source.includes(`if (!start || showMyBookings || externalReviewOffer || step === 'home' || event.changedTouches.length !== 1) return;`));
+});
