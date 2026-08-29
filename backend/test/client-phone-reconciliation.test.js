@@ -212,3 +212,76 @@ test('blacklist actions do not cross different verified Telegram identities', as
   assert.equal(second.blacklistReason, 'B');
   assert.deepEqual(savedIds, ['client-a']);
 });
+
+test('active duplicate protection treats Ukrainian local and international phone forms as one identity', async () => {
+  const activeBooking = {
+    guestDeviceIdHash: 'different-device',
+    guestPhoneNormalized: '0671234567',
+    client: { phone: '067 123 45 67' },
+  };
+  const query = {
+    leftJoinAndSelect() { return this; },
+    addSelect() { return this; },
+    where() { return this; },
+    andWhere() { return this; },
+    async getMany() { return [activeBooking]; },
+  };
+  const bookings = {
+    createQueryBuilder() { return query; },
+  };
+  const service = new BookingsService(
+    bookings,
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    {},
+    {},
+    {},
+  );
+
+  assert.equal(service.normalizePhoneIdentity('067 123 45 67'), '380671234567');
+  assert.equal(service.normalizePhoneIdentity('+380 (67) 123-45-67'), '380671234567');
+  await assert.rejects(
+    () => service.assertNoActiveGuestBooking(
+      '2099-01-01',
+      '+380 (67) 123-45-67',
+      'new-device',
+    ),
+    /вже є активне бронювання/,
+  );
+});
+
+test('manual booking phone key is canonical for atomic Ukrainian duplicate constraint', async () => {
+  const query = {
+    leftJoinAndSelect() { return this; },
+    addSelect() { return this; },
+    where() { return this; },
+    andWhere() { return this; },
+    async getMany() { return []; },
+  };
+  const bookings = {
+    createQueryBuilder() { return query; },
+  };
+  const service = new BookingsService(
+    bookings,
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    {},
+    {},
+    {},
+  );
+
+  assert.equal(
+    await service.assertNoActivePhoneBooking('2099-01-01', '067 123 45 67'),
+    '380671234567',
+  );
+  assert.equal(
+    await service.assertNoActivePhoneBooking('2099-01-01', '+380671234567'),
+    '380671234567',
+  );
+});

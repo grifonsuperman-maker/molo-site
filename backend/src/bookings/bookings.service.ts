@@ -55,6 +55,12 @@ export class BookingsService {
     return String(phone || '').replace(/\D/g, '');
   }
 
+  private normalizePhoneIdentity(phone: string | null | undefined) {
+    const digits = this.normalizePhone(phone);
+    if (/^0\d{9}$/.test(digits)) return `38${digits}`;
+    return digits;
+  }
+
   private phoneIdentityCandidates(phone: string | null | undefined) {
     const digits = this.normalizePhone(phone);
     if (!digits) return [];
@@ -117,13 +123,16 @@ export class BookingsService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.client', 'client')
       .addSelect('booking.guestDeviceIdHash')
+      .addSelect('booking.guestPhoneNormalized')
       .where('booking.bookingDate = :bookingDate', { bookingDate })
       .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
       .getMany();
-    const normalizedPhone = this.normalizePhone(phone);
+    const normalizedPhone = this.normalizePhoneIdentity(phone);
     const duplicate = activeBookings.some((booking) =>
       booking.guestDeviceIdHash === guestDeviceIdHash ||
-      this.normalizePhone(booking.client?.phone) === normalizedPhone,
+      this.normalizePhoneIdentity(
+        booking.guestPhoneNormalized || booking.client?.phone,
+      ) === normalizedPhone,
     );
 
     if (duplicate) {
@@ -132,7 +141,7 @@ export class BookingsService {
   }
 
   private async assertNoActivePhoneBooking(bookingDate: string, phone: string) {
-    const normalizedPhone = this.normalizePhone(phone);
+    const normalizedPhone = this.normalizePhoneIdentity(phone);
     if (!normalizedPhone) {
       throw new BadRequestException('Вкажіть коректний номер телефону');
     }
@@ -147,8 +156,9 @@ export class BookingsService {
 
     const duplicate = activeBookings.some(
       (booking) =>
-        booking.guestPhoneNormalized === normalizedPhone ||
-        this.normalizePhone(booking.client?.phone) === normalizedPhone,
+        this.normalizePhoneIdentity(
+          booking.guestPhoneNormalized || booking.client?.phone,
+        ) === normalizedPhone,
     );
 
     if (duplicate) {
@@ -652,7 +662,7 @@ export class BookingsService {
       await this.validateRestaurant();
 
       const guestDeviceIdHash = this.hashGuestDeviceId(dto.guestDeviceId);
-      const guestPhoneNormalized = this.normalizePhone(dto.phone) || null;
+      const guestPhoneNormalized = this.normalizePhoneIdentity(dto.phone) || null;
       await this.assertNoActiveGuestBooking(dto.bookingDate, dto.phone, guestDeviceIdHash);
 
       const table = await this.resolveTableForBooking(dto);
