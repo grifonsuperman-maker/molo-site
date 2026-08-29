@@ -123,3 +123,92 @@ test('equivalent phones with different verified Telegram identities are not merg
   const result = await service.findAll();
   assert.equal(result.length, 2);
 });
+
+test('blacklist actions update every safely reconciled phone row', async () => {
+  const local = client({
+    id: 'client-local',
+    phone: '067 123 45 67',
+    createdAt: new Date('2023-01-01T00:00:00.000Z'),
+  });
+  const telegram = client({
+    id: 'client-telegram',
+    phone: '+380671234567',
+    telegramId: '123456789',
+    createdAt: new Date('2024-01-01T00:00:00.000Z'),
+  });
+  const rows = [local, telegram];
+  const savedIds = [];
+  const repo = {
+    async findOne({ where }) {
+      return rows.find((item) => item.id === where.id) || null;
+    },
+    async find() {
+      return rows;
+    },
+    async save(value) {
+      savedIds.push(value.id);
+      return value;
+    },
+  };
+  const service = new ClientsService(repo);
+
+  await service.blacklist('client-telegram', 'Тестова причина');
+
+  assert.equal(local.isBlacklisted, true);
+  assert.equal(telegram.isBlacklisted, true);
+  assert.equal(local.blacklistReason, 'Тестова причина');
+  assert.equal(telegram.blacklistReason, 'Тестова причина');
+  assert.deepEqual(savedIds, ['client-local', 'client-telegram']);
+
+  savedIds.length = 0;
+  await service.unblacklist('client-telegram');
+
+  assert.equal(local.isBlacklisted, false);
+  assert.equal(telegram.isBlacklisted, false);
+  assert.equal(local.blacklistReason, null);
+  assert.equal(telegram.blacklistReason, null);
+  assert.equal(local.blacklistedAt, null);
+  assert.equal(telegram.blacklistedAt, null);
+  assert.deepEqual(savedIds, ['client-local', 'client-telegram']);
+});
+
+test('blacklist actions do not cross different verified Telegram identities', async () => {
+  const first = client({
+    id: 'client-a',
+    phone: '0671234567',
+    telegramId: '111',
+    isBlacklisted: true,
+    blacklistReason: 'A',
+    blacklistedAt: new Date('2026-01-01T00:00:00.000Z'),
+  });
+  const second = client({
+    id: 'client-b',
+    phone: '+380671234567',
+    telegramId: '222',
+    isBlacklisted: true,
+    blacklistReason: 'B',
+    blacklistedAt: new Date('2026-01-02T00:00:00.000Z'),
+  });
+  const rows = [first, second];
+  const savedIds = [];
+  const repo = {
+    async findOne({ where }) {
+      return rows.find((item) => item.id === where.id) || null;
+    },
+    async find() {
+      return rows;
+    },
+    async save(value) {
+      savedIds.push(value.id);
+      return value;
+    },
+  };
+  const service = new ClientsService(repo);
+
+  await service.unblacklist('client-a');
+
+  assert.equal(first.isBlacklisted, false);
+  assert.equal(second.isBlacklisted, true);
+  assert.equal(second.blacklistReason, 'B');
+  assert.deepEqual(savedIds, ['client-a']);
+});
