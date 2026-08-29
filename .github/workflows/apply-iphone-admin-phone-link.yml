@@ -42,41 +42,37 @@ jobs:
               source = source.replace(old, new, 1)
 
           replace_once(
-              """  const pendingTooLong =
-              bookingStatus?.status === 'pending' &&
-              (bookingStatus.isPendingTooLong || bookingStatus.pendingAgeMinutes >= 15);
-            const activeBookingStatusText = !bookingStatus
-          """,
-              """  const pendingTooLong =
-              bookingStatus?.status === 'pending' &&
-              (bookingStatus.isPendingTooLong || bookingStatus.pendingAgeMinutes >= 15);
-            const adminPhone = bookingStatus?.restaurantPhone || restaurant?.phone;
-            const activeBookingStatusText = !bookingStatus
-          """,
+              """const pendingTooLong =
+    bookingStatus?.status === 'pending' &&
+    (bookingStatus.isPendingTooLong || bookingStatus.pendingAgeMinutes >= 15);
+  const activeBookingStatusText = !bookingStatus""",
+              """const pendingTooLong =
+    bookingStatus?.status === 'pending' &&
+    (bookingStatus.isPendingTooLong || bookingStatus.pendingAgeMinutes >= 15);
+  const adminPhone = bookingStatus?.restaurantPhone || restaurant?.phone;
+  const activeBookingStatusText = !bookingStatus""",
               'adminPhone value',
           )
 
           replace_once(
-              """  function callAdmin() {
-              const phone = bookingStatus?.restaurantPhone || restaurant?.phone;
+              """function callAdmin() {
+    const phone = bookingStatus?.restaurantPhone || restaurant?.phone;
 
-              if (phone) {
-                window.location.href = `tel:${phone}`;
-                return;
-              }
+    if (phone) {
+      window.location.href = `tel:${phone}`;
+      return;
+    }
 
-              alert('Телефон адміністратора ще не додано.');
-            }
-          """,
-              """  function callAdmin() {
-              alert('Телефон адміністратора ще не додано.');
-            }
-          """,
+    alert('Телефон адміністратора ще не додано.');
+  }""",
+              """function callAdmin() {
+    alert('Телефон адміністратора ще не додано.');
+  }""",
               'callAdmin fallback',
           )
 
           replace_once(
-              """            {pendingTooLong && (
+              """{pendingTooLong && (
               <button
                 type=\"button\"
                 onClick={callAdmin}
@@ -84,9 +80,8 @@ jobs:
               >
                 Зателефонувати Адміністратору
               </button>
-            )}
-          """,
-              """            {pendingTooLong && (
+            )}""",
+              """{pendingTooLong && (
               adminPhone ? (
                 <a
                   href={`tel:${adminPhone}`}
@@ -103,21 +98,19 @@ jobs:
                   Зателефонувати Адміністратору
                 </button>
               )
-            )}
-          """,
+            )}""",
               'top pending admin call',
           )
 
           replace_once(
-              """                <button
+              """<button
                   onClick={callAdmin}
                   className=\"molo-button inline-flex items-center justify-center gap-4 rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm sm:text-2xl\"
                 >
                   <Phone className=\"h-7 w-7 text-amber-200\" />
                   Зателефонувати адміністратору
-                </button>
-          """,
-              """                {adminPhone ? (
+                </button>""",
+              """{adminPhone ? (
                   <a
                     href={`tel:${adminPhone}`}
                     className=\"molo-button inline-flex items-center justify-center gap-4 rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm sm:text-2xl\"
@@ -134,21 +127,19 @@ jobs:
                     <Phone className=\"h-7 w-7 text-amber-200\" />
                     Зателефонувати адміністратору
                   </button>
-                )}
-          """,
+                )}""",
               'home admin call',
           )
 
           replace_once(
-              """                  <button
+              """<button
                     type=\"button\"
                     onClick={callAdmin}
                     className=\"mt-4 rounded-2xl border border-amber-200/60 bg-amber-300/20 px-5 py-3 text-sm font-bold text-amber-100 transition active:scale-95\"
                   >
                     Зателефонувати Адміністратору
-                  </button>
-          """,
-              """                  {adminPhone ? (
+                  </button>""",
+              """{adminPhone ? (
                     <a
                       href={`tel:${adminPhone}`}
                       className=\"mt-4 inline-block rounded-2xl border border-amber-200/60 bg-amber-300/20 px-5 py-3 text-sm font-bold text-amber-100 transition active:scale-95\"
@@ -163,8 +154,7 @@ jobs:
                     >
                       Зателефонувати Адміністратору
                     </button>
-                  )}
-          """,
+                  )}""",
               'success pending admin call',
           )
 
