@@ -1,0 +1,52 @@
+name: Apply admin manual waiter Telegram patch
+
+on:
+  push:
+    branches:
+      - fix/admin-manual-waiter-telegram
+    paths:
+      - .github/workflows/apply-admin-manual-waiter-telegram.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/admin-manual-waiter-telegram
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Apply scoped patch
+        run: python3 .github/scripts/apply-admin-manual-waiter-telegram.py
+      - name: Remove temporary patch tooling
+        run: rm .github/scripts/apply-admin-manual-waiter-telegram.py .github/workflows/apply-admin-manual-waiter-telegram.yml
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Build frontend
+        run: npm --prefix frontend run build
+      - name: Test backend
+        run: npm --prefix backend test
+      - name: Test frontend
+        run: npm --prefix frontend test
+      - name: Check whitespace
+        run: git diff --check
+      - name: Commit scoped change
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/bookings/bookings.service.ts backend/src/notifications/notifications.service.ts backend/test/admin-manual-booking.test.js backend/test/telegram-booking-notifications.test.js .github/scripts/apply-admin-manual-waiter-telegram.py .github/workflows/apply-admin-manual-waiter-telegram.yml
+          git diff --cached --check
+          git commit -m "fix: notify waiters about admin manual bookings"
+          git show --check HEAD
+          git push origin HEAD:fix/admin-manual-waiter-telegram
