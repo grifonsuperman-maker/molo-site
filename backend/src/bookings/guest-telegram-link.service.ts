@@ -9,6 +9,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { Client } from '../clients/entities/client.entity';
 import { Booking } from './entities/booking.entity';
+import { refreshClientVisitStats } from './client-visit-stats';
 
 @Injectable()
 export class GuestTelegramLinkService {
@@ -82,8 +83,15 @@ export class GuestTelegramLinkService {
 
       const linkedClient = await clients.findOne({ where: { telegramId } });
       if (linkedClient && linkedClient.id !== client.id) {
+        const previousClientId = client.id;
         booking.client = linkedClient;
         await manager.getRepository(Booking).save(booking);
+
+        if (booking.status === 'completed') {
+          await refreshClientVisitStats(manager, previousClientId);
+          await refreshClientVisitStats(manager, linkedClient.id);
+        }
+
         return this.linkedResponse();
       }
 

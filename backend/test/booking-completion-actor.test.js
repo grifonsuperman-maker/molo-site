@@ -36,12 +36,23 @@ test('booking completion history records the real waiter', async () => {
   const savedHistory = [];
   const logged = [];
 
-  const bookings = {
+  const bookingRepository = {
     async findOne() {
       return booking;
     },
     async save(value) {
       return value;
+    },
+  };
+  const manager = {
+    getRepository(entity) {
+      if (entity?.name === 'Booking') return bookingRepository;
+      throw new Error(`Unexpected repository: ${entity?.name}`);
+    },
+  };
+  const bookings = {
+    manager: {
+      transaction: async (callback) => callback(manager),
     },
   };
   const histories = {

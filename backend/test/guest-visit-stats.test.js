@@ -50,7 +50,7 @@ test('guest identity reuses a client across Ukrainian local and international ph
   );
 });
 
-test('completing visits recalculates one visit per completed booking without double counting', async () => {
+test('completing visits keeps completedAt stable and refreshes stats under row locks', async () => {
   const client = {
     id: 'client-1',
     fullName: 'Іван',
@@ -59,7 +59,7 @@ test('completing visits recalculates one visit per completed booking without dou
     totalGuests: 0,
     lastVisitAt: null,
   };
-  const olderCompletedAt = new Date('2098-12-01T20:00:00.000Z');
+  const olderCompletedAt = new Date('2025-12-01T20:00:00.000Z');
   const booking = {
     id: 'booking-current',
     status: 'approved',
@@ -86,11 +86,18 @@ test('completing visits recalculates one visit per completed booking without dou
     guestsCount: 2,
     completedAt: olderCompletedAt,
   };
+  const bookingLocks = [];
+  const clientLocks = [];
   const clientSaves = [];
 
-  const bookings = {
-    async findOne() { return booking; },
-    async save(value) { return value; },
+  const bookingRepo = {
+    async findOne({ lock }) {
+      bookingLocks.push(lock?.mode || null);
+      return booking;
+    },
+    async save(value) {
+      return value;
+    },
     createQueryBuilder() {
       return {
         leftJoin() { return this; },
@@ -100,12 +107,9 @@ test('completing visits recalculates one visit per completed booking without dou
       };
     },
   };
-  const histories = {
-    create(value) { return value; },
-    async save(value) { return value; },
-  };
-  const clients = {
-    async findOne({ where }) {
+  const clientRepo = {
+    async findOne({ where, lock }) {
+      clientLocks.push(lock?.mode || null);
       return where.id === client.id ? client : null;
     },
     async save(value) {
@@ -116,6 +120,22 @@ test('completing visits recalculates one visit per completed booking without dou
       });
       return value;
     },
+  };
+  const manager = {
+    getRepository(entity) {
+      if (entity?.name === 'Booking') return bookingRepo;
+      if (entity?.name === 'Client') return clientRepo;
+      throw new Error(`Unexpected repository: ${entity?.name}`);
+    },
+  };
+  const bookings = {
+    manager: {
+      transaction: async (callback) => callback(manager),
+    },
+  };
+  const histories = {
+    create(value) { return value; },
+    async save(value) { return value; },
   };
   const tables = {
     async save() {
@@ -128,7 +148,7 @@ test('completing visits recalculates one visit per completed booking without dou
     bookings,
     histories,
     {},
-    clients,
+    {},
     tables,
     {},
     logs,
@@ -137,15 +157,22 @@ test('completing visits recalculates one visit per completed booking without dou
   );
 
   await service.complete('booking-current');
+  const firstCompletedAt = booking.completedAt;
+  const firstLastVisitAt = client.lastVisitAt;
+
   assert.equal(client.visitsCount, 2);
   assert.equal(client.totalGuests, 5);
+  assert.ok(firstCompletedAt instanceof Date);
+  assert.equal(firstLastVisitAt, firstCompletedAt);
 
   await service.complete('booking-current');
 
   assert.equal(client.visitsCount, 2);
   assert.equal(client.totalGuests, 5);
-  assert.ok(client.lastVisitAt instanceof Date);
-  assert.ok(client.lastVisitAt.getTime() >= olderCompletedAt.getTime());
+  assert.equal(booking.completedAt, firstCompletedAt);
+  assert.equal(client.lastVisitAt, firstLastVisitAt);
+  assert.deepEqual(bookingLocks, ['pessimistic_write', 'pessimistic_write']);
+  assert.deepEqual(clientLocks, ['pessimistic_write', 'pessimistic_write']);
   assert.equal(clientSaves.length, 2);
   assert.deepEqual(
     clientSaves.map((item) => [item.visitsCount, item.totalGuests]),

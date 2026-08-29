@@ -17,6 +17,7 @@ import { LogsService } from '../logs/logs.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
 import type { AuthUser } from '../auth/types/auth-user.type';
+import { refreshClientVisitStats } from './client-visit-stats';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
@@ -394,31 +395,6 @@ export class BookingsService {
     } catch (error) {
       console.error('Booking notification failed:', error);
     }
-  }
-
-  private async refreshClientVisitStats(clientId: string) {
-    const client = await this.clients.findOne({ where: { id: clientId } });
-    if (!client) return;
-
-    const completedBookings = await this.bookings
-      .createQueryBuilder('booking')
-      .leftJoin('booking.client', 'client')
-      .where('client.id = :clientId', { clientId })
-      .andWhere('booking.status = :status', { status: 'completed' })
-      .getMany();
-
-    client.visitsCount = completedBookings.length;
-    client.totalGuests = completedBookings.reduce(
-      (sum, item) => sum + Number(item.guestsCount || 0),
-      0,
-    );
-    client.lastVisitAt = completedBookings.reduce<Date | null>((latest, item) => {
-      if (!item.completedAt) return latest;
-      if (!latest || item.completedAt.getTime() > latest.getTime()) return item.completedAt;
-      return latest;
-    }, null);
-
-    await this.clients.save(client);
   }
 
   private async saveHistory(
@@ -1102,16 +1078,25 @@ export class BookingsService {
   }
 
   async complete(id: string, actor?: AuthUser) {
-    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
-    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+    const { booking, previousData } = await this.bookings.manager.transaction(async (manager) => {
+      const booking = await manager.getRepository(Booking).findOne({
+        where: { id },
+        relations: ['table', 'client'],
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
-    const previousData = this.bookingSnapshot(booking);
-    booking.status = 'completed';
-    booking.completedAt = new Date();
-    await this.bookings.save(booking);
-    if (booking.client?.id) {
-      await this.refreshClientVisitStats(booking.client.id);
-    }
+      const previousData = this.bookingSnapshot(booking);
+      booking.status = 'completed';
+      if (!booking.completedAt) booking.completedAt = new Date();
+      await manager.getRepository(Booking).save(booking);
+      if (booking.client?.id) {
+        await refreshClientVisitStats(manager, booking.client.id);
+      }
+
+      return { booking, previousData };
+    });
+
     await this.saveHistory(
       booking,
       'booking_completed',
