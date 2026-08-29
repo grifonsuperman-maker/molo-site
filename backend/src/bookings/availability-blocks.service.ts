@@ -159,7 +159,12 @@ export class AvailabilityBlocksService {
     return { message: 'Заплановану недоступність скасовано' };
   }
 
-  async assertBookable(dto: CreateBookingDto) {
+  async assertBookable(
+    dto: Pick<
+      CreateBookingDto,
+      'tableId' | 'tableNumber' | 'bookingDate' | 'bookingTime' | 'durationMinutes'
+    >,
+  ) {
     const table = await this.resolveTable(dto.tableId, dto.tableNumber);
     if (!table) return;
     const start = this.parseTime(dto.bookingTime);

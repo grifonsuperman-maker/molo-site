@@ -9,6 +9,7 @@ import { AvailabilityBlocksService } from './availability-blocks.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
+import { CreateAdminManualBookingDto } from './dto/create-admin-manual-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { GuestBookingListDto } from './dto/guest-booking-list.dto';
 import { GuestCancelBookingDto } from './dto/guest-cancel-booking.dto';
@@ -54,6 +55,18 @@ export class BookingsController {
     return this.tableLock.withCreateLock(bookingDto, async () => {
       await this.availabilityBlocks.assertBookable(bookingDto);
       return this.service.create(bookingDto);
+    });
+  }
+
+  @Post('admin/manual')
+  @Roles('admin', 'owner')
+  async createManual(
+    @Body() dto: CreateAdminManualBookingDto,
+    @Req() request: { user: AuthUser },
+  ) {
+    return this.tableLock.withCreateLock(dto, async () => {
+      await this.availabilityBlocks.assertBookable(dto);
+      return this.service.createManual(dto, request.user);
     });
   }
 

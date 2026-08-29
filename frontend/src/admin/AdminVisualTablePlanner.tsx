@@ -236,6 +236,14 @@ export default function AdminVisualTablePlanner({
   const [reason, setReason] = useState('');
   const [transferBookingId, setTransferBookingId] = useState<string | null>(null);
   const [transferTableId, setTransferTableId] = useState('');
+  const [manualBookingOpen, setManualBookingOpen] = useState(false);
+  const [manualDate, setManualDate] = useState(today);
+  const [manualTime, setManualTime] = useState('18:00');
+  const [manualFullName, setManualFullName] = useState('');
+  const [manualPhone, setManualPhone] = useState('');
+  const [manualGuestsCount, setManualGuestsCount] = useState('2');
+  const [manualDurationMinutes, setManualDurationMinutes] = useState('120');
+  const [manualWishes, setManualWishes] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -269,6 +277,7 @@ export default function AdminVisualTablePlanner({
     if (!silent) setLoading(false);
   }
   useEffect(() => { setTarget(null); void load(); }, [date, time]);
+  useEffect(() => { setManualBookingOpen(false); }, [target?.type, target?.id]);
 
   function realTable(number: number) { return map?.tables.find((table) => Number(table.tableNumber) === number) || null; }
   function tableColor(number: number) {
@@ -324,6 +333,64 @@ export default function AdminVisualTablePlanner({
     try { await availabilityBlocksApi.transferBooking(booking.id, transferTableId, reason.trim() || 'Перенесення Адміністратором'); setNotice('Бронювання перенесено'); setTransferBookingId(null); setTransferTableId(''); await load(true); }
     catch (actionError: any) { setError(actionError?.message || 'Не вдалося перенести'); } finally { setBusy(''); }
   }
+  function openManualBooking() {
+    if (!selectedTable) return;
+    setManualDate(date);
+    setManualTime(time);
+    setManualFullName('');
+    setManualPhone('');
+    setManualGuestsCount(String(Math.min(2, Math.max(1, Number(selectedTable.seats) || 2))));
+    setManualDurationMinutes('120');
+    setManualWishes('');
+    setError('');
+    setNotice('');
+    setManualBookingOpen(true);
+  }
+
+  async function createManualBooking() {
+    if (!selectedTable) return;
+    const fullName = manualFullName.trim();
+    const phone = manualPhone.trim();
+    const guestsCount = Number(manualGuestsCount);
+    const durationMinutes = Number(manualDurationMinutes);
+
+    if (!fullName || !phone || !manualDate || !manualTime) {
+      setError('Заповніть ім’я, телефон, дату та час');
+      return;
+    }
+    if (!Number.isInteger(guestsCount) || guestsCount < 1 || guestsCount > 30) {
+      setError('Кількість гостей має бути від 1 до 30');
+      return;
+    }
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 30 || durationMinutes > 720) {
+      setError('Тривалість має бути від 30 до 720 хвилин');
+      return;
+    }
+
+    setBusy('manual-booking');
+    setError('');
+    setNotice('');
+    try {
+      await bookingsApi.createManual({
+        tableId: selectedTable.id,
+        fullName,
+        phone,
+        bookingDate: manualDate,
+        bookingTime: manualTime,
+        guestsCount,
+        durationMinutes,
+        wishes: manualWishes.trim() || undefined,
+      });
+      setNotice(`Бронювання створено і підтверджено: ${manualDate} о ${manualTime}`);
+      setManualBookingOpen(false);
+      await load(true);
+    } catch (actionError: any) {
+      setError(actionError?.message || 'Не вдалося створити бронювання');
+    } finally {
+      setBusy('');
+    }
+  }
+
   async function setPhysicalStatus(status: 'free' | 'occupied' | 'cleaning' | 'closed') {
     if (!selectedTable || date !== today) return;
     if (mode === 'director' && status !== 'free' && status !== 'occupied') return;
@@ -372,6 +439,8 @@ export default function AdminVisualTablePlanner({
 
         {target && <section data-map-target className="mt-3 rounded-[28px] border border-amber-300/30 bg-amber-300/[.06] p-4 shadow-[0_0_38px_rgba(251,191,36,.09)]">
           <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[.16em] text-amber-100/50">Обрано</p><h2 className="mt-1 text-2xl font-black">{selectedName}</h2>{selectedTable && <p className="mt-1 text-sm text-white/50">{selectedTable.seats} місць · {selectedTable.zone?.name || location.label}</p>}</div><button type="button" onClick={() => setTarget(null)} className="rounded-xl border border-white/10 p-2"><X size={17} /></button></div>
+
+          {mode === 'admin' && selectedTable && <div className="mt-4 rounded-[24px] border border-sky-300/25 bg-sky-400/[.07] p-3"><button type="button" onClick={() => manualBookingOpen ? setManualBookingOpen(false) : openManualBooking()} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-200/45 bg-sky-300/10 px-4 py-3 font-black text-sky-100 transition active:scale-[.98]"><CalendarClock size={18} />Створити бронювання</button>{manualBookingOpen && <div className="mt-3 space-y-3"><p className="text-xs leading-5 text-white/50">Бронювання одразу буде підтверджено. Офіціант побачить його у своєму пульті тільки в день бронювання.</p><div className="grid grid-cols-2 gap-2"><label className="rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-white/40">Дата<input type="date" min={today} value={manualDate} onChange={(event) => setManualDate(event.target.value)} className="mt-1 block w-full bg-transparent text-base font-black text-white outline-none" /></label><label className="rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-white/40">Час<input type="time" value={manualTime} onChange={(event) => setManualTime(event.target.value)} className="mt-1 block w-full bg-transparent text-base font-black text-white outline-none" /></label></div><label className="block text-xs text-white/45">Ім’я гостя<input type="text" value={manualFullName} onChange={(event) => setManualFullName(event.target.value)} className="mt-1 w-full rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-base text-white outline-none focus:border-sky-200/40" /></label><label className="block text-xs text-white/45">Телефон гостя<input type="tel" inputMode="tel" autoComplete="tel" value={manualPhone} onChange={(event) => setManualPhone(event.target.value)} className="mt-1 w-full rounded-2xl border border-white/10 bg-black/25 px-3 py-3 text-base text-white outline-none focus:border-sky-200/40" /></label><div className="grid grid-cols-2 gap-2"><label className="rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-white/40">Гостей<input type="number" min={1} max={30} value={manualGuestsCount} onChange={(event) => setManualGuestsCount(event.target.value)} className="mt-1 block w-full bg-transparent text-base font-black text-white outline-none" /></label><label className="rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-white/40">Тривалість, хв<input type="number" min={30} max={720} step={30} value={manualDurationMinutes} onChange={(event) => setManualDurationMinutes(event.target.value)} className="mt-1 block w-full bg-transparent text-base font-black text-white outline-none" /></label></div><label className="block text-xs text-white/45">Побажання<textarea value={manualWishes} onChange={(event) => setManualWishes(event.target.value)} className="mt-1 min-h-20 w-full rounded-2xl border border-white/10 bg-black/25 p-3 text-base text-white outline-none focus:border-sky-200/40" /></label><button type="button" disabled={busy === 'manual-booking' || !manualFullName.trim() || !manualPhone.trim()} onClick={() => void createManualBooking()} className="w-full rounded-2xl bg-sky-300 px-4 py-4 font-black text-neutral-950 disabled:opacity-35">{busy === 'manual-booking' ? 'Створюємо…' : 'Створити й підтвердити'}</button></div>}</div>}
 
           {selectedTable && date === today && <div className="mt-4"><p className="mb-2 text-xs font-black uppercase tracking-[.14em] text-white/40">Статус зараз</p>{mode === 'director' ? <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => void setPhysicalStatus('free')} className="rounded-2xl border border-emerald-200/65 bg-black/60 px-3 py-3 text-sm font-black text-emerald-50 shadow-[0_0_20px_rgba(52,211,153,.18)]">Стіл вільний</button><button type="button" onClick={() => void setPhysicalStatus('occupied')} className="rounded-2xl border border-rose-200/65 bg-black/60 px-3 py-3 text-sm font-black text-rose-50 shadow-[0_0_20px_rgba(244,63,94,.18)]">Стіл зайнятий</button></div> : <div className="grid grid-cols-3 gap-2"><button type="button" onClick={() => void setPhysicalStatus('free')} className="rounded-2xl border border-emerald-300/35 bg-emerald-400/10 px-3 py-3 text-xs font-black text-emerald-100">Вільний</button><button type="button" onClick={() => void setPhysicalStatus('cleaning')} className="rounded-2xl border border-cyan-300/35 bg-cyan-400/10 px-3 py-3 text-xs font-black text-cyan-100">Готується</button><button type="button" onClick={() => void setPhysicalStatus('closed')} className="rounded-2xl border border-red-300/35 bg-red-400/10 px-3 py-3 text-xs font-black text-red-100">Закрити</button></div>}</div>}
 
