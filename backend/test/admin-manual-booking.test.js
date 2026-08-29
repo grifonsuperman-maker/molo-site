@@ -65,6 +65,7 @@ test('manual booking is saved approved without guest browser credentials', async
   const saved = [];
   const histories = [];
   const tableStatus = [];
+  const waiterNotifications = [];
   const table = {
     id: 'table-1',
     tableNumber: '5',
@@ -80,6 +81,9 @@ test('manual booking is saved approved without guest browser credentials', async
     async save(value) {
       saved.push(value);
       return value;
+    },
+    async findOne() {
+      return saved[0] || null;
     },
   };
   const clients = {
@@ -106,7 +110,11 @@ test('manual booking is saved approved without guest browser credentials', async
     tables,
     {},
     { create: async () => undefined },
-    {},
+    {
+      async notifyManualBookingCreated(value) {
+        waiterNotifications.push(value);
+      },
+    },
     {},
   );
 
@@ -154,4 +162,8 @@ test('manual booking is saved approved without guest browser credentials', async
   assert.deepEqual(histories[0][6], actor);
   assert.equal(tableStatus[0][1], 'reserved');
   assert.equal(tableStatus[0][2], '2026-09-10');
+  assert.equal(waiterNotifications.length, 1);
+  assert.equal(waiterNotifications[0].id, 'booking-1');
+  assert.equal(waiterNotifications[0].status, 'approved');
+  assert.equal(waiterNotifications[0].source, 'admin_manual');
 });

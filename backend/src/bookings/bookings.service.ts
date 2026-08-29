@@ -756,6 +756,14 @@ export class BookingsService {
         actorName: actor?.name || null,
       });
 
+      await this.safeNotify(async () => {
+        const full = await this.bookings.findOne({
+          where: { id: booking.id },
+          relations: ['table', 'client'],
+        });
+        if (full) await this.notifications.notifyManualBookingCreated(full);
+      });
+
       return {
         message: 'Бронювання створено та підтверджено',
         bookingId: booking.id,
