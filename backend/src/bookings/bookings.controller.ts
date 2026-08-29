@@ -17,6 +17,7 @@ import { GuestLatenessDto } from './dto/guest-lateness.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 import { GuestBookingsService } from './guest-bookings.service';
+import { GuestTableNumberValidationService } from './guest-table-number-validation.service';
 import { GuestTelegramLinkService } from './guest-telegram-link.service';
 import { GuestTimeChangeService } from './guest-time-change.service';
 
@@ -31,6 +32,7 @@ export class BookingsController {
     private readonly adminAttention: AdminAttentionService,
     private readonly notifications: NotificationsService,
     private readonly guestTimeChange: GuestTimeChangeService,
+    private readonly guestTableNumbers: GuestTableNumberValidationService,
   ) {}
 
   private withGuestArrivalTimeCapabilities<T extends { status?: string; checkedInAt?: unknown }>(booking: T) {
@@ -43,10 +45,15 @@ export class BookingsController {
 
   @Public()
   @Post()
-  create(@Body() dto: CreateBookingDto) {
-    return this.tableLock.withCreateLock(dto, async () => {
-      await this.availabilityBlocks.assertBookable(dto);
-      return this.service.create(dto);
+  async create(@Body() dto: CreateBookingDto) {
+    const existingTableNumber = await this.guestTableNumbers.resolveExisting(dto.tableNumber);
+    const bookingDto = existingTableNumber
+      ? { ...dto, tableNumber: existingTableNumber }
+      : dto;
+
+    return this.tableLock.withCreateLock(bookingDto, async () => {
+      await this.availabilityBlocks.assertBookable(bookingDto);
+      return this.service.create(bookingDto);
     });
   }
 
@@ -176,12 +183,18 @@ export class BookingsController {
 
   @Public()
   @Patch(':id/guest/change-table')
-  guestChangeTable(
+  async guestChangeTable(
     @Param('id') id: string,
     @Headers('x-guest-booking-token') token: string,
     @Body() dto: GuestChangeTableDto,
   ) {
-    return this.adminAttention.requestTableChange(id, token, dto);
+    await this.guestService.get(id, token);
+    const existingTableNumber = await this.guestTableNumbers.resolveExisting(dto.tableNumber);
+    const requestedTable = existingTableNumber
+      ? { ...dto, tableNumber: existingTableNumber }
+      : dto;
+
+    return this.adminAttention.requestTableChange(id, token, requestedTable);
   }
 
   @Public()
