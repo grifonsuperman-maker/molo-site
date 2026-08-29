@@ -1,19 +1,22 @@
 name: Guest swipe modal guard once
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/guest-swipe-modal-guard
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
+    if: github.head_ref == 'fix/guest-swipe-modal-guard'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
 
       - name: Apply scoped guest swipe fix
         run: |
