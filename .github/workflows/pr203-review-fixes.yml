@@ -58,3 +58,5 @@ jobs:
           git commit -m 'fix: reconcile guest visit statistics paths'
           git show --check HEAD
           git push origin HEAD:fix/guest-visit-identity
+
+# retry after generated newline escaping fix
