@@ -116,6 +116,26 @@ test('new booking action buttons go only to admin', async () => {
   assert.match(deliveries[1].text, /Нове бронювання/);
 });
 
+test('manual Admin booking notification goes only to waiter without approval buttons', async () => {
+  const { service } = createNotificationsService();
+  const deliveries = [];
+
+  service.sendToRoles = async (roles, text, replyMarkup) => {
+    deliveries.push({ roles, text, replyMarkup });
+    return { attempted: 1, delivered: 1, failed: 0 };
+  };
+
+  await service.notifyManualBookingCreated(booking);
+
+  assert.equal(deliveries.length, 1);
+  assert.deepEqual(deliveries[0].roles, ['waiter']);
+  assert.equal(deliveries[0].replyMarkup, undefined);
+  assert.match(deliveries[0].text, /Нове бронювання/);
+  assert.match(deliveries[0].text, /Створено Адміністратором/);
+  assert.match(deliveries[0].text, /Дата: <b>2026-08-16<\/b>/);
+  assert.deepEqual(callbacks(deliveries[0].replyMarkup), []);
+});
+
 test('Director is excluded from operational Telegram notifications', async () => {
   const { service } = createNotificationsService();
   const deliveries = [];

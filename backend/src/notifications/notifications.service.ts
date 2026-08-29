@@ -192,6 +192,28 @@ export class NotificationsService {
     ]);
   }
 
+  async notifyManualBookingCreated(booking: Booking) {
+    const longBookingLine = this.isLongBooking(booking) ? '⚠️ <b>Довге бронювання</b>' : null;
+
+    const text = [
+      '🟠 <b>Нове бронювання</b>',
+      '✍️ Створено Адміністратором',
+      '',
+      `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
+      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
+      `📅 Дата: <b>${booking.bookingDate}</b>`,
+      `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
+      `⏳ Відпочинок: <b>${this.durationLine(booking)}</b>`,
+      `🧽 Наступний гість з: <b>${this.availableFromLabel(booking)}</b>`,
+      longBookingLine,
+      `👥 Гостей: <b>${booking.guestsCount}</b>`,
+      `📝 Побажання: ${booking.wishes || '-'}`,
+    ].filter(Boolean).join('\n');
+
+    await this.sendToRoles(['waiter'], text);
+  }
+
   async notifyBookingApproved(booking: Booking) {
     const text = [
       '✅ <b>Бронювання підтверджено</b>',
