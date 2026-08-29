@@ -24,10 +24,10 @@ jobs:
           node-version: 24
 
       - name: Apply phone identity patch
-        run: python3 scripts/pr203_phone_identity_fix.py
+        run: python3 scripts/pr203_phone_identity_fix_v2.py
 
       - name: Remove temporary verification files
-        run: rm .github/workflows/pr203-phone-identity.yml scripts/pr203_phone_identity_fix.py
+        run: rm .github/workflows/pr203-phone-identity.yml scripts/pr203_phone_identity_fix.py scripts/pr203_phone_identity_fix_v2.py
 
       - name: Install backend dependencies
         run: npm --prefix backend ci
@@ -58,3 +58,5 @@ jobs:
           git commit -m 'fix: canonicalize Ukrainian booking phone identity'
           git show --check HEAD
           git push origin HEAD:fix/guest-visit-identity
+
+# retry with exact EOF normalization
