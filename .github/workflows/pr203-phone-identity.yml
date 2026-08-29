@@ -1,0 +1,60 @@
+name: Apply PR 203 phone identity fix
+
+on:
+  push:
+    branches:
+      - fix/guest-visit-identity
+    paths:
+      - .github/workflows/pr203-phone-identity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/guest-visit-identity
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Apply phone identity patch
+        run: python3 scripts/pr203_phone_identity_fix.py
+
+      - name: Remove temporary verification files
+        run: rm .github/workflows/pr203-phone-identity.yml scripts/pr203_phone_identity_fix.py
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Build backend
+        run: npm --prefix backend run build
+
+      - name: Build frontend
+        run: npm --prefix frontend run build
+
+      - name: Test backend
+        run: npm --prefix backend test
+
+      - name: Test frontend
+        run: npm --prefix frontend test
+
+      - name: Verify and commit
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix: canonicalize Ukrainian booking phone identity'
+          git show --check HEAD
+          git push origin HEAD:fix/guest-visit-identity
