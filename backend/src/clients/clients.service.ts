@@ -93,6 +93,26 @@ export class ClientsService {
     };
   }
 
+  private async writableIdentityGroup(id: string) {
+    const requested = await this.repo.findOne({ where: { id } });
+    if (!requested) throw new NotFoundException('Клієнта не знайдено');
+
+    const clients = await this.repo.find({ order: { createdAt: 'ASC' } });
+    const key = this.phoneIdentityKey(requested.phone);
+    const equivalents = clients.filter(
+      (client) => this.phoneIdentityKey(client.phone) === key,
+    );
+
+    if (
+      equivalents.length <= 1 ||
+      this.telegramIdentityCount(equivalents) > 1
+    ) {
+      return [requested];
+    }
+
+    return equivalents;
+  }
+
   async findAll() {
     const clients = await this.repo.find({ order: { createdAt: 'ASC' } });
     const groups = new Map<string, Client[]>();
@@ -152,20 +172,29 @@ export class ClientsService {
   }
 
   async blacklist(id: string, reason: string) {
-    const client = await this.repo.findOne({ where: { id } });
-    if (!client) throw new NotFoundException('Клієнта не знайдено');
-    client.isBlacklisted = true;
-    client.blacklistReason = reason.trim();
-    client.blacklistedAt = new Date();
-    return this.repo.save(client);
+    const clients = await this.writableIdentityGroup(id);
+    const blacklistedAt = new Date();
+
+    for (const client of clients) {
+      client.isBlacklisted = true;
+      client.blacklistReason = reason.trim();
+      client.blacklistedAt = blacklistedAt;
+      await this.repo.save(client);
+    }
+
+    return clients.find((client) => client.id === id) || clients[0];
   }
 
   async unblacklist(id: string) {
-    const client = await this.repo.findOne({ where: { id } });
-    if (!client) throw new NotFoundException('Клієнта не знайдено');
-    client.isBlacklisted = false;
-    client.blacklistReason = null;
-    client.blacklistedAt = null;
-    return this.repo.save(client);
+    const clients = await this.writableIdentityGroup(id);
+
+    for (const client of clients) {
+      client.isBlacklisted = false;
+      client.blacklistReason = null;
+      client.blacklistedAt = null;
+      await this.repo.save(client);
+    }
+
+    return clients.find((client) => client.id === id) || clients[0];
   }
 }
