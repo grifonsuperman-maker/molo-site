@@ -1,0 +1,74 @@
+name: Run guest visit review fixes
+
+on:
+  push:
+    branches:
+      - fix/guest-visit-identity
+    paths:
+      - .github/workflows/guest-visit-review-fixes-run.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/guest-visit-identity
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Apply stored scoped patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/guest-visit-review-fixes.yml').read_text().splitlines()
+          start_marker = "          python3 <<'PY'"
+          end_marker = '          PY'
+          start = source.index(start_marker) + 1
+          end = source.index(end_marker, start)
+          script_lines = []
+          for line in source[start:end]:
+              if line.startswith('          '):
+                  script_lines.append(line[10:])
+              else:
+                  script_lines.append(line)
+          Path('/tmp/apply_guest_visit_review_fixes.py').write_text('\n'.join(script_lines) + '\n')
+          PY
+          python3 /tmp/apply_guest_visit_review_fixes.py
+          rm .github/workflows/guest-visit-review-fixes.yml
+          rm .github/workflows/guest-visit-review-fixes-run.yml
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Build frontend
+        run: npm --prefix frontend run build
+      - name: Test backend
+        run: npm --prefix backend test
+      - name: Test frontend
+        run: npm --prefix frontend test
+      - name: Check whitespace
+        run: git diff --check
+      - name: Commit review fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/bookings/bookings.service.ts \
+                  backend/src/bookings/client-visit-stats.ts \
+                  backend/src/bookings/guest-telegram-link.service.ts \
+                  backend/test/guest-visit-stats.test.js \
+                  backend/test/guest-telegram-link.test.js \
+                  .github/workflows/guest-visit-review-fixes.yml \
+                  .github/workflows/guest-visit-review-fixes-run.yml
+          git commit -m "fix: make guest visit stats consistent"
+          git show --check HEAD
+          git push origin HEAD:fix/guest-visit-identity
