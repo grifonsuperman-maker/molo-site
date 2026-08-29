@@ -828,6 +828,7 @@ export default function GuestApp() {
   const pendingTooLong =
     bookingStatus?.status === 'pending' &&
     (bookingStatus.isPendingTooLong || bookingStatus.pendingAgeMinutes >= 15);
+  const adminPhone = bookingStatus?.restaurantPhone || restaurant?.phone;
   const activeBookingStatusText = !bookingStatus
     ? 'Перевіряємо статус...'
     : bookingStatus.status === 'pending'
@@ -924,13 +925,6 @@ export default function GuestApp() {
   }
 
   function callAdmin() {
-    const phone = bookingStatus?.restaurantPhone || restaurant?.phone;
-
-    if (phone) {
-      window.location.href = `tel:${phone}`;
-      return;
-    }
-
     alert('Телефон адміністратора ще не додано.');
   }
 
@@ -1401,13 +1395,22 @@ export default function GuestApp() {
             </div>
 
             {pendingTooLong && (
-              <button
-                type="button"
-                onClick={callAdmin}
-                className="mt-3 w-full rounded-2xl border border-amber-200/60 bg-amber-300/20 px-4 py-3 text-sm font-black text-amber-100 transition active:scale-[0.98]"
-              >
-                Зателефонувати Адміністратору
-              </button>
+              adminPhone ? (
+                <a
+                  href={`tel:${adminPhone}`}
+                  className="mt-3 block w-full rounded-2xl border border-amber-200/60 bg-amber-300/20 px-4 py-3 text-center text-sm font-black text-amber-100 transition active:scale-[0.98]"
+                >
+                  Зателефонувати Адміністратору
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={callAdmin}
+                  className="mt-3 w-full rounded-2xl border border-amber-200/60 bg-amber-300/20 px-4 py-3 text-sm font-black text-amber-100 transition active:scale-[0.98]"
+                >
+                  Зателефонувати Адміністратору
+                </button>
+              )
             )}
           </div>
         </aside>
@@ -1482,13 +1485,24 @@ export default function GuestApp() {
                   Menu
                 </button>
 
-                <button
-                  onClick={callAdmin}
-                  className="molo-button inline-flex items-center justify-center gap-4 rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm sm:text-2xl"
-                >
-                  <Phone className="h-7 w-7 text-amber-200" />
-                  Зателефонувати адміністратору
-                </button>
+                {adminPhone ? (
+                  <a
+                    href={`tel:${adminPhone}`}
+                    className="molo-button inline-flex items-center justify-center gap-4 rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm sm:text-2xl"
+                  >
+                    <Phone className="h-7 w-7 text-amber-200" />
+                    Зателефонувати адміністратору
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={callAdmin}
+                    className="molo-button inline-flex items-center justify-center gap-4 rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm sm:text-2xl"
+                  >
+                    <Phone className="h-7 w-7 text-amber-200" />
+                    Зателефонувати адміністратору
+                  </button>
+                )}
               </div>
 
               <p className="mt-6 text-base text-white/75 sm:text-xl">
@@ -2215,13 +2229,22 @@ export default function GuestApp() {
                   <p className="mt-2 text-sm text-white/70">
                     Заявка очікує вже {bookingStatus.pendingAgeMinutes} хв. Можна подзвонити адміністратору ресторану.
                   </p>
-                  <button
-                    type="button"
-                    onClick={callAdmin}
-                    className="mt-4 rounded-2xl border border-amber-200/60 bg-amber-300/20 px-5 py-3 text-sm font-bold text-amber-100 transition active:scale-95"
-                  >
-                    Зателефонувати Адміністратору
-                  </button>
+                  {adminPhone ? (
+                    <a
+                      href={`tel:${adminPhone}`}
+                      className="mt-4 inline-block rounded-2xl border border-amber-200/60 bg-amber-300/20 px-5 py-3 text-sm font-bold text-amber-100 transition active:scale-95"
+                    >
+                      Зателефонувати Адміністратору
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={callAdmin}
+                      className="mt-4 rounded-2xl border border-amber-200/60 bg-amber-300/20 px-5 py-3 text-sm font-bold text-amber-100 transition active:scale-95"
+                    >
+                      Зателефонувати Адміністратору
+                    </button>
+                  )}
                 </div>
               )}
 
