@@ -20,6 +20,8 @@ test('guest pages support a deliberate right swipe from the left edge', () => {
   assert.match(source, /onTouchCancel=\{cancelBackSwipe\}/);
   assert.match(source, /step === 'home'/);
   assert.match(source, /touch\.clientX > 64/);
+  assert.ok(source.includes(`target?.closest('input, textarea, select, button, a, label, [role=\"button\"]')`));
+  assert.equal(source.includes(`target?.closest('input, textarea, select, button, a, [role=\"button\"]')`), false);
   assert.match(source, /deltaX >= 72/);
   assert.match(source, /deltaX > deltaY \* 1\.25/);
   assert.match(source, /goBack\(\);/);

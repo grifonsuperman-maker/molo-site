@@ -1051,7 +1051,7 @@ export default function GuestApp() {
     if (touch.clientX > 64) return;
 
     const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('input, textarea, select, button, a, [role="button"]')) return;
+    if (target?.closest('input, textarea, select, button, a, label, [role="button"]')) return;
 
     backSwipeStart.current = { x: touch.clientX, y: touch.clientY };
   }
