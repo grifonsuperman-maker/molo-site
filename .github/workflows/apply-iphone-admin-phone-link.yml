@@ -29,6 +29,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          from textwrap import dedent
 
           guest_path = Path('frontend/src/guest/GuestApp.tsx')
           source = guest_path.read_text()
@@ -177,36 +178,37 @@ jobs:
           guest_path.write_text(source)
 
           test_path = Path('frontend/test/iphone-admin-phone-link.test.cjs')
-          test_path.write_text("""const assert = require('node:assert/strict');
-          const fs = require('node:fs');
-          const path = require('node:path');
-          const test = require('node:test');
+          test_path.write_text(dedent("""
+              const assert = require('node:assert/strict');
+              const fs = require('node:fs');
+              const path = require('node:path');
+              const test = require('node:test');
 
-          const source = fs.readFileSync(
-            path.join(__dirname, '..', 'src', 'guest', 'GuestApp.tsx'),
-            'utf8',
-          );
+              const source = fs.readFileSync(
+                path.join(__dirname, '..', 'src', 'guest', 'GuestApp.tsx'),
+                'utf8',
+              );
 
-          test('guest admin call controls use native tel links for iPhone-compatible navigation', () => {
-            assert.match(
-              source,
-              /const adminPhone = bookingStatus\\?\\.restaurantPhone \\|\\| restaurant\\?\\.phone;/,
-              'admin phone priority must remain booking response first, restaurant settings second',
-            );
-            assert.equal(
-              (source.match(/href=\\{`tel:\\$\\{adminPhone\\}`\\}/g) || []).length,
-              3,
-              'all three admin call controls must render native tel anchors when a phone exists',
-            );
-            assert.equal(
-              (source.match(/onClick=\\{callAdmin\\}/g) || []).length,
-              3,
-              'all three call locations must keep the missing-phone button fallback',
-            );
-            assert.doesNotMatch(source, /window\\.location\\.href\\s*=\\s*`tel:/);
-            assert.match(source, /alert\\('Телефон адміністратора ще не додано\\.'\\);/);
-          });
-          """.replace(/^          /gm, ''))
+              test('guest admin call controls use native tel links for iPhone-compatible navigation', () => {
+                assert.match(
+                  source,
+                  /const adminPhone = bookingStatus\\?\\.restaurantPhone \\|\\| restaurant\\?\\.phone;/,
+                  'admin phone priority must remain booking response first, restaurant settings second',
+                );
+                assert.equal(
+                  (source.match(/href=\\{`tel:\\$\\{adminPhone\\}`\\}/g) || []).length,
+                  3,
+                  'all three admin call controls must render native tel anchors when a phone exists',
+                );
+                assert.equal(
+                  (source.match(/onClick=\\{callAdmin\\}/g) || []).length,
+                  3,
+                  'all three call locations must keep the missing-phone button fallback',
+                );
+                assert.doesNotMatch(source, /window\\.location\\.href\\s*=\\s*`tel:/);
+                assert.match(source, /alert\\('Телефон адміністратора ще не додано\\.'\\);/);
+              });
+          """).lstrip())
 
           package_path = Path('frontend/package.json')
           package_source = package_path.read_text()
