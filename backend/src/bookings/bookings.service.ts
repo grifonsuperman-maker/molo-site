@@ -140,7 +140,11 @@ export class BookingsService {
     }
   }
 
-  private async assertNoActivePhoneBooking(bookingDate: string, phone: string) {
+  private async assertNoActivePhoneBooking(
+    bookingDate: string,
+    phone: string,
+    excludeBookingId?: string,
+  ) {
     const normalizedPhone = this.normalizePhoneIdentity(phone);
     if (!normalizedPhone) {
       throw new BadRequestException('Вкажіть коректний номер телефону');
@@ -156,6 +160,7 @@ export class BookingsService {
 
     const duplicate = activeBookings.some(
       (booking) =>
+        booking.id !== excludeBookingId &&
         this.normalizePhoneIdentity(
           booking.guestPhoneNormalized || booking.client?.phone,
         ) === normalizedPhone,
@@ -166,6 +171,38 @@ export class BookingsService {
     }
 
     return normalizedPhone;
+  }
+
+  private async prepareGuestPhoneForActivation(booking: Booking) {
+    const phone = booking.guestPhoneNormalized || booking.client?.phone;
+    if (!phone) return;
+
+    booking.guestPhoneNormalized = await this.assertNoActivePhoneBooking(
+      booking.bookingDate,
+      phone,
+      booking.id,
+    );
+  }
+
+  private async saveActivatedBooking(booking: Booking) {
+    try {
+      return await this.bookings.save(booking);
+    } catch (error: any) {
+      const code = error?.code || error?.driverError?.code;
+      const constraint = error?.constraint || error?.driverError?.constraint;
+      if (
+        code === '23505' &&
+        [
+          'UQ_bookings_active_guest_device_date',
+          'UQ_bookings_active_guest_phone_date',
+        ].includes(constraint)
+      ) {
+        throw new BadRequestException(
+          'На цю дату вже є активне бронювання з цього пристрою або номера телефону',
+        );
+      }
+      throw error;
+    }
   }
 
   private normalizeDuration(durationMinutes?: number) {
@@ -1013,9 +1050,10 @@ export class BookingsService {
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
     const previousData = this.bookingSnapshot(booking);
+    await this.prepareGuestPhoneForActivation(booking);
     booking.status = 'approved';
     booking.approvedAt = new Date();
-    await this.bookings.save(booking);
+    await this.saveActivatedBooking(booking);
     await this.saveHistory(booking, 'booking_approved', 'admin', previousData, this.bookingSnapshot(booking));
     await this.setTableStatusOnlyForToday(booking.table, 'reserved', booking.bookingDate);
     await this.safeLog('Підтверджено бронювання', { bookingId: id });
@@ -1086,10 +1124,11 @@ export class BookingsService {
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
     const previousData = this.bookingSnapshot(booking);
+    await this.prepareGuestPhoneForActivation(booking);
     booking.status = 'approved';
     if (!booking.approvedAt) booking.approvedAt = new Date();
     if (!booking.checkedInAt) booking.checkedInAt = new Date();
-    await this.bookings.save(booking);
+    await this.saveActivatedBooking(booking);
     await this.saveHistory(
       booking,
       'booking_checked_in',

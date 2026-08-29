@@ -93,11 +93,14 @@ export class ClientsService {
     };
   }
 
-  private async writableIdentityGroup(id: string) {
-    const requested = await this.repo.findOne({ where: { id } });
+  private async writableIdentityGroup(
+    id: string,
+    repo: Repository<Client> = this.repo,
+  ) {
+    const requested = await repo.findOne({ where: { id } });
     if (!requested) throw new NotFoundException('Клієнта не знайдено');
 
-    const clients = await this.repo.find({ order: { createdAt: 'ASC' } });
+    const clients = await repo.find({ order: { createdAt: 'ASC' } });
     const key = this.phoneIdentityKey(requested.phone);
     const equivalents = clients.filter(
       (client) => this.phoneIdentityKey(client.phone) === key,
@@ -171,30 +174,51 @@ export class ClientsService {
     return this.repo.save(client);
   }
 
+  private async lockedWritableIdentityGroup(
+    id: string,
+    repo: Repository<Client>,
+  ) {
+    const clients = await this.writableIdentityGroup(id, repo);
+    const ids = clients.map((client) => client.id).sort();
+
+    return repo
+      .createQueryBuilder('client')
+      .where('client.id IN (:...ids)', { ids })
+      .orderBy('client.id', 'ASC')
+      .setLock('pessimistic_write')
+      .getMany();
+  }
+
   async blacklist(id: string, reason: string) {
-    const clients = await this.writableIdentityGroup(id);
-    const blacklistedAt = new Date();
+    return this.repo.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(Client);
+      const clients = await this.lockedWritableIdentityGroup(id, repo);
+      const blacklistedAt = new Date();
 
-    for (const client of clients) {
-      client.isBlacklisted = true;
-      client.blacklistReason = reason.trim();
-      client.blacklistedAt = blacklistedAt;
-      await this.repo.save(client);
-    }
+      for (const client of clients) {
+        client.isBlacklisted = true;
+        client.blacklistReason = reason.trim();
+        client.blacklistedAt = blacklistedAt;
+      }
+      await repo.save(clients);
 
-    return clients.find((client) => client.id === id) || clients[0];
+      return clients.find((client) => client.id === id) || clients[0];
+    });
   }
 
   async unblacklist(id: string) {
-    const clients = await this.writableIdentityGroup(id);
+    return this.repo.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(Client);
+      const clients = await this.lockedWritableIdentityGroup(id, repo);
 
-    for (const client of clients) {
-      client.isBlacklisted = false;
-      client.blacklistReason = null;
-      client.blacklistedAt = null;
-      await this.repo.save(client);
-    }
+      for (const client of clients) {
+        client.isBlacklisted = false;
+        client.blacklistReason = null;
+        client.blacklistedAt = null;
+      }
+      await repo.save(clients);
 
-    return clients.find((client) => client.id === id) || clients[0];
+      return clients.find((client) => client.id === id) || clients[0];
+    });
   }
 }

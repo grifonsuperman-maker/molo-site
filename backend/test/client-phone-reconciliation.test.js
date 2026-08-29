@@ -138,16 +138,35 @@ test('blacklist actions update every safely reconciled phone row', async () => {
   });
   const rows = [local, telegram];
   const savedIds = [];
-  const repo = {
+  const lockCalls = [];
+  const txRepo = {
     async findOne({ where }) {
       return rows.find((item) => item.id === where.id) || null;
     },
     async find() {
       return rows;
     },
+    createQueryBuilder() {
+      let ids = [];
+      return {
+        where(_sql, params) { ids = params.ids; return this; },
+        orderBy() { return this; },
+        setLock(mode) { lockCalls.push(mode); return this; },
+        async getMany() { return rows.filter((item) => ids.includes(item.id)); },
+      };
+    },
     async save(value) {
-      savedIds.push(value.id);
+      const values = Array.isArray(value) ? value : [value];
+      savedIds.push(...values.map((item) => item.id));
       return value;
+    },
+  };
+  const repo = {
+    ...txRepo,
+    manager: {
+      async transaction(callback) {
+        return callback({ getRepository: () => txRepo });
+      },
     },
   };
   const service = new ClientsService(repo);
@@ -170,6 +189,7 @@ test('blacklist actions update every safely reconciled phone row', async () => {
   assert.equal(local.blacklistedAt, null);
   assert.equal(telegram.blacklistedAt, null);
   assert.deepEqual(savedIds, ['client-local', 'client-telegram']);
+  assert.deepEqual(lockCalls, ['pessimistic_write', 'pessimistic_write']);
 });
 
 test('blacklist actions do not cross different verified Telegram identities', async () => {
@@ -191,16 +211,35 @@ test('blacklist actions do not cross different verified Telegram identities', as
   });
   const rows = [first, second];
   const savedIds = [];
-  const repo = {
+  const lockCalls = [];
+  const txRepo = {
     async findOne({ where }) {
       return rows.find((item) => item.id === where.id) || null;
     },
     async find() {
       return rows;
     },
+    createQueryBuilder() {
+      let ids = [];
+      return {
+        where(_sql, params) { ids = params.ids; return this; },
+        orderBy() { return this; },
+        setLock(mode) { lockCalls.push(mode); return this; },
+        async getMany() { return rows.filter((item) => ids.includes(item.id)); },
+      };
+    },
     async save(value) {
-      savedIds.push(value.id);
+      const values = Array.isArray(value) ? value : [value];
+      savedIds.push(...values.map((item) => item.id));
       return value;
+    },
+  };
+  const repo = {
+    ...txRepo,
+    manager: {
+      async transaction(callback) {
+        return callback({ getRepository: () => txRepo });
+      },
     },
   };
   const service = new ClientsService(repo);
@@ -211,6 +250,7 @@ test('blacklist actions do not cross different verified Telegram identities', as
   assert.equal(second.isBlacklisted, true);
   assert.equal(second.blacklistReason, 'B');
   assert.deepEqual(savedIds, ['client-a']);
+  assert.deepEqual(lockCalls, ['pessimistic_write']);
 });
 
 test('active duplicate protection treats Ukrainian local and international phone forms as one identity', async () => {
@@ -284,4 +324,103 @@ test('manual booking phone key is canonical for atomic Ukrainian duplicate const
     await service.assertNoActivePhoneBooking('2099-01-01', '+380671234567'),
     '380671234567',
   );
+});
+
+
+test('approve canonicalizes a legacy Ukrainian phone key and excludes the current active booking', async () => {
+  const booking = {
+    id: 'booking-legacy',
+    status: 'pending',
+    bookingDate: '2099-01-01',
+    bookingTime: '19:00:00',
+    durationMinutes: 120,
+    guestsCount: 2,
+    wishes: '',
+    guestPhoneNormalized: '0671234567',
+    client: { id: 'client-1', phone: '067 123 45 67' },
+    table: { id: 'table-1', tableNumber: '1', status: 'free' },
+  };
+  let saved = null;
+  const query = {
+    leftJoinAndSelect() { return this; },
+    addSelect() { return this; },
+    where() { return this; },
+    andWhere() { return this; },
+    async getMany() { return [booking]; },
+  };
+  const bookings = {
+    async findOne() { return booking; },
+    createQueryBuilder() { return query; },
+    async save(value) { saved = value; return value; },
+  };
+  const histories = {
+    create(value) { return value; },
+    async save(value) { return value; },
+  };
+  const service = new BookingsService(
+    bookings,
+    histories,
+    noopRepository(),
+    noopRepository(),
+    { async save() { throw new Error('future booking must not update table status'); } },
+    noopRepository(),
+    { async create() {} },
+    { async notifyBookingApproved() {} },
+    {},
+  );
+
+  await service.approve('booking-legacy');
+
+  assert.equal(saved.guestPhoneNormalized, '380671234567');
+  assert.equal(saved.status, 'approved');
+});
+
+test('reactivation rejects an equivalent legacy active phone before writing', async () => {
+  const booking = {
+    id: 'booking-reactivate',
+    status: 'cancelled',
+    bookingDate: '2099-01-01',
+    bookingTime: '19:00:00',
+    durationMinutes: 120,
+    guestsCount: 2,
+    wishes: '',
+    guestPhoneNormalized: '0671234567',
+    client: { id: 'client-1', phone: '0671234567' },
+    table: { id: 'table-1', tableNumber: '1', status: 'free' },
+  };
+  const otherActive = {
+    id: 'booking-other',
+    guestPhoneNormalized: '380671234567',
+    client: { phone: '+380671234567' },
+  };
+  let saveCalls = 0;
+  const query = {
+    leftJoinAndSelect() { return this; },
+    addSelect() { return this; },
+    where() { return this; },
+    andWhere() { return this; },
+    async getMany() { return [otherActive]; },
+  };
+  const bookings = {
+    async findOne() { return booking; },
+    createQueryBuilder() { return query; },
+    async save(value) { saveCalls += 1; return value; },
+  };
+  const service = new BookingsService(
+    bookings,
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    noopRepository(),
+    {},
+    {},
+    {},
+  );
+
+  await assert.rejects(
+    () => service.checkIn('booking-reactivate'),
+    /вже є активне бронювання/,
+  );
+  assert.equal(saveCalls, 0);
 });
