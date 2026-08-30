@@ -119,8 +119,8 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
       return;
     }
 
-    if (!/^\d{6}$/.test(pin)) {
-      setError('PIN має містити рівно 6 цифр');
+    if (!/^\d{4,6}$/.test(pin)) {
+      setError('PIN має містити від 4 до 6 цифр');
       return;
     }
 
@@ -205,7 +205,7 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
           </p>
           <h1 className="mt-2 text-2xl font-black">Вхід до адмінпанелі</h1>
           <p className="mt-2 text-sm leading-6 text-white/55">
-            Оберіть адміністратора та введіть особистий шестизначний PIN.
+            Оберіть адміністратора та введіть особистий PIN із 4–6 цифр.
           </p>
         </div>
 
@@ -253,7 +253,7 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
               }}
               inputMode="numeric"
               autoComplete="one-time-code"
-              pattern="\d{6}"
+              pattern="\d{4,6}"
               maxLength={6}
               placeholder="••••••"
               disabled={submitting}
