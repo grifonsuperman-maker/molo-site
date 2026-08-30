@@ -132,3 +132,110 @@ test('Admin Telegram creates approved manual booking with optional phone skipped
   );
   assert.equal(calls.filter((entry) => entry[0] === 'createManual').length, 1);
 });
+
+test('Telegram receipt failure after persistence never reports booking as unsaved or creates a duplicate', async () => {
+  const calls = [];
+  let persisted = false;
+  const bookings = {
+    async createManual(dto) {
+      calls.push(['createManual', dto]);
+      persisted = true;
+      return {
+        bookingId: 'booking-persisted',
+        status: 'approved',
+        bookingDate: dto.bookingDate,
+        bookingTime: '18:30:00',
+      };
+    },
+  };
+  const tableLock = {
+    async withCreateLock(dto, work) {
+      calls.push(['lock', dto]);
+      return work();
+    },
+  };
+  const availability = {
+    async assertBookable(dto) {
+      calls.push(['availability', dto]);
+    },
+  };
+  const tables = {
+    async findAll() {
+      return [
+        {
+          id: 'table-15',
+          tableNumber: '15',
+          isVisible: true,
+          status: 'free',
+        },
+      ];
+    },
+  };
+  const telegram = {
+    async sendMessage(chatId, text, markup) {
+      calls.push(['message', chatId, text, markup]);
+      if (persisted && /Бронювання створено/.test(text)) {
+        throw new Error('telegram unavailable');
+      }
+      return { ok: true };
+    },
+  };
+  const service = new TelegramAdminBookingCreateService(
+    bookings,
+    tableLock,
+    availability,
+    tables,
+    telegram,
+  );
+
+  await service.begin(42, ACTOR);
+  await service.handleText('2026-09-10', 42, ACTOR);
+  await service.handleText('15', 42, ACTOR);
+  await service.handleText('18:30', 42, ACTOR);
+  await service.handleText('Гість без телефону', 42, ACTOR);
+  await service.handleText('4', 42, ACTOR);
+
+  const skipCallback = callbackFor(lastMessage(calls), '⏭ Пропустити телефон');
+  await service.handleAction(actionId(skipCallback), 42, ACTOR);
+  const confirmCallback = callbackFor(
+    lastMessage(calls),
+    '✅ Створити бронювання',
+  );
+
+  const originalConsoleError = console.error;
+  const loggedErrors = [];
+  console.error = (...args) => loggedErrors.push(args);
+  try {
+    await service.handleAction(actionId(confirmCallback), 42, ACTOR);
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(persisted, true);
+  assert.equal(service.hasPendingInput('777'), false);
+  assert.equal(calls.filter((entry) => entry[0] === 'createManual').length, 1);
+  assert.equal(
+    calls.some(
+      (entry) =>
+        entry[0] === 'message' && /Бронювання не створено|Дані не збережено/.test(entry[2]),
+    ),
+    false,
+  );
+  assert.equal(
+    calls.some(
+      (entry) =>
+        entry[0] === 'message' &&
+        (entry[3]?.inline_keyboard || [])
+          .flat()
+          .some((button) => button.text === '➕ Спробувати ще раз'),
+    ),
+    false,
+  );
+  assert.equal(loggedErrors.length, 1);
+
+  await assert.rejects(
+    () => service.handleAction(actionId(confirmCallback), 42, ACTOR),
+    /неактуальна/,
+  );
+  assert.equal(calls.filter((entry) => entry[0] === 'createManual').length, 1);
+});
