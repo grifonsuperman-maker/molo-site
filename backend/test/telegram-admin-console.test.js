@@ -96,6 +96,18 @@ function harness(options = {}) {
       return { ok: true };
     },
   };
+  const bookingCreate = options.bookingCreate || {
+    hasPendingInput() { return false; },
+    clearPendingInput(id) { calls.push(['booking-create-clear', id]); },
+    async handleAction(id, chatId, actor) {
+      calls.push(['booking-create-action', id, chatId, actor]);
+      return true;
+    },
+    async handleText(text, chatId, actor) {
+      calls.push(['booking-create-text', text, chatId, actor]);
+      return true;
+    },
+  };
 
   return {
     calls,
@@ -108,6 +120,7 @@ function harness(options = {}) {
       restaurant,
       tableService,
       telegram,
+      bookingCreate,
     ),
   };
 }
@@ -128,7 +141,7 @@ function draftId(callbackData) {
   return String(callbackData || '').split(':')[2] || null;
 }
 
-test('Admin menu shows counts, locations, broadcast and full Mini App', async () => {
+test('Admin menu shows counts, manual booking, locations, broadcast and full Mini App', async () => {
   const { service, calls } = harness({
     reschedules: [{ id: 'reschedule-1' }],
     dashboard: { tableChanges: [{ id: 'change-1' }], reviews: [{ id: 'review-1' }] },
@@ -141,9 +154,19 @@ test('Admin menu shows counts, locations, broadcast and full Mini App', async ()
   assert.match(message[2], /Запитів на перенесення: <b>1<\/b>/);
   assert.match(message[2], /Запитів на інший стіл: <b>1<\/b>/);
   const texts = buttons(message).map((button) => button.text);
+  assert.equal(texts.includes('➕ Створити бронювання'), true);
   assert.equal(texts.some((value) => /Локації та столи/.test(value)), true);
   assert.equal(texts.some((value) => /Розсилка всім гостям/.test(value)), true);
   assert.equal(texts.some((value) => /Відкрити повний пульт/.test(value)), true);
+});
+
+test('manual booking stays inside existing authorized admin:booking callback family', async () => {
+  const { service, calls } = harness();
+  await service.handle('booking', 'create', 42, ACTOR);
+  assert.equal(
+    calls.some((entry) => entry[0] === 'booking-create-action' && entry[1] === 'create'),
+    true,
+  );
 });
 
 test('broadcast button is hidden without Director permission', async () => {
