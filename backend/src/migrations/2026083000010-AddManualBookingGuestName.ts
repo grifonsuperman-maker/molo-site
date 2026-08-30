@@ -6,7 +6,7 @@ export class AddManualBookingGuestName2026083000010 implements MigrationInterfac
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE "bookings"
-      ADD COLUMN IF NOT EXISTS "guest_name" character varying(120)
+      ADD COLUMN IF NOT EXISTS "guest_name" text
     `);
   }
 
