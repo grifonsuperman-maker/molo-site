@@ -102,6 +102,15 @@ export class Booking {
   })
   guestPhoneNormalized: string | null;
 
+  /** Ім'я ручної броні без обов'язкового створення Client за номером телефону. */
+  @Column({
+    name: 'guest_name',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
+  guestName: string | null;
+
   @Column({
     name: 'booking_date',
     type: 'date',
