@@ -1,10 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { TableEntity, TableStatus } from '../tables/entities/table.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
+import { refreshClientVisitStats } from './client-visit-stats';
 
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 const RELEASABLE_TABLE_STATUSES: TableStatus[] = [
@@ -43,37 +44,70 @@ export class BookingExpirationService implements OnModuleInit {
     try {
       const today = this.getKyivDate();
 
-      const expiredBookings = await this.bookings.find({
-        where: {
-          bookingDate: LessThan(today),
-          status: In(ACTIVE_BOOKING_STATUSES),
-        },
-        relations: {
-          table: true,
-        },
-        order: {
-          bookingDate: 'ASC',
-          bookingTime: 'ASC',
-        },
+      const completion = await this.bookings.manager.transaction(async (manager) => {
+        const bookingRepo = manager.getRepository(Booking);
+        const expiredBookings = await bookingRepo
+          .createQueryBuilder('booking')
+          .where('booking.bookingDate < :today', { today })
+          .andWhere('booking.status IN (:...statuses)', {
+            statuses: ACTIVE_BOOKING_STATUSES,
+          })
+          .orderBy('booking.bookingDate', 'ASC')
+          .addOrderBy('booking.bookingTime', 'ASC')
+          .setLock('pessimistic_write')
+          .getMany();
+
+        if (expiredBookings.length === 0) {
+          return { completedCount: 0, tableIds: [] as string[] };
+        }
+
+        const completedAt = new Date();
+        for (const booking of expiredBookings) {
+          booking.status = 'completed';
+          booking.completedAt ??= completedAt;
+        }
+        await bookingRepo.save(expiredBookings);
+
+        const hydratedBookings = await bookingRepo.find({
+          where: {
+            id: In(expiredBookings.map((booking) => booking.id)),
+          },
+          relations: {
+            table: true,
+            client: true,
+          },
+        });
+
+        const tableIds = Array.from(
+          new Set(
+            hydratedBookings
+              .map((booking) => booking.table?.id)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        ).sort();
+        const clientIds = Array.from(
+          new Set(
+            hydratedBookings
+              .map((booking) => booking.client?.id)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        ).sort();
+
+        for (const clientId of clientIds) {
+          await refreshClientVisitStats(manager, clientId);
+        }
+
+        return {
+          completedCount: expiredBookings.length,
+          tableIds,
+        };
       });
 
-      if (expiredBookings.length === 0) {
+      if (completion.completedCount === 0) {
         return;
       }
 
-      const completedAt = new Date();
-      const affectedTableIds = new Set<string>();
-
-      for (const booking of expiredBookings) {
-        booking.status = 'completed';
-        booking.completedAt ??= completedAt;
-
-        if (booking.table?.id) {
-          affectedTableIds.add(booking.table.id);
-        }
-      }
-
-      await this.bookings.save(expiredBookings);
+      const affectedTableIds = new Set(completion.tableIds);
 
       let releasedTables = 0;
       let preservedTables = 0;
@@ -92,7 +126,7 @@ export class BookingExpirationService implements OnModuleInit {
 
       this.logger.log(
         [
-          `Automatically completed ${expiredBookings.length} expired booking(s)`,
+          `Automatically completed ${completion.completedCount} expired booking(s)`,
           `before ${today}`,
           `released tables: ${releasedTables}`,
           `preserved tables: ${preservedTables}`,

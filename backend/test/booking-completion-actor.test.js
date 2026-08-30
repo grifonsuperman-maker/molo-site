@@ -35,13 +35,40 @@ test('booking completion history records the real waiter', async () => {
   };
   const savedHistory = [];
   const logged = [];
+  const completionLockCalls = [];
 
-  const bookings = {
-    async findOne() {
-      return booking;
+  const bookingRepository = {
+    createQueryBuilder(alias) {
+      assert.equal(alias, 'booking');
+      return {
+        leftJoinAndSelect() {
+          return this;
+        },
+        where() {
+          return this;
+        },
+        setLock(mode, version, tables) {
+          completionLockCalls.push({ mode, version, tables });
+          return this;
+        },
+        async getOne() {
+          return booking;
+        },
+      };
     },
     async save(value) {
       return value;
+    },
+  };
+  const manager = {
+    getRepository(entity) {
+      if (entity?.name === 'Booking') return bookingRepository;
+      throw new Error(`Unexpected repository: ${entity?.name}`);
+    },
+  };
+  const bookings = {
+    manager: {
+      transaction: async (callback) => callback(manager),
     },
   };
   const histories = {
@@ -79,6 +106,9 @@ test('booking completion history records the real waiter', async () => {
   const result = await service.complete('booking-1', waiterActor);
 
   assert.deepEqual(result, { message: 'Стіл звільнено' });
+  assert.deepEqual(completionLockCalls, [
+    { mode: 'pessimistic_write', version: undefined, tables: ['booking'] },
+  ]);
   assert.equal(savedHistory.length, 1);
   assert.equal(savedHistory[0].action, 'booking_completed');
   assert.equal(savedHistory[0].actorRole, 'waiter');

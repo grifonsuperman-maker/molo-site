@@ -87,8 +87,8 @@ test('manual booking is saved approved without guest browser credentials', async
     },
   };
   const clients = {
-    async findOne() {
-      return null;
+    async find() {
+      return [];
     },
     create(value) {
       return value;

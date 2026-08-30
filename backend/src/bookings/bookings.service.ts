@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
-import { Repository } from 'typeorm';
+import { Raw, Repository } from 'typeorm';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
@@ -17,6 +17,7 @@ import { LogsService } from '../logs/logs.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
 import type { AuthUser } from '../auth/types/auth-user.type';
+import { refreshClientVisitStats } from './client-visit-stats';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
@@ -54,6 +55,65 @@ export class BookingsService {
     return String(phone || '').replace(/\D/g, '');
   }
 
+  private normalizePhoneIdentity(phone: string | null | undefined) {
+    const digits = this.normalizePhone(phone);
+    if (/^0\d{9}$/.test(digits)) return `38${digits}`;
+    return digits;
+  }
+
+  private phoneIdentityCandidates(phone: string | null | undefined) {
+    const digits = this.normalizePhone(phone);
+    if (!digits) return [];
+
+    if (/^0\d{9}$/.test(digits)) {
+      return [digits, `38${digits}`];
+    }
+    if (/^380\d{9}$/.test(digits)) {
+      return [digits, digits.slice(2)];
+    }
+    return [digits];
+  }
+
+  private async findClientByPhone(phone: string) {
+    const phoneCandidates = this.phoneIdentityCandidates(phone);
+    if (!phoneCandidates.length) return null;
+
+    const matches = await this.clients.find({
+      where: {
+        phone: Raw(
+          (alias) =>
+            `regexp_replace(${alias}, '[^0-9]', '', 'g') IN (:...phoneCandidates)`,
+          { phoneCandidates },
+        ),
+      },
+      order: { createdAt: 'ASC' },
+    });
+    if (!matches.length) return null;
+
+    const telegramIds = new Set(
+      matches
+        .map((client) => String(client.telegramId || '').trim())
+        .filter(Boolean),
+    );
+
+    if (telegramIds.size > 1) {
+      return matches.find((client) => client.phone === phone) || matches[0];
+    }
+
+    const canonical =
+      matches.find((client) => Boolean(client.telegramId)) || matches[0];
+    const blacklisted = matches.find((client) => client.isBlacklisted);
+    if (blacklisted) {
+      canonical.isBlacklisted = true;
+      canonical.blacklistReason =
+        canonical.blacklistReason || blacklisted.blacklistReason || null;
+      canonical.blacklistedAt =
+        canonical.blacklistedAt || blacklisted.blacklistedAt || null;
+    }
+
+    return canonical;
+  }
+
   private hashGuestDeviceId(guestDeviceId: string) {
     return createHash('sha256').update(String(guestDeviceId).trim()).digest('hex');
   }
@@ -63,13 +123,16 @@ export class BookingsService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.client', 'client')
       .addSelect('booking.guestDeviceIdHash')
+      .addSelect('booking.guestPhoneNormalized')
       .where('booking.bookingDate = :bookingDate', { bookingDate })
       .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
       .getMany();
-    const normalizedPhone = this.normalizePhone(phone);
+    const normalizedPhone = this.normalizePhoneIdentity(phone);
     const duplicate = activeBookings.some((booking) =>
       booking.guestDeviceIdHash === guestDeviceIdHash ||
-      this.normalizePhone(booking.client?.phone) === normalizedPhone,
+      this.normalizePhoneIdentity(
+        booking.guestPhoneNormalized || booking.client?.phone,
+      ) === normalizedPhone,
     );
 
     if (duplicate) {
@@ -77,8 +140,12 @@ export class BookingsService {
     }
   }
 
-  private async assertNoActivePhoneBooking(bookingDate: string, phone: string) {
-    const normalizedPhone = this.normalizePhone(phone);
+  private async assertNoActivePhoneBooking(
+    bookingDate: string,
+    phone: string,
+    excludeBookingId?: string,
+  ) {
+    const normalizedPhone = this.normalizePhoneIdentity(phone);
     if (!normalizedPhone) {
       throw new BadRequestException('Вкажіть коректний номер телефону');
     }
@@ -93,8 +160,10 @@ export class BookingsService {
 
     const duplicate = activeBookings.some(
       (booking) =>
-        booking.guestPhoneNormalized === normalizedPhone ||
-        this.normalizePhone(booking.client?.phone) === normalizedPhone,
+        booking.id !== excludeBookingId &&
+        this.normalizePhoneIdentity(
+          booking.guestPhoneNormalized || booking.client?.phone,
+        ) === normalizedPhone,
     );
 
     if (duplicate) {
@@ -102,6 +171,38 @@ export class BookingsService {
     }
 
     return normalizedPhone;
+  }
+
+  private async prepareGuestPhoneForActivation(booking: Booking) {
+    const phone = booking.guestPhoneNormalized || booking.client?.phone;
+    if (!phone) return;
+
+    booking.guestPhoneNormalized = await this.assertNoActivePhoneBooking(
+      booking.bookingDate,
+      phone,
+      booking.id,
+    );
+  }
+
+  private async saveActivatedBooking(booking: Booking) {
+    try {
+      return await this.bookings.save(booking);
+    } catch (error: any) {
+      const code = error?.code || error?.driverError?.code;
+      const constraint = error?.constraint || error?.driverError?.constraint;
+      if (
+        code === '23505' &&
+        [
+          'UQ_bookings_active_guest_device_date',
+          'UQ_bookings_active_guest_phone_date',
+        ].includes(constraint)
+      ) {
+        throw new BadRequestException(
+          'На цю дату вже є активне бронювання з цього пристрою або номера телефону',
+        );
+      }
+      throw error;
+    }
   }
 
   private normalizeDuration(durationMinutes?: number) {
@@ -598,13 +699,13 @@ export class BookingsService {
       await this.validateRestaurant();
 
       const guestDeviceIdHash = this.hashGuestDeviceId(dto.guestDeviceId);
-      const guestPhoneNormalized = this.normalizePhone(dto.phone) || null;
+      const guestPhoneNormalized = this.normalizePhoneIdentity(dto.phone) || null;
       await this.assertNoActiveGuestBooking(dto.bookingDate, dto.phone, guestDeviceIdHash);
 
       const table = await this.resolveTableForBooking(dto);
       await this.assertTableCanBeBooked(table);
 
-      let client = await this.clients.findOne({ where: { phone: dto.phone } });
+      let client = await this.findClientByPhone(dto.phone);
       if (!client) client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
       if (client.isBlacklisted) throw new BadRequestException('Бронювання з цього номера недоступне');
 
@@ -692,7 +793,7 @@ export class BookingsService {
       if (!table) throw new NotFoundException('Стіл не знайдено');
       await this.assertTableCanBeBooked(table);
 
-      let client = await this.clients.findOne({ where: { phone: dto.phone } });
+      let client = await this.findClientByPhone(dto.phone);
       if (!client) {
         client = await this.clients.save(
           this.clients.create({ fullName: dto.fullName, phone: dto.phone }),
@@ -949,9 +1050,10 @@ export class BookingsService {
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
     const previousData = this.bookingSnapshot(booking);
+    await this.prepareGuestPhoneForActivation(booking);
     booking.status = 'approved';
     booking.approvedAt = new Date();
-    await this.bookings.save(booking);
+    await this.saveActivatedBooking(booking);
     await this.saveHistory(booking, 'booking_approved', 'admin', previousData, this.bookingSnapshot(booking));
     await this.setTableStatusOnlyForToday(booking.table, 'reserved', booking.bookingDate);
     await this.safeLog('Підтверджено бронювання', { bookingId: id });
@@ -1022,10 +1124,11 @@ export class BookingsService {
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
     const previousData = this.bookingSnapshot(booking);
+    await this.prepareGuestPhoneForActivation(booking);
     booking.status = 'approved';
     if (!booking.approvedAt) booking.approvedAt = new Date();
     if (!booking.checkedInAt) booking.checkedInAt = new Date();
-    await this.bookings.save(booking);
+    await this.saveActivatedBooking(booking);
     await this.saveHistory(
       booking,
       'booking_checked_in',
@@ -1045,13 +1148,28 @@ export class BookingsService {
   }
 
   async complete(id: string, actor?: AuthUser) {
-    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
-    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+    const { booking, previousData } = await this.bookings.manager.transaction(async (manager) => {
+      const booking = await manager
+        .getRepository(Booking)
+        .createQueryBuilder('booking')
+        .leftJoinAndSelect('booking.table', 'table')
+        .leftJoinAndSelect('booking.client', 'client')
+        .where('booking.id = :id', { id })
+        .setLock('pessimistic_write', undefined, ['booking'])
+        .getOne();
+      if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
-    const previousData = this.bookingSnapshot(booking);
-    booking.status = 'completed';
-    booking.completedAt = new Date();
-    await this.bookings.save(booking);
+      const previousData = this.bookingSnapshot(booking);
+      booking.status = 'completed';
+      if (!booking.completedAt) booking.completedAt = new Date();
+      await manager.getRepository(Booking).save(booking);
+      if (booking.client?.id) {
+        await refreshClientVisitStats(manager, booking.client.id);
+      }
+
+      return { booking, previousData };
+    });
+
     await this.saveHistory(
       booking,
       'booking_completed',
