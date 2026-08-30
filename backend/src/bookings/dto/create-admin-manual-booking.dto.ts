@@ -1,5 +1,5 @@
 import { OmitType } from '@nestjs/mapped-types';
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 import { CreateBookingDto } from './create-booking.dto';
 
@@ -8,8 +8,13 @@ export class CreateAdminManualBookingDto extends OmitType(CreateBookingDto, [
   'tableId',
   'tableNumber',
   'seats',
+  'phone',
 ] as const) {
   @IsString()
   @IsNotEmpty()
   tableId: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
 }
