@@ -155,6 +155,7 @@ test('manual booking is saved approved without guest browser credentials', async
   assert.equal(saved[0].guestAccessTokenHash, null);
   assert.equal(saved[0].guestDeviceIdHash, null);
   assert.equal(saved[0].guestPhoneNormalized, '380000000000');
+  assert.equal(saved[0].guestName, 'Гість');
   assert.ok(saved[0].approvedAt instanceof Date);
   assert.equal(result.status, 'approved');
   assert.equal(histories[0][1], 'booking_created');
@@ -166,4 +167,104 @@ test('manual booking is saved approved without guest browser credentials', async
   assert.equal(waiterNotifications[0].id, 'booking-1');
   assert.equal(waiterNotifications[0].status, 'approved');
   assert.equal(waiterNotifications[0].source, 'admin_manual');
+});
+
+test('manual booking without phone keeps guest name and does not create fake Client', async () => {
+  const saved = [];
+  const waiterNotifications = [];
+  let clientCalls = 0;
+  const table = {
+    id: 'table-15',
+    tableNumber: '15',
+    seats: 6,
+    isVisible: true,
+    status: 'free',
+    zone: { isClosed: false, isVisible: true },
+  };
+  const bookings = {
+    create(value) {
+      return { id: 'booking-no-phone', ...value };
+    },
+    async save(value) {
+      saved.push(value);
+      return value;
+    },
+    async findOne() {
+      return saved[0] || null;
+    },
+  };
+  const clients = {
+    async findOne() {
+      clientCalls += 1;
+      throw new Error('Client lookup must not run without phone');
+    },
+    create() {
+      clientCalls += 1;
+      throw new Error('Client create must not run without phone');
+    },
+    async save() {
+      clientCalls += 1;
+      throw new Error('Client save must not run without phone');
+    },
+  };
+  const tables = {
+    async findOne() {
+      return table;
+    },
+  };
+  const service = new BookingsService(
+    bookings,
+    {},
+    {},
+    clients,
+    tables,
+    {},
+    { create: async () => undefined },
+    {
+      async notifyManualBookingCreated(value) {
+        waiterNotifications.push(value);
+      },
+    },
+    {},
+  );
+
+  service.assertTableCanBeBooked = async () => undefined;
+  service.assertNoTimeConflict = async () => ({
+    bookingTime: '18:30:00',
+    bookingTimeLabel: '18:30',
+    departureTime: '20:30:00',
+    departureTimeLabel: '20:30',
+    availableFrom: '20:45:00',
+    availableFromLabel: '20:45',
+    durationMinutes: 120,
+    cleanupMinutes: 15,
+  });
+  service.saveHistory = async () => undefined;
+  service.setTableStatusOnlyForToday = async () => undefined;
+  service.safeLog = async () => undefined;
+
+  const result = await service.createManual(
+    {
+      tableId: 'table-15',
+      fullName: 'Гість без телефону',
+      bookingDate: '2026-09-10',
+      bookingTime: '18:30',
+      guestsCount: 4,
+    },
+    { role: 'admin', staffId: 'admin-1', name: 'Олена' },
+  );
+
+  assert.equal(clientCalls, 0);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].client, null);
+  assert.equal(saved[0].guestPhoneNormalized, null);
+  assert.equal(saved[0].guestName, 'Гість без телефону');
+  assert.equal(saved[0].status, 'approved');
+  assert.equal(saved[0].source, 'admin_manual');
+  assert.equal(saved[0].guestAccessTokenHash, null);
+  assert.equal(saved[0].guestDeviceIdHash, null);
+  assert.equal(result.status, 'approved');
+  assert.equal(waiterNotifications.length, 1);
+  assert.equal(waiterNotifications[0].client.fullName, 'Гість без телефону');
+  assert.equal(waiterNotifications[0].client.phone, null);
 });
