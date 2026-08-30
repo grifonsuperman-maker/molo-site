@@ -54,7 +54,7 @@ export class TelegramAdminMenuService {
   hasPendingInput(telegramId: string) {
     const key = String(telegramId || '').trim();
     if (!key) return false;
-    if (this.bookingCreate.hasPendingInput(key)) return true;
+    if (this.bookingCreate?.hasPendingInput(key)) return true;
     const draft = this.broadcastDrafts.get(key);
     if (!draft) return false;
     if (draft.expiresAt <= Date.now()) {
@@ -68,7 +68,7 @@ export class TelegramAdminMenuService {
     const key = String(telegramId || '').trim();
     if (!key) return;
     this.broadcastDrafts.delete(key);
-    this.bookingCreate.clearPendingInput(key);
+    this.bookingCreate?.clearPendingInput(key);
   }
 
   async sendMenu(
@@ -176,6 +176,9 @@ export class TelegramAdminMenuService {
     }
     if (action === 'booking') {
       if (String(id || '').startsWith('create')) {
+        if (!this.bookingCreate) {
+          throw new BadRequestException('Створення бронювання у Telegram тимчасово недоступне');
+        }
         this.broadcastDrafts.delete(this.actorKey(actor));
         await this.bookingCreate.handleAction(id, chatId, actor);
         return true;
@@ -276,7 +279,7 @@ export class TelegramAdminMenuService {
     this.assertAdminActor(actor);
     const key = this.actorKey(actor);
 
-    if (this.bookingCreate.hasPendingInput(key)) {
+    if (this.bookingCreate?.hasPendingInput(key)) {
       return this.bookingCreate.handleText(text, chatId, actor);
     }
 
@@ -745,7 +748,7 @@ export class TelegramAdminMenuService {
 
   private async beginBroadcast(chatId: string | number, actor: AuthUser) {
     await this.permissions.assert(actor, 'adminCanSendBroadcasts');
-    this.bookingCreate.clearPendingInput(this.actorKey(actor));
+    this.bookingCreate?.clearPendingInput(this.actorKey(actor));
     const recipients = await this.broadcasts.getTargetClients('all_clients');
     if (!recipients.length) {
       throw new BadRequestException('Немає доступних гостей для розсилки');
