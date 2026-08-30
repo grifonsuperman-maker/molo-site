@@ -72,13 +72,29 @@ test('rewind state assertion rejects a leftover migration object', async () => {
   );
 });
 
-test('schema roundtrip comparison ignores only TypeORM migration row ids', async () => {
+test('schema roundtrip comparison ignores migration row ids and physical column order only', async () => {
   const { compareSchemaBaselines } = await importScript(
     'schema-roundtrip-compare.mjs',
   );
 
   const expected = {
     tables: [{ table_name: 'bookings' }],
+    columns: [
+      {
+        table_name: 'bookings',
+        ordinal_position: 1,
+        column_name: 'id',
+        data_type: 'uuid',
+        is_nullable: 'NO',
+      },
+      {
+        table_name: 'bookings',
+        ordinal_position: 2,
+        column_name: 'guest_name',
+        data_type: 'text',
+        is_nullable: 'YES',
+      },
+    ],
     indexes: [{ index_name: 'IDX_bookings_date' }],
     typeOrmMigrations: [
       { id: 1, name: 'MigrationA', timestamp: '1' },
@@ -87,6 +103,22 @@ test('schema roundtrip comparison ignores only TypeORM migration row ids', async
   };
   const actual = {
     tables: [{ table_name: 'bookings' }],
+    columns: [
+      {
+        table_name: 'bookings',
+        ordinal_position: 30,
+        column_name: 'guest_name',
+        data_type: 'text',
+        is_nullable: 'YES',
+      },
+      {
+        table_name: 'bookings',
+        ordinal_position: 1,
+        column_name: 'id',
+        data_type: 'uuid',
+        is_nullable: 'NO',
+      },
+    ],
     indexes: [{ index_name: 'IDX_bookings_date' }],
     typeOrmMigrations: [
       { id: 6, name: 'MigrationA', timestamp: '1' },
@@ -95,6 +127,47 @@ test('schema roundtrip comparison ignores only TypeORM migration row ids', async
   };
 
   assert.doesNotThrow(() => compareSchemaBaselines(expected, actual));
+});
+
+test('schema roundtrip comparison still fails on semantic column drift', async () => {
+  const { compareSchemaBaselines } = await importScript(
+    'schema-roundtrip-compare.mjs',
+  );
+
+  assert.throws(
+    () =>
+      compareSchemaBaselines(
+        {
+          tables: [{ table_name: 'bookings' }],
+          columns: [
+            {
+              table_name: 'bookings',
+              ordinal_position: 2,
+              column_name: 'guest_name',
+              data_type: 'text',
+              is_nullable: 'YES',
+            },
+          ],
+          indexes: [{ index_name: 'IDX_bookings_date' }],
+          typeOrmMigrations: [],
+        },
+        {
+          tables: [{ table_name: 'bookings' }],
+          columns: [
+            {
+              table_name: 'bookings',
+              ordinal_position: 30,
+              column_name: 'guest_name',
+              data_type: 'character varying',
+              is_nullable: 'YES',
+            },
+          ],
+          indexes: [{ index_name: 'IDX_bookings_date' }],
+          typeOrmMigrations: [],
+        },
+      ),
+    /Schema roundtrip mismatch in sections: columns/,
+  );
 });
 
 test('schema roundtrip comparison fails on real schema drift', async () => {
