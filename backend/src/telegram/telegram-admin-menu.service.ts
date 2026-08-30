@@ -10,6 +10,7 @@ import { TelegramService } from '../notifications/telegram.service';
 import { AdminPermissionsService } from '../restaurant/admin-permissions.service';
 import { RestaurantService } from '../restaurant/restaurant.service';
 import { TablesService } from '../tables/tables.service';
+import { TelegramAdminBookingCreateService } from './telegram-admin-booking-create.service';
 
 const PAGE_SIZE = 8;
 const REVIEWS_PAGE_SIZE = 4;
@@ -47,11 +48,13 @@ export class TelegramAdminMenuService {
     private readonly restaurant: RestaurantService,
     private readonly tables: TablesService,
     private readonly telegram: TelegramService,
+    private readonly bookingCreate: TelegramAdminBookingCreateService,
   ) {}
 
   hasPendingInput(telegramId: string) {
     const key = String(telegramId || '').trim();
     if (!key) return false;
+    if (this.bookingCreate.hasPendingInput(key)) return true;
     const draft = this.broadcastDrafts.get(key);
     if (!draft) return false;
     if (draft.expiresAt <= Date.now()) {
@@ -63,7 +66,9 @@ export class TelegramAdminMenuService {
 
   clearPendingInput(telegramId: string) {
     const key = String(telegramId || '').trim();
-    if (key) this.broadcastDrafts.delete(key);
+    if (!key) return;
+    this.broadcastDrafts.delete(key);
+    this.bookingCreate.clearPendingInput(key);
   }
 
   async sendMenu(
@@ -87,6 +92,12 @@ export class TelegramAdminMenuService {
         {
           text: `📋 Бронювання сьогодні · ${today.length}`,
           callback_data: 'admin:bookings:0',
+        },
+      ],
+      [
+        {
+          text: '➕ Створити бронювання',
+          callback_data: 'admin:booking:create',
         },
       ],
       [
@@ -164,6 +175,11 @@ export class TelegramAdminMenuService {
       return true;
     }
     if (action === 'booking') {
+      if (String(id || '').startsWith('create')) {
+        this.broadcastDrafts.delete(this.actorKey(actor));
+        await this.bookingCreate.handleAction(id, chatId, actor);
+        return true;
+      }
       await this.sendBooking(chatId, id);
       return true;
     }
@@ -259,6 +275,11 @@ export class TelegramAdminMenuService {
   async handleText(text: string, chatId: string | number, actor: AuthUser) {
     this.assertAdminActor(actor);
     const key = this.actorKey(actor);
+
+    if (this.bookingCreate.hasPendingInput(key)) {
+      return this.bookingCreate.handleText(text, chatId, actor);
+    }
+
     const draft = this.broadcastDrafts.get(key);
     if (!draft || draft.expiresAt <= Date.now()) {
       this.broadcastDrafts.delete(key);
@@ -724,6 +745,7 @@ export class TelegramAdminMenuService {
 
   private async beginBroadcast(chatId: string | number, actor: AuthUser) {
     await this.permissions.assert(actor, 'adminCanSendBroadcasts');
+    this.bookingCreate.clearPendingInput(this.actorKey(actor));
     const recipients = await this.broadcasts.getTargetClients('all_clients');
     if (!recipients.length) {
       throw new BadRequestException('Немає доступних гостей для розсилки');
