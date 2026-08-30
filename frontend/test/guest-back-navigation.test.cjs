@@ -8,13 +8,10 @@ const source = fs.readFileSync(
   'utf8',
 );
 
-test('guest back button is lower, clickable, and keeps the existing goBack action', () => {
-  assert.match(source, /const hasGuestTopBanner = Boolean/);
-  assert.ok(source.includes(`hasGuestTopBanner ? 'top-52' : 'top-20'`));
-  assert.match(source, /\{hasGuestTopBanner && \(/);
-  assert.doesNotMatch(source, /fixed left-4 top-20 z-\[100\]/);
+test('guest back button is restored to the original high position and keeps the existing goBack action', () => {
+  assert.ok(source.includes(`className="fixed left-4 top-4 z-[100]"`));
+  assert.equal(source.includes(`hasGuestTopBanner ? 'top-52' : 'top-20'`), false);
   assert.match(source, /type="button"\s+onClick=\{goBack\}/);
-  assert.doesNotMatch(source, /fixed left-4 top-4 z-\[80\]/);
 });
 
 test('guest pages support a deliberate right swipe from the left edge', () => {

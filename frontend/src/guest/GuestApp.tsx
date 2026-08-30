@@ -1392,7 +1392,7 @@ export default function GuestApp() {
       {siteMode === 'holiday' && <div className="molo-holiday-lights" aria-hidden="true" />}
 
       {step !== 'home' && (
-        <div className={`fixed left-4 z-[100] ${hasGuestTopBanner ? 'top-52' : 'top-20'}`}>
+        <div className="fixed left-4 top-4 z-[100]">
           <button
             type="button"
             onClick={goBack}
