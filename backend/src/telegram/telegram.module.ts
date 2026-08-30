@@ -8,6 +8,7 @@ import { RestaurantModule } from '../restaurant/restaurant.module';
 import { StaffModule } from '../staff/staff.module';
 import { TablesModule } from '../tables/tables.module';
 import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
+import { TelegramAdminBookingCreateService } from './telegram-admin-booking-create.service';
 import { TelegramAdminMenuService } from './telegram-admin-menu.service';
 import { TelegramHookahMenuService } from './telegram-hookah-menu.service';
 import { TelegramWaiterAssignmentLookupService } from './telegram-waiter-assignment-lookup.service';
@@ -30,6 +31,7 @@ import { TelegramWebhookService } from './telegram-webhook.service';
   controllers: [TelegramWebhookController],
   providers: [
     TelegramWebhookService,
+    TelegramAdminBookingCreateService,
     TelegramAdminMenuService,
     TelegramHookahMenuService,
     TelegramWaiterAssignmentLookupService,
