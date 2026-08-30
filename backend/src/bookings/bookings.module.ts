@@ -77,6 +77,7 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     BookingsService,
     GuestBookingsService,
     BookingRescheduleApprovalService,
+    BookingTableLockService,
     AdminAttentionService,
     AvailabilityBlocksService,
   ],
