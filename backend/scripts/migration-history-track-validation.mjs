@@ -8,7 +8,7 @@ import {
 } from './fresh-schema-baseline-validation.mjs';
 import { EXPECTED_RUNTIME_MIGRATIONS } from './runtime-migration-roundtrip.mjs';
 
-export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe2026082500010';
+export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe2026090100010';
 export const EXPECTED_EXISTING_TRACK_AFTER_PROBE = [
   ...EXPECTED_RUNTIME_MIGRATIONS,
   FUTURE_MIGRATION_PROBE,
@@ -71,7 +71,7 @@ function loadInitialBaseline(require) {
   return InitialSchemaBaseline2026081300000;
 }
 
-class MigrationHistoryProbe2026082500010 {
+class MigrationHistoryProbe2026090100010 {
   name = FUTURE_MIGRATION_PROBE;
 
   async up(queryRunner) {
@@ -131,11 +131,11 @@ export async function runMigrationHistoryTrackValidation(mode, env = process.env
   const runtimeMigrations = loadRuntimeMigrations(require);
   const migrations =
     mode === 'existing'
-      ? [...runtimeMigrations, MigrationHistoryProbe2026082500010]
+      ? [...runtimeMigrations, MigrationHistoryProbe2026090100010]
       : [
           loadInitialBaseline(require),
           ...runtimeMigrations,
-          MigrationHistoryProbe2026082500010,
+          MigrationHistoryProbe2026090100010,
         ];
 
   const expectedAfter =
