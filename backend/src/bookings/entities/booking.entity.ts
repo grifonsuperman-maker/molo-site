@@ -105,8 +105,7 @@ export class Booking {
   /** Ім'я ручної броні без обов'язкового створення Client за номером телефону. */
   @Column({
     name: 'guest_name',
-    type: 'varchar',
-    length: 120,
+    type: 'text',
     nullable: true,
   })
   guestName: string | null;
