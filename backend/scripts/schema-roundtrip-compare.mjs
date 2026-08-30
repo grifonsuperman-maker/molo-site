@@ -9,6 +9,23 @@ function normalizeMigrationHistory(rows) {
   }));
 }
 
+function normalizeColumns(columns) {
+  if (!Array.isArray(columns)) return columns;
+  return columns
+    .map((column) => {
+      if (!column || typeof column !== 'object' || Array.isArray(column)) {
+        return column;
+      }
+      const { ordinal_position: _ordinalPosition, ...semanticColumn } = column;
+      return semanticColumn;
+    })
+    .sort((left, right) => {
+      const leftKey = `${left?.table_name || ''}\u0000${left?.column_name || ''}`;
+      const rightKey = `${right?.table_name || ''}\u0000${right?.column_name || ''}`;
+      return leftKey.localeCompare(rightKey);
+    });
+}
+
 export function comparableSchemaBaseline(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
     throw new Error('Schema baseline must be a JSON object');
@@ -16,6 +33,7 @@ export function comparableSchemaBaseline(snapshot) {
 
   return {
     ...snapshot,
+    columns: normalizeColumns(snapshot.columns),
     typeOrmMigrations: normalizeMigrationHistory(snapshot.typeOrmMigrations),
   };
 }
