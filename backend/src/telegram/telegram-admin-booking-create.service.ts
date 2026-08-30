@@ -397,12 +397,32 @@ export class TelegramAdminBookingCreateService {
     // той самий advisory lock + availability guard, що й ручна бронь на сайті.
     this.drafts.delete(key);
 
+    let result: any;
     try {
-      const result = await this.tableLock.withCreateLock(dto, async () => {
+      result = await this.tableLock.withCreateLock(dto, async () => {
         await this.availabilityBlocks.assertBookable(dto);
         return this.bookings.createManual(dto, actor);
       });
+    } catch (cause) {
+      await this.telegram.sendMessage(
+        chatId,
+        [
+          '❌ <b>Бронювання не створено</b>',
+          this.escapeHtml(this.errorMessage(cause)),
+          '',
+          'Дані не збережено. Почніть створення заново.',
+        ].join('\n'),
+        {
+          inline_keyboard: [
+            [{ text: '➕ Спробувати ще раз', callback_data: 'admin:booking:create' }],
+            [{ text: '⬅️ До пульта', callback_data: 'menu:admin' }],
+          ],
+        },
+      );
+      return;
+    }
 
+    try {
       await this.telegram.sendMessage(
         chatId,
         [
@@ -424,20 +444,9 @@ export class TelegramAdminBookingCreateService {
         },
       );
     } catch (cause) {
-      await this.telegram.sendMessage(
-        chatId,
-        [
-          '❌ <b>Бронювання не створено</b>',
-          this.escapeHtml(this.errorMessage(cause)),
-          '',
-          'Дані не збережено. Почніть створення заново.',
-        ].join('\n'),
-        {
-          inline_keyboard: [
-            [{ text: '➕ Спробувати ще раз', callback_data: 'admin:booking:create' }],
-            [{ text: '⬅️ До пульта', callback_data: 'menu:admin' }],
-          ],
-        },
+      console.error(
+        'Telegram admin booking receipt delivery failed after persistence',
+        cause,
       );
     }
   }
