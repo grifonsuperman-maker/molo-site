@@ -98,7 +98,10 @@ export class NotificationsService {
   }
 
   private bookingGuestName(booking: Booking) {
-    return booking.client?.fullName || booking.guestName || '-';
+    const rawName = booking.source === 'admin_manual'
+      ? booking.guestName || booking.client?.fullName || '-'
+      : booking.client?.fullName || booking.guestName || '-';
+    return this.escapeHtml(String(rawName));
   }
 
   private bookingTimeRange(booking: Booking) {
