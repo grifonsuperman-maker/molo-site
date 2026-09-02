@@ -309,6 +309,16 @@ export class TelegramAdminBookingCreateService {
   }
 
   private async acceptDate(chatId: string | number, draft: BookingDraft, bookingDate: string) {
+    if (bookingDate < this.kyivDate(0)) {
+      this.touch(draft);
+      await this.telegram.sendMessage(
+        chatId,
+        '⚠️ Минула дата недоступна. Оберіть сьогодні або майбутню дату.',
+        this.cancelMarkup(draft),
+      );
+      return;
+    }
+
     draft.bookingDate = bookingDate;
     draft.stage = 'table';
     this.touch(draft);
