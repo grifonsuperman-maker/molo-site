@@ -710,15 +710,24 @@ export class BookingsService {
       await this.assertTableCanBeBooked(table);
 
       let client: Client | null = null;
-      if (phone) {
-        client = await this.clients.findOne({ where: { phone } });
+      if (phone && guestPhoneNormalized) {
+        const matchingClients = await this.clients
+          .createQueryBuilder('client')
+          .where(
+            `regexp_replace("client"."phone", '[^0-9]', '', 'g') = :normalizedPhone`,
+            { normalizedPhone: guestPhoneNormalized },
+          )
+          .getMany();
+
+        if (matchingClients.some((candidate) => candidate.isBlacklisted)) {
+          throw new BadRequestException('Бронювання з цього номера недоступне');
+        }
+
+        client = matchingClients[0] || null;
         if (!client) {
           client = await this.clients.save(
             this.clients.create({ fullName, phone }),
           );
-        }
-        if (client.isBlacklisted) {
-          throw new BadRequestException('Бронювання з цього номера недоступне');
         }
       }
 
