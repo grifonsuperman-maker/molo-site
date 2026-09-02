@@ -393,6 +393,24 @@ export class TelegramAdminBookingCreateService {
       throw new BadRequestException('Дані бронювання неповні. Почніть створення заново.');
     }
 
+    if (draft.bookingDate < this.kyivDate(0)) {
+      this.drafts.delete(key);
+      await this.telegram.sendMessage(
+        chatId,
+        [
+          '⚠️ <b>Дата бронювання вже минула</b>',
+          'Почніть створення заново та оберіть актуальну дату.',
+        ].join('\n'),
+        {
+          inline_keyboard: [
+            [{ text: '➕ Створити заново', callback_data: 'admin:booking:create' }],
+            [{ text: '⬅️ До пульта', callback_data: 'menu:admin' }],
+          ],
+        },
+      );
+      return;
+    }
+
     const dto: CreateAdminManualBookingDto = {
       tableId: draft.tableId,
       fullName: draft.fullName,
