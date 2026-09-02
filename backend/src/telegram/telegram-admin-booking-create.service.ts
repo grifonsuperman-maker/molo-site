@@ -129,6 +129,15 @@ export class TelegramAdminBookingCreateService {
       return true;
     }
 
+    if (actionId === `create_phone_skip_${draft.id}`) {
+      this.assertStage(draft, 'phone');
+      draft.phone = undefined;
+      draft.stage = 'confirm';
+      this.touch(draft);
+      await this.sendConfirmation(chatId, draft);
+      return true;
+    }
+
     if (actionId === `create_confirm_${draft.id}`) {
       this.assertStage(draft, 'confirm');
       await this.confirm(chatId, key, draft, actor);
@@ -220,14 +229,14 @@ export class TelegramAdminBookingCreateService {
       draft.fullName = value;
       draft.stage = 'guests';
       this.touch(draft);
-      await this.telegram.sendMessage(chatId, 'Крок 5/6 · Скільки гостей? Надішліть число.', this.cancelMarkup(draft));
+      await this.telegram.sendMessage(chatId, 'Крок 5/6 · Скільки гостей? Надішліть число від 1 до 30.', this.cancelMarkup(draft));
       return true;
     }
 
     if (draft.stage === 'guests') {
       const guestsCount = Number(value);
-      if (!Number.isInteger(guestsCount) || guestsCount < 1) {
-        await this.telegram.sendMessage(chatId, '⚠️ Кількість гостей має бути цілим числом від 1.');
+      if (!Number.isInteger(guestsCount) || guestsCount < 1 || guestsCount > 30) {
+        await this.telegram.sendMessage(chatId, '⚠️ Кількість гостей має бути цілим числом від 1 до 30.');
         return true;
       }
       draft.guestsCount = guestsCount;
@@ -235,15 +244,19 @@ export class TelegramAdminBookingCreateService {
       this.touch(draft);
       await this.telegram.sendMessage(
         chatId,
-        'Крок 6/6 · Надішліть номер телефону гостя.',
-        this.cancelMarkup(draft),
+        'Крок 6/6 · Надішліть номер телефону гостя або пропустіть цей крок.',
+        this.phoneMarkup(draft),
       );
       return true;
     }
 
     if (draft.stage === 'phone') {
       if (!value || !value.replace(/\D/g, '')) {
-        await this.telegram.sendMessage(chatId, '⚠️ Вкажіть номер телефону гостя.');
+        await this.telegram.sendMessage(
+          chatId,
+          '⚠️ Вкажіть номер телефону або натисніть «Пропустити телефон».',
+          this.phoneMarkup(draft),
+        );
         return true;
       }
       draft.phone = value;
@@ -292,7 +305,7 @@ export class TelegramAdminBookingCreateService {
         `🪑 Стіл №<b>${this.escapeHtml(draft.tableNumber!)}</b>`,
         `👤 ${this.escapeHtml(draft.fullName!)}`,
         `👥 Гостей: <b>${draft.guestsCount}</b>`,
-        `📞 ${this.escapeHtml(draft.phone!)}`,
+        `📞 ${this.phoneLabel(draft.phone)}`,
         '',
         'Після підтвердження бронювання буде одразу підтвердженим.',
       ].join('\n'),
@@ -311,7 +324,7 @@ export class TelegramAdminBookingCreateService {
     const dto: CreateAdminManualBookingDto = {
       tableId: draft.tableId!,
       fullName: draft.fullName!,
-      phone: draft.phone!,
+      phone: draft.phone,
       bookingDate: draft.bookingDate!,
       bookingTime: draft.bookingTime!,
       guestsCount: draft.guestsCount!,
@@ -356,7 +369,7 @@ export class TelegramAdminBookingCreateService {
           `🪑 Стіл №<b>${this.escapeHtml(draft.tableNumber!)}</b>`,
           `👤 ${this.escapeHtml(draft.fullName!)}`,
           `👥 Гостей: <b>${draft.guestsCount}</b>`,
-          `📞 ${this.escapeHtml(draft.phone!)}`,
+          `📞 ${this.phoneLabel(draft.phone)}`,
           '',
           'Статус: <b>Підтверджено</b>',
         ].join('\n'),
@@ -396,8 +409,7 @@ export class TelegramAdminBookingCreateService {
       !draft.tableNumber ||
       !draft.bookingTime ||
       !draft.fullName ||
-      !draft.guestsCount ||
-      !draft.phone
+      !draft.guestsCount
     ) {
       throw new BadRequestException('Дані бронювання неповні. Почніть створення заново.');
     }
@@ -410,6 +422,15 @@ export class TelegramAdminBookingCreateService {
   private cancelMarkup(draft: Draft) {
     return {
       inline_keyboard: [
+        [{ text: '❌ Скасувати', callback_data: `admin:booking:create_cancel_${draft.id}` }],
+      ],
+    };
+  }
+
+  private phoneMarkup(draft: Draft) {
+    return {
+      inline_keyboard: [
+        [{ text: 'Пропустити телефон', callback_data: `admin:booking:create_phone_skip_${draft.id}` }],
         [{ text: '❌ Скасувати', callback_data: `admin:booking:create_cancel_${draft.id}` }],
       ],
     };
@@ -466,6 +487,10 @@ export class TelegramAdminBookingCreateService {
 
   private timeLabel(value: string) {
     return String(value || '').slice(0, 5);
+  }
+
+  private phoneLabel(value: string | undefined) {
+    return value ? this.escapeHtml(value) : 'Не вказано';
   }
 
   private actorKey(actor: AuthUser) {
