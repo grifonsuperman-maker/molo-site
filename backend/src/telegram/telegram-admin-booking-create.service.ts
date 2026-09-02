@@ -448,9 +448,23 @@ export class TelegramAdminBookingCreateService {
     const short = value.match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?$/);
     if (!short) return null;
     const [, dayRaw, monthRaw, yearRaw] = short;
-    const currentYear = this.kyivDate(0).slice(0, 4);
-    const normalized = `${yearRaw || currentYear}-${monthRaw.padStart(2, '0')}-${dayRaw.padStart(2, '0')}`;
-    return this.isCalendarDate(normalized) ? normalized : null;
+    const day = dayRaw.padStart(2, '0');
+    const month = monthRaw.padStart(2, '0');
+
+    if (yearRaw) {
+      const explicitDate = `${yearRaw}-${month}-${day}`;
+      return this.isCalendarDate(explicitDate) ? explicitDate : null;
+    }
+
+    const today = this.kyivDate(0);
+    const currentYear = Number(today.slice(0, 4));
+    const currentYearDate = `${currentYear}-${month}-${day}`;
+    if (this.isCalendarDate(currentYearDate) && currentYearDate >= today) {
+      return currentYearDate;
+    }
+
+    const nextYearDate = `${currentYear + 1}-${month}-${day}`;
+    return this.isCalendarDate(nextYearDate) ? nextYearDate : null;
   }
 
   private isCalendarDate(value: string) {
