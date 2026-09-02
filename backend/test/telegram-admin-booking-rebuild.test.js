@@ -104,12 +104,16 @@ function createHarness(options = {}) {
   };
 }
 
-async function fillDraft(service, calls, bookingDate = kyivDate(1)) {
+async function fillUntilGuests(service, bookingDate = kyivDate(1)) {
   await service.begin(42, ACTOR);
   await service.handleText(bookingDate, 42, ACTOR);
   await service.handleText('15', 42, ACTOR);
   await service.handleText('18:30', 42, ACTOR);
   await service.handleText('Тестовий гість', 42, ACTOR);
+}
+
+async function fillDraft(service, calls, bookingDate = kyivDate(1)) {
+  await fillUntilGuests(service, bookingDate);
   await service.handleText('4', 42, ACTOR);
   await service.handleText('+380501234567', 42, ACTOR);
   const confirmation = lastMessage(calls);
@@ -140,6 +144,43 @@ test('Telegram Admin creates manual booking through lock, availability and exist
   assert.deepEqual(createCall[2], ACTOR);
   assert.equal(service.hasPendingInput('777'), false);
   assert.match(lastMessage(calls)[2], /Бронювання створено/);
+});
+
+test('Telegram Admin enforces the same 30-guest maximum as the web manual flow', async () => {
+  const { service, calls } = createHarness();
+  await fillUntilGuests(service);
+
+  await service.handleText('31', 42, ACTOR);
+
+  assert.match(lastMessage(calls)[2], /від 1 до 30/);
+  assert.equal(calls.filter((entry) => entry[0] === 'createManual').length, 0);
+  assert.equal(service.hasPendingInput('777'), true);
+
+  await service.handleText('30', 42, ACTOR);
+  assert.ok(callbackFor(lastMessage(calls), 'Пропустити телефон'));
+});
+
+test('Telegram Admin can skip phone and create the manual booking without a fake contact', async () => {
+  const { service, calls } = createHarness();
+  await fillUntilGuests(service);
+  await service.handleText('4', 42, ACTOR);
+
+  const phoneStep = lastMessage(calls);
+  const skipCallback = callbackFor(phoneStep, 'Пропустити телефон');
+  assert.match(skipCallback, /^admin:booking:create_phone_skip_[a-f0-9]+$/);
+
+  await service.handleAction(actionId(skipCallback), 42, ACTOR);
+  const confirmation = lastMessage(calls);
+  assert.match(confirmation[2], /Не вказано/);
+  const confirmCallback = callbackFor(confirmation, '✅ Створити бронювання');
+
+  await service.handleAction(actionId(confirmCallback), 42, ACTOR);
+
+  const createCall = calls.find((entry) => entry[0] === 'createManual');
+  assert.equal(createCall[1].phone, undefined);
+  assert.equal(createCall[1].fullName, 'Тестовий гість');
+  assert.equal(createCall[1].guestsCount, 4);
+  assert.match(lastMessage(calls)[2], /Не вказано/);
 });
 
 test('Telegram Admin rejects a past date before table selection', async () => {
