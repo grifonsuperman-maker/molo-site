@@ -3,6 +3,8 @@ name: Pull request checks
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -27,7 +29,12 @@ jobs:
       - name: Test frontend
         run: npm --prefix frontend test
       - name: Check whitespace
-        run: git diff --check origin/main...HEAD
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            git diff --check "${{ github.event.before }}..${{ github.sha }}"
+          else
+            git diff --check origin/main...HEAD
+          fi
 
   backend:
     runs-on: ubuntu-latest
