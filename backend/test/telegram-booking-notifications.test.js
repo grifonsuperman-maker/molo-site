@@ -204,6 +204,32 @@ test('automatic late guest Telegram notification also targets only admin', async
   ]);
 });
 
+test('phone-less manual booking keeps its booking-specific guest name in Telegram notifications', async () => {
+  const { service } = createNotificationsService();
+  const deliveries = [];
+  const manualBooking = {
+    ...booking,
+    id: 'manual-booking-1',
+    source: 'admin_manual',
+    guestName: 'Гість без телефону',
+    client: null,
+  };
+
+  service.sendToRoles = async (roles, text, replyMarkup) => {
+    deliveries.push({ roles, text, replyMarkup });
+    return { attempted: 1, delivered: 1, failed: 0 };
+  };
+
+  await service.notifyManualBookingCreated(manualBooking);
+  await service.notifyLateGuest(manualBooking);
+
+  assert.equal(deliveries.length, 2);
+  assert.match(deliveries[0].text, /Гість без телефону/);
+  assert.match(deliveries[0].text, /Телефон: <b>-<\/b>/);
+  assert.match(deliveries[1].text, /Гість без телефону/);
+  assert.match(deliveries[1].text, /Телефон: <b>-<\/b>/);
+});
+
 test('off-shift waiter is excluded from operational Telegram notifications', async () => {
   const sent = [];
   const staffRepo = {

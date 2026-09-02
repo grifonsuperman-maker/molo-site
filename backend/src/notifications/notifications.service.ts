@@ -97,6 +97,13 @@ export class NotificationsService {
     return parts.join(' ') || '-';
   }
 
+  private bookingGuestName(booking: Booking) {
+    const value = booking.source === 'admin_manual'
+      ? booking.guestName || booking.client?.fullName || '-'
+      : booking.client?.fullName || '-';
+    return this.escapeHtml(String(value));
+  }
+
   private bookingTimeRange(booking: Booking) {
     const anyBooking = booking as any;
 
@@ -166,7 +173,7 @@ export class NotificationsService {
       '🟠 <b>Нове бронювання</b>',
       '',
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
-      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
       `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
       `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
@@ -200,7 +207,7 @@ export class NotificationsService {
       '✍️ Створено Адміністратором',
       '',
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
-      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
       `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
       `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
@@ -219,7 +226,7 @@ export class NotificationsService {
       '✅ <b>Бронювання підтверджено</b>',
       '',
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
-      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
       `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
     ].join('\n');
@@ -232,7 +239,7 @@ export class NotificationsService {
       '❌ <b>Бронювання скасовано</b>',
       '',
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
-      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
       `📅 Дата: <b>${booking.bookingDate}</b>`,
       `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
     ].join('\n');
@@ -246,7 +253,7 @@ export class NotificationsService {
       '⏰ <b>Запит на перенесення бронювання</b>',
       '',
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
-      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
       `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
       '',
       `Було: <b>${booking.bookingDate} ${this.timeLabel(booking.bookingTime)}</b>`,
@@ -312,7 +319,7 @@ export class NotificationsService {
       '⚠️ <b>Гість запізнюється</b>',
       '',
       `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
-      `👤 Імʼя: <b>${booking.client?.fullName || '-'}</b>`,
+      `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
       `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
       `🕒 Час бронювання: <b>${this.timeLabel(booking.bookingTime)}</b>`,
       '',

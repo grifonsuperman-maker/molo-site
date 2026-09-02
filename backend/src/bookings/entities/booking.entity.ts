@@ -1,4 +1,5 @@
 import {
+  AfterLoad,
   Column,
   CreateDateColumn,
   Entity,
@@ -101,6 +102,14 @@ export class Booking {
     select: false,
   })
   guestPhoneNormalized: string | null;
+
+  /** Ім'я, введене Адміністратором саме для ручного бронювання. */
+  @Column({
+    name: 'guest_name',
+    type: 'text',
+    nullable: true,
+  })
+  guestName: string | null;
 
   @Column({
     name: 'booking_date',
@@ -247,4 +256,14 @@ export class Booking {
     name: 'updated_at',
   })
   updatedAt: Date;
+
+  @AfterLoad()
+  useBookingSpecificManualGuestName() {
+    if (this.source === 'admin_manual' && this.guestName && this.client) {
+      this.client = {
+        ...this.client,
+        fullName: this.guestName,
+      } as Client;
+    }
+  }
 }

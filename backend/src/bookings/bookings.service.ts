@@ -364,6 +364,18 @@ export class BookingsService {
     }
   }
 
+  /** Для ручної броні без телефону повертаємо display-only Client, не записуючи фіктивний номер у БД. */
+  private withManualGuestDisplayClient(booking: Booking): Booking {
+    if (booking.client || !booking.guestName) return booking;
+    return {
+      ...booking,
+      client: {
+        fullName: booking.guestName,
+        phone: null,
+      } as unknown as Client,
+    } as Booking;
+  }
+
   private async saveHistory(
     booking: Booking,
     action: string,
@@ -627,6 +639,7 @@ export class BookingsService {
           guestAccessTokenHash,
           guestDeviceIdHash,
           guestPhoneNormalized,
+          guestName: null,
           bookingDate: dto.bookingDate,
           bookingTime: timeInfo.bookingTime,
           durationMinutes: timeInfo.durationMinutes,
@@ -683,7 +696,11 @@ export class BookingsService {
   async createManual(dto: CreateAdminManualBookingDto, actor?: AuthUser) {
     try {
       const bookingDate = this.normalizeBookingDate(dto.bookingDate);
-      const guestPhoneNormalized = await this.assertNoActivePhoneBooking(bookingDate, dto.phone);
+      const fullName = String(dto.fullName || '').trim();
+      const phone = String(dto.phone || '').trim();
+      const guestPhoneNormalized = phone
+        ? await this.assertNoActivePhoneBooking(bookingDate, phone)
+        : null;
 
       const table = await this.tables.findOne({
         where: { id: dto.tableId },
@@ -692,14 +709,26 @@ export class BookingsService {
       if (!table) throw new NotFoundException('Стіл не знайдено');
       await this.assertTableCanBeBooked(table);
 
-      let client = await this.clients.findOne({ where: { phone: dto.phone } });
-      if (!client) {
-        client = await this.clients.save(
-          this.clients.create({ fullName: dto.fullName, phone: dto.phone }),
-        );
-      }
-      if (client.isBlacklisted) {
-        throw new BadRequestException('Бронювання з цього номера недоступне');
+      let client: Client | null = null;
+      if (phone && guestPhoneNormalized) {
+        const matchingClients = await this.clients
+          .createQueryBuilder('client')
+          .where(
+            `regexp_replace("client"."phone", '[^0-9]', '', 'g') = :normalizedPhone`,
+            { normalizedPhone: guestPhoneNormalized },
+          )
+          .getMany();
+
+        if (matchingClients.some((candidate) => candidate.isBlacklisted)) {
+          throw new BadRequestException('Бронювання з цього номера недоступне');
+        }
+
+        client = matchingClients[0] || null;
+        if (!client) {
+          client = await this.clients.save(
+            this.clients.create({ fullName, phone }),
+          );
+        }
       }
 
       const timeInfo = await this.assertNoTimeConflict(
@@ -715,6 +744,7 @@ export class BookingsService {
       ].filter(Boolean).join('\n');
 
       // Ручне бронювання Адміністратора не залежить від перемикача онлайн-бронювання.
+      // Якщо телефону немає, Client не створюємо: ім'я зберігається у самій броні.
       const booking = await this.bookings.save(
         this.bookings.create({
           table,
@@ -722,6 +752,7 @@ export class BookingsService {
           guestAccessTokenHash: null,
           guestDeviceIdHash: null,
           guestPhoneNormalized,
+          guestName: fullName,
           bookingDate,
           bookingTime: timeInfo.bookingTime,
           durationMinutes: timeInfo.durationMinutes,
@@ -746,7 +777,8 @@ export class BookingsService {
       await this.safeLog('Створено ручне бронювання', {
         bookingId: booking.id,
         tableNumber: table.tableNumber,
-        clientName: client.fullName,
+        clientName: fullName,
+        hasPhone: Boolean(phone),
         bookingDate,
         time: `${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel}`,
         durationMinutes: timeInfo.durationMinutes,
@@ -761,7 +793,11 @@ export class BookingsService {
           where: { id: booking.id },
           relations: ['table', 'client'],
         });
-        if (full) await this.notifications.notifyManualBookingCreated(full);
+        if (full) {
+          await this.notifications.notifyManualBookingCreated(
+            this.withManualGuestDisplayClient(full),
+          );
+        }
       });
 
       return {
@@ -862,8 +898,9 @@ export class BookingsService {
         event?.action === 'booking_checked_in' &&
         event.actorRole === 'waiter' &&
         Boolean(event.actorStaffId);
+      const displayBooking = this.withManualGuestDisplayClient(booking);
 
-      return Object.assign(booking, {
+      return Object.assign(displayBooking, {
         assignedWaiterId: hasAssignedWaiter ? event?.actorStaffId || null : null,
         assignedWaiterName: hasAssignedWaiter ? event?.actorName || null : null,
       });
@@ -896,7 +933,8 @@ export class BookingsService {
       });
     }
 
-    return query.getMany();
+    const bookings = await query.getMany();
+    return bookings.map((booking) => this.withManualGuestDisplayClient(booking));
   }
 
   async getStats() {

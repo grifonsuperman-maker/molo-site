@@ -11,26 +11,36 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'CloseInactiveWaiterCalls2026081500020',
   'AddGuestReviewArchive2026082200010',
   'AddLogArchive2026082400010',
+  'AddManualBookingGuestName2026082400020',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  7: {
+    guestNameColumn: false,
+    logArchiveTable: true,
+    reviewArchiveTable: true,
+  },
   6: {
+    guestNameColumn: false,
     logArchiveTable: false,
     reviewArchiveTable: true,
   },
   5: {
+    guestNameColumn: false,
     logArchiveTable: false,
     reviewArchiveTable: false,
     waiterLifecycleTrigger: true,
     waiterLifecycleFunction: true,
   },
   4: {
+    guestNameColumn: false,
     logArchiveTable: false,
     reviewArchiveTable: false,
     waiterLifecycleTrigger: false,
     waiterLifecycleFunction: false,
   },
   3: {
+    guestNameColumn: false,
     logArchiveTable: false,
     reviewArchiveTable: false,
     waiterAssignmentActiveColumn: false,
@@ -38,11 +48,13 @@ const EXPECTED_REWIND_STATE = {
     waiterStatusIndex: true,
   },
   2: {
+    guestNameColumn: false,
     logArchiveTable: false,
     reviewArchiveTable: false,
     waiterCallsTable: false,
   },
   1: {
+    guestNameColumn: false,
     logArchiveTable: false,
     reviewArchiveTable: false,
     staffPinAttemptsTable: true,
@@ -53,6 +65,7 @@ const EXPECTED_REWIND_STATE = {
     staffPinUpdatedAtIndex: true,
   },
   0: {
+    guestNameColumn: false,
     logArchiveTable: false,
     reviewArchiveTable: false,
     staffPinAttemptsTable: false,
@@ -105,6 +118,9 @@ function loadRuntimeMigrations(require) {
   const {
     AddLogArchive2026082400010,
   } = require('../dist/migrations/2026082400010-AddLogArchive.js');
+  const {
+    AddManualBookingGuestName2026082400020,
+  } = require('../dist/migrations/2026082400020-AddManualBookingGuestName.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -114,6 +130,7 @@ function loadRuntimeMigrations(require) {
     CloseInactiveWaiterCalls2026081500020,
     AddGuestReviewArchive2026082200010,
     AddLogArchive2026082400010,
+    AddManualBookingGuestName2026082400020,
   ];
 }
 
@@ -131,6 +148,13 @@ async function readRewindState(dataSource) {
       to_regclass('public.waiter_calls') IS NOT NULL AS "waiterCallsTable",
       to_regclass('public.guest_review_archives') IS NOT NULL AS "reviewArchiveTable",
       to_regclass('public.log_archives') IS NOT NULL AS "logArchiveTable",
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'bookings'
+          AND column_name = 'guest_name'
+      ) AS "guestNameColumn",
       EXISTS (
         SELECT 1
         FROM information_schema.columns
