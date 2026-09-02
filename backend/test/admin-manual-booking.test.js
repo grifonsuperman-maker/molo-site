@@ -87,6 +87,16 @@ test('manual booking is saved approved without guest browser credentials', async
     },
   };
   const clients = {
+    createQueryBuilder() {
+      return {
+        where() {
+          return this;
+        },
+        async getMany() {
+          return [];
+        },
+      };
+    },
     async findOne() {
       return null;
     },
@@ -167,6 +177,95 @@ test('manual booking is saved approved without guest browser credentials', async
   assert.equal(waiterNotifications[0].id, 'booking-1');
   assert.equal(waiterNotifications[0].status, 'approved');
   assert.equal(waiterNotifications[0].source, 'admin_manual');
+});
+
+test('manual booking blocks a blacklisted client even when phone formatting differs', async () => {
+  const queryCalls = [];
+  let clientCreated = false;
+  let bookingSaved = false;
+  const table = {
+    id: 'table-1',
+    tableNumber: '5',
+    isVisible: true,
+    status: 'free',
+    zone: { isClosed: false, isVisible: true },
+  };
+  const clients = {
+    createQueryBuilder(alias) {
+      assert.equal(alias, 'client');
+      return {
+        where(sql, params) {
+          queryCalls.push([sql, params]);
+          return this;
+        },
+        async getMany() {
+          return [
+            {
+              id: 'client-blacklisted',
+              fullName: 'Заблокований гість',
+              phone: '+380501234567',
+              isBlacklisted: true,
+            },
+          ];
+        },
+      };
+    },
+    create() {
+      clientCreated = true;
+      return {};
+    },
+    async save() {
+      clientCreated = true;
+      return {};
+    },
+  };
+  const bookings = {
+    create() {
+      return {};
+    },
+    async save() {
+      bookingSaved = true;
+      return {};
+    },
+  };
+  const tables = {
+    async findOne() {
+      return table;
+    },
+  };
+  const service = new BookingsService(
+    bookings,
+    {},
+    {},
+    clients,
+    tables,
+    {},
+    {},
+    {},
+    {},
+  );
+
+  service.assertNoActivePhoneBooking = async () => '380501234567';
+  service.assertTableCanBeBooked = async () => undefined;
+
+  await assert.rejects(
+    () =>
+      service.createManual({
+        tableId: 'table-1',
+        fullName: 'Гість',
+        phone: '380 50 123 45 67',
+        bookingDate: '2026-09-10',
+        bookingTime: '18:00',
+        guestsCount: 2,
+      }),
+    /Бронювання з цього номера недоступне/,
+  );
+
+  assert.equal(queryCalls.length, 1);
+  assert.match(queryCalls[0][0], /regexp_replace/);
+  assert.equal(queryCalls[0][1].normalizedPhone, '380501234567');
+  assert.equal(clientCreated, false);
+  assert.equal(bookingSaved, false);
 });
 
 test('phone-less manual booking does not create a fake Client and keeps the guest name', async () => {
