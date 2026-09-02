@@ -103,6 +103,13 @@ export class Booking {
   guestPhoneNormalized: string | null;
 
   @Column({
+    name: 'guest_name',
+    type: 'text',
+    nullable: true,
+  })
+  guestName: string | null;
+
+  @Column({
     name: 'booking_date',
     type: 'date',
   })
