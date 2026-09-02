@@ -9,6 +9,7 @@ const runtimeHistory = [
   'CloseInactiveWaiterCalls2026081500020',
   'AddGuestReviewArchive2026082200010',
   'AddLogArchive2026082400010',
+  'AddManualBookingGuestName2026082400020',
 ];
 const baseline = 'InitialSchemaBaseline2026081300000';
 const probe = 'MigrationHistoryProbe2026082500010';
