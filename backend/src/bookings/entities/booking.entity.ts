@@ -103,6 +103,14 @@ export class Booking {
   })
   guestPhoneNormalized: string | null;
 
+  /** Ім'я, введене Адміністратором саме для ручного бронювання. */
+  @Column({
+    name: 'guest_name',
+    type: 'text',
+    nullable: true,
+  })
+  guestName: string | null;
+
   @Column({
     name: 'booking_date',
     type: 'date',
@@ -248,13 +256,6 @@ export class Booking {
     name: 'updated_at',
   })
   updatedAt: Date;
-
-  @Column({
-    name: 'guest_name',
-    type: 'text',
-    nullable: true,
-  })
-  guestName: string | null;
 
   @AfterLoad()
   useBookingSpecificManualGuestName() {
