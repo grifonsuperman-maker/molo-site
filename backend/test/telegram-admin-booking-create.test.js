@@ -13,6 +13,19 @@ const ACTOR = {
   name: 'Олена Адміністратор',
 };
 
+function kyivDate(offsetDays) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === 'year')?.value || 1970);
+  const month = Number(parts.find((part) => part.type === 'month')?.value || 1);
+  const day = Number(parts.find((part) => part.type === 'day')?.value || 1);
+  return new Date(Date.UTC(year, month - 1, day + offsetDays)).toISOString().slice(0, 10);
+}
+
 function lastMessage(calls) {
   return [...calls].reverse().find((entry) => entry[0] === 'message');
 }
@@ -31,6 +44,7 @@ function actionId(callbackData) {
 
 test('Admin Telegram creates approved manual booking with optional phone skipped', async () => {
   const calls = [];
+  const bookingDate = kyivDate(7);
   let receivedDto = null;
   let receivedActor = null;
   const bookings = {
@@ -92,7 +106,7 @@ test('Admin Telegram creates approved manual booking with optional phone skipped
   await service.begin(42, ACTOR);
   assert.equal(service.hasPendingInput('777'), true);
 
-  await service.handleText('2026-09-10', 42, ACTOR);
+  await service.handleText(bookingDate, 42, ACTOR);
   await service.handleText('15', 42, ACTOR);
   await service.handleText('18:30', 42, ACTOR);
   await service.handleText('Гість без телефону', 42, ACTOR);
@@ -118,7 +132,7 @@ test('Admin Telegram creates approved manual booking with optional phone skipped
   );
   assert.equal(Object.prototype.hasOwnProperty.call(receivedDto, 'phone'), false);
   assert.equal(receivedDto.tableId, 'table-15');
-  assert.equal(receivedDto.bookingDate, '2026-09-10');
+  assert.equal(receivedDto.bookingDate, bookingDate);
   assert.equal(receivedDto.bookingTime, '18:30');
   assert.equal(receivedDto.fullName, 'Гість без телефону');
   assert.equal(receivedDto.guestsCount, 4);
@@ -135,6 +149,7 @@ test('Admin Telegram creates approved manual booking with optional phone skipped
 
 test('Telegram receipt failure after persistence never reports booking as unsaved or creates a duplicate', async () => {
   const calls = [];
+  const bookingDate = kyivDate(7);
   let persisted = false;
   const bookings = {
     async createManual(dto) {
@@ -189,7 +204,7 @@ test('Telegram receipt failure after persistence never reports booking as unsave
   );
 
   await service.begin(42, ACTOR);
-  await service.handleText('2026-09-10', 42, ACTOR);
+  await service.handleText(bookingDate, 42, ACTOR);
   await service.handleText('15', 42, ACTOR);
   await service.handleText('18:30', 42, ACTOR);
   await service.handleText('Гість без телефону', 42, ACTOR);
