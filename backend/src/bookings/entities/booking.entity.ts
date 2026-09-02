@@ -260,7 +260,10 @@ export class Booking {
   @AfterLoad()
   useBookingSpecificManualGuestName() {
     if (this.source === 'admin_manual' && this.guestName && this.client) {
-      this.client.fullName = this.guestName;
+      this.client = {
+        ...this.client,
+        fullName: this.guestName,
+      } as Client;
     }
   }
 }
