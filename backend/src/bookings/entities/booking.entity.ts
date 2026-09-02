@@ -1,4 +1,5 @@
 import {
+  AfterLoad,
   Column,
   CreateDateColumn,
   Entity,
@@ -254,4 +255,11 @@ export class Booking {
     name: 'updated_at',
   })
   updatedAt: Date;
+
+  @AfterLoad()
+  useBookingSpecificManualGuestName() {
+    if (this.source === 'admin_manual' && this.guestName && this.client) {
+      this.client.fullName = this.guestName;
+    }
+  }
 }
