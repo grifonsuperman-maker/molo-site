@@ -194,6 +194,21 @@ test('Telegram Admin rejects a past date before table selection', async () => {
   assert.match(lastMessage(calls)[2], /Минула дата недоступна/);
 });
 
+test('Telegram Admin rolls DD.MM without a year into the next year when this year date already passed', async () => {
+  const { service, calls } = createHarness();
+  service.kyivDate = () => '2026-12-31';
+
+  await service.begin(42, ACTOR);
+  await service.handleText('01.01', 42, ACTOR);
+
+  assert.match(lastMessage(calls)[2], /01\.01\.2027/);
+  assert.equal(service.hasPendingInput('777'), true);
+
+  await service.handleText('15', 42, ACTOR);
+  assert.equal(calls.filter((entry) => entry[0] === 'tables').length, 1);
+  assert.match(lastMessage(calls)[2], /Стіл №<b>15<\/b>/);
+});
+
 test('booking date is rechecked after the create lock is acquired', async () => {
   let currentDate = kyivDate(0);
   const { service, calls } = createHarness({
