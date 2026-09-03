@@ -14,6 +14,9 @@ function normalizeOrigin(value: string, source: string): string {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new Error('unsupported protocol');
     }
+    if (url.hostname.includes('*')) {
+      throw new Error('wildcard hostname');
+    }
     return url.origin;
   } catch {
     throw new Error(`Invalid ${source} origin: ${value}`);
