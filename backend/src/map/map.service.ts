@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { Restaurant } from '../restaurant/entities/restaurant.entity';
+import { RestaurantService } from '../restaurant/restaurant.service';
 import { TableEntity } from '../tables/entities/table.entity';
 import { Zone } from '../zones/entities/zone.entity';
 import { MapObject } from './entities/map-object.entity';
@@ -14,46 +14,13 @@ export class MapService {
     private readonly tables: Repository<TableEntity>,
     @InjectRepository(Zone)
     private readonly zones: Repository<Zone>,
-    @InjectRepository(Restaurant)
-    private readonly restaurants: Repository<Restaurant>,
+    private readonly restaurantService: RestaurantService,
     @InjectRepository(MapObject)
     private readonly objects: Repository<MapObject>,
   ) {}
 
-  private async restaurant(): Promise<Restaurant> {
-    const restaurants = await this.restaurants.find({
-      order: { createdAt: 'ASC' } as any,
-      take: 1,
-    });
-
-    if (restaurants.length > 0 && restaurants[0]) {
-      return restaurants[0];
-    }
-
-    const restaurant = this.restaurants.create() as unknown as Restaurant;
-
-    Object.assign(restaurant as any, {
-      name: 'MOLO',
-      phone: null,
-      address: null,
-      menuUrl:
-        'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio',
-      logoUrl: '/logo.png',
-      mainPhotoUrl: '/logo.png',
-      openTime: '10:00',
-      bookingCloseTime: '22:00',
-      closeTime: '23:00',
-      status: 'open',
-      closeMessage: 'Ресторан зараз зачинений.\nМи працюємо з 10:00 до 23:00.',
-      bookingClosedMessage:
-        'Онлайн-бронювання завершено.\nДля бронювання зателефонуйте адміністратору.',
-      mapWidth: 2200,
-      mapHeight: 1500,
-      bookingCloseNotifiedAt: null,
-      restaurantCloseNotifiedAt: null,
-    });
-
-    return (await this.restaurants.save(restaurant as any)) as Restaurant;
+  private restaurant() {
+    return this.restaurantService.getRestaurant();
   }
 
   async getFullMap() {
