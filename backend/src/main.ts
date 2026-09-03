@@ -9,9 +9,10 @@ import { TelegramService } from './notifications/telegram.service';
 async function bootstrap() {
   assertProductionSecrets();
   assertProductionDatabaseSynchronize();
+  const corsOptions = buildCorsOptions();
 
   const app = await NestFactory.create(AppModule);
-  app.enableCors(buildCorsOptions());
+  app.enableCors(corsOptions);
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   const port = process.env.PORT || 3000;
