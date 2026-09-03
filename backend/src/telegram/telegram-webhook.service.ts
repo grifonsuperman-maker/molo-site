@@ -493,7 +493,20 @@ export class TelegramWebhookService {
   ): Promise<CallbackAuthorization | null> {
     const rule = CALLBACK_ROLE_RULES[`${type}:${action}`];
 
-    if (!rule) return { role: 'unprotected', actor: null };
+    if (!rule) {
+      if (
+        type === 'menu' ||
+        type === 'waiter' ||
+        type === 'hookah' ||
+        type === 'admin' ||
+        type === 'booking' ||
+        type === 'reschedule' ||
+        type === 'restaurant'
+      ) {
+        return null;
+      }
+      return { role: 'unprotected', actor: null };
+    }
     if (!telegramUserId) return null;
 
     const telegramId = String(telegramUserId);
