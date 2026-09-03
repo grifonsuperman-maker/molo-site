@@ -69,4 +69,22 @@ test('production rejects wildcard or malformed origin configuration', () => {
       }),
     /Invalid CORS_ALLOWED_ORIGINS origin/,
   );
+
+  assert.throws(
+    () =>
+      buildCorsOptions({
+        NODE_ENV: 'production',
+        CORS_ALLOWED_ORIGINS: 'https://*.example.com',
+      }),
+    /Invalid CORS_ALLOWED_ORIGINS origin/,
+  );
+
+  assert.throws(
+    () =>
+      buildCorsOptions({
+        NODE_ENV: 'production',
+        TELEGRAM_WEB_APP_URL: 'https://*.example.com',
+      }),
+    /Invalid TELEGRAM_WEB_APP_URL origin/,
+  );
 });
