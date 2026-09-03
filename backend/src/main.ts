@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { buildCorsOptions } from './config/cors';
 import { assertProductionSecrets } from './config/runtime-secrets';
 import { assertProductionDatabaseSynchronize } from './database/database-synchronize';
 import { TelegramService } from './notifications/telegram.service';
@@ -8,9 +9,10 @@ import { TelegramService } from './notifications/telegram.service';
 async function bootstrap() {
   assertProductionSecrets();
   assertProductionDatabaseSynchronize();
+  const corsOptions = buildCorsOptions();
 
   const app = await NestFactory.create(AppModule);
-  app.enableCors({ origin: true, credentials: true });
+  app.enableCors(corsOptions);
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   const port = process.env.PORT || 3000;
