@@ -17,6 +17,7 @@ function createController(review, initiallyArchived = false, archiveTotal = revi
   const transactions = [];
   const locks = [];
   const pagination = { skip: null, take: null };
+  const paginationMethods = [];
   const archiveSearch = [];
   const selections = [];
   const orderBys = [];
@@ -43,10 +44,22 @@ function createController(review, initiallyArchived = false, archiveTotal = revi
       return this;
     },
     skip(value) {
+      paginationMethods.push('skip');
       pagination.skip = value;
       return this;
     },
     take(value) {
+      paginationMethods.push('take');
+      pagination.take = value;
+      return this;
+    },
+    offset(value) {
+      paginationMethods.push('offset');
+      pagination.skip = value;
+      return this;
+    },
+    limit(value) {
+      paginationMethods.push('limit');
       pagination.take = value;
       return this;
     },
@@ -128,6 +141,7 @@ function createController(review, initiallyArchived = false, archiveTotal = revi
     transactions,
     locks,
     pagination,
+    paginationMethods,
     archiveSearch,
     selections,
     orderBys,
@@ -159,7 +173,7 @@ test('review archive manager endpoints are owner-only', () => {
 
 test('active review manager supports pages beyond the first 300 reviews and displayed-date search', async () => {
   const review = reviewFixture();
-  const { controller, pagination, archiveSearch } = createController(review, false, 451);
+  const { controller, pagination, paginationMethods, archiveSearch } = createController(review, false, 451);
 
   const result = await controller.findActive('4', '100', '23.08.2026');
 
@@ -171,6 +185,7 @@ test('active review manager supports pages beyond the first 300 reviews and disp
     hasMore: true,
   });
   assert.deepEqual(pagination, { skip: 300, take: 100 });
+  assert.deepEqual(paginationMethods, ['skip', 'take']);
   assert.equal(archiveSearch.length, 1);
   assert.match(
     archiveSearch[0].sql,
@@ -179,11 +194,12 @@ test('active review manager supports pages beyond the first 300 reviews and disp
   assert.equal(archiveSearch[0].params.activeSearch, '%23.08.2026%');
 });
 
-test('archive list supports pages beyond the first 300 reviews', async () => {
+test('archive list uses direct offset/limit pagination beyond the first 300 reviews', async () => {
   const review = reviewFixture();
   const {
     controller,
     pagination,
+    paginationMethods,
     archiveSearch,
     selections,
     orderBys,
@@ -199,6 +215,7 @@ test('archive list supports pages beyond the first 300 reviews', async () => {
     hasMore: true,
   });
   assert.deepEqual(pagination, { skip: 300, take: 100 });
+  assert.deepEqual(paginationMethods, ['offset', 'limit']);
   assert.equal(archiveSearch.length, 1);
   assert.equal(archiveSearch[0].params.archiveSearch, '%тест%');
   assert.deepEqual(selections, [
