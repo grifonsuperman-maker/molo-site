@@ -59,8 +59,8 @@ export class LogsService {
       .addSelect('log_archive.archived_at', 'logArchiveArchivedAt')
       .orderBy('logArchiveArchivedAt', 'DESC')
       .addOrderBy('log.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit)
+      .offset((page - 1) * limit)
+      .limit(limit)
       .getManyAndCount();
 
     return {
