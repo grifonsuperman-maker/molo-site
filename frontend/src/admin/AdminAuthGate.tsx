@@ -246,6 +246,7 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
             </span>
 
             <input
+              type="password"
               value={pin}
               onChange={(event) => {
                 setPin(event.target.value.replace(/\D/g, '').slice(0, 6));
