@@ -31,6 +31,7 @@ function createHarness({ archived = false, total = 451, log = logFixture() } = {
   const selections = [];
   const orderBys = [];
   const pagination = { skip: null, take: null };
+  const paginationMethods = [];
   const locks = [];
   const removed = [];
   const transactionQueries = [];
@@ -62,10 +63,22 @@ function createHarness({ archived = false, total = 451, log = logFixture() } = {
       return this;
     },
     skip(value) {
+      paginationMethods.push('skip');
       pagination.skip = value;
       return this;
     },
     take(value) {
+      paginationMethods.push('take');
+      pagination.take = value;
+      return this;
+    },
+    offset(value) {
+      paginationMethods.push('offset');
+      pagination.skip = value;
+      return this;
+    },
+    limit(value) {
+      paginationMethods.push('limit');
       pagination.take = value;
       return this;
     },
@@ -132,6 +145,7 @@ function createHarness({ archived = false, total = 451, log = logFixture() } = {
     selections,
     orderBys,
     pagination,
+    paginationMethods,
     locks,
     removed,
     transactionQueries,
@@ -172,7 +186,7 @@ test('new log archive management endpoints are owner-only', () => {
 });
 
 test('active staff actions support pages beyond the first 300 records', async () => {
-  const { controller, pagination, joins } = createHarness({ total: 451 });
+  const { controller, pagination, paginationMethods, joins } = createHarness({ total: 451 });
 
   const result = await controller.findActive('4', '100');
 
@@ -181,6 +195,7 @@ test('active staff actions support pages beyond the first 300 records', async ()
   assert.equal(result.limit, 100);
   assert.equal(result.hasMore, true);
   assert.deepEqual(pagination, { skip: 300, take: 100 });
+  assert.deepEqual(paginationMethods, ['skip', 'take']);
   assert.ok(
     joins.some(
       (join) =>
@@ -191,10 +206,11 @@ test('active staff actions support pages beyond the first 300 records', async ()
   );
 });
 
-test('archive pages order by a selected raw-table alias and support more than 300 records', async () => {
+test('archive pages use direct offset/limit pagination and order by the selected archive alias', async () => {
   const {
     controller,
     pagination,
+    paginationMethods,
     joins,
     selections,
     orderBys,
@@ -207,6 +223,7 @@ test('archive pages order by a selected raw-table alias and support more than 30
   assert.equal(result.limit, 100);
   assert.equal(result.hasMore, true);
   assert.deepEqual(pagination, { skip: 300, take: 100 });
+  assert.deepEqual(paginationMethods, ['offset', 'limit']);
   assert.ok(
     joins.some(
       (join) =>
