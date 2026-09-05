@@ -127,8 +127,8 @@ export class GuestReviewsController {
     const [items, total] = await query
       .orderBy('reviewArchiveArchivedAt', 'DESC')
       .addOrderBy('review.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit)
+      .offset((page - 1) * limit)
+      .limit(limit)
       .getManyAndCount();
 
     return {
