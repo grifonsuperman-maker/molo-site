@@ -194,7 +194,7 @@ test('active review manager supports pages beyond the first 300 reviews and disp
   assert.equal(archiveSearch[0].params.activeSearch, '%23.08.2026%');
 });
 
-test('archive list uses direct offset/limit pagination beyond the first 300 reviews', async () => {
+test('archive list uses direct offset/limit pagination and the real archive column for ordering', async () => {
   const review = reviewFixture();
   const {
     controller,
@@ -226,7 +226,7 @@ test('archive list uses direct offset/limit pagination beyond the first 300 revi
   ]);
   assert.deepEqual(orderBys.slice(-2), [
     {
-      criteria: 'reviewArchiveArchivedAt',
+      criteria: 'review_archive.archived_at',
       direction: 'DESC',
       kind: 'orderBy',
     },
