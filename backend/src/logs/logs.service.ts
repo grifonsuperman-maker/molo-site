@@ -57,7 +57,7 @@ export class LogsService {
         'log_archive.log_id = log.id',
       )
       .addSelect('log_archive.archived_at', 'logArchiveArchivedAt')
-      .orderBy('logArchiveArchivedAt', 'DESC')
+      .orderBy('log_archive.archived_at', 'DESC')
       .addOrderBy('log.createdAt', 'DESC')
       .offset((page - 1) * limit)
       .limit(limit)
