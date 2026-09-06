@@ -206,7 +206,7 @@ test('active staff actions support pages beyond the first 300 records', async ()
   );
 });
 
-test('archive pages use direct offset/limit pagination and order by the selected archive alias', async () => {
+test('archive pages use direct offset/limit pagination and order by the real archive column', async () => {
   const {
     controller,
     pagination,
@@ -241,7 +241,7 @@ test('archive pages use direct offset/limit pagination and order by the selected
   assert.deepEqual(orderBys.slice(-2), [
     {
       kind: 'orderBy',
-      criteria: 'logArchiveArchivedAt',
+      criteria: 'log_archive.archived_at',
       direction: 'DESC',
     },
     {
