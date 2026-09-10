@@ -6,6 +6,13 @@ import { AvailabilityBlocksService } from '../bookings/availability-blocks.servi
 import { BookingTableLockService } from '../bookings/booking-table-lock.service';
 import { BookingsService } from '../bookings/bookings.service';
 import type { CreateAdminManualBookingDto } from '../bookings/dto/create-admin-manual-booking.dto';
+import {
+  GUEST_NAME_ERROR,
+  GUEST_PHONE_ERROR,
+  isValidGuestName,
+  normalizeGuestName,
+  normalizeGuestPhone,
+} from '../common/validation/guest-contact';
 import { TelegramService } from '../notifications/telegram.service';
 import { TablesService } from '../tables/tables.service';
 
@@ -218,15 +225,12 @@ export class TelegramAdminBookingCreateService {
     }
 
     if (draft.stage === 'name') {
-      if (!value) {
-        await this.telegram.sendMessage(chatId, '⚠️ Вкажіть ім’я гостя.');
+      const fullName = normalizeGuestName(value);
+      if (!isValidGuestName(fullName)) {
+        await this.telegram.sendMessage(chatId, `⚠️ ${GUEST_NAME_ERROR}`, this.cancelMarkup(draft));
         return true;
       }
-      if (value.length > 120) {
-        await this.telegram.sendMessage(chatId, '⚠️ Ім’я занадто довге. Максимум 120 символів.');
-        return true;
-      }
-      draft.fullName = value;
+      draft.fullName = fullName;
       draft.stage = 'guests';
       this.touch(draft);
       await this.telegram.sendMessage(chatId, 'Крок 5/6 · Скільки гостей? Надішліть число від 1 до 30.', this.cancelMarkup(draft));
@@ -251,15 +255,16 @@ export class TelegramAdminBookingCreateService {
     }
 
     if (draft.stage === 'phone') {
-      if (!value || !value.replace(/\D/g, '')) {
+      const phone = normalizeGuestPhone(value);
+      if (!phone) {
         await this.telegram.sendMessage(
           chatId,
-          '⚠️ Вкажіть номер телефону або натисніть «Пропустити телефон».',
+          `⚠️ ${GUEST_PHONE_ERROR} або натисніть «Пропустити телефон».`,
           this.phoneMarkup(draft),
         );
         return true;
       }
-      draft.phone = value;
+      draft.phone = phone;
       draft.stage = 'confirm';
       this.touch(draft);
       await this.sendConfirmation(chatId, draft);
@@ -321,10 +326,16 @@ export class TelegramAdminBookingCreateService {
   private async confirm(chatId: string | number, key: string, draft: Draft, actor: AuthUser) {
     this.assertComplete(draft);
 
+    const fullName = normalizeGuestName(draft.fullName!);
+    if (!isValidGuestName(fullName)) throw new BadRequestException(GUEST_NAME_ERROR);
+
+    const phone = draft.phone ? normalizeGuestPhone(draft.phone) : undefined;
+    if (draft.phone && !phone) throw new BadRequestException(GUEST_PHONE_ERROR);
+
     const dto: CreateAdminManualBookingDto = {
       tableId: draft.tableId!,
-      fullName: draft.fullName!,
-      phone: draft.phone,
+      fullName,
+      phone,
       bookingDate: draft.bookingDate!,
       bookingTime: draft.bookingTime!,
       guestsCount: draft.guestsCount!,
@@ -367,9 +378,9 @@ export class TelegramAdminBookingCreateService {
           '✅ <b>Бронювання створено</b>',
           `📅 ${this.dateLabel(result.bookingDate || dto.bookingDate)} · 🕒 ${this.timeLabel(result.bookingTime || dto.bookingTime)}`,
           `🪑 Стіл №<b>${this.escapeHtml(draft.tableNumber!)}</b>`,
-          `👤 ${this.escapeHtml(draft.fullName!)}`,
+          `👤 ${this.escapeHtml(fullName)}`,
           `👥 Гостей: <b>${draft.guestsCount}</b>`,
-          `📞 ${this.phoneLabel(draft.phone)}`,
+          `📞 ${this.phoneLabel(phone)}`,
           '',
           'Статус: <b>Підтверджено</b>',
         ].join('\n'),
