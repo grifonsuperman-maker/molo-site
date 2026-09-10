@@ -53,8 +53,15 @@ test('guest booking rejects digits, hyphen and apostrophe in guest name', async 
   }
 });
 
-test('guest booking rejects incomplete or non-Ukrainian phone', async () => {
-  for (const phone of ['+380 (67) 123-45', '+48 501 234 567', '+380 (01) 123-45-67', 'hello']) {
+test('guest booking rejects incomplete, legacy-only or non-Ukrainian phone input', async () => {
+  for (const phone of [
+    '+380 (67) 123-45',
+    '+3806712345678',
+    '501234567',
+    '+48 501 234 567',
+    '+380 (01) 123-45-67',
+    'hello',
+  ]) {
     const dto = plainToInstance(CreateBookingDto, guestPayload({ phone }));
     const errors = await validate(dto);
     assert.ok(errors.some((error) => error.property === 'phone'), phone);
