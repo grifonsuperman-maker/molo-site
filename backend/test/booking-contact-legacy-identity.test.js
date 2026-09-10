@@ -10,6 +10,7 @@ function queryBuilder(rows) {
     where: () => builder,
     andWhere: () => builder,
     orderBy: () => builder,
+    addOrderBy: () => builder,
     leftJoinAndSelect: () => builder,
     addSelect: () => builder,
     getMany: async () => rows,
