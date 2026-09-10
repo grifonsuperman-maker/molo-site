@@ -22,6 +22,10 @@ import { waiterCallsApi } from '../api/waiterCalls';
 import type { GuestWaiterCallStatus } from '../api/waiterCalls';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { usePersistentState } from '../hooks/usePersistentState';
+import {
+  formatUkrainePhoneInput,
+  sanitizeGuestNameInput,
+} from '../services/guestContact';
 import GuestBookingServiceActions from './GuestBookingServiceActions';
 import GuestHookahCallPanel from './GuestHookahCallPanel';
 import { formatDuration } from './services/durationFormat';
@@ -1914,16 +1918,27 @@ export default function GuestApp() {
 
             <div className="mt-6 grid gap-4">
               <input
+                type="text"
+                autoComplete="name"
+                maxLength={120}
                 placeholder="Ваше імʼя"
                 value={form.fullName}
-                onChange={(event) => setForm({ ...form, fullName: event.target.value })}
+                onChange={(event) =>
+                  setForm({ ...form, fullName: sanitizeGuestNameInput(event.target.value) })
+                }
                 className="w-full rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3 outline-none"
               />
 
               <input
-                placeholder="Телефон"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="+380 (__) ___-__-__"
+                maxLength={19}
                 value={form.phone}
-                onChange={(event) => setForm({ ...form, phone: event.target.value })}
+                onChange={(event) =>
+                  setForm({ ...form, phone: formatUkrainePhoneInput(event.target.value) })
+                }
                 className="w-full rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3 outline-none"
               />
 
