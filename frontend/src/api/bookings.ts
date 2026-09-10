@@ -193,7 +193,7 @@ function guestHeaders(token: string): HeadersInit {
 function validateGuestName(fullName: string): string {
   const normalized = normalizeGuestName(fullName);
   if (!isValidGuestName(normalized)) {
-    throw new Error('Ім’я може містити лише літери, пробіли, дефіс та апостроф');
+    throw new Error('Ім’я може містити лише літери та пробіли між словами');
   }
   return normalized;
 }
