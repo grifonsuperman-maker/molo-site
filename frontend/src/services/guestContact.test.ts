@@ -21,6 +21,10 @@ assert(
   'local Ukrainian phone should format to +380 mask',
 );
 assert(
+  formatUkrainePhoneInput('+48 501 234 567') === '+48 501 234 567',
+  'foreign country code must not be rewritten as +380',
+);
+assert(
   normalizeUkrainePhone('+380 (67) 123-45-67') === '+380671234567',
   'formatted Ukrainian phone should normalize',
 );
