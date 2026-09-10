@@ -2,13 +2,21 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, QueryRunner, Repository } from 'typeorm';
 
+import { Client } from '../clients/entities/client.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 import { CreateAvailabilityBlockDto } from './dto/create-availability-block.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking } from './entities/booking.entity';
+import {
+  normalizeLegacyUkrainePhone,
+  ukrainePhoneDigitsVariants,
+} from './guest-contact-validation';
 
 type AdvisoryLock = readonly [key: string, scope: string];
+type CreateLockDto = Pick<CreateBookingDto, 'tableId' | 'tableNumber' | 'bookingDate'> & {
+  phone?: string;
+};
 
 @Injectable()
 export class BookingTableLockService {
@@ -20,12 +28,15 @@ export class BookingTableLockService {
     private readonly bookings: Repository<Booking>,
     @InjectRepository(BookingTableChangeRequest)
     private readonly tableChangeRequests: Repository<BookingTableChangeRequest>,
+    @InjectRepository(Client)
+    private readonly clients: Repository<Client>,
   ) {}
 
   async withCreateLock<T>(
-    dto: Pick<CreateBookingDto, 'tableId' | 'tableNumber' | 'bookingDate'>,
+    dto: CreateLockDto,
     work: () => Promise<T>,
   ) {
+    await this.alignPhoneWithLegacyIdentity(dto);
     const tableKey = await this.resolveTableKey(dto.tableId, dto.tableNumber);
     return this.withLocks([[tableKey, dto.bookingDate]], work);
   }
@@ -101,6 +112,54 @@ export class BookingTableLockService {
 
     if (!request?.booking?.id) return work();
     return this.withTransferLock(request.booking.id, tableId, work);
+  }
+
+  private async alignPhoneWithLegacyIdentity(dto: CreateLockDto) {
+    const phone = String(dto.phone || '').trim();
+    const canonicalPhone = normalizeLegacyUkrainePhone(phone);
+    if (!phone || !canonicalPhone) return;
+
+    const phoneVariants = ukrainePhoneDigitsVariants(canonicalPhone);
+    const equivalentClients = await this.clients
+      .createQueryBuilder('client')
+      .where(
+        `regexp_replace("client"."phone", '[^0-9]', '', 'g') IN (:...phoneVariants)`,
+        { phoneVariants },
+      )
+      .orderBy('client.createdAt', 'ASC')
+      .getMany();
+
+    const blacklistedClient = equivalentClients.find((client) => client.isBlacklisted);
+    if (blacklistedClient) {
+      dto.phone = blacklistedClient.phone;
+      return;
+    }
+
+    const activeBookings = await this.bookings
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.client', 'client')
+      .addSelect('booking.guestPhoneNormalized')
+      .where('booking.bookingDate = :bookingDate', { bookingDate: dto.bookingDate })
+      .andWhere('booking.status IN (:...statuses)', { statuses: ['pending', 'approved'] })
+      .getMany();
+
+    const activeEquivalent = activeBookings.find((booking) =>
+      normalizeLegacyUkrainePhone(booking.client?.phone) === canonicalPhone ||
+      normalizeLegacyUkrainePhone(booking.guestPhoneNormalized) === canonicalPhone,
+    );
+
+    if (activeEquivalent?.client?.phone) {
+      dto.phone = activeEquivalent.client.phone;
+      return;
+    }
+    if (activeEquivalent?.guestPhoneNormalized) {
+      dto.phone = activeEquivalent.guestPhoneNormalized;
+      return;
+    }
+
+    if (equivalentClients[0]?.phone) {
+      dto.phone = equivalentClients[0].phone;
+    }
   }
 
   private async resolveTableKey(tableId?: string | null, tableNumber?: string | null) {
