@@ -58,15 +58,16 @@ export class BookingsService {
   }
 
   private findClientsByPhone(normalizedPhone: string) {
-    // Match existing formatted/local numbers without rewriting guest history.
-    const localPhone = /^380[1-9]\d{8}$/.test(normalizedPhone)
-      ? normalizedPhone.slice(2)
-      : normalizedPhone;
+    // Match existing full, local and legacy subscriber-only numbers without
+    // rewriting guest history.
+    const isUkrainianPhone = /^380[1-9]\d{8}$/.test(normalizedPhone);
+    const localPhone = isUkrainianPhone ? normalizedPhone.slice(2) : normalizedPhone;
+    const subscriberPhone = isUkrainianPhone ? normalizedPhone.slice(3) : normalizedPhone;
     return this.clients
       .createQueryBuilder('client')
       .where(
-        `regexp_replace("client"."phone", '[^0-9]', '', 'g') IN (:normalizedPhone, :localPhone)`,
-        { normalizedPhone, localPhone },
+        `regexp_replace("client"."phone", '[^0-9]', '', 'g') IN (:normalizedPhone, :localPhone, :subscriberPhone)`,
+        { normalizedPhone, localPhone, subscriberPhone },
       )
       .getMany();
   }
@@ -80,12 +81,14 @@ export class BookingsService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.client', 'client')
       .addSelect('booking.guestDeviceIdHash')
+      .addSelect('booking.guestPhoneNormalized')
       .where('booking.bookingDate = :bookingDate', { bookingDate })
       .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
       .getMany();
     const normalizedPhone = this.normalizePhone(phone);
     const duplicate = activeBookings.some((booking) =>
       booking.guestDeviceIdHash === guestDeviceIdHash ||
+      this.normalizePhone(booking.guestPhoneNormalized) === normalizedPhone ||
       this.normalizePhone(booking.client?.phone) === normalizedPhone,
     );
 
@@ -110,7 +113,7 @@ export class BookingsService {
 
     const duplicate = activeBookings.some(
       (booking) =>
-        booking.guestPhoneNormalized === normalizedPhone ||
+        this.normalizePhone(booking.guestPhoneNormalized) === normalizedPhone ||
         this.normalizePhone(booking.client?.phone) === normalizedPhone,
     );
 
