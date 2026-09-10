@@ -114,6 +114,11 @@ export class BookingTableLockService {
     return this.withTransferLock(request.booking.id, tableId, work);
   }
 
+  /**
+   * Старі версії форми могли зберегти один український номер як 501234567,
+   * 0501234567 або +380501234567. Перед існуючими blacklist/duplicate/client
+   * перевірками підбираємо вже збережене представлення тієї самої особи.
+   */
   private async alignPhoneWithLegacyIdentity(dto: CreateLockDto) {
     const phone = String(dto.phone || '').trim();
     const canonicalPhone = normalizeLegacyUkrainePhone(phone);
@@ -127,6 +132,7 @@ export class BookingTableLockService {
         { phoneVariants },
       )
       .orderBy('client.createdAt', 'ASC')
+      .addOrderBy('client.id', 'ASC')
       .getMany();
 
     const blacklistedClient = equivalentClients.find((client) => client.isBlacklisted);
@@ -148,11 +154,17 @@ export class BookingTableLockService {
       normalizeLegacyUkrainePhone(booking.guestPhoneNormalized) === canonicalPhone,
     );
 
-    if (activeEquivalent?.client?.phone) {
+    if (
+      activeEquivalent?.client?.phone &&
+      normalizeLegacyUkrainePhone(activeEquivalent.client.phone) === canonicalPhone
+    ) {
       dto.phone = activeEquivalent.client.phone;
       return;
     }
-    if (activeEquivalent?.guestPhoneNormalized) {
+    if (
+      activeEquivalent?.guestPhoneNormalized &&
+      normalizeLegacyUkrainePhone(activeEquivalent.guestPhoneNormalized) === canonicalPhone
+    ) {
       dto.phone = activeEquivalent.guestPhoneNormalized;
       return;
     }
