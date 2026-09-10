@@ -28,6 +28,13 @@ assert(
   normalizeUkrainePhone('+380 (67) 123-45-67') === '+380671234567',
   'formatted Ukrainian phone should normalize',
 );
+const tooLongPhone = '+3806712345678';
+assert(
+  formatUkrainePhoneInput(tooLongPhone) === tooLongPhone,
+  'extra digit must stay visible instead of being silently truncated',
+);
+assert(normalizeUkrainePhone(tooLongPhone) === null, 'extra digit must be rejected');
+assert(normalizeUkrainePhone('501234567') === null, 'subscriber-only legacy value must not be accepted as new input');
 assert(normalizeUkrainePhone('+380 (67) 123-45') === null, 'incomplete phone must be rejected');
 assert(normalizeUkrainePhone('+48 501 234 567') === null, 'non-Ukrainian phone must be rejected');
 assert(normalizeUkrainePhone('+380 (01) 123-45-67') === null, 'invalid Ukrainian national prefix must be rejected');
