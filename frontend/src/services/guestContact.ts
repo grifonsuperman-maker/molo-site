@@ -37,6 +37,11 @@ export function formatUkrainePhoneInput(value: string): string {
   const input = String(value || '');
   if (!input) return '';
 
+  const trimmed = input.trim();
+  if (trimmed.startsWith('+') && !trimmed.startsWith('+380')) {
+    return input.slice(0, 19);
+  }
+
   const digits = input.replace(/\D/g, '');
   let nationalDigits = digits;
 
