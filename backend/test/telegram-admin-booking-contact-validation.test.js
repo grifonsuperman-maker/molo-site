@@ -54,14 +54,16 @@ async function reachNameStep(service) {
   await service.handleText('18:30', 42, ACTOR);
 }
 
-test('Telegram Admin rejects digits in guest name', async () => {
-  const { service, messages } = createHarness();
-  await reachNameStep(service);
+test('Telegram Admin rejects non-letter guest-name characters', async () => {
+  for (const fullName of ['Анна123', 'Анна-Марія', 'О’Браєн']) {
+    const { service, messages } = createHarness();
+    await reachNameStep(service);
 
-  await service.handleText('Анна123', 42, ACTOR);
+    await service.handleText(fullName, 42, ACTOR);
 
-  assert.match(messages.at(-1).text, /лише літери/);
-  assert.equal(service.hasPendingInput('777'), true);
+    assert.match(messages.at(-1).text, /лише літери/);
+    assert.equal(service.hasPendingInput('777'), true);
+  }
 });
 
 test('Telegram Admin validates a provided Ukrainian phone but still offers skip', async () => {
