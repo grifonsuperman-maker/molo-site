@@ -367,7 +367,7 @@ export default function AdminVisualTablePlanner({
       return;
     }
     if (!isValidGuestName(fullName)) {
-      setError('Ім’я може містити лише літери, пробіли, дефіс та апостроф');
+      setError('Ім’я може містити лише літери та пробіли між словами');
       return;
     }
     if (rawPhone && !phone) {
