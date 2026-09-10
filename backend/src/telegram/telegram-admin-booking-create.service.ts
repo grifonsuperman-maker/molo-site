@@ -235,7 +235,7 @@ export class TelegramAdminBookingCreateService {
       if (!isValidGuestName(fullName)) {
         await this.telegram.sendMessage(
           chatId,
-          '⚠️ Ім’я може містити лише літери, пробіли, дефіс та апостроф.',
+          '⚠️ Ім’я може містити лише літери та пробіли між словами.',
         );
         return true;
       }
