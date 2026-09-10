@@ -5,7 +5,6 @@ const test = require('node:test');
 const { ValidationPipe } = require('@nestjs/common');
 const { CreateBookingDto } = require('../dist/bookings/dto/create-booking.dto');
 const { CreateAdminManualBookingDto } = require('../dist/bookings/dto/create-admin-manual-booking.dto');
-const { UpdateClientDto } = require('../dist/clients/dto/update-client.dto');
 const { GUEST_NAME_ERROR, GUEST_PHONE_ERROR } = require('../dist/common/validation/guest-contact');
 const { BookingsService } = require('../dist/bookings/bookings.service');
 
@@ -21,10 +20,10 @@ const rejectsField = (type, value, message) => assert.rejects(
   (error) => error.getStatus() === 400 && error.getResponse().message.includes(message),
 );
 
-test('guest and manual booking accept the same complete Ukrainian phone formats', async () => {
-  for (const phone of ['+380501234567', '+380 (50) 123-45-67', '380 50 123 45 67', '0501234567', '(050) 123-45-67', '+380441234567']) {
+test('guest and manual booking accept complete Ukrainian phone formats', async () => {
+  for (const phone of ['+380501234567', '+380 (50) 123-45-67', '380 50 123 45 67', '0501234567', '(050) 123-45-67', '501234567', '+380441234567']) {
     const expected = phone.includes('44') ? '+380441234567' : '+380501234567';
-    for (const [type, base] of [[CreateBookingDto, booking], [CreateAdminManualBookingDto, manualBooking], [UpdateClientDto, {}]]) {
+    for (const [type, base] of [[CreateBookingDto, booking], [CreateAdminManualBookingDto, manualBooking]]) {
       const result = await validate(type, { ...base, phone });
       assert.equal(result.phone, expected, `${type.name}: ${phone}`);
     }
@@ -46,9 +45,9 @@ test('manual booking keeps phone optional and never invents a client phone', asy
   }
 });
 
-test('invalid provided phone is rejected on every guest contact write, including manual booking', async () => {
+test('invalid provided phone is rejected for guest and manual booking', async () => {
   for (const phone of ['abc', '+380501234567abc', '+3805012345678', '+48501234567', '+0501234567', '+380000000000', '050123456', '05012345678', '+380 (50) 123-45-67 доб. 1', '+380+501234567', '+380501234567🙂', 380501234567, {}, [], true]) {
-    for (const [type, base] of [[CreateBookingDto, booking], [CreateAdminManualBookingDto, manualBooking], [UpdateClientDto, {}]]) {
+    for (const [type, base] of [[CreateBookingDto, booking], [CreateAdminManualBookingDto, manualBooking]]) {
       await rejectsField(type, { ...base, phone }, GUEST_PHONE_ERROR);
     }
   }
@@ -56,16 +55,16 @@ test('invalid provided phone is rejected on every guest contact write, including
 
 test('names accept letters in different alphabets and normalize surrounding/repeated spaces', async () => {
   for (const fullName of ['Олена', 'Ілля Євген Ґалаґан', 'Саня', 'Anne Marie', 'José', 'Jose\u0301', '李 明', '  Олена   Коваль  ']) {
-    for (const [type, base] of [[CreateBookingDto, booking], [CreateAdminManualBookingDto, manualBooking], [UpdateClientDto, {}]]) {
+    for (const [type, base] of [[CreateBookingDto, booking], [CreateAdminManualBookingDto, manualBooking]]) {
       const result = await validate(type, { ...base, fullName });
       assert.equal(result.fullName, fullName.normalize('NFC').trim().replace(/ +/g, ' '));
     }
   }
 });
 
-test('names reject digits, punctuation, emoji, blank text and overlong input at the API boundary', async () => {
+test('names reject digits, punctuation, emoji, blank text and overlong input at the booking API boundary', async () => {
   for (const fullName of ['', '   ', 'Олена123', '123', 'Олена🙂', '<script>', 'Олена_Коваль', 'Анна-Марія', 'Мар’яна', 'Олена\nКоваль', 'Олена\tКоваль', 'А'.repeat(101), 123, {}, []]) {
-    for (const [type, base] of [[CreateBookingDto, booking], [CreateAdminManualBookingDto, manualBooking], [UpdateClientDto, {}]]) {
+    for (const [type, base] of [[CreateBookingDto, booking], [CreateAdminManualBookingDto, manualBooking]]) {
       await rejectsField(type, { ...base, fullName }, GUEST_NAME_ERROR);
     }
   }
@@ -73,13 +72,6 @@ test('names reject digits, punctuation, emoji, blank text and overlong input at 
     await rejectsField(CreateBookingDto, { ...booking, fullName }, GUEST_NAME_ERROR);
     await rejectsField(CreateAdminManualBookingDto, { ...manualBooking, fullName }, GUEST_NAME_ERROR);
   }
-});
-
-test('editing other client fields does not require resubmitting historical contact data', async () => {
-  const result = await validate(UpdateClientDto, { note: 'Постійний гість', isRegular: true });
-  assert.equal(result.note, 'Постійний гість');
-  assert.equal(result.fullName, undefined);
-  assert.equal(result.phone, undefined);
 });
 
 function serviceWithActiveBookings(activeBookings) {
@@ -92,9 +84,9 @@ function serviceWithActiveBookings(activeBookings) {
   return new BookingsService({ createQueryBuilder: () => query }, {}, {}, {}, {}, {}, {}, {}, {});
 }
 
-test('canonical phone still finds active bookings with historical local/formatted phone values', async () => {
-  for (const storedPhone of ['0501234567', '+380 (50) 123-45-67']) {
-    const service = serviceWithActiveBookings([{ bookingDate: booking.bookingDate, status: 'approved', client: { phone: storedPhone }, guestDeviceIdHash: 'old-device' }]);
+test('canonical phone still finds active bookings with historical full, local and subscriber-only values', async () => {
+  for (const storedPhone of ['501234567', '0501234567', '+380 (50) 123-45-67']) {
+    const service = serviceWithActiveBookings([{ bookingDate: booking.bookingDate, status: 'approved', client: { phone: storedPhone }, guestPhoneNormalized: storedPhone.replace(/\D/g, ''), guestDeviceIdHash: 'old-device' }]);
     await assert.rejects(service.assertNoActiveGuestBooking(booking.bookingDate, booking.phone, 'new-device'), /активне бронювання/);
     await assert.rejects(service.assertNoActivePhoneBooking(booking.bookingDate, booking.phone), /активне бронювання/);
   }
@@ -118,7 +110,11 @@ test('guest creation checks every matching historical client for blacklist befor
       return {
         where(sql, values) {
           assert.match(sql, /regexp_replace/);
-          assert.deepEqual(values, { normalizedPhone: '380501234567', localPhone: '0501234567' });
+          assert.deepEqual(values, {
+            normalizedPhone: '380501234567',
+            localPhone: '0501234567',
+            subscriberPhone: '501234567',
+          });
           return this;
         },
         async getMany() { return [{ isBlacklisted: false }, { isBlacklisted: true }]; },
