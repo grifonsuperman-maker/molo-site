@@ -255,7 +255,7 @@ export const bookingsApi = {
       cleanupMinutes: number;
     }>('/bookings', normalizedPayload);
 
-    rememberGuestRuntimeAccess(normalizedPayload.guestDeviceId, [
+    rememberGuestRuntimeAccess(payload.guestDeviceId, [
       { bookingId: result.bookingId, token: result.guestAccessToken },
     ]);
     return result;
