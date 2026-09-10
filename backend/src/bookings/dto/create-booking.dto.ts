@@ -41,7 +41,7 @@ export class CreateBookingDto {
   @IsNotEmpty()
   @MaxLength(120)
   @Matches(GUEST_NAME_PATTERN, {
-    message: 'Ім’я може містити лише літери, пробіли, дефіс та апостроф',
+    message: 'Ім’я може містити лише літери та пробіли між словами',
   })
   fullName: string;
 
