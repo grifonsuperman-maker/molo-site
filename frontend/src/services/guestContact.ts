@@ -1,16 +1,18 @@
-export const GUEST_NAME_PATTERN = /^\p{L}+(?:[\s'’-]\p{L}+)*$/u;
+export const GUEST_NAME_PATTERN = /^\p{L}+(?: \p{L}+)*$/u;
 
 const PHONE_INPUT_PATTERN = /^[+\d\s()-]+$/;
 
 export function normalizeGuestName(value: string): string {
   return String(value || '')
+    .normalize('NFC')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 export function sanitizeGuestNameInput(value: string): string {
   return String(value || '')
-    .replace(/[^\p{L}\s'’-]/gu, '')
+    .normalize('NFC')
+    .replace(/[^\p{L}\s]/gu, '')
     .replace(/\s{2,}/g, ' ')
     .slice(0, 120);
 }
@@ -29,7 +31,7 @@ export function normalizeUkrainePhone(value: string): string | null {
     ? `38${digits}`
     : digits;
 
-  if (!/^380\d{9}$/.test(normalizedDigits)) return null;
+  if (!/^380[1-9]\d{8}$/.test(normalizedDigits)) return null;
   return `+${normalizedDigits}`;
 }
 
