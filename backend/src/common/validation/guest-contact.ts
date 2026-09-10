@@ -7,14 +7,27 @@ export const GUEST_PHONE_ERROR = 'Введіть повний номер у фо
 const GUEST_NAME_PATTERN = /^\p{L}[\p{L}\p{M}]*(?: \p{L}[\p{L}\p{M}]*)*$/u;
 
 export function normalizeGuestName(value: string): string {
-  return value.normalize('NFC').trim().replace(/ +/g, ' ');
+  return String(value || '').normalize('NFC').trim().replace(/ +/g, ' ');
+}
+
+export function isValidGuestName(value: string): boolean {
+  const normalized = normalizeGuestName(value);
+  return [...normalized].length <= 100 && GUEST_NAME_PATTERN.test(normalized);
 }
 
 export function normalizeGuestPhone(value: string): string | null {
-  const input = value.trim();
+  const input = String(value || '').trim();
   if (!/^\+?[0-9 ()-]+$/.test(input)) return null;
   let digits = input.replace(/\D/g, '');
-  if (!input.startsWith('+') && /^0[1-9]\d{8}$/.test(digits)) digits = `38${digits}`;
+  if (!input.startsWith('+')) {
+    if (/^0[1-9]\d{8}$/.test(digits)) {
+      digits = `38${digits}`;
+    } else if (/^[1-9]\d{8}$/.test(digits)) {
+      // Старі записи могли зберігати лише 9 цифр абонентського номера.
+      // Вважаємо їх тим самим українським номером, що й +380XXXXXXXXX.
+      digits = `380${digits}`;
+    }
+  }
   return /^380[1-9]\d{8}$/.test(digits) ? `+${digits}` : null;
 }
 
