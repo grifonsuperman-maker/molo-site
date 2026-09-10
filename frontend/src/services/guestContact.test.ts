@@ -10,12 +10,12 @@ function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
 }
 
-assert(isValidGuestName('Анна Марія'), 'name with space should be valid');
-assert(isValidGuestName('Анна-Марія'), 'name with hyphen should be valid');
-assert(isValidGuestName('О’Браєн'), 'name with apostrophe should be valid');
+assert(isValidGuestName('Анна Марія'), 'name with letters and spaces should be valid');
+assert(!isValidGuestName('Анна-Марія'), 'hyphen in guest name must be rejected');
+assert(!isValidGuestName('О’Браєн'), 'apostrophe in guest name must be rejected');
 assert(!isValidGuestName('Анна123'), 'digits in guest name must be rejected');
 assert(normalizeGuestName('  Анна   Марія  ') === 'Анна Марія', 'name whitespace should normalize');
-assert(sanitizeGuestNameInput('Анна123!') === 'Анна', 'name input should remove non-name characters');
+assert(sanitizeGuestNameInput('Анна-123! Марія') === 'Анна Марія', 'name input should keep only letters and spaces');
 assert(
   formatUkrainePhoneInput('0671234567') === '+380 (67) 123-45-67',
   'local Ukrainian phone should format to +380 mask',
@@ -30,5 +30,6 @@ assert(
 );
 assert(normalizeUkrainePhone('+380 (67) 123-45') === null, 'incomplete phone must be rejected');
 assert(normalizeUkrainePhone('+48 501 234 567') === null, 'non-Ukrainian phone must be rejected');
+assert(normalizeUkrainePhone('+380 (01) 123-45-67') === null, 'invalid Ukrainian national prefix must be rejected');
 
 console.log('guest contact validation passed');
