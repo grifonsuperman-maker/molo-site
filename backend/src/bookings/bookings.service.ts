@@ -17,6 +17,7 @@ import { LogsService } from '../logs/logs.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
 import type { AuthUser } from '../auth/types/auth-user.type';
+import { normalizeGuestPhone } from '../common/validation/guest-contact';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
@@ -51,7 +52,23 @@ export class BookingsService {
   }
 
   private normalizePhone(phone: string | null | undefined) {
+    const normalized = normalizeGuestPhone(String(phone || ''));
+    if (normalized) return normalized.slice(1);
     return String(phone || '').replace(/\D/g, '');
+  }
+
+  private findClientsByPhone(normalizedPhone: string) {
+    // Match existing formatted/local numbers without rewriting guest history.
+    const localPhone = /^380[1-9]\d{8}$/.test(normalizedPhone)
+      ? normalizedPhone.slice(2)
+      : normalizedPhone;
+    return this.clients
+      .createQueryBuilder('client')
+      .where(
+        `regexp_replace("client"."phone", '[^0-9]', '', 'g') IN (:normalizedPhone, :localPhone)`,
+        { normalizedPhone, localPhone },
+      )
+      .getMany();
   }
 
   private hashGuestDeviceId(guestDeviceId: string) {
@@ -616,9 +633,12 @@ export class BookingsService {
       const table = await this.resolveTableForBooking(dto);
       await this.assertTableCanBeBooked(table);
 
-      let client = await this.clients.findOne({ where: { phone: dto.phone } });
+      const matchingClients = await this.findClientsByPhone(guestPhoneNormalized);
+      if (matchingClients.some((candidate) => candidate.isBlacklisted)) {
+        throw new BadRequestException('Бронювання з цього номера недоступне');
+      }
+      let client = matchingClients[0] || null;
       if (!client) client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
-      if (client.isBlacklisted) throw new BadRequestException('Бронювання з цього номера недоступне');
 
       const timeInfo = await this.assertNoTimeConflict(table.id, dto.bookingDate, dto.bookingTime, dto.durationMinutes);
 
@@ -711,13 +731,7 @@ export class BookingsService {
 
       let client: Client | null = null;
       if (phone && guestPhoneNormalized) {
-        const matchingClients = await this.clients
-          .createQueryBuilder('client')
-          .where(
-            `regexp_replace("client"."phone", '[^0-9]', '', 'g') = :normalizedPhone`,
-            { normalizedPhone: guestPhoneNormalized },
-          )
-          .getMany();
+        const matchingClients = await this.findClientsByPhone(guestPhoneNormalized);
 
         if (matchingClients.some((candidate) => candidate.isBlacklisted)) {
           throw new BadRequestException('Бронювання з цього номера недоступне');

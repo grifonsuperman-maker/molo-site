@@ -26,6 +26,14 @@ import GuestBookingServiceActions from './GuestBookingServiceActions';
 import GuestHookahCallPanel from './GuestHookahCallPanel';
 import { formatDuration } from './services/durationFormat';
 import { addMinutesToTime } from './services/timeMath';
+import GuestPhoneInput from './components/GuestPhoneInput';
+import {
+  GUEST_NAME_ERROR,
+  GUEST_PHONE_ERROR,
+  isValidGuestName,
+  normalizeGuestName,
+  normalizeGuestPhone,
+} from './services/contactValidation';
 const FALLBACK_MENU =
   'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
 
@@ -643,6 +651,9 @@ export default function GuestApp() {
     guestsCount: 2,
     wishes: '',
   });
+  const [contactTouched, setContactTouched] = useState({ fullName: false, phone: false });
+  const nameError = contactTouched.fullName && !isValidGuestName(form.fullName);
+  const phoneError = contactTouched.phone && !normalizeGuestPhone(form.phone);
 
   const { loading, error, run } = useAsyncAction();
 
@@ -1207,6 +1218,14 @@ export default function GuestApp() {
   async function submit() {
     if (!selectedTable) return;
 
+    setContactTouched({ fullName: true, phone: true });
+    const fullName = normalizeGuestName(form.fullName);
+    const phone = normalizeGuestPhone(form.phone);
+    if (!isValidGuestName(fullName) || !phone) {
+      document.getElementById(!isValidGuestName(fullName) ? 'guest-full-name' : 'guest-phone')?.focus();
+      return;
+    }
+
     const currentKyivDate = getKyivDateValue();
     if (date < currentKyivDate) {
       setToday(currentKyivDate);
@@ -1238,8 +1257,8 @@ export default function GuestApp() {
         tableId: selectedTable.id,
         tableNumber: String(selectedTable.tableNumber),
         seats: selectedTable.seats,
-        fullName: form.fullName,
-        phone: form.phone,
+        fullName,
+        phone,
         guestDeviceId: bookingGuestDeviceId,
         bookingDate: date,
         bookingTime: time,
@@ -1913,19 +1932,40 @@ export default function GuestApp() {
             </div>
 
             <div className="mt-6 grid gap-4">
-              <input
-                placeholder="Ваше імʼя"
-                value={form.fullName}
-                onChange={(event) => setForm({ ...form, fullName: event.target.value })}
-                className="w-full rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3 outline-none"
-              />
+              <div>
+                <label htmlFor="guest-full-name" className="mb-1.5 block text-sm text-white/70">Ваше ім’я</label>
+                <input
+                  id="guest-full-name"
+                  type="text"
+                  autoComplete="name"
+                  maxLength={100}
+                  value={form.fullName}
+                  onChange={(event) => setForm({ ...form, fullName: event.target.value })}
+                  onBlur={() => setContactTouched((current) => ({ ...current, fullName: true }))}
+                  aria-invalid={nameError}
+                  aria-describedby="guest-name-help"
+                  className="w-full rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3 outline-none"
+                />
+                <p id="guest-name-help" className={`mt-1.5 text-xs ${nameError ? 'text-red-300' : 'text-white/50'}`}>
+                  {nameError ? GUEST_NAME_ERROR : 'Лише літери та пробіли між словами.'}
+                </p>
+              </div>
 
-              <input
-                placeholder="Телефон"
-                value={form.phone}
-                onChange={(event) => setForm({ ...form, phone: event.target.value })}
-                className="w-full rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3 outline-none"
-              />
+              <div>
+                <label htmlFor="guest-phone" className="mb-1.5 block text-sm text-white/70">Телефон</label>
+                <GuestPhoneInput
+                  id="guest-phone"
+                  value={form.phone}
+                  onChange={(phone) => setForm((current) => ({ ...current, phone }))}
+                  onBlur={() => setContactTouched((current) => ({ ...current, phone: true }))}
+                  aria-invalid={phoneError}
+                  aria-describedby="guest-phone-help"
+                  className="w-full rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3 outline-none"
+                />
+                <p id="guest-phone-help" className={`mt-1.5 text-xs ${phoneError ? 'text-red-300' : 'text-white/50'}`}>
+                  {phoneError ? GUEST_PHONE_ERROR : '+380 (XX) XXX-XX-XX'}
+                </p>
+              </div>
 
               <label className="rounded-2xl border border-amber-200/35 bg-white/5 px-4 py-3">
                 <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-white/55 sm:gap-2 sm:text-xs sm:tracking-[0.18em]">

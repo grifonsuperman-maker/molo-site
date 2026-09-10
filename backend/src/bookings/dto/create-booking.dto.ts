@@ -10,6 +10,8 @@ import {
   Min,
 } from 'class-validator';
 
+import { GuestName, GuestPhone } from '../../common/validation/guest-contact';
+
 export class CreateBookingDto {
   // Якщо стіл вже є в базі, frontend передасть uuid.
   // Якщо це поки тільки SVG-стіл, frontend передасть visual-15 + tableNumber.
@@ -28,12 +30,10 @@ export class CreateBookingDto {
   @Max(30)
   seats?: number;
 
-  @IsString()
-  @IsNotEmpty()
+  @GuestName()
   fullName: string;
 
-  @IsString()
-  @IsNotEmpty()
+  @GuestPhone()
   phone: string;
 
   @IsString()

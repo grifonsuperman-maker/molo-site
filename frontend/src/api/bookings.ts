@@ -19,7 +19,7 @@ export type CreateBookingPayload = {
 export type CreateAdminManualBookingPayload = {
   tableId: string;
   fullName: string;
-  phone: string;
+  phone?: string;
   bookingDate: string;
   bookingTime: string;
   guestsCount: number;
