@@ -7,6 +7,10 @@ const { validate } = require('class-validator');
 
 const { CreateBookingDto } = require('../dist/bookings/dto/create-booking.dto.js');
 const { CreateAdminManualBookingDto } = require('../dist/bookings/dto/create-admin-manual-booking.dto.js');
+const {
+  normalizeLegacyUkrainePhone,
+  ukrainePhoneDigitsVariants,
+} = require('../dist/bookings/guest-contact-validation.js');
 
 function guestPayload(overrides = {}) {
   return {
@@ -24,7 +28,7 @@ function guestPayload(overrides = {}) {
 function manualPayload(overrides = {}) {
   return {
     tableId: 'table-1',
-    fullName: 'Анна-Марія',
+    fullName: 'Анна Марія',
     bookingDate: '2026-09-10',
     bookingTime: '18:00',
     guestsCount: 2,
@@ -32,7 +36,7 @@ function manualPayload(overrides = {}) {
   };
 }
 
-test('guest booking normalizes Ukrainian phone and accepts letter-only guest name', async () => {
+test('guest booking normalizes Ukrainian phone and accepts letters with spaces', async () => {
   const dto = plainToInstance(CreateBookingDto, guestPayload());
   const errors = await validate(dto);
 
@@ -41,19 +45,30 @@ test('guest booking normalizes Ukrainian phone and accepts letter-only guest nam
   assert.equal(dto.phone, '+380671234567');
 });
 
-test('guest booking rejects digits in guest name', async () => {
-  const dto = plainToInstance(CreateBookingDto, guestPayload({ fullName: 'Анна123' }));
-  const errors = await validate(dto);
-
-  assert.ok(errors.some((error) => error.property === 'fullName'));
+test('guest booking rejects digits, hyphen and apostrophe in guest name', async () => {
+  for (const fullName of ['Анна123', 'Анна-Марія', 'О’Браєн']) {
+    const dto = plainToInstance(CreateBookingDto, guestPayload({ fullName }));
+    const errors = await validate(dto);
+    assert.ok(errors.some((error) => error.property === 'fullName'), fullName);
+  }
 });
 
 test('guest booking rejects incomplete or non-Ukrainian phone', async () => {
-  for (const phone of ['+380 (67) 123-45', '+48 501 234 567', 'hello']) {
+  for (const phone of ['+380 (67) 123-45', '+48 501 234 567', '+380 (01) 123-45-67', 'hello']) {
     const dto = plainToInstance(CreateBookingDto, guestPayload({ phone }));
     const errors = await validate(dto);
     assert.ok(errors.some((error) => error.property === 'phone'), phone);
   }
+});
+
+test('legacy Ukrainian phone formats resolve to one canonical identity', () => {
+  for (const phone of ['501234567', '0501234567', '+380501234567', '+380 (50) 123-45-67']) {
+    assert.equal(normalizeLegacyUkrainePhone(phone), '+380501234567', phone);
+  }
+  assert.deepEqual(
+    ukrainePhoneDigitsVariants('+380 (50) 123-45-67'),
+    ['380501234567', '0501234567', '501234567'],
+  );
 });
 
 test('manual admin booking accepts missing phone', async () => {
