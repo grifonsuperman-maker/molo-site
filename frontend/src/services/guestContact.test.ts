@@ -4,7 +4,7 @@ import {
   normalizeGuestName,
   normalizeUkrainePhone,
   sanitizeGuestNameInput,
-} from './guestContact';
+} from './guestContact.js';
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
