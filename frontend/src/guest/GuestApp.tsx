@@ -1934,7 +1934,7 @@ export default function GuestApp() {
                 inputMode="tel"
                 autoComplete="tel"
                 placeholder="+380 (__) ___-__-__"
-                maxLength={19}
+                maxLength={20}
                 value={form.phone}
                 onChange={(event) =>
                   setForm({ ...form, phone: formatUkrainePhoneInput(event.target.value) })
