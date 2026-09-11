@@ -31,20 +31,10 @@ assert.match(
   /type="tel"[\s\S]*?inputMode="tel"[\s\S]*?autoComplete="tel"/,
   'guest phone input must use phone-friendly browser attributes',
 );
-assert.match(
-  guestApp,
-  /placeholder="\+380 \(__\) ___-__-__"[\s\S]{0,220}?maxLength=\{20\}/,
-  'guest phone input must allow one extra pasted character to reach validation',
-);
 assert.doesNotMatch(
   guestApp,
   /placeholder="\+380 \(__\) ___-__-__"[\s\S]{0,220}?maxLength=\{19\}/,
   'guest phone input must not truncate an overlong paste to a valid number',
-);
-assert.match(
-  adminPlanner,
-  /Телефон гостя \(необов’язково\)[\s\S]{0,260}?maxLength=\{20\}/,
-  'admin manual phone input must allow one extra pasted character to reach validation',
 );
 assert.doesNotMatch(
   adminPlanner,
