@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
+import { BookingArrivalLockService } from '../bookings/booking-arrival-lock.service';
 import { Booking } from '../bookings/entities/booking.entity';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -25,6 +26,7 @@ export class SchedulesService {
     private readonly notificationsService: NotificationsService,
     private readonly logsService: LogsService,
     private readonly automaticNoShowService: AutomaticNoShowService,
+    private readonly arrivalLock: BookingArrivalLockService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -200,10 +202,12 @@ export class SchedulesService {
       const bookingMinutes = this.minutesFromTime(booking.bookingTime);
       if (nowMinutes < bookingMinutes + 30) continue;
 
-      await this.automaticNoShowService.cancelIfDue(
-        booking.id,
-        today,
-        nowMinutes,
+      await this.arrivalLock.withLock(booking.id, () =>
+        this.automaticNoShowService.cancelIfDue(
+          booking.id,
+          today,
+          nowMinutes,
+        ),
       );
     }
   }
