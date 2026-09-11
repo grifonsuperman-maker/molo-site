@@ -32,6 +32,11 @@ assert.match(
   'guest phone input must use phone-friendly browser attributes',
 );
 assert.doesNotMatch(
+  guestApp,
+  /placeholder="\+380 \(__\) ___-__-__"[\s\S]{0,220}?maxLength=\{19\}/,
+  'guest phone input must let an overlong paste reach validation instead of truncating it to a valid number',
+);
+assert.doesNotMatch(
   adminPlanner,
   /Ім’я може містити лише літери, пробіли, дефіс та апостроф/,
   'admin validation message must not claim that hyphen or apostrophe are allowed',
