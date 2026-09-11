@@ -33,6 +33,12 @@ assert(
   formatUkrainePhoneInput(tooLongPhone) === tooLongPhone,
   'extra digit must stay visible instead of being silently truncated',
 );
+const tooLongFormattedPhone = '+380 (67) 123-45-678';
+assert(
+  formatUkrainePhoneInput(tooLongFormattedPhone) === tooLongFormattedPhone,
+  'formatted phone with an extra pasted digit must stay invalid instead of becoming a valid number',
+);
+assert(normalizeUkrainePhone(tooLongFormattedPhone) === null, 'formatted extra digit must be rejected');
 assert(normalizeUkrainePhone(tooLongPhone) === null, 'extra digit must be rejected');
 assert(normalizeUkrainePhone('501234567') === null, 'subscriber-only legacy value must not be accepted as new input');
 assert(normalizeUkrainePhone('+380 (67) 123-45') === null, 'incomplete phone must be rejected');
