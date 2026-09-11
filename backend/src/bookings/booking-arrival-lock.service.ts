@@ -37,8 +37,11 @@ export class BookingArrivalLockService {
   async withCheckInLock<T>(bookingId: string, work: () => Promise<T>) {
     return this.withLock(bookingId, async () => {
       const current = await this.bookings.findOne({ where: { id: bookingId } });
-      if (current?.status === 'cancelled') {
-        throw new BadRequestException('Бронювання вже анульовано');
+      if (
+        current?.status === 'cancelled' &&
+        current.cancellationReason === 'no_show'
+      ) {
+        throw new BadRequestException('Бронювання вже анульовано через неявку');
       }
       return work();
     });
