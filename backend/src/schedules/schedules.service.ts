@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { Booking } from '../bookings/entities/booking.entity';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LogsService } from '../logs/logs.service';
+import { AutomaticNoShowService } from './automatic-no-show.service';
 
 type RestaurantReminderKind = 'booking' | 'restaurant';
 
@@ -23,6 +24,7 @@ export class SchedulesService {
 
     private readonly notificationsService: NotificationsService,
     private readonly logsService: LogsService,
+    private readonly automaticNoShowService: AutomaticNoShowService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -190,45 +192,19 @@ export class SchedulesService {
         bookingDate: today,
         status: 'approved',
       },
-      relations: ['table', 'client'],
     });
 
     for (const booking of bookings) {
-      if (booking.lateNotifiedAt || booking.checkedInAt) {
-        continue;
-      }
+      if (booking.checkedInAt) continue;
 
       const bookingMinutes = this.minutesFromTime(booking.bookingTime);
-      const isLate = nowMinutes >= bookingMinutes + 15;
+      if (nowMinutes < bookingMinutes + 30) continue;
 
-      if (!isLate) {
-        continue;
-      }
-
-      const lateNotifiedAt = new Date();
-      const claim = await this.bookingsRepo.update(
-        {
-          id: booking.id,
-          status: 'approved',
-          checkedInAt: IsNull(),
-          lateNotifiedAt: IsNull(),
-        },
-        { lateNotifiedAt },
+      await this.automaticNoShowService.cancelIfDue(
+        booking.id,
+        today,
+        nowMinutes,
       );
-
-      if (!claim.affected) {
-        continue;
-      }
-
-      booking.lateNotifiedAt = lateNotifiedAt;
-      await this.notificationsService.notifyLateGuest(booking);
-
-      await this.logsService.create('Відправлено сповіщення про запізнення гостя', null, {
-        bookingId: booking.id,
-        tableNumber: booking.table?.tableNumber,
-        clientName: booking.client?.fullName,
-        bookingTime: booking.bookingTime,
-      });
     }
   }
 
