@@ -6,6 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AdminAttentionService } from './admin-attention.service';
 import { AvailabilityBlocksService } from './availability-blocks.service';
+import { BookingArrivalLockService } from './booking-arrival-lock.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
@@ -29,6 +30,7 @@ export class BookingsController {
     private readonly guestService: GuestBookingsService,
     private readonly guestTelegramLink: GuestTelegramLinkService,
     private readonly tableLock: BookingTableLockService,
+    private readonly arrivalLock: BookingArrivalLockService,
     private readonly availabilityBlocks: AvailabilityBlocksService,
     private readonly adminAttention: AdminAttentionService,
     private readonly notifications: NotificationsService,
@@ -271,7 +273,9 @@ export class BookingsController {
   @Patch(':id/check-in')
   @Roles('waiter', 'admin', 'owner')
   checkIn(@Param('id') id: string, @Req() request: any) {
-    return this.service.checkIn(id, request.user);
+    return this.arrivalLock.withCheckInLock(id, () =>
+      this.service.checkIn(id, request.user),
+    );
   }
 
   @Patch(':id/complete')
