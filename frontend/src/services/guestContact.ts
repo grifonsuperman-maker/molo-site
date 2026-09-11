@@ -41,7 +41,7 @@ export function formatUkrainePhoneInput(value: string): string {
 
   const trimmed = input.trim();
   if (trimmed.startsWith('+') && !trimmed.startsWith('+380')) {
-    return input.slice(0, 19);
+    return input;
   }
 
   const digits = input.replace(/\D/g, '');
@@ -52,7 +52,7 @@ export function formatUkrainePhoneInput(value: string): string {
 
   // Не обрізаємо зайву цифру до валідного номера: залишаємо помилковий ввід
   // видимим, щоб normalizeUkrainePhone відхилив його при відправленні форми.
-  if (nationalDigits.length > 9) return input.slice(0, 19);
+  if (nationalDigits.length > 9) return input;
 
   if (!nationalDigits) return '+380';
 
