@@ -1,14 +1,22 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDateString,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
+
+import {
+  GUEST_NAME_PATTERN,
+  UKRAINE_PHONE_PATTERN,
+  normalizeGuestName,
+  normalizeUkrainePhone,
+} from '../guest-contact-validation';
 
 export class CreateBookingDto {
   // Якщо стіл вже є в базі, frontend передасть uuid.
@@ -28,12 +36,23 @@ export class CreateBookingDto {
   @Max(30)
   seats?: number;
 
+  @Transform(({ value }) => normalizeGuestName(value))
   @IsString()
   @IsNotEmpty()
+  @MaxLength(120)
+  @Matches(GUEST_NAME_PATTERN, {
+    message: 'Ім’я може містити лише літери та пробіли між словами',
+  })
   fullName: string;
 
+  @Transform(({ value }) =>
+    normalizeUkrainePhone(value) ?? String(value ?? '').trim(),
+  )
   @IsString()
   @IsNotEmpty()
+  @Matches(UKRAINE_PHONE_PATTERN, {
+    message: 'Вкажіть телефон у форматі +380 (XX) XXX-XX-XX',
+  })
   phone: string;
 
   @IsString()

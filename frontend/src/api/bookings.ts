@@ -1,3 +1,8 @@
+import {
+  isValidGuestName,
+  normalizeGuestName,
+  normalizeUkrainePhone,
+} from '../services/guestContact';
 import { api } from './client';
 import { rememberGuestRuntimeAccess } from './guestAccessRuntime';
 import type { Booking } from './types';
@@ -19,7 +24,7 @@ export type CreateBookingPayload = {
 export type CreateAdminManualBookingPayload = {
   tableId: string;
   fullName: string;
-  phone: string;
+  phone?: string;
   bookingDate: string;
   bookingTime: string;
   guestsCount: number;
@@ -185,6 +190,22 @@ function guestHeaders(token: string): HeadersInit {
   return { 'x-guest-booking-token': token };
 }
 
+function validateGuestName(fullName: string): string {
+  const normalized = normalizeGuestName(fullName);
+  if (!isValidGuestName(normalized)) {
+    throw new Error('Ім’я може містити лише літери та пробіли між словами');
+  }
+  return normalized;
+}
+
+function validateUkrainePhone(phone: string): string {
+  const normalized = normalizeUkrainePhone(phone);
+  if (!normalized) {
+    throw new Error('Вкажіть телефон у форматі +380 (XX) XXX-XX-XX');
+  }
+  return normalized;
+}
+
 function buildAvailabilityQuery(params: {
   tableId: string;
   bookingDate: string;
@@ -217,6 +238,11 @@ function buildTableStatusesQuery(params: {
 
 export const bookingsApi = {
   create: async (payload: CreateBookingPayload) => {
+    const normalizedPayload = {
+      ...payload,
+      fullName: validateGuestName(payload.fullName),
+      phone: validateUkrainePhone(payload.phone),
+    };
     const result = await api.post<{
       message: string;
       bookingId: string;
@@ -227,7 +253,7 @@ export const bookingsApi = {
       availableFrom: string | null;
       durationMinutes: number;
       cleanupMinutes: number;
-    }>('/bookings', payload);
+    }>('/bookings', normalizedPayload);
 
     rememberGuestRuntimeAccess(payload.guestDeviceId, [
       { bookingId: result.bookingId, token: result.guestAccessToken },
@@ -235,8 +261,15 @@ export const bookingsApi = {
     return result;
   },
 
-  createManual: (payload: CreateAdminManualBookingPayload) =>
-    api.post<{
+  createManual: async (payload: CreateAdminManualBookingPayload) => {
+    const rawPhone = String(payload.phone || '').trim();
+    const normalizedPayload = {
+      ...payload,
+      fullName: validateGuestName(payload.fullName),
+      phone: rawPhone ? validateUkrainePhone(rawPhone) : undefined,
+    };
+
+    return api.post<{
       message: string;
       bookingId: string;
       status: string;
@@ -246,7 +279,8 @@ export const bookingsApi = {
       availableFrom: string;
       durationMinutes: number;
       cleanupMinutes: number;
-    }>('/bookings/admin/manual', payload),
+    }>('/bookings/admin/manual', normalizedPayload);
+  },
 
   availability: (params: {
     tableId: string;

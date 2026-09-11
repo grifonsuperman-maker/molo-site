@@ -6,6 +6,11 @@ import { AvailabilityBlocksService } from '../bookings/availability-blocks.servi
 import { BookingTableLockService } from '../bookings/booking-table-lock.service';
 import { BookingsService } from '../bookings/bookings.service';
 import type { CreateAdminManualBookingDto } from '../bookings/dto/create-admin-manual-booking.dto';
+import {
+  isValidGuestName,
+  normalizeGuestName,
+  normalizeUkrainePhone,
+} from '../bookings/guest-contact-validation';
 import { TelegramService } from '../notifications/telegram.service';
 import { TablesService } from '../tables/tables.service';
 
@@ -218,15 +223,23 @@ export class TelegramAdminBookingCreateService {
     }
 
     if (draft.stage === 'name') {
-      if (!value) {
+      const fullName = normalizeGuestName(value);
+      if (!fullName) {
         await this.telegram.sendMessage(chatId, '⚠️ Вкажіть ім’я гостя.');
         return true;
       }
-      if (value.length > 120) {
+      if (fullName.length > 120) {
         await this.telegram.sendMessage(chatId, '⚠️ Ім’я занадто довге. Максимум 120 символів.');
         return true;
       }
-      draft.fullName = value;
+      if (!isValidGuestName(fullName)) {
+        await this.telegram.sendMessage(
+          chatId,
+          '⚠️ Ім’я може містити лише літери та пробіли між словами.',
+        );
+        return true;
+      }
+      draft.fullName = fullName;
       draft.stage = 'guests';
       this.touch(draft);
       await this.telegram.sendMessage(chatId, 'Крок 5/6 · Скільки гостей? Надішліть число від 1 до 30.', this.cancelMarkup(draft));
@@ -244,22 +257,23 @@ export class TelegramAdminBookingCreateService {
       this.touch(draft);
       await this.telegram.sendMessage(
         chatId,
-        'Крок 6/6 · Надішліть номер телефону гостя або пропустіть цей крок.',
+        'Крок 6/6 · Надішліть номер телефону гостя у форматі +380 (XX) XXX-XX-XX або пропустіть цей крок.',
         this.phoneMarkup(draft),
       );
       return true;
     }
 
     if (draft.stage === 'phone') {
-      if (!value || !value.replace(/\D/g, '')) {
+      const phone = normalizeUkrainePhone(value);
+      if (!phone) {
         await this.telegram.sendMessage(
           chatId,
-          '⚠️ Вкажіть номер телефону або натисніть «Пропустити телефон».',
+          '⚠️ Вкажіть телефон у форматі +380 (XX) XXX-XX-XX або натисніть «Пропустити телефон».',
           this.phoneMarkup(draft),
         );
         return true;
       }
-      draft.phone = value;
+      draft.phone = phone;
       draft.stage = 'confirm';
       this.touch(draft);
       await this.sendConfirmation(chatId, draft);
