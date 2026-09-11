@@ -7,7 +7,7 @@ const {
   BookingArrivalLockService,
 } = require('../dist/bookings/booking-arrival-lock.service.js');
 
-function createHarness(status = 'approved') {
+function createHarness(status = 'approved', cancellationReason = null) {
   const calls = [];
   const runner = {
     async connect() { calls.push(['connect']); },
@@ -19,8 +19,8 @@ function createHarness(status = 'approved') {
   };
   const bookings = {
     async findOne() {
-      calls.push(['findOne', status]);
-      return { id: 'booking-1', status };
+      calls.push(['findOne', status, cancellationReason]);
+      return { id: 'booking-1', status, cancellationReason };
     },
   };
   return {
@@ -47,18 +47,29 @@ test('arrival lock holds the same advisory lock around a booking action', async 
   assert.deepEqual(calls[4], ['release']);
 });
 
-test('check-in cannot resurrect a booking already cancelled by no-show', async () => {
-  const { service, calls } = createHarness('cancelled');
+test('check-in cannot resurrect a booking already cancelled as no-show', async () => {
+  const { service, calls } = createHarness('cancelled', 'no_show');
   let ran = false;
 
   await assert.rejects(
     service.withCheckInLock('booking-1', async () => {
       ran = true;
     }),
-    /Бронювання вже анульовано/,
+    /Бронювання вже анульовано через неявку/,
   );
 
   assert.equal(ran, false);
   assert.ok(calls.some((call) => call[0] === 'findOne'));
   assert.ok(calls.some((call) => call[0] === 'query' && /pg_advisory_unlock/.test(call[1])));
+});
+
+test('check-in guard does not redefine unrelated cancelled-booking behavior', async () => {
+  const { service } = createHarness('cancelled', 'guest_cancelled');
+  let ran = false;
+
+  await service.withCheckInLock('booking-1', async () => {
+    ran = true;
+  });
+
+  assert.equal(ran, true);
 });
