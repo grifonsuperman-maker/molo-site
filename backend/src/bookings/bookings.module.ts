@@ -16,6 +16,7 @@ import { AdminBookingEventsService } from './admin-booking-events.service';
 import { AvailabilityBlocksController } from './availability-blocks.controller';
 import { AvailabilityBlocksService } from './availability-blocks.service';
 import { AvailabilityPermissionsService } from './availability-permissions.service';
+import { BookingArrivalLockService } from './booking-arrival-lock.service';
 import { BookingExpirationService } from './booking-expiration.service';
 import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { BookingTableLockService } from './booking-table-lock.service';
@@ -68,6 +69,7 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     BookingExpirationService,
     BookingRescheduleApprovalService,
     BookingTableLockService,
+    BookingArrivalLockService,
     AdminAttentionService,
     AdminBookingEventsService,
     AvailabilityBlocksService,
@@ -78,6 +80,7 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     GuestBookingsService,
     BookingRescheduleApprovalService,
     BookingTableLockService,
+    BookingArrivalLockService,
     AdminAttentionService,
     AvailabilityBlocksService,
   ],
