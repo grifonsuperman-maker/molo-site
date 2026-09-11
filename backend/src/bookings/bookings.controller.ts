@@ -30,12 +30,12 @@ export class BookingsController {
     private readonly guestService: GuestBookingsService,
     private readonly guestTelegramLink: GuestTelegramLinkService,
     private readonly tableLock: BookingTableLockService,
-    private readonly arrivalLock: BookingArrivalLockService,
     private readonly availabilityBlocks: AvailabilityBlocksService,
     private readonly adminAttention: AdminAttentionService,
     private readonly notifications: NotificationsService,
     private readonly guestTimeChange: GuestTimeChangeService,
     private readonly guestTableNumbers: GuestTableNumberValidationService,
+    private readonly arrivalLock: BookingArrivalLockService,
   ) {}
 
   private withGuestArrivalTimeCapabilities<T extends { status?: string; checkedInAt?: unknown }>(booking: T) {
