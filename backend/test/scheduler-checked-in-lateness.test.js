@@ -24,6 +24,12 @@ function createHarness(booking, nowMinutes) {
       return true;
     },
   };
+  const arrivalLock = {
+    async withLock(bookingId, work) {
+      calls.push(['arrivalLock', bookingId]);
+      return work();
+    },
+  };
 
   const service = new SchedulesService(
     bookingsRepo,
@@ -31,6 +37,7 @@ function createHarness(booking, nowMinutes) {
     notifications,
     logs,
     automaticNoShow,
+    arrivalLock,
   );
   service.getKyivClock = () => ({
     date: '2026-08-27',
@@ -71,7 +78,7 @@ test('automatic no-show does not run before 30 minutes', async () => {
   assert.deepEqual(calls, [['find']]);
 });
 
-test('automatic no-show runs exactly 30 minutes after current booking time', async () => {
+test('automatic no-show runs exactly 30 minutes after current booking time under arrival lock', async () => {
   const booking = {
     id: 'booking-due',
     bookingDate: '2026-08-27',
@@ -85,6 +92,7 @@ test('automatic no-show runs exactly 30 minutes after current booking time', asy
 
   assert.deepEqual(calls, [
     ['find'],
+    ['arrivalLock', 'booking-due'],
     ['cancelIfDue', 'booking-due', '2026-08-27', 19 * 60 + 50],
   ]);
 });
@@ -105,6 +113,7 @@ test('approved time change automatically moves the 30-minute deadline', async ()
   await due.service.checkLateGuests();
   assert.deepEqual(due.calls, [
     ['find'],
+    ['arrivalLock', 'booking-rescheduled'],
     ['cancelIfDue', 'booking-rescheduled', '2026-08-27', 20 * 60 + 30],
   ]);
 });
