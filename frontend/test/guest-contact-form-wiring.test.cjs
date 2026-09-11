@@ -38,6 +38,11 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(
   adminPlanner,
+  /Телефон гостя \(необов’язково\)[\s\S]{0,260}?maxLength=\{19\}/,
+  'admin manual phone input must also let an overlong paste reach validation',
+);
+assert.doesNotMatch(
+  adminPlanner,
   /Ім’я може містити лише літери, пробіли, дефіс та апостроф/,
   'admin validation message must not claim that hyphen or apostrophe are allowed',
 );
