@@ -7,7 +7,20 @@ const {
   SchedulesService,
 } = require('../dist/schedules/schedules.service.js');
 
-function createHarness(booking, nowMinutes) {
+function dueAtThirtyMinutes(bookingDate, bookingTime, currentDate, currentMinutes) {
+  const [bookingYear, bookingMonth, bookingDay] = bookingDate.split('-').map(Number);
+  const [currentYear, currentMonth, currentDay] = currentDate.split('-').map(Number);
+  const dayDifference = Math.round(
+    (
+      Date.UTC(currentYear, currentMonth - 1, currentDay) -
+      Date.UTC(bookingYear, bookingMonth - 1, bookingDay)
+    ) / 86_400_000,
+  );
+  const [hours, minutes] = bookingTime.slice(0, 5).split(':').map(Number);
+  return dayDifference * 24 * 60 + currentMinutes - (hours * 60 + minutes) >= 30;
+}
+
+function createHarness(booking, nowMinutes, currentDate = '2026-08-27') {
   const calls = [];
   const bookingsRepo = {
     async find() {
@@ -19,6 +32,14 @@ function createHarness(booking, nowMinutes) {
   const notifications = {};
   const logs = {};
   const automaticNoShow = {
+    isDue(bookingDate, bookingTime, today, currentMinutes) {
+      return dueAtThirtyMinutes(
+        bookingDate,
+        bookingTime,
+        today,
+        currentMinutes,
+      );
+    },
     async cancelIfDue(bookingId, today, currentMinutes) {
       calls.push(['cancelIfDue', bookingId, today, currentMinutes]);
       return true;
@@ -40,7 +61,7 @@ function createHarness(booking, nowMinutes) {
     arrivalLock,
   );
   service.getKyivClock = () => ({
-    date: '2026-08-27',
+    date: currentDate,
     time: `${String(Math.floor(nowMinutes / 60)).padStart(2, '0')}:${String(nowMinutes % 60).padStart(2, '0')}`,
     minutes: nowMinutes,
   });
@@ -115,5 +136,24 @@ test('approved time change automatically moves the 30-minute deadline', async ()
     ['find'],
     ['arrivalLock', 'booking-rescheduled'],
     ['cancelIfDue', 'booking-rescheduled', '2026-08-27', 20 * 60 + 30],
+  ]);
+});
+
+test('automatic no-show still runs when the +30 minute deadline crosses midnight', async () => {
+  const booking = {
+    id: 'booking-midnight',
+    bookingDate: '2026-08-27',
+    bookingTime: '23:45',
+    status: 'approved',
+    checkedInAt: null,
+  };
+  const { service, calls } = createHarness(booking, 15, '2026-08-28');
+
+  await service.checkLateGuests();
+
+  assert.deepEqual(calls, [
+    ['find'],
+    ['arrivalLock', 'booking-midnight'],
+    ['cancelIfDue', 'booking-midnight', '2026-08-28', 15],
   ]);
 });
