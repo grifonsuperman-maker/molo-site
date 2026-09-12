@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThanOrEqual, Repository } from 'typeorm';
 
 import { BookingArrivalLockService } from '../bookings/booking-arrival-lock.service';
 import { Booking } from '../bookings/entities/booking.entity';
@@ -191,16 +191,23 @@ export class SchedulesService {
 
     const bookings = await this.bookingsRepo.find({
       where: {
-        bookingDate: today,
+        bookingDate: LessThanOrEqual(today),
         status: 'approved',
       },
     });
 
     for (const booking of bookings) {
       if (booking.checkedInAt) continue;
-
-      const bookingMinutes = this.minutesFromTime(booking.bookingTime);
-      if (nowMinutes < bookingMinutes + 30) continue;
+      if (
+        !this.automaticNoShowService.isDue(
+          booking.bookingDate,
+          booking.bookingTime,
+          today,
+          nowMinutes,
+        )
+      ) {
+        continue;
+      }
 
       await this.arrivalLock.withLock(booking.id, () =>
         this.automaticNoShowService.cancelIfDue(
