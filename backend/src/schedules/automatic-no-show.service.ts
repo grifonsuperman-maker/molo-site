@@ -45,6 +45,20 @@ export class AutomaticNoShowService {
     );
   }
 
+  isDue(
+    bookingDate: string,
+    bookingTime: string,
+    currentDate: string,
+    currentMinutes: number,
+  ) {
+    return this.minutesSinceArrival(
+      bookingDate,
+      bookingTime,
+      currentDate,
+      currentMinutes,
+    ) >= NO_SHOW_GRACE_MINUTES;
+  }
+
   async cancelIfDue(bookingId: string, today: string, nowMinutes: number) {
     const cancelled = await this.dataSource.transaction(async (manager) => {
       const bookings = manager.getRepository(Booking);
@@ -54,14 +68,7 @@ export class AutomaticNoShowService {
       });
 
       if (!locked || locked.status !== 'approved' || locked.checkedInAt) return null;
-      if (
-        this.minutesSinceArrival(
-          locked.bookingDate,
-          locked.bookingTime,
-          today,
-          nowMinutes,
-        ) < NO_SHOW_GRACE_MINUTES
-      ) {
+      if (!this.isDue(locked.bookingDate, locked.bookingTime, today, nowMinutes)) {
         return null;
       }
 
