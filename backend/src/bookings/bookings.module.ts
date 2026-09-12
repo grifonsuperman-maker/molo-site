@@ -16,11 +16,16 @@ import { AdminBookingEventsService } from './admin-booking-events.service';
 import { AvailabilityBlocksController } from './availability-blocks.controller';
 import { AvailabilityBlocksService } from './availability-blocks.service';
 import { AvailabilityPermissionsService } from './availability-permissions.service';
+import { BookingArrivalLockService } from './booking-arrival-lock.service';
 import { BookingExpirationService } from './booking-expiration.service';
 import { BookingRescheduleApprovalService } from './booking-reschedule-approval.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsController } from './bookings.controller';
 import { BookingsService } from './bookings.service';
+import {
+  createCoordinatedBookingsService,
+  RAW_BOOKINGS_SERVICE,
+} from './coordinated-bookings.provider';
 import { AvailabilityBlock } from './entities/availability-block.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
@@ -60,7 +65,13 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     GuestReviewsController,
   ],
   providers: [
-    BookingsService,
+    { provide: RAW_BOOKINGS_SERVICE, useClass: BookingsService },
+    BookingArrivalLockService,
+    {
+      provide: BookingsService,
+      useFactory: createCoordinatedBookingsService,
+      inject: [RAW_BOOKINGS_SERVICE, BookingArrivalLockService],
+    },
     GuestBookingsService,
     GuestTimeChangeService,
     GuestTableNumberValidationService,
@@ -78,6 +89,7 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     GuestBookingsService,
     BookingRescheduleApprovalService,
     BookingTableLockService,
+    BookingArrivalLockService,
     AdminAttentionService,
     AvailabilityBlocksService,
   ],

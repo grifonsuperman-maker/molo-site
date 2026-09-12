@@ -128,7 +128,7 @@ test("scheduler clock uses the Kyiv calendar date across a UTC day boundary", ()
   );
 });
 
-test("late guest scan uses one Kyiv clock for both date and minutes", async () => {
+test("late guest scan uses one Kyiv clock and includes prior booking dates", async () => {
   let findOptions = null;
   const service = createService({
     bookingsRepo: {
@@ -147,7 +147,8 @@ test("late guest scan uses one Kyiv clock for both date and minutes", async () =
 
   await service.checkLateGuests();
 
-  assert.equal(findOptions.where.bookingDate, "2026-08-17");
+  assert.equal(findOptions.where.bookingDate._type, "lessThanOrEqual");
+  assert.equal(findOptions.where.bookingDate._value, "2026-08-17");
   assert.equal(findOptions.where.status, "approved");
 });
 
