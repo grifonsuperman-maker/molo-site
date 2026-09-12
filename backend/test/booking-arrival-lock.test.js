@@ -47,6 +47,28 @@ test('arrival lock holds the same advisory lock around a booking action', async 
   assert.deepEqual(calls[4], ['release']);
 });
 
+test('arrival lock is reentrant for the same booking in one async action', async () => {
+  const { service, calls } = createHarness();
+
+  await service.withLock('booking-1', async () => {
+    calls.push(['outer']);
+    await service.withLock('booking-1', async () => {
+      calls.push(['inner']);
+    });
+  });
+
+  const lockQueries = calls.filter(
+    (call) => call[0] === 'query' && /pg_advisory_lock/.test(call[1]),
+  );
+  const unlockQueries = calls.filter(
+    (call) => call[0] === 'query' && /pg_advisory_unlock/.test(call[1]),
+  );
+  assert.equal(lockQueries.length, 1);
+  assert.equal(unlockQueries.length, 1);
+  assert.ok(calls.some((call) => call[0] === 'outer'));
+  assert.ok(calls.some((call) => call[0] === 'inner'));
+});
+
 test('check-in cannot resurrect a booking already cancelled as no-show', async () => {
   const { service, calls } = createHarness('cancelled', 'no_show');
   let ran = false;
