@@ -7,11 +7,17 @@ const {
   AutomaticNoShowService,
 } = require('../dist/schedules/automatic-no-show.service.js');
 
-function createHarness({ checkedInAt = null, pendingTimeChange = false, bookingTime = '19:20' } = {}) {
+function createHarness({
+  checkedInAt = null,
+  pendingTimeChange = false,
+  bookingDate = '2026-08-27',
+  bookingTime = '19:20',
+  activeBookings = [],
+} = {}) {
   const calls = [];
   const lockedBooking = {
     id: 'booking-1',
-    bookingDate: '2026-08-27',
+    bookingDate,
     bookingTime,
     status: 'approved',
     checkedInAt,
@@ -39,9 +45,9 @@ function createHarness({ checkedInAt = null, pendingTimeChange = false, bookingT
       calls.push(['booking.save', value.status, value.cancellationReason]);
       return value;
     },
-    async find() {
-      calls.push(['booking.find.active']);
-      return [];
+    async find(options) {
+      calls.push(['booking.find.active', options]);
+      return activeBookings;
     },
   };
   const rescheduleRepo = {
@@ -159,4 +165,40 @@ test('auto no-show uses the currently approved booking time', async () => {
   assert.equal(before, false);
   assert.equal(lockedBooking.status, 'approved');
   assert.ok(!calls.some((call) => call[0] === 'booking.save'));
+});
+
+test('auto no-show deadline continues across Kyiv midnight', async () => {
+  const { service, lockedBooking, calls } = createHarness({
+    bookingDate: '2026-08-27',
+    bookingTime: '23:45',
+  });
+
+  assert.equal(
+    service.isDue('2026-08-27', '23:45', '2026-08-28', 14),
+    false,
+  );
+  assert.equal(
+    service.isDue('2026-08-27', '23:45', '2026-08-28', 15),
+    true,
+  );
+
+  const result = await service.cancelIfDue('booking-1', '2026-08-28', 15);
+  assert.equal(result, true);
+  assert.equal(lockedBooking.status, 'cancelled');
+  const activeLookup = calls.find((call) => call[0] === 'booking.find.active');
+  assert.equal(activeLookup[1].where.bookingDate, '2026-08-28');
+});
+
+test('cross-midnight no-show preserves a reservation for the new Kyiv date', async () => {
+  const { service, table, calls } = createHarness({
+    bookingDate: '2026-08-27',
+    bookingTime: '23:45',
+    activeBookings: [{ status: 'approved' }],
+  });
+
+  const result = await service.cancelIfDue('booking-1', '2026-08-28', 15);
+
+  assert.equal(result, true);
+  assert.equal(table.status, 'reserved');
+  assert.ok(!calls.some((call) => call[0] === 'table.save' && call[1] === 'free'));
 });
