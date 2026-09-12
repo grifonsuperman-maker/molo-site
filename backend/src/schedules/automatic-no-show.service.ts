@@ -9,6 +9,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { TableEntity, type TableStatus } from '../tables/entities/table.entity';
 
 const NO_SHOW_GRACE_MINUTES = 30;
+const DAY_MINUTES = 24 * 60;
 
 @Injectable()
 export class AutomaticNoShowService {
@@ -23,6 +24,27 @@ export class AutomaticNoShowService {
     return hours * 60 + minutes;
   }
 
+  private dayDifference(fromDate: string, toDate: string) {
+    const [fromYear, fromMonth, fromDay] = fromDate.split('-').map(Number);
+    const [toYear, toMonth, toDay] = toDate.split('-').map(Number);
+    const fromUtc = Date.UTC(fromYear, fromMonth - 1, fromDay);
+    const toUtc = Date.UTC(toYear, toMonth - 1, toDay);
+    return Math.round((toUtc - fromUtc) / 86_400_000);
+  }
+
+  private minutesSinceArrival(
+    bookingDate: string,
+    bookingTime: string,
+    currentDate: string,
+    currentMinutes: number,
+  ) {
+    return (
+      this.dayDifference(bookingDate, currentDate) * DAY_MINUTES +
+      currentMinutes -
+      this.minutesFromTime(bookingTime)
+    );
+  }
+
   async cancelIfDue(bookingId: string, today: string, nowMinutes: number) {
     const cancelled = await this.dataSource.transaction(async (manager) => {
       const bookings = manager.getRepository(Booking);
@@ -32,8 +54,14 @@ export class AutomaticNoShowService {
       });
 
       if (!locked || locked.status !== 'approved' || locked.checkedInAt) return null;
-      if (locked.bookingDate !== today) return null;
-      if (nowMinutes < this.minutesFromTime(locked.bookingTime) + NO_SHOW_GRACE_MINUTES) {
+      if (
+        this.minutesSinceArrival(
+          locked.bookingDate,
+          locked.bookingTime,
+          today,
+          nowMinutes,
+        ) < NO_SHOW_GRACE_MINUTES
+      ) {
         return null;
       }
 
@@ -97,10 +125,10 @@ export class AutomaticNoShowService {
       );
 
       if (withRelations.table?.id) {
-        await this.synchronizeTableForToday(
+        await this.synchronizeTableForDate(
           manager,
           withRelations.table.id,
-          locked.bookingDate,
+          today,
         );
       }
 
@@ -133,7 +161,7 @@ export class AutomaticNoShowService {
     return true;
   }
 
-  private async synchronizeTableForToday(
+  private async synchronizeTableForDate(
     manager: DataSource['manager'],
     tableId: string,
     bookingDate: string,
