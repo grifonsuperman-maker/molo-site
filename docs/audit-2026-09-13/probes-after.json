@@ -1,0 +1,113 @@
+{
+  "mode": "offline service probes; synthetic repositories; no production writes; no PostgreSQL concurrency claim",
+  "results": [
+    {
+      "id": "AUD-01",
+      "expected": "Old cancelled booking cannot be approved over a replacement booking",
+      "actual": {
+        "oldStatus": "approved",
+        "activeOverlappingBookings": 2
+      },
+      "passed": false
+    },
+    {
+      "id": "AUD-02",
+      "expected": "Failed creation leaves no active booking and no raw internal error",
+      "actual": {
+        "savedActiveBookings": 1,
+        "error": "Booking error: AUDIT_INJECTED_HISTORY_FAILURE",
+        "tokenReturned": false
+      },
+      "passed": false
+    },
+    {
+      "id": "AUD-03a",
+      "expected": "Guest booking in the past is rejected by server",
+      "actual": {
+        "dtoErrors": [],
+        "created": true,
+        "bookingDate": "2020-01-02"
+      },
+      "passed": false
+    },
+    {
+      "id": "AUD-03b",
+      "expected": "Guest booking outside configured 10:00–23:00 hours is rejected",
+      "actual": {
+        "dtoErrors": [],
+        "created": true,
+        "bookingTime": "03:00"
+      },
+      "passed": false
+    },
+    {
+      "id": "AUD-03c",
+      "expected": "100 guests cannot silently book a four-seat table",
+      "actual": {
+        "dtoErrors": [],
+        "created": true,
+        "guestsCount": 100
+      },
+      "passed": false
+    },
+    {
+      "id": "AUD-04",
+      "expected": "Booking keeps the newly entered guest name",
+      "actual": {
+        "storedGuestName": null,
+        "linkedClientName": "Тестовий Гість"
+      },
+      "passed": false
+    },
+    {
+      "id": "AUD-05",
+      "expected": "Free-text wishes are escaped in HTML Telegram messages",
+      "actual": {
+        "containsRawMarkup": false,
+        "messageCount": 2
+      },
+      "passed": true
+    },
+    {
+      "id": "AUD-06",
+      "expected": "Storage denial does not throw from token write/clear helpers",
+      "actual": [
+        {
+          "method": "setAccessToken",
+          "error": "SecurityError"
+        },
+        {
+          "method": "clearAccessToken",
+          "error": "SecurityError"
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "AUD-07",
+      "expected": "Completed checked-in visit updates statistics used by regular-client and recent-visit queries",
+      "actual": {
+        "visitsCount": 0,
+        "totalGuests": 0,
+        "lastVisitAt": null
+      },
+      "passed": false
+    },
+    {
+      "id": "AUD-08",
+      "expected": "15-second timer reads the currently selected booking date",
+      "actual": {
+        "effectDependencies": "[]",
+        "selectedDate": "2026-09-14",
+        "requestedDates": [
+          "2026-09-13",
+          "2026-09-14",
+          "2026-09-13"
+        ]
+      },
+      "passed": false
+    }
+  ],
+  "passed": 1,
+  "failed": 9
+}

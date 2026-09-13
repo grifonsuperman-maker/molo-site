@@ -1523,7 +1523,7 @@ export default function GuestApp() {
                   className="molo-button inline-flex items-center justify-center gap-4 rounded-[26px] border border-amber-200/95 bg-black/10 px-6 py-5 text-xl font-semibold text-amber-100 shadow-[0_0_34px_rgba(251,191,36,.12)] backdrop-blur-sm sm:text-2xl"
                 >
                   <Menu className="h-7 w-7 text-amber-200" />
-                  Menu
+                  Меню
                 </button>
 
                 <button
@@ -2325,7 +2325,7 @@ export default function GuestApp() {
                       <GuestHookahCallPanel bookingId={lastBookingId} />
                     </div>
                   )}
-              
+
                 </div>
               )}
 
