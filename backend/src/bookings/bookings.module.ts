@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 
 import { Client } from '../clients/entities/client.entity';
 import { LogsModule } from '../logs/logs.module';
@@ -70,7 +71,7 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     {
       provide: BookingsService,
       useFactory: createCoordinatedBookingsService,
-      inject: [RAW_BOOKINGS_SERVICE, BookingArrivalLockService],
+      inject: [RAW_BOOKINGS_SERVICE, DataSource],
     },
     GuestBookingsService,
     GuestTimeChangeService,
