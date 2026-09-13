@@ -73,7 +73,7 @@ Future dates show booking state only.
 - Never return access tokens or device/phone hashes from the backend.
 - Guests see only active bookings for today and future dates.
 - Guest history must not be shown.
-- Lateness must never automatically cancel a booking or free a table.
+- An approved booking with no check-in is automatically cancelled as `no_show` 30 minutes after the current approved arrival time. A pending guest time-change request pauses automatic no-show; after approval, the 30-minute window is counted from the new booking time.
 - Table changes must be atomic and preserve the old table until the new table is successfully assigned.
 - Review prompts are allowed only after a completed checked-in visit.
 - Cancelled, rejected and no-show bookings must not receive a review prompt.

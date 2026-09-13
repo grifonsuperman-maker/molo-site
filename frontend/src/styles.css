@@ -67,6 +67,19 @@ html,body,#root{min-height:100%;margin:0;background:#10100f;}*{box-sizing:border
   }
 }
 
+section[aria-label="Виклик персоналу для цього бронювання"]::before {
+  content: "Якщо ви не прибули протягом 30 хвилин після зазначеного часу та не змінили час прибуття, бронювання буде автоматично анульовано.";
+  display: block;
+  margin-bottom: 12px;
+  border: 1px solid rgba(251, 191, 36, .32);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: rgba(251, 191, 36, .07);
+  color: rgba(254, 243, 199, .82);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .molo-service-action {
   isolation: isolate;
   overflow: visible;
