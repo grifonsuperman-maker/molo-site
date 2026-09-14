@@ -44,6 +44,18 @@ export function expandTelegramWebApp(webApp: TelegramWebApp | undefined) {
   }
 }
 
+const TELEGRAM_ROLE_MODES: Record<TelegramAuthRole, TelegramMode> = {
+  guest: 'guest',
+  waiter: 'waiter',
+  hookah: 'hookah',
+  admin: 'admin',
+  owner: 'director',
+};
+
+export function telegramRoleToMode(role: TelegramAuthRole): TelegramMode {
+  return TELEGRAM_ROLE_MODES[role];
+}
+
 export function resolveTelegramMode(
   role: TelegramAuthRole,
   currentHash: string,
@@ -51,13 +63,5 @@ export function resolveTelegramMode(
   const explicitMode = currentHash.replace('#', '');
   if (explicitMode && explicitMode !== 'guest') return null;
 
-  const modes: Record<TelegramAuthRole, TelegramMode> = {
-    guest: 'guest',
-    waiter: 'waiter',
-    hookah: 'hookah',
-    admin: 'admin',
-    owner: 'director',
-  };
-
-  return modes[role];
+  return telegramRoleToMode(role);
 }
