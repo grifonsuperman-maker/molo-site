@@ -1,4 +1,8 @@
 import { expandTelegramWebApp, resolveTelegramMode } from './telegramRuntime.js';
+import {
+  DEVELOPER_ROLE_SWITCHER_PATH,
+  isDeveloperRoleSwitcherPath,
+} from '../developer/developerRoleSwitcher.js';
 
 function expectEqual(actual: unknown, expected: unknown, name: string) {
   if (actual !== expected) {
@@ -14,6 +18,27 @@ expectEqual(resolveTelegramMode('hookah', '#guest'), 'hookah', 'hookah route');
 expectEqual(resolveTelegramMode('admin', ''), 'admin', 'admin route');
 expectEqual(resolveTelegramMode('owner', ''), 'director', 'director route');
 expectEqual(resolveTelegramMode('waiter', '#admin'), null, 'explicit route');
+
+expectEqual(
+  DEVELOPER_ROLE_SWITCHER_PATH,
+  '/__dev/roles',
+  'developer switcher path',
+);
+expectEqual(
+  isDeveloperRoleSwitcherPath('/__dev/roles'),
+  true,
+  'developer path is enabled',
+);
+expectEqual(
+  isDeveloperRoleSwitcherPath('/'),
+  false,
+  'root does not show developer switcher',
+);
+expectEqual(
+  isDeveloperRoleSwitcherPath('/waiter'),
+  false,
+  'role route does not show developer switcher',
+);
 
 let iosExpandCalls = 0;
 let iosFullscreenCalls = 0;
