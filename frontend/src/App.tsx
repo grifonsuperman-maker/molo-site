@@ -11,7 +11,7 @@ import { useTelegramAuth } from "./auth/useTelegramAuth";
 import TelegramStaffLinkGate, {
   readTelegramStaffInviteToken,
 } from "./telegram/TelegramStaffLinkGate";
-import { resolveTelegramMode } from "./telegram/telegramRuntime";
+import { telegramRoleToMode } from "./telegram/telegramRuntime";
 import { isDeveloperRoleSwitcherPath } from "./developer/developerRoleSwitcher";
 
 const GuestApp = lazy(() => import("./guest/GuestApp"));
@@ -122,12 +122,9 @@ export default function App() {
 
     telegramRoleRouted.current = true;
 
-    const nextMode = resolveTelegramMode(
-      telegramAuth.user.role,
-      window.location.hash,
-    );
+    const nextMode = telegramRoleToMode(telegramAuth.user.role);
 
-    if (nextMode && nextMode !== mode) {
+    if (nextMode !== mode) {
       window.location.hash = nextMode;
       setMode(nextMode);
     }
@@ -160,7 +157,7 @@ export default function App() {
   }
 
   function handleTelegramLinked(user: StaffAuthUser) {
-    const nextMode = resolveTelegramMode(user.role, "#guest") || "guest";
+    const nextMode = telegramRoleToMode(user.role);
     const url = new URL(window.location.href);
     url.searchParams.delete("tgWebAppStartParam");
     window.history.replaceState(

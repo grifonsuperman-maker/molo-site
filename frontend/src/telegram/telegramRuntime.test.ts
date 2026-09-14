@@ -1,4 +1,8 @@
-import { expandTelegramWebApp, resolveTelegramMode } from './telegramRuntime.js';
+import {
+  expandTelegramWebApp,
+  resolveTelegramMode,
+  telegramRoleToMode,
+} from './telegramRuntime.js';
 import {
   DEVELOPER_ROLE_SWITCHER_PATH,
   isDeveloperRoleSwitcherPath,
@@ -18,6 +22,12 @@ expectEqual(resolveTelegramMode('hookah', '#guest'), 'hookah', 'hookah route');
 expectEqual(resolveTelegramMode('admin', ''), 'admin', 'admin route');
 expectEqual(resolveTelegramMode('owner', ''), 'director', 'director route');
 expectEqual(resolveTelegramMode('waiter', '#admin'), null, 'explicit route');
+
+expectEqual(telegramRoleToMode('guest'), 'guest', 'Telegram guest role');
+expectEqual(telegramRoleToMode('waiter'), 'waiter', 'Telegram waiter role');
+expectEqual(telegramRoleToMode('hookah'), 'hookah', 'Telegram hookah role');
+expectEqual(telegramRoleToMode('admin'), 'admin', 'Telegram admin role');
+expectEqual(telegramRoleToMode('owner'), 'director', 'Telegram director role');
 
 expectEqual(
   DEVELOPER_ROLE_SWITCHER_PATH,
