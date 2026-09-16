@@ -99,8 +99,16 @@ function getModeFromHash(): Mode {
   return "guest";
 }
 
+function getInitialMode(): Mode {
+  if (window.location.pathname === "/guest") {
+    return "guest";
+  }
+
+  return getModeFromHash();
+}
+
 export default function App() {
-  const [mode, setMode] = useState<Mode>(() => getModeFromHash());
+  const [mode, setMode] = useState<Mode>(() => getInitialMode());
   const [telegramInviteToken, setTelegramInviteToken] = useState<string | null>(
     () => readTelegramStaffInviteToken(),
   );
@@ -184,65 +192,41 @@ export default function App() {
         />
       )}
 
-      {telegramAuth.isTelegram && telegramAuth.error && !telegramInviteToken && (
-        <div className="fixed left-3 right-3 top-3 z-[70] rounded-2xl border border-red-400/40 bg-red-950/95 px-4 py-3 text-center text-sm text-red-100 shadow-2xl">
-          Не вдалося увійти через Telegram. Закрийте та відкрийте застосунок повторно.
-        </div>
-      )}
-
       {showDeveloperRoleSwitcher && (
-        <div className="fixed bottom-4 left-1/2 z-50 grid w-[calc(100%-24px)] max-w-xl -translate-x-1/2 grid-cols-5 gap-1.5 rounded-2xl border border-neutral-800 bg-neutral-950/95 p-2 shadow-2xl">
+        <div className="fixed inset-x-0 top-0 z-[100] border-b border-white/10 bg-black/80 px-4 py-2 text-center text-xs text-white/80 backdrop-blur">
+          <span className="mr-2">Тестовий режим ролей</span>
           <button
+            type="button"
             onClick={() => changeMode("guest")}
-            className={`rounded-xl px-1.5 py-2 text-[11px] font-semibold ${
-              mode === "guest"
-                ? "bg-amber-300 text-neutral-950"
-                : "bg-neutral-800 text-white"
-            }`}
+            className="mr-2 rounded-lg border border-white/20 px-2 py-1"
           >
             Гість
           </button>
-
           <button
+            type="button"
             onClick={() => changeMode("waiter")}
-            className={`rounded-xl px-1.5 py-2 text-[11px] font-semibold ${
-              mode === "waiter"
-                ? "bg-amber-300 text-neutral-950"
-                : "bg-neutral-800 text-white"
-            }`}
+            className="mr-2 rounded-lg border border-white/20 px-2 py-1"
           >
             Офіціант
           </button>
-
           <button
+            type="button"
             onClick={() => changeMode("hookah")}
-            className={`rounded-xl px-1.5 py-2 text-[11px] font-semibold ${
-              mode === "hookah"
-                ? "bg-amber-300 text-neutral-950"
-                : "bg-neutral-800 text-white"
-            }`}
+            className="mr-2 rounded-lg border border-white/20 px-2 py-1"
           >
             Кальянник
           </button>
-
           <button
+            type="button"
             onClick={() => changeMode("admin")}
-            className={`rounded-xl px-1.5 py-2 text-[11px] font-semibold ${
-              mode === "admin"
-                ? "bg-amber-300 text-neutral-950"
-                : "bg-neutral-800 text-white"
-            }`}
+            className="mr-2 rounded-lg border border-white/20 px-2 py-1"
           >
             Адмін
           </button>
-
           <button
+            type="button"
             onClick={() => changeMode("director")}
-            className={`rounded-xl px-1.5 py-2 text-[11px] font-semibold ${
-              mode === "director"
-                ? "bg-amber-300 text-neutral-950"
-                : "bg-neutral-800 text-white"
-            }`}
+            className="rounded-lg border border-white/20 px-2 py-1"
           >
             Директор
           </button>
@@ -250,29 +234,32 @@ export default function App() {
       )}
 
       <RoleLoadBoundary resetKey={mode}>
-        <Suspense fallback={null}>
-          {mode === "guest" && (
-            <>
-              <GuestApp />
-              <GuestBookingDecisionController />
-              <GuestReviewDismissController />
-            </>
-          )}
+        <Suspense
+          fallback={
+            <div className="flex min-h-screen items-center justify-center text-sm text-white/70">
+              Завантаження…
+            </div>
+          }
+        >
+          {mode === "guest" && <GuestApp />}
           {mode === "waiter" && (
-            <div className="molo-waiter-legacy-theme">
+            <>
               <WaiterCallAlertController />
               <WaiterApp />
-            </div>
+            </>
           )}
           {mode === "hookah" && <HookahApp />}
           {mode === "admin" && (
-            <div className="molo-admin-neon-theme">
+            <>
+              <GuestBookingDecisionController />
               <AdminWorkspace />
-            </div>
+            </>
           )}
           {mode === "director" && <DirectorWorkspace />}
         </Suspense>
       </RoleLoadBoundary>
+
+      {mode === "guest" && <GuestReviewDismissController />}
     </main>
   );
 }
