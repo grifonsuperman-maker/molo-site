@@ -125,3 +125,8 @@ html,body,#root{min-height:100%;margin:0;background:#10100f;}*{box-sizing:border
     animation: none;
   }
 }
+
+/* Keep the developer badge below the opening-hours line on the guest home screen. */
+a[aria-label="Telegram розробника Alex Ulquiorra"] {
+  bottom: max(8px, env(safe-area-inset-bottom)) !important;
+}
