@@ -226,13 +226,17 @@ export class StaffService implements OnModuleInit {
     director.directorCredentialsConfiguredAt = new Date();
     director.directorFailedLoginAttempts = 0;
     director.directorLockedUntil = null;
+    director.directorSessionVersion =
+      this.getDirectorSessionVersion(director) + 1;
 
+    const renewedSession = await this.issueStaffToken(director, false);
     const saved = await this.staffRepo.save(director);
 
     return {
       fullName: saved.fullName,
       loginName: saved.directorLoginName || '',
       configured: true,
+      accessToken: renewedSession.accessToken,
     };
   }
 
@@ -562,6 +566,11 @@ export class StaffService implements OnModuleInit {
       staffId: staff.id,
       role: staff.role,
       name: staff.fullName,
+      ...(staff.role === 'owner'
+        ? {
+            directorSessionVersion: this.getDirectorSessionVersion(staff),
+          }
+        : {}),
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
@@ -572,6 +581,11 @@ export class StaffService implements OnModuleInit {
       staff: this.toPublicStaff(staff),
       mustConfigureDirectorAccess,
     };
+  }
+
+  private getDirectorSessionVersion(staff: Staff): number {
+    const version = Number(staff.directorSessionVersion);
+    return Number.isInteger(version) && version > 0 ? version : 1;
   }
 
   private async assertDirectorNotLocked(director: Staff) {

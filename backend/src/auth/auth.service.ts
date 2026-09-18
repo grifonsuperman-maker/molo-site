@@ -35,6 +35,11 @@ export class AuthService {
       staffId: staff?.id || null,
       role,
       name: staff?.fullName || telegramUser.name,
+      ...(staff?.role === 'owner'
+        ? {
+            directorSessionVersion: this.getDirectorSessionVersion(staff),
+          }
+        : {}),
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
@@ -58,6 +63,17 @@ export class AuthService {
       }
       if ((staff.role === 'waiter' || staff.role === 'hookah') && !staff.isOnShift) {
         throw new UnauthorizedException('Зміну працівника завершено');
+      }
+      if (staff.role === 'owner') {
+        const tokenSessionVersion = payload.directorSessionVersion ?? 1;
+        const currentSessionVersion = this.getDirectorSessionVersion(staff);
+
+        if (
+          !Number.isInteger(tokenSessionVersion) ||
+          tokenSessionVersion !== currentSessionVersion
+        ) {
+          throw new UnauthorizedException('Сеанс Директора завершено');
+        }
       }
       return {
         ...payload,
@@ -107,5 +123,10 @@ export class AuthService {
     }
 
     throw new BadRequestException('initData Telegram відсутній');
+  }
+
+  private getDirectorSessionVersion(staff: Staff): number {
+    const version = Number(staff.directorSessionVersion);
+    return Number.isInteger(version) && version > 0 ? version : 1;
   }
 }

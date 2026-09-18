@@ -103,6 +103,7 @@ export class StaffBootstrapService implements OnModuleInit {
       directorCredentialsConfiguredAt: null,
       directorFailedLoginAttempts: 0,
       directorLockedUntil: null,
+      directorSessionVersion: 1,
       note: 'Стартовий Директор для першого входу за тимчасовим PIN',
       active: true,
       isArchived: false,

@@ -81,6 +81,13 @@ export class Staff {
   @Column({ name: 'director_locked_until', type: 'timestamp', nullable: true })
   directorLockedUntil: Date | null;
 
+  @Column({
+    name: 'director_session_version',
+    type: 'integer',
+    default: 1,
+  })
+  directorSessionVersion: number;
+
   @Column({ type: 'text', nullable: true })
   note: string | null;
 

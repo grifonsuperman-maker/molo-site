@@ -102,6 +102,11 @@ export class TelegramStaffLinkService {
       staffId: saved.id,
       role: saved.role,
       name: saved.fullName,
+      ...(saved.role === 'owner'
+        ? {
+            directorSessionVersion: this.getDirectorSessionVersion(saved),
+          }
+        : {}),
     };
     const accessToken = await this.jwtService.signAsync(payload);
 
@@ -121,6 +126,11 @@ export class TelegramStaffLinkService {
         isArchived: false,
       },
     });
+  }
+
+  private getDirectorSessionVersion(staff: Staff): number {
+    const version = Number(staff.directorSessionVersion);
+    return Number.isInteger(version) && version > 0 ? version : 1;
   }
 
   private async consumeInviteAtomically(rawToken: string, telegramId: string) {

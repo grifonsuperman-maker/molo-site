@@ -16,6 +16,7 @@ function createDirector(overrides = {}) {
     directorCredentialsConfiguredAt: null,
     directorFailedLoginAttempts: 0,
     directorLockedUntil: null,
+    directorSessionVersion: 1,
     note: null,
     active: true,
     isArchived: false,
@@ -67,12 +68,17 @@ function createService(director = createDirector()) {
     create: (value) => value,
   };
 
+  const signedPayloads = [];
   const jwtService = {
-    signAsync: async () => 'director-token',
+    signAsync: async (payload) => {
+      signedPayloads.push(payload);
+      return 'director-token';
+    },
   };
 
   return {
     director,
+    signedPayloads,
     service: new StaffService(repository, shiftRepository, jwtService),
   };
 }
@@ -106,7 +112,7 @@ test('wrong temporary PIN is counted and does not open Director panel', async ()
 });
 
 test('saving Director name and password disables temporary PIN', async () => {
-  const { service, director } = createService();
+  const { service, director, signedPayloads } = createService();
 
   const settings = await service.updateDirectorAccess(
     {
@@ -126,6 +132,9 @@ test('saving Director name and password disables temporary PIN', async () => {
 
   assert.equal(settings.configured, true);
   assert.equal(settings.loginName, 'director');
+  assert.equal(settings.accessToken, 'director-token');
+  assert.equal(director.directorSessionVersion, 2);
+  assert.equal(signedPayloads.at(-1).directorSessionVersion, 2);
   assert.ok(director.directorPasswordHash);
 
   await assert.rejects(
@@ -159,7 +168,7 @@ test('legacy staff PIN route cannot be used by Director', async () => {
 });
 
 test('changing configured Director credentials requires current password', async () => {
-  const { service, director } = createService();
+  const { service, director, signedPayloads } = createService();
   const user = {
     sub: director.id,
     staffId: director.id,
@@ -197,6 +206,9 @@ test('changing configured Director credentials requires current password', async
 
   assert.equal(updated.fullName, 'Новий Директор');
   assert.equal(updated.loginName, 'new-director');
+  assert.equal(updated.accessToken, 'director-token');
+  assert.equal(director.directorSessionVersion, 3);
+  assert.equal(signedPayloads.at(-1).directorSessionVersion, 3);
 });
 
 test('Director login is locked for 15 minutes after five wrong passwords', async () => {
