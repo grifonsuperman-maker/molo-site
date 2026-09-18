@@ -94,9 +94,16 @@ export class TelegramStaffLinkService {
   async confirmInvite(dto: ConfirmTelegramStaffLinkDto) {
     const telegramUser = this.verifyTelegramUser(dto.initData);
     const staffForCredentialCheck = await this.resolveInvite(dto.token);
-    await this.assertCredential(staffForCredentialCheck, dto);
+    const verifiedDirectorSessionVersion = await this.assertCredential(
+      staffForCredentialCheck,
+      dto,
+    );
 
-    const saved = await this.consumeInviteAtomically(dto.token, telegramUser.id);
+    const saved = await this.consumeInviteAtomically(
+      dto.token,
+      telegramUser.id,
+      verifiedDirectorSessionVersion,
+    );
     const payload: AuthUser = {
       sub: saved.id,
       telegramId: telegramUser.id,
@@ -127,7 +134,11 @@ export class TelegramStaffLinkService {
     });
   }
 
-  private async consumeInviteAtomically(rawToken: string, telegramId: string) {
+  private async consumeInviteAtomically(
+    rawToken: string,
+    telegramId: string,
+    verifiedDirectorSessionVersion?: number,
+  ) {
     const token = this.normalizeToken(rawToken);
     const tokenHash = this.hashToken(token);
 
@@ -141,6 +152,15 @@ export class TelegramStaffLinkService {
           .getOne();
 
         this.assertInviteUsable(staff);
+
+        if (
+          staff.role === 'owner' &&
+          directorSessionVersion(staff) !== verifiedDirectorSessionVersion
+        ) {
+          throw new UnauthorizedException(
+            'Дані входу Директора змінено. Введіть актуальний пароль',
+          );
+        }
 
         const alreadyLinked = await manager.getRepository(Staff).findOne({
           where: { telegramId },
@@ -240,8 +260,7 @@ export class TelegramStaffLinkService {
     dto: ConfirmTelegramStaffLinkDto,
   ) {
     if (staff.role === 'owner') {
-      await this.assertDirectorCredentialAtomically(dto.token, dto.password);
-      return;
+      return this.assertDirectorCredentialAtomically(dto.token, dto.password);
     }
 
     if (!staff.pinHash) {
@@ -353,10 +372,14 @@ export class TelegramStaffLinkService {
         await repository.save(director);
       }
 
-      return { error: null };
+      return {
+        error: null,
+        verifiedDirectorSessionVersion: directorSessionVersion(director),
+      };
     });
 
     if (result.error) throw result.error;
+    return result.verifiedDirectorSessionVersion;
   }
 
   private verifyTelegramUser(initData: string) {

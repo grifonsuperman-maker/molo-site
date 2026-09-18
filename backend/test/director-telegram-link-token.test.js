@@ -30,7 +30,9 @@ async function issueInviteToken(staff) {
   // and credential checks. These stubs must not bypass verification in production.
   linker.verifyTelegramUser = () => ({ id: staff.telegramId });
   linker.resolveInvite = async () => ({ ...staff });
-  linker.assertCredential = async () => {};
+  linker.assertCredential = async () => staff.role === 'owner'
+    ? staff.directorCredentialsConfiguredAt.getTime()
+    : undefined;
   linker.consumeInviteAtomically = async () => ({ ...staff });
   const result = await linker.confirmInvite({ token: 'invite', initData: 'verified' });
   return { result, auth: new AuthService(repository, jwt) };

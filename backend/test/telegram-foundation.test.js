@@ -93,7 +93,11 @@ function createSingleStaffRepository(staff, lockCalls, transactionState) {
   repo.manager = {
     async transaction(callback) {
       transactionState.count += 1;
-      return callback(manager);
+      const result = await callback(manager);
+      if (transactionState.afterTransaction) {
+        await transactionState.afterTransaction(transactionState.count);
+      }
+      return result;
     },
   };
 
@@ -500,6 +504,129 @@ test('director Telegram invite enforces the existing five-attempt lockout state'
       /Повторіть через/,
     );
     assert.equal(director.telegramId, null);
+  } finally {
+    if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = previousToken;
+  }
+});
+
+test('director Telegram invite rejects a password rotated after credential verification without consuming the invite', async () => {
+  const previousToken = process.env.TELEGRAM_BOT_TOKEN;
+  process.env.TELEGRAM_BOT_TOKEN = '123456:test-token';
+  const transactionState = { count: 0 };
+  const originalVersion = new Date('2026-09-18T10:00:00.000Z');
+  const rotatedVersion = new Date('2026-09-18T10:00:00.001Z');
+  const director = {
+    id: '33333333-3333-4333-8333-333333333333',
+    fullName: 'Директор',
+    role: 'owner',
+    active: true,
+    isArchived: false,
+    telegramId: null,
+    telegramInviteTokenHash: null,
+    telegramInviteExpiresAt: null,
+    pinHash: null,
+    directorPasswordHash: await hash('old-password', 4),
+    directorCredentialsConfiguredAt: originalVersion,
+    directorFailedLoginAttempts: 0,
+    directorLockedUntil: null,
+  };
+  const repo = createSingleStaffRepository(director, [], transactionState);
+  let issuedTokens = 0;
+  const service = new TelegramStaffLinkService(
+    repo,
+    { async signAsync() { issuedTokens += 1; return 'director-jwt'; } },
+    { async getBotUsername() { return 'molo_restaurant_bot'; } },
+  );
+
+  try {
+    const invite = await service.createInvite(director.id);
+    const startParam = new URL(invite.inviteUrl).searchParams.get('startapp');
+    const inviteHash = director.telegramInviteTokenHash;
+    const inviteExpiry = director.telegramInviteExpiresAt;
+    const initData = createInitData({
+      botToken: '123456:test-token',
+      authDate: Math.floor(Date.now() / 1000),
+      user: { id: 999, first_name: 'Director' },
+    });
+
+    transactionState.afterTransaction = async (transactionNumber) => {
+      if (transactionNumber !== 2) return;
+      director.directorPasswordHash = await hash('new-password', 4);
+      director.directorCredentialsConfiguredAt = rotatedVersion;
+    };
+
+    await assert.rejects(
+      () => service.confirmInvite({
+        token: startParam,
+        initData,
+        password: 'old-password',
+      }),
+      /Дані входу Директора змінено/,
+    );
+    assert.equal(issuedTokens, 0);
+    assert.equal(director.telegramId, null);
+    assert.equal(director.telegramInviteTokenHash, inviteHash);
+    assert.equal(director.telegramInviteExpiresAt, inviteExpiry);
+
+    transactionState.afterTransaction = null;
+    const linked = await service.confirmInvite({
+      token: startParam,
+      initData,
+      password: 'new-password',
+    });
+    assert.equal(linked.accessToken, 'director-jwt');
+    assert.equal(linked.user.directorSessionVersion, rotatedVersion.getTime());
+    assert.equal(director.telegramId, '999');
+    assert.equal(director.telegramInviteTokenHash, null);
+    assert.equal(issuedTokens, 1);
+  } finally {
+    if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = previousToken;
+  }
+});
+
+test('director Telegram invite links normally with the current password', async () => {
+  const previousToken = process.env.TELEGRAM_BOT_TOKEN;
+  process.env.TELEGRAM_BOT_TOKEN = '123456:test-token';
+  const version = new Date('2026-09-18T11:00:00.000Z');
+  const director = {
+    id: '44444444-4444-4444-8444-444444444444',
+    fullName: 'Директор',
+    role: 'owner',
+    active: true,
+    isArchived: false,
+    telegramId: null,
+    telegramInviteTokenHash: null,
+    telegramInviteExpiresAt: null,
+    pinHash: null,
+    directorPasswordHash: await hash('current-password', 4),
+    directorCredentialsConfiguredAt: version,
+    directorFailedLoginAttempts: 0,
+    directorLockedUntil: null,
+  };
+  const repo = createSingleStaffRepository(director, [], { count: 0 });
+  const service = new TelegramStaffLinkService(
+    repo,
+    { async signAsync() { return 'director-jwt'; } },
+    { async getBotUsername() { return 'molo_restaurant_bot'; } },
+  );
+
+  try {
+    const invite = await service.createInvite(director.id);
+    const linked = await service.confirmInvite({
+      token: new URL(invite.inviteUrl).searchParams.get('startapp'),
+      initData: createInitData({
+        botToken: '123456:test-token',
+        authDate: Math.floor(Date.now() / 1000),
+        user: { id: 1000, first_name: 'Director' },
+      }),
+      password: 'current-password',
+    });
+
+    assert.equal(linked.accessToken, 'director-jwt');
+    assert.equal(linked.user.directorSessionVersion, version.getTime());
+    assert.equal(director.telegramId, '1000');
   } finally {
     if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
     else process.env.TELEGRAM_BOT_TOKEN = previousToken;
