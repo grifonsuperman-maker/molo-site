@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { compare } from 'bcryptjs';
+import { createHmac } from 'crypto';
 import { Repository } from 'typeorm';
 import { isDevAuthAllowed, resolveJwtSecret } from '../config/runtime-secrets';
 import { DirectorLoginDto } from '../staff/dto/director-login.dto';
@@ -38,7 +39,7 @@ export class AuthService {
       role,
       name: staff?.fullName || telegramUser.name,
       ...(role === 'owner'
-        ? { directorSessionVersion: staff?.directorCredentialsConfiguredAt?.getTime() ?? 0 }
+        ? { directorCredentialFingerprint: this.directorCredentialFingerprint(staff!) }
         : {}),
     };
 
@@ -50,9 +51,9 @@ export class AuthService {
     };
   }
 
-  // The regular Director login validates the password and applies lockout in StaffService.
-  // Recheck the current credential before attaching the current session version so a
-  // simultaneous password change cannot grant a fresh token to an old password.
+  // StaffService enforces the regular Director login checks and lockout.
+  // Recheck the current password before attaching the current credential fingerprint
+  // so a concurrent password change cannot authorize an old password.
   async issueDirectorSessionToken(
     login: { accessToken: string; user: AuthUser; mustConfigureDirectorAccess: boolean },
     dto: DirectorLoginDto,
@@ -83,7 +84,7 @@ export class AuthService {
 
     const user: AuthUser = {
       ...login.user,
-      directorSessionVersion: director.directorCredentialsConfiguredAt?.getTime() ?? 0,
+      directorCredentialFingerprint: this.directorCredentialFingerprint(director),
     };
 
     return {
@@ -106,9 +107,7 @@ export class AuthService {
       }
       if (
         staff.role === 'owner' &&
-        (!Number.isSafeInteger(payload.directorSessionVersion) ||
-          payload.directorSessionVersion !==
-            (staff.directorCredentialsConfiguredAt?.getTime() ?? 0))
+        payload.directorCredentialFingerprint !== this.directorCredentialFingerprint(staff)
       ) {
         throw new UnauthorizedException('Сеанс Директора завершено. Увійдіть знову');
       }
@@ -123,6 +122,13 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('Недійсний токен авторизації');
     }
+  }
+
+  private directorCredentialFingerprint(staff: Staff): string {
+    // HMAC keeps the stored bcrypt hash out of the JWT and does not need a schema change.
+    return createHmac('sha256', resolveJwtSecret())
+      .update(staff.directorPasswordHash || 'director-bootstrap')
+      .digest('hex');
   }
 
   private resolveTelegramUser(dto: TelegramAuthDto): { telegramId: string; name: string | null } {
