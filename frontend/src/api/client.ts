@@ -1,6 +1,7 @@
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 const TOKEN_KEY = 'molo_access_token';
+export const AUTH_SESSION_INVALIDATED_EVENT = 'molo:auth-session-invalidated';
 
 export function setAccessToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token);
@@ -16,7 +17,10 @@ export function getAccessToken() {
 }
 
 export function clearAccessToken() {
-  localStorage.removeItem(TOKEN_KEY);
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {}
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -40,6 +44,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const message = Array.isArray(data?.message)
       ? data.message.join('\n')
       : data?.message || 'Помилка сервера';
+
+    if (res.status === 401 && message === 'Недійсний токен авторизації') {
+      clearAccessToken();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event(AUTH_SESSION_INVALIDATED_EVENT));
+      }
+    }
 
     throw new Error(message);
   }

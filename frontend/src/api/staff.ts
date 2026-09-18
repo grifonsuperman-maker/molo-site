@@ -63,6 +63,10 @@ export type DirectorAccessSettings = {
   configured: boolean;
 };
 
+export type DirectorAccessUpdateResponse = DirectorAccessSettings & {
+  accessToken: string;
+};
+
 export type DirectorLoginPayload =
   | {
       staffId: string;
@@ -158,8 +162,15 @@ export const staffApi = {
   getDirectorAccess: () =>
     api.get<DirectorAccessSettings>('/staff/director-access'),
 
-  updateDirectorAccess: (payload: UpdateDirectorAccessPayload) =>
-    api.patch<DirectorAccessSettings>('/staff/director-access', payload),
+  updateDirectorAccess: async (payload: UpdateDirectorAccessPayload) => {
+    const result = await api.patch<DirectorAccessUpdateResponse>(
+      '/staff/director-access',
+      payload,
+    );
+
+    setAccessToken(result.accessToken);
+    return result;
+  },
 
   getLoginOptions: () =>
     api.get<StaffLoginOption[]>('/staff/login-options'),

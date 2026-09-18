@@ -9,7 +9,11 @@ import {
   UserRound,
 } from 'lucide-react';
 
-import { clearAccessToken, getAccessToken } from '../api/client';
+import {
+  AUTH_SESSION_INVALIDATED_EVENT,
+  clearAccessToken,
+  getAccessToken,
+} from '../api/client';
 import { staffApi } from '../api/staff';
 import type { DirectorAccessStatus } from '../api/staff';
 
@@ -61,6 +65,24 @@ export default function DirectorAuthGate({ children }: Props) {
     [status],
   );
   const bootstrapMode = Boolean(status && !status.configured);
+
+  useEffect(() => {
+    const handleInvalidatedSession = () => {
+      setAuthenticated(false);
+      setChecking(false);
+      setError('Сеанс завершено. Увійдіть знову.');
+    };
+
+    window.addEventListener(
+      AUTH_SESSION_INVALIDATED_EVENT,
+      handleInvalidatedSession,
+    );
+    return () =>
+      window.removeEventListener(
+        AUTH_SESSION_INVALIDATED_EVENT,
+        handleInvalidatedSession,
+      );
+  }, []);
 
   useEffect(() => {
     let active = true;

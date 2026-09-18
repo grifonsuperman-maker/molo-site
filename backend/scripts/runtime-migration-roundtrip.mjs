@@ -12,9 +12,16 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'AddGuestReviewArchive2026082200010',
   'AddLogArchive2026082400010',
   'AddManualBookingGuestName2026082400020',
+  'AddDirectorSessionVersion2026091800010',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  8: {
+    directorSessionVersionColumn: false,
+    guestNameColumn: true,
+    logArchiveTable: true,
+    reviewArchiveTable: true,
+  },
   7: {
     guestNameColumn: false,
     logArchiveTable: true,
@@ -121,6 +128,9 @@ function loadRuntimeMigrations(require) {
   const {
     AddManualBookingGuestName2026082400020,
   } = require('../dist/migrations/2026082400020-AddManualBookingGuestName.js');
+  const {
+    AddDirectorSessionVersion2026091800010,
+  } = require('../dist/migrations/2026091800010-AddDirectorSessionVersion.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -131,6 +141,7 @@ function loadRuntimeMigrations(require) {
     AddGuestReviewArchive2026082200010,
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
+    AddDirectorSessionVersion2026091800010,
   ];
 }
 
@@ -148,6 +159,13 @@ async function readRewindState(dataSource) {
       to_regclass('public.waiter_calls') IS NOT NULL AS "waiterCallsTable",
       to_regclass('public.guest_review_archives') IS NOT NULL AS "reviewArchiveTable",
       to_regclass('public.log_archives') IS NOT NULL AS "logArchiveTable",
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'staff'
+          AND column_name = 'director_session_version'
+      ) AS "directorSessionVersionColumn",
       EXISTS (
         SELECT 1
         FROM information_schema.columns

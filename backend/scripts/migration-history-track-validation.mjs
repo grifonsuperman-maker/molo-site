@@ -51,6 +51,9 @@ function loadRuntimeMigrations(require) {
   const {
     AddManualBookingGuestName2026082400020,
   } = require('../dist/migrations/2026082400020-AddManualBookingGuestName.js');
+  const {
+    AddDirectorSessionVersion2026091800010,
+  } = require('../dist/migrations/2026091800010-AddDirectorSessionVersion.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -61,6 +64,7 @@ function loadRuntimeMigrations(require) {
     AddGuestReviewArchive2026082200010,
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
+    AddDirectorSessionVersion2026091800010,
   ];
 }
 
