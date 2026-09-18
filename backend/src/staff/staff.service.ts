@@ -105,6 +105,26 @@ export class StaffService implements OnModuleInit {
   }
 
   async loginDirector(dto: DirectorLoginDto) {
+    let loginError: unknown;
+    const result = await this.staffRepo.manager.transaction(async (manager) => {
+      try {
+        const staffRepo = manager.getRepository(Staff);
+        return await this.loginDirectorWithLockedCredentials(dto, staffRepo);
+      } catch (error) {
+        // Authentication errors are raised only after the transaction commits,
+        // otherwise the failed-attempt update would be rolled back with them.
+        loginError = error;
+        return null;
+      }
+    });
+    if (loginError) throw loginError;
+    return result!;
+  }
+
+  private async loginDirectorWithLockedCredentials(
+    dto: DirectorLoginDto,
+    staffRepo: Repository<Staff>,
+  ) {
     const temporaryPin = dto.temporaryPin?.trim();
 
     if (temporaryPin !== undefined || dto.staffId) {
@@ -112,26 +132,27 @@ export class StaffService implements OnModuleInit {
         throw new BadRequestException('Оберіть Директора та введіть тимчасовий PIN');
       }
 
-      const director = await this.staffRepo.findOne({
+      const director = await staffRepo.findOne({
         where: {
           id: dto.staffId,
           role: 'owner',
           active: true,
           isArchived: false,
         },
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (!director || this.hasConfiguredDirectorAccess(director)) {
         throw new UnauthorizedException('Тимчасовий доступ недоступний');
       }
 
-      await this.assertDirectorNotLocked(director);
+      await this.assertDirectorNotLocked(director, staffRepo);
 
       if (temporaryPin !== TEMPORARY_DIRECTOR_PIN) {
-        await this.registerDirectorLoginFailure(director);
+        await this.registerDirectorLoginFailure(director, staffRepo);
       }
 
-      await this.resetDirectorLoginProtection(director);
+      await this.resetDirectorLoginProtection(director, staffRepo);
       return this.issueStaffToken(director, true);
     }
 
@@ -142,20 +163,21 @@ export class StaffService implements OnModuleInit {
       throw new BadRequestException('Введіть ім’я та пароль Директора');
     }
 
-    const director = await this.staffRepo.findOne({
+    const director = await staffRepo.findOne({
       where: {
         directorLoginName: loginName,
         role: 'owner',
         active: true,
         isArchived: false,
       },
+      lock: { mode: 'pessimistic_write' },
     });
 
     if (!director || !director.directorPasswordHash) {
       throw new UnauthorizedException('Невірне ім’я або пароль');
     }
 
-    await this.assertDirectorNotLocked(director);
+    await this.assertDirectorNotLocked(director, staffRepo);
 
     const passwordIsValid = await compare(
       password,
@@ -163,10 +185,10 @@ export class StaffService implements OnModuleInit {
     );
 
     if (!passwordIsValid) {
-      await this.registerDirectorLoginFailure(director);
+      await this.registerDirectorLoginFailure(director, staffRepo);
     }
 
-    await this.resetDirectorLoginProtection(director);
+    await this.resetDirectorLoginProtection(director, staffRepo);
     return this.issueStaffToken(director, false);
   }
 
@@ -595,14 +617,15 @@ export class StaffService implements OnModuleInit {
     };
   }
 
-  private async assertDirectorNotLocked(director: Staff) {
+  private async assertDirectorNotLocked(
+    director: Staff,
+    staffRepo: Repository<Staff>,
+  ) {
     if (!director.directorLockedUntil) return;
 
     const lockedUntil = new Date(director.directorLockedUntil);
     if (lockedUntil.getTime() <= Date.now()) {
-      director.directorFailedLoginAttempts = 0;
-      director.directorLockedUntil = null;
-      await this.staffRepo.save(director);
+      await this.updateDirectorLoginProtection(director, staffRepo, 0, null);
       return;
     }
 
@@ -615,29 +638,45 @@ export class StaffService implements OnModuleInit {
     );
   }
 
-  private async registerDirectorLoginFailure(director: Staff): Promise<never> {
-    director.directorFailedLoginAttempts =
+  private async registerDirectorLoginFailure(
+    director: Staff,
+    staffRepo: Repository<Staff>,
+  ): Promise<never> {
+    const failedLoginAttempts =
       Number(director.directorFailedLoginAttempts || 0) + 1;
 
-    if (director.directorFailedLoginAttempts >= DIRECTOR_MAX_FAILED_ATTEMPTS) {
-      director.directorLockedUntil = new Date(
+    if (failedLoginAttempts >= DIRECTOR_MAX_FAILED_ATTEMPTS) {
+      const lockedUntil = new Date(
         Date.now() + DIRECTOR_LOCK_MINUTES * 60_000,
       );
-      await this.staffRepo.save(director);
+      await this.updateDirectorLoginProtection(
+        director,
+        staffRepo,
+        failedLoginAttempts,
+        lockedUntil,
+      );
       throw new UnauthorizedException(
         `Забагато невдалих спроб. Вхід заблоковано на ${DIRECTOR_LOCK_MINUTES} хв.`,
       );
     }
 
-    await this.staffRepo.save(director);
+    await this.updateDirectorLoginProtection(
+      director,
+      staffRepo,
+      failedLoginAttempts,
+      null,
+    );
     const attemptsLeft =
-      DIRECTOR_MAX_FAILED_ATTEMPTS - director.directorFailedLoginAttempts;
+      DIRECTOR_MAX_FAILED_ATTEMPTS - failedLoginAttempts;
     throw new UnauthorizedException(
       `Невірні дані входу. Залишилось спроб: ${attemptsLeft}`,
     );
   }
 
-  private async resetDirectorLoginProtection(director: Staff) {
+  private async resetDirectorLoginProtection(
+    director: Staff,
+    staffRepo: Repository<Staff>,
+  ) {
     if (
       !director.directorFailedLoginAttempts &&
       !director.directorLockedUntil
@@ -645,9 +684,37 @@ export class StaffService implements OnModuleInit {
       return;
     }
 
-    director.directorFailedLoginAttempts = 0;
-    director.directorLockedUntil = null;
-    await this.staffRepo.save(director);
+    await this.updateDirectorLoginProtection(director, staffRepo, 0, null);
+  }
+
+  private async updateDirectorLoginProtection(
+    director: Staff,
+    staffRepo: Repository<Staff>,
+    failedLoginAttempts: number,
+    lockedUntil: Date | null,
+  ) {
+    const result = await staffRepo.update(
+      {
+        id: director.id,
+        role: 'owner',
+        active: true,
+        isArchived: false,
+        directorCredentialsConfiguredAt:
+          director.directorCredentialsConfiguredAt ?? IsNull(),
+      },
+      {
+        directorFailedLoginAttempts: failedLoginAttempts,
+        directorLockedUntil: lockedUntil,
+      },
+    );
+    if (result.affected !== 1) {
+      throw new UnauthorizedException(
+        'Дані входу Директора змінено. Увійдіть знову',
+      );
+    }
+
+    director.directorFailedLoginAttempts = failedLoginAttempts;
+    director.directorLockedUntil = lockedUntil;
   }
 
   private async getAuthenticatedDirector(user?: AuthUser) {

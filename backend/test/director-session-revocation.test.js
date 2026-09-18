@@ -65,6 +65,9 @@ function setup(director = makeStaff()) {
       return { affected: 1 };
     },
   };
+  repo.manager = {
+    transaction: async (callback) => callback({ getRepository: () => repo }),
+  };
   const shifts = { find: async () => [], save: async (event) => event, create: (event) => event };
   const jwt = {
     signAsync: async (payload) => JSON.stringify(payload),
