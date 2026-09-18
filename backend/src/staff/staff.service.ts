@@ -269,7 +269,18 @@ export class StaffService implements OnModuleInit {
       throw new ConflictException('Дані входу Директора вже змінено. Увійдіть знову');
     }
 
-    const saved = await this.getAuthenticatedDirector(user);
+    // Sign exactly the version written by this CAS. Do not reload the row here:
+    // another successful rotation may commit between our UPDATE and signing.
+    // A token carrying that later rotation's version would then outlive the
+    // credentials that this request actually installed.
+    const saved = {
+      ...director,
+      fullName: dto.fullName.trim(),
+      directorLoginName: loginName,
+      directorCredentialsConfiguredAt: nextCredentialsConfiguredAt,
+      directorFailedLoginAttempts: 0,
+      directorLockedUntil: null,
+    };
     const { accessToken } = await this.issueStaffToken(saved, false);
 
     return {

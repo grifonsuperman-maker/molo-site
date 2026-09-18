@@ -35,6 +35,8 @@ function createDirector(overrides = {}) {
 
 function createService(director = createDirector()) {
   let transactionTail = Promise.resolve();
+  let afterDirectorUpdate;
+  const signedPayloads = [];
   let notifyTransactionStarted;
   const transactionStarted = new Promise((resolve) => {
     notifyTransactionStarted = resolve;
@@ -79,7 +81,13 @@ function createService(director = createDirector()) {
     save: async (value) => value,
     update: async (where, values) => {
       await transactionTail;
-      return updateDirector(where, values);
+      const result = await updateDirector(where, values);
+      if (result.affected === 1 && afterDirectorUpdate) {
+        const callback = afterDirectorUpdate;
+        afterDirectorUpdate = undefined;
+        await callback();
+      }
+      return result;
     },
     create: (value) => value,
   };
@@ -109,12 +117,17 @@ function createService(director = createDirector()) {
   };
 
   const jwtService = {
-    signAsync: async () => 'director-token',
+    signAsync: async (payload) => {
+      signedPayloads.push(payload);
+      return `director-token-${payload.directorSessionVersion ?? 'unversioned'}`;
+    },
   };
 
   return {
     director,
     service: new StaffService(repository, shiftRepository, jwtService),
+    setAfterDirectorUpdate: (callback) => { afterDirectorUpdate = callback; },
+    signedPayloads,
     waitForDirectorLoginLock: () => transactionStarted,
   };
 }
@@ -127,7 +140,7 @@ test('temporary PIN 1111 opens Director panel before credentials are configured'
     temporaryPin: '1111',
   });
 
-  assert.equal(result.accessToken, 'director-token');
+  assert.match(result.accessToken, /^director-token-/);
   assert.equal(result.user.role, 'owner');
   assert.equal(result.mustConfigureDirectorAccess, true);
 });
@@ -239,6 +252,57 @@ test('changing configured Director credentials requires current password', async
 
   assert.equal(updated.fullName, 'Новий Директор');
   assert.equal(updated.loginName, 'new-director');
+});
+
+test('credential update token never adopts a later concurrent CAS version', async () => {
+  const {
+    service,
+    director,
+    setAfterDirectorUpdate,
+    signedPayloads,
+  } = createService();
+  const user = {
+    sub: director.id,
+    staffId: director.id,
+    role: 'owner',
+    name: director.fullName,
+  };
+
+  await service.updateDirectorAccess(user, {
+    fullName: director.fullName,
+    loginName: 'director',
+    newPassword: 'initial-password',
+    confirmPassword: 'initial-password',
+  });
+
+  let laterUpdate;
+  setAfterDirectorUpdate(async () => {
+    laterUpdate = await service.updateDirectorAccess(user, {
+      fullName: 'Другий Директор',
+      loginName: 'director-two',
+      currentPassword: 'password-one',
+      newPassword: 'password-two',
+      confirmPassword: 'password-two',
+    });
+  });
+
+  const firstUpdate = await service.updateDirectorAccess(user, {
+    fullName: 'Перший Директор',
+    loginName: 'director-one',
+    currentPassword: 'initial-password',
+    newPassword: 'password-one',
+    confirmPassword: 'password-one',
+  });
+
+  const firstVersion = Number(firstUpdate.accessToken.split('-').at(-1));
+  const laterVersion = Number(laterUpdate.accessToken.split('-').at(-1));
+  assert.ok(laterVersion > firstVersion);
+  assert.equal(firstUpdate.fullName, 'Перший Директор');
+  assert.equal(firstUpdate.loginName, 'director-one');
+  assert.equal(director.fullName, 'Другий Директор');
+  assert.equal(director.directorCredentialsConfiguredAt.getTime(), laterVersion);
+  assert.equal(signedPayloads.at(-1).directorSessionVersion, firstVersion);
+  assert.notEqual(firstVersion, director.directorCredentialsConfiguredAt.getTime());
 });
 
 test('Director login is locked for 15 minutes after five wrong passwords', async () => {
