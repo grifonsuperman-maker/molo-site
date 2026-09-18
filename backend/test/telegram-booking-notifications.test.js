@@ -48,6 +48,19 @@ const booking = {
   },
 };
 
+test('guest and manual booking wishes cannot inject Telegram HTML', async () => {
+  const { sent, service } = createNotificationsService();
+  const input = { ...booking, wishes: 'Місце <біля вікна> & <b>тихо</b>' };
+  await service.notifyNewBooking(input);
+  await service.notifyManualBookingCreated(input);
+  assert.equal(sent.length, 3);
+  for (const [, text] of sent) {
+    assert.ok(text.includes('Місце &lt;біля вікна&gt; &amp; &lt;b&gt;тихо&lt;/b&gt;'));
+    assert.ok(!text.includes('<біля вікна>'));
+    assert.ok(text.includes('<b>Нове бронювання</b>'));
+  }
+});
+
 test('booking Telegram notifications keep phone text without broken callbacks', async () => {
   const { sent, service } = createNotificationsService();
 
