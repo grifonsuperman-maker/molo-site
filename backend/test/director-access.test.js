@@ -58,6 +58,20 @@ function createService(director = createDirector()) {
       return director;
     },
     save: async (value) => value,
+    update: async (where, values) => {
+      if (where.id !== director.id || where.role !== director.role ||
+          where.active !== director.active || where.isArchived !== director.isArchived) {
+        return { affected: 0 };
+      }
+      const previous = where.directorCredentialsConfiguredAt;
+      const versionMatches = previous?._type === 'isNull'
+        ? director.directorCredentialsConfiguredAt === null
+        : previous instanceof Date && director.directorCredentialsConfiguredAt instanceof Date &&
+          previous.getTime() === director.directorCredentialsConfiguredAt.getTime();
+      if (!versionMatches) return { affected: 0 };
+      Object.assign(director, values);
+      return { affected: 1 };
+    },
     create: (value) => value,
   };
 
