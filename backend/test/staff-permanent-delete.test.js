@@ -3,13 +3,24 @@ const test = require('node:test');
 
 const { StaffService } = require('../dist/staff/staff.service.js');
 
-function createService(staff) {
+function createService(staff, { promoteAfterRead = false } = {}) {
   const removed = [];
   const staffRepo = {
-    findOne: async () => staff,
-    remove: async (value) => {
-      removed.push(value);
-      return value;
+    findOne: async () => {
+      if (!promoteAfterRead) return staff;
+      const snapshot = { ...staff };
+      staff.role = 'owner';
+      return snapshot;
+    },
+    delete: async (where) => {
+      if (where.id !== staff.id || where.role !== staff.role || where.isArchived !== staff.isArchived) {
+        return { affected: 0 };
+      }
+      removed.push(staff);
+      return { affected: 1 };
+    },
+    remove: async () => {
+      throw new Error('Deletion must check the current role in the database');
     },
   };
 
@@ -48,5 +59,17 @@ test('never permanently deletes a Director account', async () => {
     () => service.deletePermanently(staff.id),
     /Директора не можна видалити назавжди/,
   );
+  assert.deepEqual(removed, []);
+});
+
+test('cannot delete an employee promoted to Director after the initial read', async () => {
+  const staff = { id: 'waiter-1', role: 'waiter', isArchived: true };
+  const { service, removed } = createService(staff, { promoteAfterRead: true });
+
+  await assert.rejects(
+    () => service.deletePermanently(staff.id),
+    /Дані працівника змінилися/,
+  );
+  assert.equal(staff.role, 'owner');
   assert.deepEqual(removed, []);
 });
