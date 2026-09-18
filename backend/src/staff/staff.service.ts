@@ -324,40 +324,56 @@ export class StaffService implements OnModuleInit {
 
   async update(id: string, dto: UpdateStaffDto) {
     const staff = await this.getStaffOrThrow(id);
+    const wasDirector = staff.role === 'owner';
     const { pin, ...fields } = dto;
+    const changes: Partial<Staff> = {};
 
     if (fields.fullName !== undefined) {
       staff.fullName = fields.fullName.trim();
+      changes.fullName = staff.fullName;
     }
 
     if (fields.phone !== undefined) {
       staff.phone = fields.phone?.trim() || null;
+      changes.phone = staff.phone;
     }
 
     if (fields.telegramId !== undefined) {
       staff.telegramId = fields.telegramId?.trim() || null;
+      changes.telegramId = staff.telegramId;
     }
 
     if (fields.role !== undefined) {
       staff.role = fields.role;
+      changes.role = staff.role;
     }
 
     if (fields.note !== undefined) {
       staff.note = fields.note?.trim() || null;
+      changes.note = staff.note;
     }
 
     if (pin !== undefined) {
       staff.pinHash = await hash(pin, 10);
+      changes.pinHash = staff.pinHash;
     }
 
-    const saved = await this.staffRepo.save(staff);
+    // Generic staff editing must never save the full, potentially stale
+    // Director record: that would restore an old password and JWT version.
+    const saved = wasDirector
+      ? Object.keys(changes).length
+        ? await this.updateDirectorStaffFields(id, changes)
+        : await this.getStaffOrThrow(id)
+      : await this.staffRepo.save(staff);
     return this.toPublicStaff(saved);
   }
 
   async changePin(id: string, pin: string) {
     const staff = await this.getStaffOrThrow(id);
     staff.pinHash = await hash(pin, 10);
-    const saved = await this.staffRepo.save(staff);
+    const saved = staff.role === 'owner'
+      ? await this.updateDirectorStaffFields(id, { pinHash: staff.pinHash })
+      : await this.staffRepo.save(staff);
     return this.toPublicStaff(saved);
   }
 
@@ -487,7 +503,9 @@ export class StaffService implements OnModuleInit {
     }
 
     staff.active = active;
-    const saved = await this.staffRepo.save(staff);
+    const saved = staff.role === 'owner'
+      ? await this.updateDirectorStaffFields(id, { active })
+      : await this.staffRepo.save(staff);
     return this.toPublicStaff(saved);
   }
 
@@ -499,8 +517,7 @@ export class StaffService implements OnModuleInit {
     }
 
     if (staff.isOnShift) {
-      await this.finishShift(
-        staff, 'shift_ended', dto.performedBy, 'Зміну завершено перед архівуванням');
+      await this.finishShift(staff, 'shift_ended', dto.performedBy, 'Зміну завершено перед архівуванням');
     }
 
     staff.active = false;
@@ -508,7 +525,14 @@ export class StaffService implements OnModuleInit {
     staff.archivedAt = new Date();
     staff.archivedBy = dto.performedBy?.trim() || null;
 
-    const saved = await this.staffRepo.save(staff);
+    const saved = staff.role === 'owner'
+      ? await this.updateDirectorStaffFields(id, {
+          active: false,
+          isArchived: true,
+          archivedAt: staff.archivedAt,
+          archivedBy: staff.archivedBy,
+        })
+      : await this.staffRepo.save(staff);
 
     await this.saveShiftEvent(
       saved,
@@ -532,7 +556,14 @@ export class StaffService implements OnModuleInit {
     staff.archivedAt = null;
     staff.archivedBy = null;
 
-    const saved = await this.staffRepo.save(staff);
+    const saved = staff.role === 'owner'
+      ? await this.updateDirectorStaffFields(id, {
+          active: true,
+          isArchived: false,
+          archivedAt: null,
+          archivedBy: null,
+        })
+      : await this.staffRepo.save(staff);
 
     await this.saveShiftEvent(
       saved,
@@ -762,6 +793,20 @@ export class StaffService implements OnModuleInit {
     return value?.trim().toLowerCase() || '';
   }
 
+  // Only explicit non-credential columns may be updated by generic Director
+  // staff operations. A full-entity save made from a stale read could restore
+  // a revoked password hash and JWT version after a successful rotation.
+  private async updateDirectorStaffFields(
+    id: string,
+    changes: Partial<Staff>,
+  ): Promise<Staff> {
+    const result = await this.staffRepo.update({ id, role: 'owner' }, changes);
+    if (result.affected !== 1) {
+      throw new ConflictException('Дані Директора змінилися. Оновіть сторінку');
+    }
+    return this.getStaffOrThrow(id);
+  }
+
   private async finishShift(
     staff: Staff,
     eventType: 'shift_ended' | 'shift_auto_ended',
@@ -772,7 +817,14 @@ export class StaffService implements OnModuleInit {
     staff.shiftEndedAt = new Date();
     staff.shiftEndedBy = performedBy?.trim() || null;
 
-    const saved = await this.staffRepo.save(staff);
+    const saved = staff.role === 'owner'
+      ? await this.updateDirectorStaffFields(staff.id, {
+          isOnShift: false,
+          shiftEndedAt: staff.shiftEndedAt,
+          shiftEndedBy: staff.shiftEndedBy,
+          lastAutoShiftEndDate: staff.lastAutoShiftEndDate,
+        })
+      : await this.staffRepo.save(staff);
 
     await this.saveShiftEvent(
       saved,
@@ -852,7 +904,6 @@ export class StaffService implements OnModuleInit {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
-      minute: '2-digit',
       hourCycle: 'h23',
     }).formatToParts(now);
     const value = (type: Intl.DateTimeFormatPartTypes) =>
