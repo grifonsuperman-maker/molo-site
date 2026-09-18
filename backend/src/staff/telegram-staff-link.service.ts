@@ -199,9 +199,10 @@ export class TelegramStaffLinkService {
       throw new UnauthorizedException('Посилання для прив’язки недійсне');
     }
 
+    const tokenHash = this.hashToken(token);
     const staff = await this.staffRepo.findOne({
       where: {
-        telegramInviteTokenHash: this.hashToken(token),
+        telegramInviteTokenHash: tokenHash,
       },
     });
 
@@ -220,9 +221,14 @@ export class TelegramStaffLinkService {
           staff.telegramInviteExpiresAt.getTime() < Date.now() ||
           staff.telegramId)
       ) {
-        staff.telegramInviteTokenHash = null;
-        staff.telegramInviteExpiresAt = null;
-        await this.staffRepo.save(staff);
+        // A public expired-invite request may have loaded this entity before
+        // the Director rotated credentials or a newer invite was issued.
+        // Clear only the invite fields, and only if this is still that invite.
+        // Never save a potentially stale full Staff entity here.
+        await this.staffRepo.update(
+          { id: staff.id, telegramInviteTokenHash: tokenHash },
+          { telegramInviteTokenHash: null, telegramInviteExpiresAt: null },
+        );
       }
       throw error;
     }
