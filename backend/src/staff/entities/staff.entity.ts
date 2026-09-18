@@ -104,7 +104,7 @@ export class Staff {
   shiftStartedAt: Date | null;
 
   @Column({ name: 'shift_started_by', type: 'varchar', nullable: true })
-  shiftStartedBy: Date | null;
+  shiftStartedBy: string | null;
 
   @Column({ name: 'shift_ended_at', type: 'timestamp', nullable: true })
   shiftEndedAt: Date | null;
