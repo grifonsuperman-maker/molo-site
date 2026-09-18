@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { isDevAuthAllowed, resolveJwtSecret } from '../config/runtime-secrets';
 import { Staff } from '../staff/entities/staff.entity';
 import { TelegramAuthDto } from './dto/telegram-auth.dto';
+import { directorSessionVersion } from './director-session-version';
 import { AuthRole, AuthUser } from './types/auth-user.type';
 import {
   DEFAULT_TELEGRAM_INIT_DATA_MAX_AGE_SECONDS,
@@ -35,6 +36,9 @@ export class AuthService {
       staffId: staff?.id || null,
       role,
       name: staff?.fullName || telegramUser.name,
+      ...(role === 'owner' && staff
+        ? { directorSessionVersion: directorSessionVersion(staff) }
+        : {}),
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
@@ -50,7 +54,14 @@ export class AuthService {
       const payload = await this.jwtService.verifyAsync<AuthUser>(token, {
         secret: resolveJwtSecret(),
       });
-      if (!payload.staffId) return payload;
+      if (!payload.staffId) {
+        // A Director JWT must always carry the staff identity used for the
+        // persisted session-version check, including legacy tokens.
+        if (payload.role === 'owner') {
+          throw new UnauthorizedException('Недійсний вхід Директора');
+        }
+        return payload;
+      }
 
       const staff = await this.staffRepo.findOne({ where: { id: payload.staffId } });
       if (!staff || !staff.active || staff.isArchived) {
@@ -58,6 +69,14 @@ export class AuthService {
       }
       if ((staff.role === 'waiter' || staff.role === 'hookah') && !staff.isOnShift) {
         throw new UnauthorizedException('Зміну працівника завершено');
+      }
+      if (
+        staff.role === 'owner' &&
+        payload.directorSessionVersion !== directorSessionVersion(staff)
+      ) {
+        // Missing versions in previously issued JWTs fail closed. Never use
+        // the JWT's role as a reason to skip checking a current Director.
+        throw new UnauthorizedException('Вхід Директора застарів. Увійдіть знову');
       }
       return {
         ...payload,
