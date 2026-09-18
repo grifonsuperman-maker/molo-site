@@ -10,7 +10,8 @@ import { Cron } from '@nestjs/schedule';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { compare, hash } from 'bcryptjs';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
+import { directorSessionVersion, nextDirectorCredentialsTimestamp } from '../auth/director-session-version';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { DirectorLoginDto } from './dto/director-login.dto';
 import { StaffPinLoginDto } from './dto/staff-pin-login.dto';
@@ -220,19 +221,40 @@ export class StaffService implements OnModuleInit {
       throw new ConflictException('Це ім’я для входу вже використовується');
     }
 
-    director.fullName = dto.fullName.trim();
-    director.directorLoginName = loginName;
-    director.directorPasswordHash = await hash(dto.newPassword, 10);
-    director.directorCredentialsConfiguredAt = new Date();
-    director.directorFailedLoginAttempts = 0;
-    director.directorLockedUntil = null;
+    // Compare-and-swap at database level: simultaneous requests must not
+    // overwrite one another or accidentally share a session version.
+    const nextCredentialsConfiguredAt = nextDirectorCredentialsTimestamp(
+      director.directorCredentialsConfiguredAt,
+    );
+    const result = await this.staffRepo.update(
+      {
+        id: director.id,
+        role: 'owner',
+        active: true,
+        isArchived: false,
+        directorCredentialsConfiguredAt: director.directorCredentialsConfiguredAt ?? IsNull(),
+      },
+      {
+        fullName: dto.fullName.trim(),
+        directorLoginName: loginName,
+        directorPasswordHash: await hash(dto.newPassword, 10),
+        directorCredentialsConfiguredAt: nextCredentialsConfiguredAt,
+        directorFailedLoginAttempts: 0,
+        directorLockedUntil: null,
+      },
+    );
+    if (result.affected !== 1) {
+      throw new ConflictException('Дані входу Директора вже змінено. Увійдіть знову');
+    }
 
-    const saved = await this.staffRepo.save(director);
+    const saved = await this.getAuthenticatedDirector(user);
+    const { accessToken } = await this.issueStaffToken(saved, false);
 
     return {
       fullName: saved.fullName,
       loginName: saved.directorLoginName || '',
       configured: true,
+      accessToken,
     };
   }
 
@@ -445,11 +467,7 @@ export class StaffService implements OnModuleInit {
 
     if (staff.isOnShift) {
       await this.finishShift(
-        staff,
-        'shift_ended',
-        dto.performedBy,
-        'Зміну завершено перед архівуванням',
-      );
+        staff, 'shift_ended', dto.performedBy, 'Зміну завершено перед архівуванням');
     }
 
     staff.active = false;
@@ -562,6 +580,9 @@ export class StaffService implements OnModuleInit {
       staffId: staff.id,
       role: staff.role,
       name: staff.fullName,
+      ...(staff.role === 'owner'
+        ? { directorSessionVersion: directorSessionVersion(staff) }
+        : {}),
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
