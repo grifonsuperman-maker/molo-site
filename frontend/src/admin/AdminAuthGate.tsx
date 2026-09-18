@@ -172,8 +172,8 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
   if (authState === 'authenticated' && user) {
     return (
       <>
-        <div className="border-b border-white/10 bg-neutral-950 px-4 py-3 text-white">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+        <div className="sticky top-0 z-[70] h-16 border-b border-white/10 bg-neutral-950 px-4 text-white">
+          <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-black">
                 {user.name || 'Адміністратор'}
@@ -258,7 +258,7 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
               maxLength={6}
               placeholder="••••••"
               disabled={submitting}
-              className="w-full rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3 text-center text-2xl font-black tracking-[0.4em] text-white outline-none transition placeholder:text-white/20 focus:border-amber-300 disabled:opacity-50"
+              className="w-full rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3 text-center text-2xl font-black tracking-[0.4em] text-white outline-none transition placeholder:text-white/20 focus:border-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
             />
           </label>
 
