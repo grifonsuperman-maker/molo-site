@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 
+import { AuthService } from '../auth/auth.service';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -45,6 +46,7 @@ export class StaffController {
     private readonly permissions: AdminPermissionsService,
     private readonly telegramLinks: TelegramStaffLinkService,
     private readonly pinThrottle: StaffPinThrottleService,
+    private readonly authService: AuthService,
   ) {}
 
   @Public()
@@ -55,8 +57,9 @@ export class StaffController {
 
   @Public()
   @Post('director-access/login')
-  loginDirector(@Body() dto: DirectorLoginDto) {
-    return this.service.loginDirector(dto);
+  async loginDirector(@Body() dto: DirectorLoginDto) {
+    const login = await this.service.loginDirector(dto);
+    return this.authService.issueDirectorSessionToken(login, dto);
   }
 
   @Roles('owner')
