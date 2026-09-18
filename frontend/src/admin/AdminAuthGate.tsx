@@ -172,8 +172,8 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
   if (authState === 'authenticated' && user) {
     return (
       <>
-        <div className="border-b border-white/10 bg-neutral-950 px-4 py-3 text-white">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+        <div className="sticky top-0 z-[70] h-16 border-b border-white/10 bg-neutral-950 px-4 text-white">
+          <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-black">
                 {user.name || 'Адміністратор'}
