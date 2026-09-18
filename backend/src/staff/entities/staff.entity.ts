@@ -72,6 +72,13 @@ export class Staff {
   directorCredentialsConfiguredAt: Date | null;
 
   @Column({
+    name: 'director_session_version',
+    type: 'integer',
+    default: 1,
+  })
+  directorSessionVersion: number;
+
+  @Column({
     name: 'director_failed_login_attempts',
     type: 'integer',
     default: 0,
@@ -97,7 +104,7 @@ export class Staff {
   shiftStartedAt: Date | null;
 
   @Column({ name: 'shift_started_by', type: 'varchar', nullable: true })
-  shiftStartedBy: string | null;
+  shiftStartedBy: Date | null;
 
   @Column({ name: 'shift_ended_at', type: 'timestamp', nullable: true })
   shiftEndedAt: Date | null;
