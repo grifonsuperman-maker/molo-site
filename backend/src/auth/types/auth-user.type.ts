@@ -11,5 +11,5 @@ export type AuthUser = {
   role: AuthRole;
   staffId?: string | null;
   name?: string | null;
-  directorSessionVersion?: number;
+  directorCredentialFingerprint?: string;
 };
