@@ -11,6 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { compare, hash } from 'bcryptjs';
 import { Repository } from 'typeorm';
+import { directorSessionVersion, nextDirectorCredentialsTimestamp } from '../auth/director-session-version';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { DirectorLoginDto } from './dto/director-login.dto';
 import { StaffPinLoginDto } from './dto/staff-pin-login.dto';
@@ -223,16 +224,22 @@ export class StaffService implements OnModuleInit {
     director.fullName = dto.fullName.trim();
     director.directorLoginName = loginName;
     director.directorPasswordHash = await hash(dto.newPassword, 10);
-    director.directorCredentialsConfiguredAt = new Date();
+    // The persisted timestamp is the session version. Increase it even if
+    // two updates occur in the same millisecond, before issuing a fresh JWT.
+    director.directorCredentialsConfiguredAt = nextDirectorCredentialsTimestamp(
+      director.directorCredentialsConfiguredAt,
+    );
     director.directorFailedLoginAttempts = 0;
     director.directorLockedUntil = null;
 
     const saved = await this.staffRepo.save(director);
+    const { accessToken } = await this.issueStaffToken(saved, false);
 
     return {
       fullName: saved.fullName,
       loginName: saved.directorLoginName || '',
       configured: true,
+      accessToken,
     };
   }
 
@@ -445,11 +452,7 @@ export class StaffService implements OnModuleInit {
 
     if (staff.isOnShift) {
       await this.finishShift(
-        staff,
-        'shift_ended',
-        dto.performedBy,
-        'Зміну завершено перед архівуванням',
-      );
+        staff, 'shift_ended', dto.performedBy, 'Зміну завершено перед архівуванням');
     }
 
     staff.active = false;
@@ -562,6 +565,9 @@ export class StaffService implements OnModuleInit {
       staffId: staff.id,
       role: staff.role,
       name: staff.fullName,
+      ...(staff.role === 'owner'
+        ? { directorSessionVersion: directorSessionVersion(staff) }
+        : {}),
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
