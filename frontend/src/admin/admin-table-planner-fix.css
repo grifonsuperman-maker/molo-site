@@ -40,3 +40,8 @@
     transform: none !important;
   }
 }
+
+/* Horizontal clipping must not create a scroll container that breaks sticky admin headers. */
+.molo-admin-neon-theme {
+  overflow-x: clip !important;
+}
