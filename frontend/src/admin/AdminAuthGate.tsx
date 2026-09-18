@@ -258,7 +258,7 @@ export default function AdminAuthGate({ children }: AdminAuthGateProps) {
               maxLength={6}
               placeholder="••••••"
               disabled={submitting}
-              className="w-full rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3 text-center text-2xl font-black tracking-[0.4em] text-white outline-none transition placeholder:text-white/20 focus:border-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3 text-center text-2xl font-black tracking-[0.4em] text-white outline-none transition placeholder:text-white/20 focus:border-amber-300 disabled:opacity-50"
             />
           </label>
 
