@@ -45,3 +45,8 @@
 .molo-admin-neon-theme {
   overflow-x: clip !important;
 }
+
+/* Keep section navigation directly beneath the 4rem-high sticky admin identity row. */
+.molo-admin-workspace > .sticky {
+  top: 4rem !important;
+}
