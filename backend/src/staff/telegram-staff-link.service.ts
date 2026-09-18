@@ -11,6 +11,7 @@ import { compare } from 'bcryptjs';
 import { createHash, randomBytes } from 'crypto';
 import { Repository } from 'typeorm';
 
+import { directorSessionVersion } from '../auth/director-session-version';
 import {
   DEFAULT_TELEGRAM_INIT_DATA_MAX_AGE_SECONDS,
   verifyTelegramInitData,
@@ -102,6 +103,9 @@ export class TelegramStaffLinkService {
       staffId: saved.id,
       role: saved.role,
       name: saved.fullName,
+      ...(saved.role === 'owner'
+        ? { directorSessionVersion: directorSessionVersion(saved) }
+        : {}),
     };
     const accessToken = await this.jwtService.signAsync(payload);
 
