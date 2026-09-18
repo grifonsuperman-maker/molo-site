@@ -8,6 +8,7 @@ import AdminStaffPanel from './AdminStaffPanel';
 import CompactAdminPanel from './CompactAdminPanel';
 import AdminTablesByLocation from './AdminTablesByLocation';
 import AdminVisualTablePlanner from './AdminVisualTablePlanner';
+import { isDeveloperRoleSwitcherPath } from '../developer/developerRoleSwitcher';
 import TelegramStaffInvitePanel from '../staff/TelegramStaffInvitePanel';
 import './admin-table-planner-fix.css';
 
@@ -139,7 +140,7 @@ export default function AdminWorkspace() {
         <style>
           {`
             .molo-admin-workspace > main > nav {
-              bottom: 82px;
+              bottom: ${isDeveloperRoleSwitcherPath(window.location.pathname) ? '82px' : 'calc(12px + env(safe-area-inset-bottom, 0px))'};
             }
 
             .molo-admin-workspace > main {
