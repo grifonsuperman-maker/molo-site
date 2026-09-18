@@ -32,6 +32,7 @@ function setup(director = makeStaff()) {
     id: '22222222-2222-4222-8222-222222222222',
     telegramId: '987654322',
     role: 'waiter',
+    directorLoginName: null,
     isOnShift: true,
   });
   const members = [director, waiter];
