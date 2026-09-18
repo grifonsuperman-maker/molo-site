@@ -72,13 +72,6 @@ export class Staff {
   directorCredentialsConfiguredAt: Date | null;
 
   @Column({
-    name: 'director_session_version',
-    type: 'integer',
-    default: 1,
-  })
-  directorSessionVersion: number;
-
-  @Column({
     name: 'director_failed_login_attempts',
     type: 'integer',
     default: 0,

@@ -23,7 +23,6 @@ import { CloseInactiveWaiterCalls2026081500020 } from './migrations/202608150002
 import { AddGuestReviewArchive2026082200010 } from './migrations/2026082200010-AddGuestReviewArchive';
 import { AddLogArchive2026082400010 } from './migrations/2026082400010-AddLogArchive';
 import { AddManualBookingGuestName2026082400020 } from './migrations/2026082400020-AddManualBookingGuestName';
-import { AddDirectorSessionVersion2026091800010 } from './migrations/2026091800010-AddDirectorSessionVersion';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -44,7 +43,6 @@ const staffPinMigrationOptions = {
     AddGuestReviewArchive2026082200010,
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
-    AddDirectorSessionVersion2026091800010,
   ],
 };
 
