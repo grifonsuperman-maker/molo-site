@@ -57,14 +57,20 @@ export class BookingExpirationService implements OnModuleInit {
         },
       });
 
-      if (expiredBookings.length === 0) {
+      const completableBookings = expiredBookings.filter(
+        (booking) => booking.status === 'pending' || Boolean(booking.checkedInAt),
+      );
+
+      // Approved bookings without check-in stay active here so the +30 minute
+      // no-show scheduler can classify them correctly, including after midnight.
+      if (completableBookings.length === 0) {
         return;
       }
 
       const completedAt = new Date();
       const affectedTableIds = new Set<string>();
 
-      for (const booking of expiredBookings) {
+      for (const booking of completableBookings) {
         booking.status = 'completed';
         booking.completedAt ??= completedAt;
 
@@ -73,7 +79,7 @@ export class BookingExpirationService implements OnModuleInit {
         }
       }
 
-      await this.bookings.save(expiredBookings);
+      await this.bookings.save(completableBookings);
 
       let releasedTables = 0;
       let preservedTables = 0;
@@ -92,7 +98,7 @@ export class BookingExpirationService implements OnModuleInit {
 
       this.logger.log(
         [
-          `Automatically completed ${expiredBookings.length} expired booking(s)`,
+          `Automatically completed ${completableBookings.length} expired booking(s)`,
           `before ${today}`,
           `released tables: ${releasedTables}`,
           `preserved tables: ${preservedTables}`,
