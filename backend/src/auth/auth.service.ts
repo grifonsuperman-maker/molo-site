@@ -1,8 +1,10 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
+import { compare } from 'bcryptjs';
 import { Repository } from 'typeorm';
 import { isDevAuthAllowed, resolveJwtSecret } from '../config/runtime-secrets';
+import { DirectorLoginDto } from '../staff/dto/director-login.dto';
 import { Staff } from '../staff/entities/staff.entity';
 import { TelegramAuthDto } from './dto/telegram-auth.dto';
 import { AuthRole, AuthUser } from './types/auth-user.type';
@@ -36,7 +38,7 @@ export class AuthService {
       role,
       name: staff?.fullName || telegramUser.name,
       ...(role === 'owner'
-        ? { directorSessionVersion: staff!.directorSessionVersion }
+        ? { directorSessionVersion: staff?.directorCredentialsConfiguredAt?.getTime() ?? 0 }
         : {}),
     };
 
@@ -45,6 +47,49 @@ export class AuthService {
     return {
       accessToken,
       user: payload,
+    };
+  }
+
+  // The regular Director login validates the password and applies lockout in StaffService.
+  // Recheck the current credential before attaching the current session version so a
+  // simultaneous password change cannot grant a fresh token to an old password.
+  async issueDirectorSessionToken(
+    login: { accessToken: string; user: AuthUser; mustConfigureDirectorAccess: boolean },
+    dto: DirectorLoginDto,
+  ) {
+    const director = await this.staffRepo.findOne({
+      where: {
+        id: login.user.staffId || login.user.sub,
+        role: 'owner',
+        active: true,
+        isArchived: false,
+      },
+    });
+    if (!director) {
+      throw new UnauthorizedException('Директора не знайдено');
+    }
+
+    if (login.mustConfigureDirectorAccess) {
+      if (director.directorLoginName || director.directorPasswordHash || director.directorCredentialsConfiguredAt) {
+        throw new UnauthorizedException('Тимчасовий доступ недоступний');
+      }
+    } else if (
+      !dto.password ||
+      !director.directorPasswordHash ||
+      !(await compare(dto.password, director.directorPasswordHash))
+    ) {
+      throw new UnauthorizedException('Невірне ім’я або пароль');
+    }
+
+    const user: AuthUser = {
+      ...login.user,
+      directorSessionVersion: director.directorCredentialsConfiguredAt?.getTime() ?? 0,
+    };
+
+    return {
+      ...login,
+      user,
+      accessToken: await this.jwtService.signAsync(user),
     };
   }
 
@@ -62,7 +107,8 @@ export class AuthService {
       if (
         staff.role === 'owner' &&
         (!Number.isSafeInteger(payload.directorSessionVersion) ||
-          payload.directorSessionVersion !== staff.directorSessionVersion)
+          payload.directorSessionVersion !==
+            (staff.directorCredentialsConfiguredAt?.getTime() ?? 0))
       ) {
         throw new UnauthorizedException('Сеанс Директора завершено. Увійдіть знову');
       }
