@@ -35,6 +35,9 @@ export class AuthService {
       staffId: staff?.id || null,
       role,
       name: staff?.fullName || telegramUser.name,
+      ...(role === 'owner'
+        ? { directorSessionVersion: staff!.directorSessionVersion }
+        : {}),
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
@@ -55,6 +58,13 @@ export class AuthService {
       const staff = await this.staffRepo.findOne({ where: { id: payload.staffId } });
       if (!staff || !staff.active || staff.isArchived) {
         throw new UnauthorizedException('Працівник заблокований або архівований');
+      }
+      if (
+        staff.role === 'owner' &&
+        (!Number.isSafeInteger(payload.directorSessionVersion) ||
+          payload.directorSessionVersion !== staff.directorSessionVersion)
+      ) {
+        throw new UnauthorizedException('Сеанс Директора завершено. Увійдіть знову');
       }
       if ((staff.role === 'waiter' || staff.role === 'hookah') && !staff.isOnShift) {
         throw new UnauthorizedException('Зміну працівника завершено');
