@@ -7,7 +7,7 @@ const { StaffService } = require('../dist/staff/staff.service.js');
 const oldVersion = new Date('2026-09-18T10:00:00.000Z');
 const newVersion = new Date('2026-09-18T10:00:00.001Z');
 
-function scenario({ role = 'owner', isArchived = false, isOnShift = false } = {}) {
+function scenario({ role = 'owner', isArchived = false, isOnShift = false, promoteAfterRead = false } = {}) {
   const row = {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     fullName: 'Директор',
@@ -38,10 +38,11 @@ function scenario({ role = 'owner', isArchived = false, isOnShift = false } = {}
   const repo = {
     async findOne({ where }) {
       if (where.id !== row.id) return null;
-      // Another request rotates the credentials after this first staff read.
+      // A concurrent rotation or promotion may happen after the staff read.
       const stale = { ...row };
-      if (!rotated) {
+      if (!rotated && (role === 'owner' || promoteAfterRead)) {
         rotated = true;
+        if (promoteAfterRead) row.role = 'owner';
         row.directorPasswordHash = 'new-password-hash';
         row.directorCredentialsConfiguredAt = newVersion;
       }
@@ -49,7 +50,6 @@ function scenario({ role = 'owner', isArchived = false, isOnShift = false } = {}
     },
     async update(where, values) {
       assert.equal(where.id, row.id);
-      assert.equal(where.role, 'owner');
       if (row.role !== where.role) return { affected: 0 };
       assert.equal(Object.hasOwn(values, 'directorPasswordHash'), false);
       assert.equal(Object.hasOwn(values, 'directorCredentialsConfiguredAt'), false);
@@ -131,10 +131,26 @@ test('ending a stale Director shift cannot restore older credentials', async () 
   assert.ok(state.row.shiftEndedAt instanceof Date);
 });
 
-test('existing waiter staff updates continue using their original save path', async () => {
+test('waiter staff update preserves the requested fields without a stale full-row save', async () => {
   const state = scenario({ role: 'waiter' });
-  await state.service.update(state.row.id, { fullName: 'Офіціант' });
-  assert.equal(state.getFullSaves(), 1);
-  assert.equal(state.narrowWrites.length, 0);
+  const updated = await state.service.update(state.row.id, { fullName: 'Офіціант' });
+  assert.equal(state.getFullSaves(), 0);
+  assert.deepEqual(state.narrowWrites, [{ fullName: 'Офіціант' }]);
+  assert.equal(updated.fullName, 'Офіціант');
   assert.equal(state.row.fullName, 'Офіціант');
+  assert.equal(state.row.role, 'waiter');
+});
+
+test('stale waiter edit cannot overwrite credentials after promotion to Director', async () => {
+  const state = scenario({ role: 'waiter', promoteAfterRead: true });
+  await assert.rejects(
+    () => state.service.update(state.row.id, { fullName: 'Старе ім’я' }),
+    /Дані працівника змінилися/,
+  );
+  assert.equal(state.row.role, 'owner');
+  assert.equal(state.row.fullName, 'Директор');
+  assert.equal(state.row.directorPasswordHash, 'new-password-hash');
+  assert.equal(state.row.directorCredentialsConfiguredAt.getTime(), newVersion.getTime());
+  assert.equal(state.getFullSaves(), 0);
+  assert.deepEqual(state.narrowWrites, []);
 });
