@@ -198,7 +198,7 @@ export const staffApi = {
     api.post<TelegramStaffInvite>(`/staff/${id}/telegram-invite`, {}),
 
   getTelegramInviteInfo: (token: string) =>
-    api.post<TelegramStaffInviteInfo>('/staff/telegram-link/info', token ? { token } : {}),
+    api.post<TelegramStaffInviteInfo>('/staff/telegram-link/info', { token }),
 
   confirmTelegramInvite: async (payload: ConfirmTelegramStaffInvitePayload) => {
     const result = await api.post<TelegramStaffLinkResponse>(
@@ -230,11 +230,11 @@ export const staffApi = {
   unblock: (id: string) =>
     api.patch<StaffMember>(`/staff/${id}/unblock`),
 
-  archive: (id: string, payload: StaffShiftActionPayload = {}) =>
-    api.post<StaffMember>(`/staff/${id}/archive`, payload),
+  archive: (id: string, dto: StaffShiftActionPayload = {}) =>
+    api.post<StaffMember>(`/staff/${id}/archive`, dto),
 
-  restore: (id: string, payload: StaffShiftActionPayload = {}) =>
-    api.post<StaffMember>(`/staff/${id}/restore`, payload),
+  restore: (id: string, dto: StaffShiftActionPayload = {}) =>
+    api.post<StaffMember>(`/staff/${id}/restore`, dto),
 
   deletePermanently: (id: string) =>
     api.delete<{ id: string }>(`/staff/${id}/permanent`),
