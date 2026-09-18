@@ -324,7 +324,7 @@ export class StaffService implements OnModuleInit {
 
   async update(id: string, dto: UpdateStaffDto) {
     const staff = await this.getStaffOrThrow(id);
-    const wasDirector = staff.role === 'owner';
+    const originalRole = staff.role;
     const { pin, ...fields } = dto;
     const changes: Partial<Staff> = {};
 
@@ -358,22 +358,21 @@ export class StaffService implements OnModuleInit {
       changes.pinHash = staff.pinHash;
     }
 
-    // Generic staff editing must never save the full, potentially stale
-    // Director record: that would restore an old password and JWT version.
-    const saved = wasDirector
-      ? Object.keys(changes).length
-        ? await this.updateDirectorStaffFields(id, changes)
-        : await this.getStaffOrThrow(id)
-      : await this.staffRepo.save(staff);
+    // Always write only the requested fields and require the original role.
+    // A stale administrator/waiter read must not overwrite a newly promoted
+    // Director's password or session version (nor demote that Director).
+    const saved = Object.keys(changes).length
+      ? await this.updateStaffFields(id, originalRole, changes)
+      : await this.getStaffOrThrow(id);
     return this.toPublicStaff(saved);
   }
 
   async changePin(id: string, pin: string) {
     const staff = await this.getStaffOrThrow(id);
     staff.pinHash = await hash(pin, 10);
-    const saved = staff.role === 'owner'
-      ? await this.updateDirectorStaffFields(id, { pinHash: staff.pinHash })
-      : await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, {
+      pinHash: staff.pinHash,
+    });
     return this.toPublicStaff(saved);
   }
 
@@ -438,7 +437,13 @@ export class StaffService implements OnModuleInit {
     staff.shiftEndedAt = null;
     staff.shiftEndedBy = null;
 
-    const saved = await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, {
+      isOnShift: true,
+      shiftStartedAt: now,
+      shiftStartedBy: staff.shiftStartedBy,
+      shiftEndedAt: null,
+      shiftEndedBy: null,
+    });
 
     await this.saveShiftEvent(
       saved,
@@ -503,9 +508,7 @@ export class StaffService implements OnModuleInit {
     }
 
     staff.active = active;
-    const saved = staff.role === 'owner'
-      ? await this.updateDirectorStaffFields(id, { active })
-      : await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, { active });
     return this.toPublicStaff(saved);
   }
 
@@ -525,14 +528,12 @@ export class StaffService implements OnModuleInit {
     staff.archivedAt = new Date();
     staff.archivedBy = dto.performedBy?.trim() || null;
 
-    const saved = staff.role === 'owner'
-      ? await this.updateDirectorStaffFields(id, {
-          active: false,
-          isArchived: true,
-          archivedAt: staff.archivedAt,
-          archivedBy: staff.archivedBy,
-        })
-      : await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, {
+      active: false,
+      isArchived: true,
+      archivedAt: staff.archivedAt,
+      archivedBy: staff.archivedBy,
+    });
 
     await this.saveShiftEvent(
       saved,
@@ -556,14 +557,12 @@ export class StaffService implements OnModuleInit {
     staff.archivedAt = null;
     staff.archivedBy = null;
 
-    const saved = staff.role === 'owner'
-      ? await this.updateDirectorStaffFields(id, {
-          active: true,
-          isArchived: false,
-          archivedAt: null,
-          archivedBy: null,
-        })
-      : await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, {
+      active: true,
+      isArchived: false,
+      archivedAt: null,
+      archivedBy: null,
+    });
 
     await this.saveShiftEvent(
       saved,
@@ -587,7 +586,15 @@ export class StaffService implements OnModuleInit {
     }
 
     const deletedId = staff.id;
-    await this.staffRepo.remove(staff);
+    // Do not delete a Director if this staff member was promoted since read.
+    const result = await this.staffRepo.delete({
+      id: deletedId,
+      role: staff.role,
+      isArchived: true,
+    });
+    if (result.affected !== 1) {
+      throw new ConflictException('Дані працівника змінилися. Оновіть сторінку');
+    }
     return { id: deletedId };
   }
 
@@ -793,16 +800,21 @@ export class StaffService implements OnModuleInit {
     return value?.trim().toLowerCase() || '';
   }
 
-  // Only explicit non-credential columns may be updated by generic Director
-  // staff operations. A full-entity save made from a stale read could restore
-  // a revoked password hash and JWT version after a successful rotation.
-  private async updateDirectorStaffFields(
+  // No existing Staff write may save a stale full entity. Only explicitly
+  // requested fields are written, and a concurrent role change fails closed.
+  // This also protects promotions into Director while a prior PIN/edit/shift
+  // request is hashing a PIN or otherwise waiting before persistence.
+  private async updateStaffFields(
     id: string,
+    expectedRole: Staff['role'],
     changes: Partial<Staff>,
   ): Promise<Staff> {
-    const result = await this.staffRepo.update({ id, role: 'owner' }, changes);
+    const result = await this.staffRepo.update(
+      { id, role: expectedRole },
+      changes,
+    );
     if (result.affected !== 1) {
-      throw new ConflictException('Дані Директора змінилися. Оновіть сторінку');
+      throw new ConflictException('Дані працівника змінилися. Оновіть сторінку');
     }
     return this.getStaffOrThrow(id);
   }
@@ -817,14 +829,12 @@ export class StaffService implements OnModuleInit {
     staff.shiftEndedAt = new Date();
     staff.shiftEndedBy = performedBy?.trim() || null;
 
-    const saved = staff.role === 'owner'
-      ? await this.updateDirectorStaffFields(staff.id, {
-          isOnShift: false,
-          shiftEndedAt: staff.shiftEndedAt,
-          shiftEndedBy: staff.shiftEndedBy,
-          lastAutoShiftEndDate: staff.lastAutoShiftEndDate,
-        })
-      : await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(staff.id, staff.role, {
+      isOnShift: false,
+      shiftEndedAt: staff.shiftEndedAt,
+      shiftEndedBy: staff.shiftEndedBy,
+      lastAutoShiftEndDate: staff.lastAutoShiftEndDate,
+    });
 
     await this.saveShiftEvent(
       saved,
