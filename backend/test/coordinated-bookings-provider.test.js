@@ -17,7 +17,7 @@ function kyivToday() {
 const andrii = { role: 'waiter', staffId: 'waiter-1', name: 'Андрій' };
 const serhii = { role: 'waiter', staffId: 'waiter-2', name: 'Сергій' };
 
-function createHarness({ status = 'approved', cancellationReason = null, owner = null, checkedIn = false, tableStatus = 'reserved' } = {}) {
+function createHarness({ status = 'approved', cancellationReason = null, owner = null, checkedIn = false, tableStatus = 'reserved', anotherCheckedInVisit = false } = {}) {
   const calls = [];
   const table = { id: 'table-8', tableNumber: '8', status: tableStatus, assignedWaiterId: owner };
   const booking = {
@@ -32,6 +32,10 @@ function createHarness({ status = 'approved', cancellationReason = null, owner =
       calls.push(['booking.findOne', options]);
       if (options.lock) return { ...booking, table: undefined, client: undefined };
       return booking;
+    },
+    async exist(options) {
+      calls.push(['booking.exist', options]);
+      return anotherCheckedInVisit;
     },
     async save(value) {
       calls.push(['booking.save', value.status, Boolean(value.checkedInAt)]);
@@ -106,6 +110,18 @@ test('same waiter completion releases ownership; Admin may override', async () =
   const override = createHarness({ owner: andrii.staffId });
   await override.coordinated.complete('booking-1', { role: 'admin', staffId: 'admin-1' });
   assert.equal(override.table.assignedWaiterId, null);
+});
+
+test('completion preserves physical occupancy and owner of another checked-in booking', async () => {
+  const h = createHarness({
+    owner: andrii.staffId, checkedIn: true, tableStatus: 'occupied', anotherCheckedInVisit: true,
+  });
+  await h.coordinated.complete('booking-1', andrii);
+  assert.equal(h.booking.status, 'completed');
+  assert.equal(h.table.status, 'occupied');
+  assert.equal(h.table.assignedWaiterId, andrii.staffId);
+  assert.ok(h.calls.some((call) => call[0] === 'booking.exist'));
+  assert.ok(!h.calls.some((call) => call[0] === 'table.save'));
 });
 
 test('coordinated check-in cannot resurrect a booking already cancelled as no-show', async () => {
