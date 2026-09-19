@@ -3,6 +3,7 @@ require('reflect-metadata');
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const test = require('node:test');
+const { BookingsController } = require('../dist/bookings/bookings.controller.js');
 const { GuestNoShowNoticesService } = require('../dist/bookings/guest-no-show-notices.service.js');
 
 const DEVICE = 'browser-device-1';
@@ -34,7 +35,6 @@ function harness(rows = [booking()]) {
   const records = rows;
   let lookup = null;
   const listQuery = {
-    leftJoinAndSelect() { return this; },
     where(sql, params) { calls.push(['where', sql, params]); return this; },
     andWhere(sql, params) { calls.push(['andWhere', sql, params]); return this; },
     orderBy() { return this; },
@@ -73,7 +73,7 @@ function harness(rows = [booking()]) {
   return { service: new GuestNoShowNoticesService(repository, dataSource), calls, rows: records };
 }
 
-test('only unread automatic no-show notices can be listed by device, including after Kyiv midnight', async () => {
+test('only unread automatic no-show notices are returned by device without historical booking details', async () => {
   const { service, calls } = harness([
     booking(),
     booking({ id: 'manual-cancellation', cancellationReason: 'guest_cancelled' }),
@@ -83,16 +83,33 @@ test('only unread automatic no-show notices can be listed by device, including a
   const notices = await service.listUnreadForDevice(DEVICE);
   assert.equal(notices.length, 1);
   assert.equal(notices[0].bookingId, 'owned-booking');
-  assert.equal(notices[0].bookingDate, '2026-09-18');
-  assert.equal(notices[0].status, 'cancelled');
-  assert.equal(notices[0].canGuestCancel, false);
-  assert.equal(notices[0].canLeaveReview, false);
+  assert.deepEqual(Object.keys(notices[0]).sort(), ['bookingId', 'guestNotification']);
+  assert.deepEqual(Object.keys(notices[0].guestNotification).sort(), ['createdAt', 'message', 'title', 'type']);
+  assert.equal(notices[0].guestNotification.type, 'no_show');
+  assert.equal(Object.hasOwn(notices[0], 'bookingDate'), false);
+  assert.equal(Object.hasOwn(notices[0], 'tableNumber'), false);
   assert.equal(Object.hasOwn(notices[0], 'guestDeviceIdHash'), false);
   assert.equal(Object.hasOwn(notices[0], 'guestAccessTokenHash'), false);
   assert.ok(calls.some((call) => call[0] === 'where' && call[2].deviceHash === HASH));
   assert.ok(calls.some((call) => call[0] === 'andWhere' && call[1].includes('acknowledgedAt')));
   assert.ok(calls.some((call) => call[0] === 'andWhere' && call[1].includes('guest_notification') && call[1].includes('reason')));
   assert.equal(calls.some((call) => String(call[1]).includes('bookingDate')), false);
+});
+
+test('controller keeps unread no-shows outside guest/list and exposes a dedicated notice-only response', async () => {
+  const { service } = harness();
+  const active = { bookingId: 'active-booking', status: 'approved', checkedInAt: null };
+  const guestBookings = { async list() { return [active]; } };
+  const controller = new BookingsController(
+    {}, guestBookings, {}, {}, {}, {}, {}, {}, {}, {}, service,
+  );
+  const list = await controller.guestList({ guestDeviceId: DEVICE });
+  assert.equal(list.length, 1);
+  assert.equal(list[0].bookingId, active.bookingId);
+  assert.equal(list[0].canGuestChangeTime, true);
+  const notices = await controller.guestNoShowNotices({ guestDeviceId: DEVICE });
+  assert.equal(notices.length, 1);
+  assert.deepEqual(Object.keys(notices[0]).sort(), ['bookingId', 'guestNotification']);
 });
 
 test('blank or excessively long device IDs never list notices', async () => {
