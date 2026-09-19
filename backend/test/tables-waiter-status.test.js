@@ -80,6 +80,36 @@ test('waiter cannot overwrite a reserved table with walk-in occupied status', as
   assert.deepEqual(savedStatuses, []);
 });
 
+test('alternate occupied endpoint cannot bypass the walk-in reservation guard', async () => {
+  for (const status of ['reserved', 'pending']) {
+    const table = { id: 'table-1', status, assignedWaiterId: null };
+    const { service, savedStatuses } = buildService(table);
+    await assert.rejects(() => service.markOccupied(table.id, andrii), /активне бронювання/);
+    assert.equal(table.status, status);
+    assert.equal(table.assignedWaiterId, null);
+    assert.deepEqual(savedStatuses, []);
+  }
+});
+
+test('alternate free endpoint cannot release a checked-in reservation', async () => {
+  const table = { id: 'table-1', status: 'occupied', assignedWaiterId: andrii.staffId };
+  const { service, savedStatuses } = buildService(table, [
+    { status: 'approved', checkedInAt: new Date() },
+  ]);
+  const result = await service.markFree(table.id, andrii);
+  assert.equal(result.status, 'occupied');
+  assert.equal(result.assignedWaiterId, andrii.staffId);
+  assert.deepEqual(savedStatuses, ['occupied']);
+});
+
+test('waiter cannot start cleaning a reserved table through the alternate endpoint', async () => {
+  const table = { id: 'table-1', status: 'reserved', assignedWaiterId: null };
+  const { service, savedStatuses } = buildService(table);
+  await assert.rejects(() => service.markCleaning(table.id, andrii), /лише після того, як стіл був зайнятий/);
+  assert.equal(table.status, 'reserved');
+  assert.deepEqual(savedStatuses, []);
+});
+
 test('free action keeps a checked-in approved booking occupied and retains ownership', async () => {
   const table = { id: 'table-1', status: 'occupied', assignedWaiterId: andrii.staffId };
   const { service, savedStatuses } = buildService(table, [
