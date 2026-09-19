@@ -11,9 +11,14 @@ const TABLE_CHANGE_TITLES = new Set([
 ]);
 
 type Decision = {
-  booking: GuestBooking;
+  bookingId: string;
+  guestNotification: NonNullable<GuestBooking['guestNotification']>;
   token: string | null;
   guestDeviceId: string;
+  isNoShow: boolean;
+  bookingDate?: string;
+  bookingTime?: string;
+  tableNumber?: string | number | null;
 };
 
 export default function GuestBookingDecisionController() {
@@ -29,36 +34,49 @@ export default function GuestBookingDecisionController() {
     }
 
     try {
-      const bookings = await bookingsApi.guestList(
-        guestDeviceId,
-        access.map((item) => item.token),
-      );
+      const [bookings, notices] = await Promise.all([
+        bookingsApi.guestList(guestDeviceId, access.map((item) => item.token)),
+        guestDeviceId
+          ? noShowNoticeApi.listUnreadForDevice(guestDeviceId).catch(() => [])
+          : Promise.resolve([]),
+      ]);
       const tokenFor = (bookingId: string) =>
         access.find((item) => item.bookingId === bookingId)?.token || null;
+      const notice = notices[0];
+      if (notice) {
+        setDecision({
+          bookingId: notice.bookingId,
+          guestNotification: notice.guestNotification,
+          token: tokenFor(notice.bookingId),
+          guestDeviceId,
+          isNoShow: true,
+        });
+        setError(null);
+        return;
+      }
+
       const booking = bookings.find(
-        (item) =>
-          item.status === 'cancelled' &&
-          item.guestNotification?.type === 'no_show' &&
-          !item.guestNotification.acknowledgedAt &&
-          Boolean(guestDeviceId) &&
-          !tokenFor(item.bookingId),
-      ) || bookings.find(
         (item) =>
           item.guestNotification &&
           !item.guestNotification.acknowledgedAt &&
           TABLE_CHANGE_TITLES.has(item.guestNotification.title || ''),
       );
 
-      if (!booking) {
+      if (!booking?.guestNotification) {
         setDecision(null);
         setError(null);
         return;
       }
 
       setDecision({
-        booking,
+        bookingId: booking.bookingId,
+        guestNotification: booking.guestNotification,
         token: tokenFor(booking.bookingId),
         guestDeviceId,
+        isNoShow: false,
+        bookingDate: booking.bookingDate,
+        bookingTime: booking.bookingTime,
+        tableNumber: booking.tableNumber,
       });
     } catch {
       // Основний гостьовий застосунок продовжує працювати навіть без цього повідомлення.
@@ -71,25 +89,20 @@ export default function GuestBookingDecisionController() {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  if (!decision?.booking.guestNotification) return null;
+  if (!decision) return null;
 
   async function acknowledge() {
     if (!decision) return;
-    const { booking, token, guestDeviceId } = decision;
-    const canAcknowledgeByDevice =
-      !token &&
-      Boolean(guestDeviceId) &&
-      booking.status === 'cancelled' &&
-      booking.guestNotification?.type === 'no_show';
-    if (!token && !canAcknowledgeByDevice) return;
+    const { bookingId, token, guestDeviceId, isNoShow } = decision;
+    if (!token && !(isNoShow && guestDeviceId)) return;
 
     setBusy(true);
     setError(null);
     try {
       if (token) {
-        await bookingsApi.guestAcknowledgeNotification(booking.bookingId, token);
+        await bookingsApi.guestAcknowledgeNotification(bookingId, token);
       } else {
-        await noShowNoticeApi.acknowledgeByDevice(booking.bookingId, guestDeviceId);
+        await noShowNoticeApi.acknowledgeByDevice(bookingId, guestDeviceId);
       }
       setDecision(null);
       await load();
@@ -100,13 +113,7 @@ export default function GuestBookingDecisionController() {
     }
   }
 
-  const canAcknowledge = Boolean(
-    decision.token || (
-      decision.guestDeviceId &&
-      decision.booking.status === 'cancelled' &&
-      decision.booking.guestNotification?.type === 'no_show'
-    ),
-  );
+  const canAcknowledge = Boolean(decision.token || (decision.isNoShow && decision.guestDeviceId));
 
   return (
     <aside className="fixed left-3 right-3 top-3 z-[130] mx-auto max-w-xl rounded-[24px] border border-amber-200/60 bg-neutral-950/95 p-4 text-white shadow-[0_0_34px_rgba(251,191,36,.28)] backdrop-blur-xl">
@@ -114,16 +121,18 @@ export default function GuestBookingDecisionController() {
         Оновлення бронювання
       </p>
       <h2 className="mt-1 text-lg font-black text-amber-100">
-        {decision.booking.guestNotification.title}
+        {decision.guestNotification.title}
       </h2>
-      {decision.booking.guestNotification.message && (
+      {decision.guestNotification.message && (
         <p className="mt-2 text-sm leading-6 text-white/75">
-          {decision.booking.guestNotification.message}
+          {decision.guestNotification.message}
         </p>
       )}
-      <p className="mt-2 text-xs text-white/45">
-        {decision.booking.bookingDate} · {String(decision.booking.bookingTime).slice(0, 5)} · Стіл №{decision.booking.tableNumber || '—'}
-      </p>
+      {!decision.isNoShow && decision.bookingDate && (
+        <p className="mt-2 text-xs text-white/45">
+          {decision.bookingDate} · {String(decision.bookingTime || '').slice(0, 5)} · Стіл №{decision.tableNumber || '—'}
+        </p>
+      )}
       {error && <p role="alert" className="mt-2 text-sm text-red-200">{error}</p>}
       {canAcknowledge && (
         <button
