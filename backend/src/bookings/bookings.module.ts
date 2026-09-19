@@ -39,6 +39,7 @@ import { GuestReviewsController } from './guest-reviews.controller';
 import { GuestTableNumberValidationService } from './guest-table-number-validation.service';
 import { GuestTelegramLinkService } from './guest-telegram-link.service';
 import { GuestTimeChangeService } from './guest-time-change.service';
+import { createWaiterBookingProtectionService } from './waiter-booking-protection.provider';
 
 @Module({
   imports: [
@@ -71,7 +72,10 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     BookingArrivalLockService,
     {
       provide: BookingsService,
-      useFactory: createCoordinatedBookingsService,
+      useFactory: (raw: BookingsService, dataSource: DataSource) =>
+        createWaiterBookingProtectionService(
+          createCoordinatedBookingsService(raw, dataSource), dataSource,
+        ),
       inject: [RAW_BOOKINGS_SERVICE, DataSource],
     },
     GuestBookingsService,
