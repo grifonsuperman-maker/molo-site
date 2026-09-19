@@ -42,7 +42,9 @@ const context = {
 };
 
 function syncPhoto() {
-  vm.runInNewContext(`const syncPhoto = ${match[1]}; syncPhoto();`, context);
+  // Node executes JavaScript, so remove the erased TypeScript-only type argument.
+  const executableSyncPhoto = match[1].replace('querySelector<HTMLImageElement>', 'querySelector');
+  vm.runInNewContext(`const syncPhoto = ${executableSyncPhoto}; syncPhoto();`, context);
 }
 
 syncPhoto();
