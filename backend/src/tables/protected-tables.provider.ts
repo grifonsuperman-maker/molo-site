@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { DataSource, In, IsNull, Not } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Not } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { BookingHistory } from '../bookings/entities/booking-history.entity';
@@ -16,7 +16,7 @@ function kyivToday() {
 }
 
 /** Called inside the transaction holding the physical table row lock. */
-async function assertBookedTableWaiter(manager: Parameters<Parameters<DataSource['transaction']>[0]>[0], tableId: string, waiterId: string) {
+async function assertBookedTableWaiter(manager: EntityManager, tableId: string, waiterId: string) {
   const visits = await manager.getRepository(Booking).find({
     where: {
       table: { id: tableId }, bookingDate: kyivToday(), status: 'approved',
