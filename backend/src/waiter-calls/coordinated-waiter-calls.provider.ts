@@ -157,6 +157,14 @@ export function createCoordinatedWaiterCallsService(
                   call.booking.status !== 'approved' || !call.booking.checkedInAt) {
                 throw new BadRequestException('Виклик не належить чинному відвідуванню за цим столом');
               }
+              // Ownership is locked, but a booking can retain checkedInAt after the
+              // physical table was released. Do not accept or claim that old call.
+              const table = await manager.getRepository(TableEntity).findOne({
+                where: { id: call.tableId },
+              });
+              if (!table || table.status !== 'occupied') {
+                throw new BadRequestException('Виклик не належить зайнятому столу');
+              }
               return mutateCall(manager, id, dto.waiterId, 'accept', dto.waiterName);
             },
             true,
