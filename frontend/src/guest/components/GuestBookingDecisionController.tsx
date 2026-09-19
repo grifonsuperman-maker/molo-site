@@ -34,12 +34,15 @@ export default function GuestBookingDecisionController() {
     }
 
     try {
-      const [bookings, notices] = await Promise.all([
+      const [bookingsResult, noticesResult] = await Promise.allSettled([
         bookingsApi.guestList(guestDeviceId, access.map((item) => item.token)),
         guestDeviceId
-          ? noShowNoticeApi.listUnreadForDevice(guestDeviceId).catch(() => [])
+          ? noShowNoticeApi.listUnreadForDevice(guestDeviceId)
           : Promise.resolve([]),
       ]);
+      if (bookingsResult.status === 'rejected' && noticesResult.status === 'rejected') return;
+      const bookings = bookingsResult.status === 'fulfilled' ? bookingsResult.value : [];
+      const notices = noticesResult.status === 'fulfilled' ? noticesResult.value : [];
       const tokenFor = (bookingId: string) =>
         access.find((item) => item.bookingId === bookingId)?.token || null;
       const notice = notices[0];
@@ -63,6 +66,8 @@ export default function GuestBookingDecisionController() {
       );
 
       if (!booking?.guestNotification) {
+        // A temporary failure of either independent endpoint must not dismiss its notice.
+        if (bookingsResult.status === 'rejected' || noticesResult.status === 'rejected') return;
         setDecision(null);
         setError(null);
         return;
