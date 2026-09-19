@@ -200,7 +200,7 @@ export class BookingsController {
     try {
       await this.notifications.notifyRescheduleRequest(rescheduleRequest);
     } catch (error) {
-      console.error('Telegram guest time-change notification failed', error);
+      console.error('Telegram guest time-change reschedule notification failed', error);
     }
 
     return {
