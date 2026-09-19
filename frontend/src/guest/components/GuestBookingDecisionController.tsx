@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { bookingsApi, type GuestBooking } from '../../api/bookings';
 import { readGuestBrowserAccess } from '../../api/guestAccessRuntime';
+import { noShowNoticeApi } from '../services/noShowNoticeApi';
 
 const POLLING_MS = 15_000;
 const TABLE_CHANGE_TITLES = new Set([
@@ -12,11 +13,13 @@ const TABLE_CHANGE_TITLES = new Set([
 type Decision = {
   booking: GuestBooking;
   token: string | null;
+  guestDeviceId: string;
 };
 
 export default function GuestBookingDecisionController() {
   const [decision, setDecision] = useState<Decision | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { guestDeviceId, bookings: access } = readGuestBrowserAccess();
@@ -30,7 +33,16 @@ export default function GuestBookingDecisionController() {
         guestDeviceId,
         access.map((item) => item.token),
       );
+      const tokenFor = (bookingId: string) =>
+        access.find((item) => item.bookingId === bookingId)?.token || null;
       const booking = bookings.find(
+        (item) =>
+          item.status === 'cancelled' &&
+          item.guestNotification?.type === 'no_show' &&
+          !item.guestNotification.acknowledgedAt &&
+          Boolean(guestDeviceId) &&
+          !tokenFor(item.bookingId),
+      ) || bookings.find(
         (item) =>
           item.guestNotification &&
           !item.guestNotification.acknowledgedAt &&
@@ -39,12 +51,14 @@ export default function GuestBookingDecisionController() {
 
       if (!booking) {
         setDecision(null);
+        setError(null);
         return;
       }
 
       setDecision({
         booking,
-        token: access.find((item) => item.bookingId === booking.bookingId)?.token || null,
+        token: tokenFor(booking.bookingId),
+        guestDeviceId,
       });
     } catch {
       // Основний гостьовий застосунок продовжує працювати навіть без цього повідомлення.
@@ -60,19 +74,39 @@ export default function GuestBookingDecisionController() {
   if (!decision?.booking.guestNotification) return null;
 
   async function acknowledge() {
-    if (!decision?.token) return;
+    if (!decision) return;
+    const { booking, token, guestDeviceId } = decision;
+    const canAcknowledgeByDevice =
+      !token &&
+      Boolean(guestDeviceId) &&
+      booking.status === 'cancelled' &&
+      booking.guestNotification?.type === 'no_show';
+    if (!token && !canAcknowledgeByDevice) return;
+
     setBusy(true);
+    setError(null);
     try {
-      await bookingsApi.guestAcknowledgeNotification(
-        decision.booking.bookingId,
-        decision.token,
-      );
+      if (token) {
+        await bookingsApi.guestAcknowledgeNotification(booking.bookingId, token);
+      } else {
+        await noShowNoticeApi.acknowledgeByDevice(booking.bookingId, guestDeviceId);
+      }
       setDecision(null);
       await load();
+    } catch {
+      setError('Не вдалося підтвердити повідомлення. Спробуйте ще раз.');
     } finally {
       setBusy(false);
     }
   }
+
+  const canAcknowledge = Boolean(
+    decision.token || (
+      decision.guestDeviceId &&
+      decision.booking.status === 'cancelled' &&
+      decision.booking.guestNotification?.type === 'no_show'
+    ),
+  );
 
   return (
     <aside className="fixed left-3 right-3 top-3 z-[130] mx-auto max-w-xl rounded-[24px] border border-amber-200/60 bg-neutral-950/95 p-4 text-white shadow-[0_0_34px_rgba(251,191,36,.28)] backdrop-blur-xl">
@@ -90,7 +124,8 @@ export default function GuestBookingDecisionController() {
       <p className="mt-2 text-xs text-white/45">
         {decision.booking.bookingDate} · {String(decision.booking.bookingTime).slice(0, 5)} · Стіл №{decision.booking.tableNumber || '—'}
       </p>
-      {decision.token && (
+      {error && <p role="alert" className="mt-2 text-sm text-red-200">{error}</p>}
+      {canAcknowledge && (
         <button
           type="button"
           disabled={busy}
