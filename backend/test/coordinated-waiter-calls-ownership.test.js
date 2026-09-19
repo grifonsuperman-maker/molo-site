@@ -6,8 +6,8 @@ const test = require('node:test');
 const { createCoordinatedWaiterCallsService } = require('../dist/waiter-calls/coordinated-waiter-calls.provider.js');
 const { TableOwnershipService } = require('../dist/tables/table-ownership.service.js');
 
-function harness({ owner = null, failOwnerWrite = false, checkedIn = true } = {}) {
-  const table = { id: 'table-1', status: 'occupied', assignedWaiterId: owner };
+function harness({ owner = null, failOwnerWrite = false, checkedIn = true, tableStatus = 'occupied' } = {}) {
+  const table = { id: 'table-1', status: tableStatus, assignedWaiterId: owner };
   const booking = { id: 'booking-1', table, status: 'approved', checkedInAt: checkedIn ? new Date() : null };
   const call = {
     id: 'call-1', booking, tableId: table.id, tableNumber: '1', clientName: 'Гість',
@@ -82,4 +82,17 @@ test('a stale call cannot be accepted before arrival and cannot claim its table'
   );
   assert.equal(h.call.status, 'new');
   assert.equal(h.table.assignedWaiterId, null);
+});
+
+test('a call from a released or cleaning table cannot be accepted or take ownership', async () => {
+  for (const tableStatus of ['free', 'pending', 'reserved', 'cleaning', 'closed']) {
+    const h = harness({ tableStatus });
+    await assert.rejects(
+      () => h.service.accept('call-1', { waiterId: 'waiter-1', waiterName: 'Андрій' }),
+      /не належить зайнятому столу/,
+    );
+    assert.equal(h.call.status, 'new');
+    assert.equal(h.table.assignedWaiterId, null);
+    assert.equal(h.rawAcceptCalls(), 0);
+  }
 });
