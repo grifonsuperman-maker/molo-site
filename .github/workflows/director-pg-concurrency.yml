@@ -1,0 +1,82 @@
+name: Director PostgreSQL concurrency
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/director-pg-concurrency.yml'
+      - 'backend/integration/director-pg-concurrency.cjs'
+      - 'backend/src/auth/**'
+      - 'backend/src/staff/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/director-pg-concurrency.yml'
+      - 'backend/integration/director-pg-concurrency.cjs'
+      - 'backend/src/auth/**'
+      - 'backend/src/staff/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  director-races:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: molo_fresh_schema_reference
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d molo_fresh_schema_reference"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      NODE_ENV: test
+      MOLO_PG_CONCURRENCY_TEST: 'true'
+      FRESH_SCHEMA_REFERENCE_ALLOW: 'true'
+      DB_URL: ''
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: molo_fresh_schema_reference
+      DB_SYNCHRONIZE: 'true'
+      JWT_SECRET: isolated-molo-postgres-race-secret-do-not-use-in-production
+      TELEGRAM_BOT_TOKEN: ''
+      TELEGRAM_WEBHOOK_SECRET: ''
+      RENDER_EXTERNAL_URL: ''
+      MOLO_CANDIDATE_DIR: ${{ github.workspace }}/candidate/backend
+    steps:
+      - name: Checkout test harness from this PR
+        uses: actions/checkout@v5
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Checkout Director implementation under test
+        uses: actions/checkout@v5
+        with:
+          # This test-only PR is based on main, where #237 is not merged yet.
+          # Test #237's exact reviewed commit now; after both PRs merge, use
+          # the current commit for all future pull requests and main pushes.
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref == 'test/director-pg-concurrency-20260919' && '28d701b65626f99a4aa54ec634d914452f26d137' || github.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install actual candidate dependencies
+        run: npm --prefix candidate/backend ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+      - name: Build actual candidate backend
+        run: npm --prefix candidate/backend run build
+      - name: Initialize guarded disposable PostgreSQL schema
+        run: node candidate/backend/scripts/fresh-schema-reference.mjs
+      - name: Exercise real PostgreSQL row locks and concurrent requests
+        run: node --test harness/backend/integration/director-pg-concurrency.cjs
