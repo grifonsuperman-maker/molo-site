@@ -75,16 +75,20 @@ export default function GuestBookingDecisionController() {
         return;
       }
 
-      setDecision({
-        bookingId: booking.bookingId,
-        noticeHandle: null,
-        guestNotification: booking.guestNotification,
-        token: tokenFor(booking.bookingId),
-        guestDeviceId,
-        isNoShow: false,
-        bookingDate: booking.bookingDate,
-        bookingTime: booking.bookingTime,
-        tableNumber: booking.tableNumber,
+      // A successful table-change poll must not replace a displayed no-show whose own poll failed.
+      setDecision((current) => {
+        if (noticesResult.status === 'rejected' && current?.isNoShow) return current;
+        return {
+          bookingId: booking.bookingId,
+          noticeHandle: null,
+          guestNotification: booking.guestNotification!,
+          token: tokenFor(booking.bookingId),
+          guestDeviceId,
+          isNoShow: false,
+          bookingDate: booking.bookingDate,
+          bookingTime: booking.bookingTime,
+          tableNumber: booking.tableNumber,
+        };
       });
     } catch {
       // Основний гостьовий застосунок продовжує працювати навіть без цього повідомлення.
