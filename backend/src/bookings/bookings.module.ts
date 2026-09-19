@@ -8,6 +8,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { RestaurantModule } from '../restaurant/restaurant.module';
 import { TableEntity } from '../tables/entities/table.entity';
+import { TableOwnershipService } from '../tables/table-ownership.service';
+import { TablesModule } from '../tables/tables.module';
 import { WaiterCallsModule } from '../waiter-calls/waiter-calls.module';
 import { Zone } from '../zones/entities/zone.entity';
 import { AdminAttentionController } from './admin-attention.controller';
@@ -57,6 +59,7 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     LogsModule,
     NotificationsModule,
     WaiterCallsModule,
+    TablesModule,
     RestaurantModule,
   ],
   controllers: [
@@ -72,7 +75,7 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     {
       provide: BookingsService,
       useFactory: createCoordinatedBookingsService,
-      inject: [RAW_BOOKINGS_SERVICE, DataSource],
+      inject: [RAW_BOOKINGS_SERVICE, DataSource, TableOwnershipService],
     },
     GuestBookingsService,
     GuestNoShowNoticesService,

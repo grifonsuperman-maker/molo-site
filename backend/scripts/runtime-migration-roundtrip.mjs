@@ -12,9 +12,11 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'AddGuestReviewArchive2026082200010',
   'AddLogArchive2026082400010',
   'AddManualBookingGuestName2026082400020',
+  'AddTableWaiterOwnership2026091901000',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  8: { tableWaiterOwnerColumn: false },
   7: {
     guestNameColumn: false,
     logArchiveTable: true,
@@ -121,6 +123,9 @@ function loadRuntimeMigrations(require) {
   const {
     AddManualBookingGuestName2026082400020,
   } = require('../dist/migrations/2026082400020-AddManualBookingGuestName.js');
+  const {
+    AddTableWaiterOwnership2026091901000,
+  } = require('../dist/migrations/2026091901000-AddTableWaiterOwnership.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -131,6 +136,7 @@ function loadRuntimeMigrations(require) {
     AddGuestReviewArchive2026082200010,
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
+    AddTableWaiterOwnership2026091901000,
   ];
 }
 
@@ -148,6 +154,11 @@ async function readRewindState(dataSource) {
       to_regclass('public.waiter_calls') IS NOT NULL AS "waiterCallsTable",
       to_regclass('public.guest_review_archives') IS NOT NULL AS "reviewArchiveTable",
       to_regclass('public.log_archives') IS NOT NULL AS "logArchiveTable",
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'tables'
+          AND column_name = 'assigned_waiter_id'
+      ) AS "tableWaiterOwnerColumn",
       EXISTS (
         SELECT 1
         FROM information_schema.columns
@@ -227,11 +238,7 @@ async function readRewindState(dataSource) {
 
 async function assertRewindCheckpoint(dataSource, remainingMigrationCount) {
   const history = await readMigrationHistory(dataSource);
-  assertMigrationHistory(
-    history,
-    EXPECTED_RUNTIME_MIGRATIONS.slice(0, remainingMigrationCount),
-  );
-
+  assertMigrationHistory(history, EXPECTED_RUNTIME_MIGRATIONS.slice(0, remainingMigrationCount));
   const state = await readRewindState(dataSource);
   assertRewindState(
     state,
@@ -240,18 +247,11 @@ async function assertRewindCheckpoint(dataSource, remainingMigrationCount) {
   );
 }
 
-export async function runRuntimeMigrationRoundtripStep(
-  mode,
-  env = process.env,
-) {
+export async function runRuntimeMigrationRoundtripStep(mode, env = process.env) {
   assertFreshSchemaReferenceTarget(env);
-
   if (env !== process.env) {
-    throw new Error(
-      'Runtime migration roundtrip must use process.env after safety validation.',
-    );
+    throw new Error('Runtime migration roundtrip must use process.env after safety validation.');
   }
-
   if (!['rewind', 'forward'].includes(mode)) {
     throw new Error('Mode must be either rewind or forward');
   }
@@ -273,28 +273,17 @@ export async function runRuntimeMigrationRoundtripStep(
   await dataSource.initialize();
   try {
     const before = await readMigrationHistory(dataSource);
-
     if (mode === 'rewind') {
       assertMigrationHistory(before, EXPECTED_RUNTIME_MIGRATIONS);
-
-      for (
-        let index = EXPECTED_RUNTIME_MIGRATIONS.length - 1;
-        index >= 0;
-        index -= 1
-      ) {
+      for (let index = EXPECTED_RUNTIME_MIGRATIONS.length - 1; index >= 0; index -= 1) {
         await dataSource.undoLastMigration({ transaction: 'all' });
         await assertRewindCheckpoint(dataSource, index);
       }
       return;
     }
-
     assertMigrationHistory(before, []);
     const applied = await dataSource.runMigrations({ transaction: 'all' });
-    assertMigrationHistory(
-      applied.map((migration) => migration.name),
-      EXPECTED_RUNTIME_MIGRATIONS,
-    );
-
+    assertMigrationHistory(applied.map((migration) => migration.name), EXPECTED_RUNTIME_MIGRATIONS);
     const after = await readMigrationHistory(dataSource);
     assertMigrationHistory(after, EXPECTED_RUNTIME_MIGRATIONS);
   } finally {
@@ -310,9 +299,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
-    console.error(
-      `Runtime migration roundtrip failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    console.error(`Runtime migration roundtrip failed: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
   });
 }
