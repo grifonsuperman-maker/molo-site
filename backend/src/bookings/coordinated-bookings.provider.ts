@@ -65,8 +65,17 @@ async function coordinatedCheckIn(
     });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
-    if (actor?.role === 'waiter' && (!booking.table || booking.bookingDate !== restaurantDateToday())) {
-      throw new BadRequestException('Офіціант може прийняти гостей лише за столом із бронюванням на сьогодні');
+    if (actor?.role === 'waiter') {
+      if (!booking.table || booking.bookingDate !== restaurantDateToday()) {
+        throw new BadRequestException('Офіціант може прийняти гостей лише за столом із бронюванням на сьогодні');
+      }
+      // A forged/stale check-in must not bypass the administrator's approval.
+      if (booking.status !== 'approved') {
+        throw new BadRequestException('Спочатку Адміністратор має підтвердити бронювання');
+      }
+      if (booking.checkedInAt) {
+        throw new BadRequestException('Прихід гостей за цим бронюванням уже відмічено');
+      }
     }
 
     const tables = manager.getRepository(TableEntity);
@@ -79,8 +88,8 @@ async function coordinatedCheckIn(
     if (booking.table?.id && !table) throw new NotFoundException('Стіл не знайдено');
     if (table) {
       ownership.assertCanModify(table, actor);
-      if (actor?.role === 'waiter' && table.status === 'closed') {
-        throw new BadRequestException('Закритий Адміністратором стіл не можна зайняти');
+      if (actor?.role === 'waiter' && ['closed', 'occupied', 'cleaning'].includes(table.status)) {
+        throw new BadRequestException('Стіл зараз зайнятий, прибирається або закритий');
       }
     }
 
@@ -143,8 +152,14 @@ async function coordinatedComplete(
       relations: ['table', 'client'],
     });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
-    if (actor?.role === 'waiter' && !booking.table?.id) {
-      throw new BadRequestException('Стіл для цього бронювання не знайдено');
+    if (actor?.role === 'waiter') {
+      if (!booking.table?.id) {
+        throw new BadRequestException('Стіл для цього бронювання не знайдено');
+      }
+      // Completion is for the actual current visit, never an unconfirmed or future reservation.
+      if (booking.status !== 'approved' || !booking.checkedInAt || booking.bookingDate !== restaurantDateToday()) {
+        throw new BadRequestException('Завершити можна лише підтверджене відвідування після приходу гостей');
+      }
     }
 
     const tables = manager.getRepository(TableEntity);
