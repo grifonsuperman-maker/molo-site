@@ -18,17 +18,46 @@ export class AddTableWaiterOwnership2026091901000 implements MigrationInterface 
       CREATE INDEX IF NOT EXISTS "IDX_tables_assigned_waiter"
       ON "tables" ("assigned_waiter_id")
     `);
+
+    // Every release path (including booking expiration and legacy transfers) must
+    // clear the owner in the SAME database update, even when it bypasses TablesService.
+    // Cleaning retains the owner until the table is actually released.
+    await queryRunner.query(`
+      CREATE OR REPLACE FUNCTION "clear_waiter_owner_on_table_release"()
+      RETURNS trigger AS $$
+      BEGIN
+        IF NEW."status" IN ('free', 'pending', 'reserved') THEN
+          NEW."assigned_waiter_id" := NULL;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+    await queryRunner.query(`
+      CREATE TRIGGER "TRG_tables_clear_waiter_owner_on_release"
+      BEFORE INSERT OR UPDATE ON "tables"
+      FOR EACH ROW
+      EXECUTE FUNCTION "clear_waiter_owner_on_table_release"()
+    `);
+    await queryRunner.query(`
+      UPDATE "tables"
+      SET "assigned_waiter_id" = NULL
+      WHERE "status" IN ('free', 'pending', 'reserved')
+        AND "assigned_waiter_id" IS NOT NULL
+    `);
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
-    const rows: Array<{ assigned: string }> = await queryRunner.query(`
-      SELECT count(*)::text AS assigned FROM "tables" WHERE "assigned_waiter_id" IS NOT NULL
+    await queryRunner.query(`
+      DROP TRIGGER IF EXISTS "TRG_tables_clear_waiter_owner_on_release" ON "tables"
     `);
-    if (Number(rows[0]?.assigned || 0) > 0) {
-      throw new Error('Cannot roll back table ownership while waiters are assigned; release tables first.');
-    }
+    await queryRunner.query(`
+      DROP FUNCTION IF EXISTS "clear_waiter_owner_on_table_release"()
+    `);
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_tables_assigned_waiter"`);
     await queryRunner.query(`ALTER TABLE "tables" DROP CONSTRAINT IF EXISTS "FK_tables_assigned_waiter"`);
+    // Ownership is transient operational state. Reverting the feature deliberately
+    // discards assignments; it must not fail merely because a waiter used it.
     await queryRunner.query(`ALTER TABLE "tables" DROP COLUMN IF EXISTS "assigned_waiter_id"`);
   }
 }
