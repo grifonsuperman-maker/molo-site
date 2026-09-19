@@ -9,6 +9,19 @@ import { BookingsService } from './bookings.service';
 
 export const RAW_BOOKINGS_SERVICE = Symbol('RAW_BOOKINGS_SERVICE');
 
+type BookingDecision = 'reject' | 'cancel' | 'noShow' | 'complete';
+
+type BookingInternals = {
+  bookingSnapshot(value: Booking): Record<string, unknown>;
+  markNoShowInWishes(value: Booking): string;
+  safeLog(action: string, details?: Record<string, unknown>): Promise<void>;
+  safeNotify(action: () => Promise<unknown>): Promise<void>;
+  notifications: {
+    notifyBookingApproved(booking: Booking): Promise<unknown>;
+    notifyBookingCancelled(booking: Booking): Promise<unknown>;
+  };
+};
+
 function restaurantDateToday() {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Kyiv',
@@ -28,12 +41,7 @@ async function coordinatedApprove(
   dataSource: DataSource,
   bookingId: string,
 ) {
-  const internals = rawBookings as unknown as {
-    bookingSnapshot(value: Booking): Record<string, unknown>;
-    safeLog(action: string, details?: Record<string, unknown>): Promise<void>;
-    safeNotify(action: () => Promise<unknown>): Promise<void>;
-    notifications: { notifyBookingApproved(booking: Booking): Promise<unknown> };
-  };
+  const internals = rawBookings as unknown as BookingInternals;
 
   // The lock covers the status change, booking history and today's table state.
   // Every web and Telegram approval goes through this shared BookingsService proxy.
@@ -102,6 +110,135 @@ async function coordinatedApprove(
   return { message: 'Бронювання підтверджено' };
 }
 
+/**
+ * These existing admin/waiter actions must use the same booking-row lock as
+ * approve. Otherwise a stale reject/cancel can overwrite the approved row
+ * after its transaction commits and send contradictory Telegram messages.
+ */
+async function coordinatedDecision(
+  rawBookings: BookingsService,
+  dataSource: DataSource,
+  bookingId: string,
+  decision: BookingDecision,
+  actor?: AuthUser,
+) {
+  const internals = rawBookings as unknown as BookingInternals;
+  const booking = await dataSource.transaction(async (manager) => {
+    const bookings = manager.getRepository(Booking);
+    const locked = await bookings.findOne({
+      where: { id: bookingId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!locked) throw new NotFoundException('Бронювання не знайдено');
+    if (!['pending', 'approved'].includes(locked.status)) {
+      throw new ConflictException('Це бронювання вже опрацьовано');
+    }
+    // Reject is a decision on a pending request. To revoke an approved
+    // booking, use the existing separate admin cancel action.
+    if (decision === 'reject' && locked.status !== 'pending') {
+      throw new ConflictException('Бронювання вже підтверджено');
+    }
+    if (decision === 'noShow' && locked.checkedInAt) {
+      throw new BadRequestException('Гість уже відмічений як присутній');
+    }
+
+    const current = await bookings.findOne({
+      where: { id: bookingId },
+      relations: ['table', 'client'],
+    });
+    if (!current) throw new NotFoundException('Бронювання не знайдено');
+    const previousData = internals.bookingSnapshot(current);
+    const now = new Date();
+    if (decision === 'reject') {
+      current.status = 'rejected';
+      current.rejectedAt = now;
+      current.cancellationReason = 'admin_rejected';
+    } else if (decision === 'cancel') {
+      current.status = 'cancelled';
+      current.cancelledAt = now;
+      current.cancellationReason = 'admin_cancelled';
+    } else if (decision === 'noShow') {
+      current.status = 'cancelled';
+      current.cancelledAt = now;
+      current.cancellationReason = 'no_show';
+      current.wishes = internals.markNoShowInWishes(current);
+      current.guestNotification = {
+        type: 'no_show',
+        title: 'Бронювання завершено через неявку',
+        createdAt: now.toISOString(),
+      };
+    } else {
+      current.status = 'completed';
+      current.completedAt = now;
+    }
+    await bookings.save(current);
+
+    const historyAction = {
+      reject: 'booking_rejected',
+      cancel: 'booking_cancelled',
+      noShow: 'booking_no_show',
+      complete: 'booking_completed',
+    }[decision];
+    const histories = manager.getRepository(BookingHistory);
+    await histories.save(histories.create({
+      booking: current,
+      action: historyAction,
+      actorRole: decision === 'complete' ? actor?.role || 'admin' : 'admin',
+      actorStaffId: decision === 'complete' ? actor?.staffId || null : null,
+      actorName: decision === 'complete' ? actor?.name || null : null,
+      previousData,
+      newData: internals.bookingSnapshot(current),
+      reason: decision === 'noShow' ? 'no_show' : null,
+      isManualMode: false,
+    }));
+
+    if (current.table?.id && current.bookingDate === restaurantDateToday()) {
+      const tables = manager.getRepository(TableEntity);
+      const table = await tables.findOne({
+        where: { id: current.table.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      // Completing a visit keeps the existing force-release behavior; other
+      // decisions never release a closed, occupied or cleaning physical table.
+      if (table && table.status !== 'closed' &&
+          (decision === 'complete' || !['occupied', 'cleaning'].includes(table.status))) {
+        table.status = 'free';
+        await tables.save(table);
+      }
+    }
+    return current;
+  });
+
+  if (decision === 'reject') {
+    await internals.safeLog('Відхилено бронювання', { bookingId });
+  } else if (decision === 'cancel') {
+    await internals.safeLog('Скасовано бронювання', { bookingId });
+  } else if (decision === 'noShow') {
+    await internals.safeLog('No-show: гість не прийшов', {
+      bookingId,
+      tableNumber: booking.table?.tableNumber || null,
+    });
+  } else {
+    await internals.safeLog('Стіл звільнено', {
+      bookingId,
+      staffId: actor?.staffId || null,
+      staffName: actor?.name || null,
+      role: actor?.role || 'admin',
+    });
+  }
+  if (decision !== 'complete') {
+    await internals.safeNotify(() => internals.notifications.notifyBookingCancelled(booking));
+  }
+  return {
+    message: {
+      reject: 'Бронювання відхилено',
+      cancel: 'Бронювання скасовано',
+      noShow: 'Гість не прийшов. Бронювання знято, стіл вільний.',
+      complete: 'Стіл звільнено',
+    }[decision],
+  };
+}
+
 async function coordinatedCheckIn(
   rawBookings: BookingsService,
   dataSource: DataSource,
@@ -118,6 +255,9 @@ async function coordinatedCheckIn(
     if (!locked) throw new NotFoundException('Бронювання не знайдено');
     if (locked.status === 'cancelled' && locked.cancellationReason === 'no_show') {
       throw new BadRequestException('Бронювання вже анульовано через неявку');
+    }
+    if (locked.status !== 'pending' && locked.status !== 'approved') {
+      throw new ConflictException('Це бронювання вже опрацьовано');
     }
 
     const booking = await bookings.findOne({
@@ -185,6 +325,13 @@ export function createCoordinatedBookingsService(
     get(target, property, receiver) {
       if (property === 'approve') {
         return (bookingId: string) => coordinatedApprove(target, dataSource, bookingId);
+      }
+      if (property === 'reject' || property === 'cancel' || property === 'noShow') {
+        return (bookingId: string) => coordinatedDecision(target, dataSource, bookingId, property);
+      }
+      if (property === 'complete') {
+        return (bookingId: string, actor?: AuthUser) =>
+          coordinatedDecision(target, dataSource, bookingId, 'complete', actor);
       }
       if (property === 'checkIn') {
         return (bookingId: string, actor?: AuthUser) =>
