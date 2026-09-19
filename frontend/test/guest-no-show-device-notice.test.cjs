@@ -13,6 +13,7 @@ assert.match(controller, /const POLLING_MS = 15_000;/, 'booking-decision polling
 assert.match(controller, /noShowNoticeApi\.listUnreadForDevice\(guestDeviceId\)/, 'no-show notice is fetched separately from guest booking list');
 assert.match(controller, /Promise\.allSettled/, 'failed guest booking lookup does not suppress a successful notice lookup');
 assert.match(controller, /if \(bookingsResult\.status === 'rejected' \|\| noticesResult\.status === 'rejected'\) return;/, 'partial polling failures cannot dismiss an already displayed unread notice');
+assert.match(controller, /setDecision\(\(current\) => \{\s*if \(noticesResult\.status === 'rejected' && current\?\.isNoShow\) return current;\s*return \{\s*bookingId: booking\.bookingId/, 'successful table-change polling cannot replace an existing no-show during notice endpoint failure');
 assert.match(controller, /const notice = notices\[0\]/, 'separate unread no-show notice is presented in decision overlay');
 assert.match(controller, /bookingId: null,\s*noticeHandle: notice\.noticeHandle/, 'device no-show overlay never carries a historical booking ID');
 assert.match(controller, /isNoShow: true/, 'device no-show is tagged as a notice, not a booking card');
