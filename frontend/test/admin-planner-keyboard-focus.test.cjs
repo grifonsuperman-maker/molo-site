@@ -44,7 +44,7 @@ const context = {
 function syncPhoto() {
   // Node executes JavaScript, so remove the erased TypeScript-only type argument.
   const executableSyncPhoto = match[1].replace('querySelector<HTMLImageElement>', 'querySelector');
-  vm.runInNewContext(`const syncPhoto = ${executableSyncPhoto}; syncPhoto();`, context);
+  vm.runInNewContext(`(${executableSyncPhoto})()`, context);
 }
 
 syncPhoto();
