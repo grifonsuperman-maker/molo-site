@@ -11,6 +11,7 @@ import { compare } from 'bcryptjs';
 import { createHash, randomBytes } from 'crypto';
 import { Repository } from 'typeorm';
 
+import { directorSessionVersion } from '../auth/director-session-version';
 import {
   DEFAULT_TELEGRAM_INIT_DATA_MAX_AGE_SECONDS,
   verifyTelegramInitData,
@@ -93,15 +94,25 @@ export class TelegramStaffLinkService {
   async confirmInvite(dto: ConfirmTelegramStaffLinkDto) {
     const telegramUser = this.verifyTelegramUser(dto.initData);
     const staffForCredentialCheck = await this.resolveInvite(dto.token);
-    await this.assertCredential(staffForCredentialCheck, dto);
+    const verifiedDirectorSessionVersion = await this.assertCredential(
+      staffForCredentialCheck,
+      dto,
+    );
 
-    const saved = await this.consumeInviteAtomically(dto.token, telegramUser.id);
+    const saved = await this.consumeInviteAtomically(
+      dto.token,
+      telegramUser.id,
+      verifiedDirectorSessionVersion,
+    );
     const payload: AuthUser = {
       sub: saved.id,
       telegramId: telegramUser.id,
       staffId: saved.id,
       role: saved.role,
       name: saved.fullName,
+      ...(saved.role === 'owner'
+        ? { directorSessionVersion: directorSessionVersion(saved) }
+        : {}),
     };
     const accessToken = await this.jwtService.signAsync(payload);
 
@@ -123,7 +134,11 @@ export class TelegramStaffLinkService {
     });
   }
 
-  private async consumeInviteAtomically(rawToken: string, telegramId: string) {
+  private async consumeInviteAtomically(
+    rawToken: string,
+    telegramId: string,
+    verifiedDirectorSessionVersion?: number,
+  ) {
     const token = this.normalizeToken(rawToken);
     const tokenHash = this.hashToken(token);
 
@@ -137,6 +152,15 @@ export class TelegramStaffLinkService {
           .getOne();
 
         this.assertInviteUsable(staff);
+
+        if (
+          staff.role === 'owner' &&
+          directorSessionVersion(staff) !== verifiedDirectorSessionVersion
+        ) {
+          throw new UnauthorizedException(
+            'Дані входу Директора змінено. Введіть актуальний пароль',
+          );
+        }
 
         const alreadyLinked = await manager.getRepository(Staff).findOne({
           where: { telegramId },
@@ -175,9 +199,10 @@ export class TelegramStaffLinkService {
       throw new UnauthorizedException('Посилання для прив’язки недійсне');
     }
 
+    const tokenHash = this.hashToken(token);
     const staff = await this.staffRepo.findOne({
       where: {
-        telegramInviteTokenHash: this.hashToken(token),
+        telegramInviteTokenHash: tokenHash,
       },
     });
 
@@ -196,9 +221,14 @@ export class TelegramStaffLinkService {
           staff.telegramInviteExpiresAt.getTime() < Date.now() ||
           staff.telegramId)
       ) {
-        staff.telegramInviteTokenHash = null;
-        staff.telegramInviteExpiresAt = null;
-        await this.staffRepo.save(staff);
+        // A public expired-invite request may have loaded this entity before
+        // the Director rotated credentials or a newer invite was issued.
+        // Clear only the invite fields, and only if this is still that invite.
+        // Never save a potentially stale full Staff entity here.
+        await this.staffRepo.update(
+          { id: staff.id, telegramInviteTokenHash: tokenHash },
+          { telegramInviteTokenHash: null, telegramInviteExpiresAt: null },
+        );
       }
       throw error;
     }
@@ -236,8 +266,7 @@ export class TelegramStaffLinkService {
     dto: ConfirmTelegramStaffLinkDto,
   ) {
     if (staff.role === 'owner') {
-      await this.assertDirectorCredentialAtomically(dto.token, dto.password);
-      return;
+      return this.assertDirectorCredentialAtomically(dto.token, dto.password);
     }
 
     if (!staff.pinHash) {
@@ -349,10 +378,14 @@ export class TelegramStaffLinkService {
         await repository.save(director);
       }
 
-      return { error: null };
+      return {
+        error: null,
+        verifiedDirectorSessionVersion: directorSessionVersion(director),
+      };
     });
 
     if (result.error) throw result.error;
+    return result.verifiedDirectorSessionVersion;
   }
 
   private verifyTelegramUser(initData: string) {

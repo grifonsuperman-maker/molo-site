@@ -10,7 +10,8 @@ import { Cron } from '@nestjs/schedule';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { compare, hash } from 'bcryptjs';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
+import { directorSessionVersion, nextDirectorCredentialsTimestamp } from '../auth/director-session-version';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { DirectorLoginDto } from './dto/director-login.dto';
 import { StaffPinLoginDto } from './dto/staff-pin-login.dto';
@@ -104,6 +105,26 @@ export class StaffService implements OnModuleInit {
   }
 
   async loginDirector(dto: DirectorLoginDto) {
+    let loginError: unknown;
+    const result = await this.staffRepo.manager.transaction(async (manager) => {
+      try {
+        const staffRepo = manager.getRepository(Staff);
+        return await this.loginDirectorWithLockedCredentials(dto, staffRepo);
+      } catch (error) {
+        // Authentication errors are raised only after the transaction commits,
+        // otherwise the failed-attempt update would be rolled back with them.
+        loginError = error;
+        return null;
+      }
+    });
+    if (loginError) throw loginError;
+    return result!;
+  }
+
+  private async loginDirectorWithLockedCredentials(
+    dto: DirectorLoginDto,
+    staffRepo: Repository<Staff>,
+  ) {
     const temporaryPin = dto.temporaryPin?.trim();
 
     if (temporaryPin !== undefined || dto.staffId) {
@@ -111,26 +132,27 @@ export class StaffService implements OnModuleInit {
         throw new BadRequestException('Оберіть Директора та введіть тимчасовий PIN');
       }
 
-      const director = await this.staffRepo.findOne({
+      const director = await staffRepo.findOne({
         where: {
           id: dto.staffId,
           role: 'owner',
           active: true,
           isArchived: false,
         },
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (!director || this.hasConfiguredDirectorAccess(director)) {
         throw new UnauthorizedException('Тимчасовий доступ недоступний');
       }
 
-      await this.assertDirectorNotLocked(director);
+      await this.assertDirectorNotLocked(director, staffRepo);
 
       if (temporaryPin !== TEMPORARY_DIRECTOR_PIN) {
-        await this.registerDirectorLoginFailure(director);
+        await this.registerDirectorLoginFailure(director, staffRepo);
       }
 
-      await this.resetDirectorLoginProtection(director);
+      await this.resetDirectorLoginProtection(director, staffRepo);
       return this.issueStaffToken(director, true);
     }
 
@@ -141,20 +163,21 @@ export class StaffService implements OnModuleInit {
       throw new BadRequestException('Введіть ім’я та пароль Директора');
     }
 
-    const director = await this.staffRepo.findOne({
+    const director = await staffRepo.findOne({
       where: {
         directorLoginName: loginName,
         role: 'owner',
         active: true,
         isArchived: false,
       },
+      lock: { mode: 'pessimistic_write' },
     });
 
     if (!director || !director.directorPasswordHash) {
       throw new UnauthorizedException('Невірне ім’я або пароль');
     }
 
-    await this.assertDirectorNotLocked(director);
+    await this.assertDirectorNotLocked(director, staffRepo);
 
     const passwordIsValid = await compare(
       password,
@@ -162,10 +185,10 @@ export class StaffService implements OnModuleInit {
     );
 
     if (!passwordIsValid) {
-      await this.registerDirectorLoginFailure(director);
+      await this.registerDirectorLoginFailure(director, staffRepo);
     }
 
-    await this.resetDirectorLoginProtection(director);
+    await this.resetDirectorLoginProtection(director, staffRepo);
     return this.issueStaffToken(director, false);
   }
 
@@ -220,19 +243,51 @@ export class StaffService implements OnModuleInit {
       throw new ConflictException('Це ім’я для входу вже використовується');
     }
 
-    director.fullName = dto.fullName.trim();
-    director.directorLoginName = loginName;
-    director.directorPasswordHash = await hash(dto.newPassword, 10);
-    director.directorCredentialsConfiguredAt = new Date();
-    director.directorFailedLoginAttempts = 0;
-    director.directorLockedUntil = null;
+    // Compare-and-swap at database level: simultaneous requests must not
+    // overwrite one another or accidentally share a session version.
+    const nextCredentialsConfiguredAt = nextDirectorCredentialsTimestamp(
+      director.directorCredentialsConfiguredAt,
+    );
+    const result = await this.staffRepo.update(
+      {
+        id: director.id,
+        role: 'owner',
+        active: true,
+        isArchived: false,
+        directorCredentialsConfiguredAt: director.directorCredentialsConfiguredAt ?? IsNull(),
+      },
+      {
+        fullName: dto.fullName.trim(),
+        directorLoginName: loginName,
+        directorPasswordHash: await hash(dto.newPassword, 10),
+        directorCredentialsConfiguredAt: nextCredentialsConfiguredAt,
+        directorFailedLoginAttempts: 0,
+        directorLockedUntil: null,
+      },
+    );
+    if (result.affected !== 1) {
+      throw new ConflictException('Дані входу Директора вже змінено. Увійдіть знову');
+    }
 
-    const saved = await this.staffRepo.save(director);
+    // Sign exactly the version written by this CAS. Do not reload the row here:
+    // another successful rotation may commit between our UPDATE and signing.
+    // A token carrying that later rotation's version would then outlive the
+    // credentials that this request actually installed.
+    const saved = {
+      ...director,
+      fullName: dto.fullName.trim(),
+      directorLoginName: loginName,
+      directorCredentialsConfiguredAt: nextCredentialsConfiguredAt,
+      directorFailedLoginAttempts: 0,
+      directorLockedUntil: null,
+    };
+    const { accessToken } = await this.issueStaffToken(saved, false);
 
     return {
       fullName: saved.fullName,
       loginName: saved.directorLoginName || '',
       configured: true,
+      accessToken,
     };
   }
 
@@ -269,40 +324,55 @@ export class StaffService implements OnModuleInit {
 
   async update(id: string, dto: UpdateStaffDto) {
     const staff = await this.getStaffOrThrow(id);
+    const originalRole = staff.role;
     const { pin, ...fields } = dto;
+    const changes: Partial<Staff> = {};
 
     if (fields.fullName !== undefined) {
       staff.fullName = fields.fullName.trim();
+      changes.fullName = staff.fullName;
     }
 
     if (fields.phone !== undefined) {
       staff.phone = fields.phone?.trim() || null;
+      changes.phone = staff.phone;
     }
 
     if (fields.telegramId !== undefined) {
       staff.telegramId = fields.telegramId?.trim() || null;
+      changes.telegramId = staff.telegramId;
     }
 
     if (fields.role !== undefined) {
       staff.role = fields.role;
+      changes.role = staff.role;
     }
 
     if (fields.note !== undefined) {
       staff.note = fields.note?.trim() || null;
+      changes.note = staff.note;
     }
 
     if (pin !== undefined) {
       staff.pinHash = await hash(pin, 10);
+      changes.pinHash = staff.pinHash;
     }
 
-    const saved = await this.staffRepo.save(staff);
+    // Always write only the requested fields and require the original role.
+    // A stale administrator/waiter read must not overwrite a newly promoted
+    // Director's password or session version (nor demote that Director).
+    const saved = Object.keys(changes).length
+      ? await this.updateStaffFields(id, originalRole, changes)
+      : await this.getStaffOrThrow(id);
     return this.toPublicStaff(saved);
   }
 
   async changePin(id: string, pin: string) {
     const staff = await this.getStaffOrThrow(id);
     staff.pinHash = await hash(pin, 10);
-    const saved = await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, {
+      pinHash: staff.pinHash,
+    });
     return this.toPublicStaff(saved);
   }
 
@@ -367,7 +437,13 @@ export class StaffService implements OnModuleInit {
     staff.shiftEndedAt = null;
     staff.shiftEndedBy = null;
 
-    const saved = await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, {
+      isOnShift: true,
+      shiftStartedAt: now,
+      shiftStartedBy: staff.shiftStartedBy,
+      shiftEndedAt: null,
+      shiftEndedBy: null,
+    });
 
     await this.saveShiftEvent(
       saved,
@@ -432,7 +508,7 @@ export class StaffService implements OnModuleInit {
     }
 
     staff.active = active;
-    const saved = await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, { active });
     return this.toPublicStaff(saved);
   }
 
@@ -444,12 +520,7 @@ export class StaffService implements OnModuleInit {
     }
 
     if (staff.isOnShift) {
-      await this.finishShift(
-        staff,
-        'shift_ended',
-        dto.performedBy,
-        'Зміну завершено перед архівуванням',
-      );
+      await this.finishShift(staff, 'shift_ended', dto.performedBy, 'Зміну завершено перед архівуванням');
     }
 
     staff.active = false;
@@ -457,7 +528,12 @@ export class StaffService implements OnModuleInit {
     staff.archivedAt = new Date();
     staff.archivedBy = dto.performedBy?.trim() || null;
 
-    const saved = await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, {
+      active: false,
+      isArchived: true,
+      archivedAt: staff.archivedAt,
+      archivedBy: staff.archivedBy,
+    });
 
     await this.saveShiftEvent(
       saved,
@@ -481,7 +557,12 @@ export class StaffService implements OnModuleInit {
     staff.archivedAt = null;
     staff.archivedBy = null;
 
-    const saved = await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(id, staff.role, {
+      active: true,
+      isArchived: false,
+      archivedAt: null,
+      archivedBy: null,
+    });
 
     await this.saveShiftEvent(
       saved,
@@ -505,7 +586,15 @@ export class StaffService implements OnModuleInit {
     }
 
     const deletedId = staff.id;
-    await this.staffRepo.remove(staff);
+    // Do not delete a Director if this staff member was promoted since read.
+    const result = await this.staffRepo.delete({
+      id: deletedId,
+      role: staff.role,
+      isArchived: true,
+    });
+    if (result.affected !== 1) {
+      throw new ConflictException('Дані працівника змінилися. Оновіть сторінку');
+    }
     return { id: deletedId };
   }
 
@@ -562,6 +651,9 @@ export class StaffService implements OnModuleInit {
       staffId: staff.id,
       role: staff.role,
       name: staff.fullName,
+      ...(staff.role === 'owner'
+        ? { directorSessionVersion: directorSessionVersion(staff) }
+        : {}),
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
@@ -574,14 +666,15 @@ export class StaffService implements OnModuleInit {
     };
   }
 
-  private async assertDirectorNotLocked(director: Staff) {
+  private async assertDirectorNotLocked(
+    director: Staff,
+    staffRepo: Repository<Staff>,
+  ) {
     if (!director.directorLockedUntil) return;
 
     const lockedUntil = new Date(director.directorLockedUntil);
     if (lockedUntil.getTime() <= Date.now()) {
-      director.directorFailedLoginAttempts = 0;
-      director.directorLockedUntil = null;
-      await this.staffRepo.save(director);
+      await this.updateDirectorLoginProtection(director, staffRepo, 0, null);
       return;
     }
 
@@ -594,29 +687,45 @@ export class StaffService implements OnModuleInit {
     );
   }
 
-  private async registerDirectorLoginFailure(director: Staff): Promise<never> {
-    director.directorFailedLoginAttempts =
+  private async registerDirectorLoginFailure(
+    director: Staff,
+    staffRepo: Repository<Staff>,
+  ): Promise<never> {
+    const failedLoginAttempts =
       Number(director.directorFailedLoginAttempts || 0) + 1;
 
-    if (director.directorFailedLoginAttempts >= DIRECTOR_MAX_FAILED_ATTEMPTS) {
-      director.directorLockedUntil = new Date(
+    if (failedLoginAttempts >= DIRECTOR_MAX_FAILED_ATTEMPTS) {
+      const lockedUntil = new Date(
         Date.now() + DIRECTOR_LOCK_MINUTES * 60_000,
       );
-      await this.staffRepo.save(director);
+      await this.updateDirectorLoginProtection(
+        director,
+        staffRepo,
+        failedLoginAttempts,
+        lockedUntil,
+      );
       throw new UnauthorizedException(
         `Забагато невдалих спроб. Вхід заблоковано на ${DIRECTOR_LOCK_MINUTES} хв.`,
       );
     }
 
-    await this.staffRepo.save(director);
+    await this.updateDirectorLoginProtection(
+      director,
+      staffRepo,
+      failedLoginAttempts,
+      null,
+    );
     const attemptsLeft =
-      DIRECTOR_MAX_FAILED_ATTEMPTS - director.directorFailedLoginAttempts;
+      DIRECTOR_MAX_FAILED_ATTEMPTS - failedLoginAttempts;
     throw new UnauthorizedException(
       `Невірні дані входу. Залишилось спроб: ${attemptsLeft}`,
     );
   }
 
-  private async resetDirectorLoginProtection(director: Staff) {
+  private async resetDirectorLoginProtection(
+    director: Staff,
+    staffRepo: Repository<Staff>,
+  ) {
     if (
       !director.directorFailedLoginAttempts &&
       !director.directorLockedUntil
@@ -624,9 +733,37 @@ export class StaffService implements OnModuleInit {
       return;
     }
 
-    director.directorFailedLoginAttempts = 0;
-    director.directorLockedUntil = null;
-    await this.staffRepo.save(director);
+    await this.updateDirectorLoginProtection(director, staffRepo, 0, null);
+  }
+
+  private async updateDirectorLoginProtection(
+    director: Staff,
+    staffRepo: Repository<Staff>,
+    failedLoginAttempts: number,
+    lockedUntil: Date | null,
+  ) {
+    const result = await staffRepo.update(
+      {
+        id: director.id,
+        role: 'owner',
+        active: true,
+        isArchived: false,
+        directorCredentialsConfiguredAt:
+          director.directorCredentialsConfiguredAt ?? IsNull(),
+      },
+      {
+        directorFailedLoginAttempts: failedLoginAttempts,
+        directorLockedUntil: lockedUntil,
+      },
+    );
+    if (result.affected !== 1) {
+      throw new UnauthorizedException(
+        'Дані входу Директора змінено. Увійдіть знову',
+      );
+    }
+
+    director.directorFailedLoginAttempts = failedLoginAttempts;
+    director.directorLockedUntil = lockedUntil;
   }
 
   private async getAuthenticatedDirector(user?: AuthUser) {
@@ -663,6 +800,25 @@ export class StaffService implements OnModuleInit {
     return value?.trim().toLowerCase() || '';
   }
 
+  // No existing Staff write may save a stale full entity. Only explicitly
+  // requested fields are written, and a concurrent role change fails closed.
+  // This also protects promotions into Director while a prior PIN/edit/shift
+  // request is hashing a PIN or otherwise waiting before persistence.
+  private async updateStaffFields(
+    id: string,
+    expectedRole: Staff['role'],
+    changes: Partial<Staff>,
+  ): Promise<Staff> {
+    const result = await this.staffRepo.update(
+      { id, role: expectedRole },
+      changes,
+    );
+    if (result.affected !== 1) {
+      throw new ConflictException('Дані працівника змінилися. Оновіть сторінку');
+    }
+    return this.getStaffOrThrow(id);
+  }
+
   private async finishShift(
     staff: Staff,
     eventType: 'shift_ended' | 'shift_auto_ended',
@@ -673,7 +829,12 @@ export class StaffService implements OnModuleInit {
     staff.shiftEndedAt = new Date();
     staff.shiftEndedBy = performedBy?.trim() || null;
 
-    const saved = await this.staffRepo.save(staff);
+    const saved = await this.updateStaffFields(staff.id, staff.role, {
+      isOnShift: false,
+      shiftEndedAt: staff.shiftEndedAt,
+      shiftEndedBy: staff.shiftEndedBy,
+      lastAutoShiftEndDate: staff.lastAutoShiftEndDate,
+    });
 
     await this.saveShiftEvent(
       saved,

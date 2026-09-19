@@ -158,8 +158,16 @@ export const staffApi = {
   getDirectorAccess: () =>
     api.get<DirectorAccessSettings>('/staff/director-access'),
 
-  updateDirectorAccess: (payload: UpdateDirectorAccessPayload) =>
-    api.patch<DirectorAccessSettings>('/staff/director-access', payload),
+  updateDirectorAccess: async (payload: UpdateDirectorAccessPayload) => {
+    const result = await api.patch<DirectorAccessSettings & { accessToken: string }>(
+      '/staff/director-access',
+      payload,
+    );
+    // The server has revoked every previously issued Director token. Keep
+    // only the device making this authenticated settings change signed in.
+    setAccessToken(result.accessToken);
+    return result;
+  },
 
   getLoginOptions: () =>
     api.get<StaffLoginOption[]>('/staff/login-options'),
@@ -222,17 +230,11 @@ export const staffApi = {
   unblock: (id: string) =>
     api.patch<StaffMember>(`/staff/${id}/unblock`),
 
-  archive: (
-    id: string,
-    payload: StaffShiftActionPayload = {},
-  ) =>
-    api.post<StaffMember>(`/staff/${id}/archive`, payload),
+  archive: (id: string, dto: StaffShiftActionPayload = {}) =>
+    api.post<StaffMember>(`/staff/${id}/archive`, dto),
 
-  restore: (
-    id: string,
-    payload: StaffShiftActionPayload = {},
-  ) =>
-    api.post<StaffMember>(`/staff/${id}/restore`, payload),
+  restore: (id: string, dto: StaffShiftActionPayload = {}) =>
+    api.post<StaffMember>(`/staff/${id}/restore`, dto),
 
   deletePermanently: (id: string) =>
     api.delete<{ id: string }>(`/staff/${id}/permanent`),

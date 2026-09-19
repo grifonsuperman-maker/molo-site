@@ -296,8 +296,10 @@ test('API token lookup catches blocked storage access', () => {
     'utf8',
   );
 
-  assert.match(
-    clientSource,
-    /export function getAccessToken\(\) \{\s*try \{\s*if \(typeof localStorage === 'undefined'\) return null;\s*return localStorage\.getItem\(TOKEN_KEY\);\s*\} catch \{\s*return null;/,
-  );
+  // Keep the fail-closed storage read even when a newer in-memory or
+  // sessionStorage token is available during a Director password rotation.
+  assert.match(clientSource, /export function getAccessToken\(\)/);
+  assert.match(clientSource, /return localStorage\.getItem\(TOKEN_KEY\);\s*\} catch \{\s*return null;/);
+  assert.match(clientSource, /inMemoryAccessToken/);
+  assert.match(clientSource, /sessionStorage\.getItem\(TOKEN_KEY\)/);
 });

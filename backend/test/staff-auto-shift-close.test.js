@@ -7,7 +7,19 @@ function createService(staff) {
   const savedEvents = [];
   const staffRepo = {
     find: async () => (staff.isOnShift ? [staff] : []),
-    save: async (value) => value,
+    findOne: async ({ where }) => (where.id === staff.id ? staff : null),
+    update: async (where, values) => {
+      if (where.id !== staff.id || where.role !== staff.role) {
+        return { affected: 0 };
+      }
+      assert.equal(Object.hasOwn(values, 'directorPasswordHash'), false);
+      assert.equal(Object.hasOwn(values, 'directorCredentialsConfiguredAt'), false);
+      Object.assign(staff, values);
+      return { affected: 1 };
+    },
+    save: async () => {
+      throw new Error('Shift updates must not save a stale full Staff row');
+    },
   };
   const shiftEventRepo = {
     create: (value) => value,
@@ -26,6 +38,7 @@ function createService(staff) {
 test('keeps a same-day shift open before 23:01 Kyiv time', async () => {
   const staff = {
     id: 'waiter-1',
+    role: 'waiter',
     isOnShift: true,
     shiftStartedAt: new Date('2026-08-07T17:00:00.000Z'),
   };
@@ -40,6 +53,7 @@ test('keeps a same-day shift open before 23:01 Kyiv time', async () => {
 test('closes a same-day shift at 23:01 Kyiv time', async () => {
   const staff = {
     id: 'waiter-1',
+    role: 'waiter',
     isOnShift: true,
     shiftStartedAt: new Date('2026-08-07T17:00:00.000Z'),
   };
@@ -56,6 +70,7 @@ test('closes a same-day shift at 23:01 Kyiv time', async () => {
 test('closes a carried-over shift when the server restarts next day', async () => {
   const staff = {
     id: 'hookah-1',
+    role: 'hookah',
     isOnShift: true,
     shiftStartedAt: new Date('2026-08-07T17:00:00.000Z'),
   };

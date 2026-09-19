@@ -34,6 +34,27 @@ function createDirector(overrides = {}) {
 }
 
 function createService(director = createDirector()) {
+  let transactionTail = Promise.resolve();
+  let afterDirectorUpdate;
+  const signedPayloads = [];
+  let notifyTransactionStarted;
+  const transactionStarted = new Promise((resolve) => {
+    notifyTransactionStarted = resolve;
+  });
+  const updateDirector = async (where, values) => {
+    if (where.id !== director.id || where.role !== director.role ||
+        where.active !== director.active || where.isArchived !== director.isArchived) {
+      return { affected: 0 };
+    }
+    const previous = where.directorCredentialsConfiguredAt;
+    const versionMatches = previous?._type === 'isNull'
+      ? director.directorCredentialsConfiguredAt === null
+      : previous instanceof Date && director.directorCredentialsConfiguredAt instanceof Date &&
+        previous.getTime() === director.directorCredentialsConfiguredAt.getTime();
+    if (!versionMatches) return { affected: 0 };
+    Object.assign(director, values);
+    return { affected: 1 };
+  };
   const repository = {
     find: async ({ where } = {}) => {
       if (where?.role === 'owner') return [director];
@@ -58,7 +79,35 @@ function createService(director = createDirector()) {
       return director;
     },
     save: async (value) => value,
+    update: async (where, values) => {
+      await transactionTail;
+      const result = await updateDirector(where, values);
+      if (result.affected === 1 && afterDirectorUpdate) {
+        const callback = afterDirectorUpdate;
+        afterDirectorUpdate = undefined;
+        await callback();
+      }
+      return result;
+    },
     create: (value) => value,
+  };
+  const transactionalRepository = {
+    ...repository,
+    update: updateDirector,
+  };
+  repository.manager = {
+    transaction: async (callback) => {
+      const previous = transactionTail;
+      let release;
+      transactionTail = new Promise((resolve) => { release = resolve; });
+      await previous;
+      notifyTransactionStarted();
+      try {
+        return await callback({ getRepository: () => transactionalRepository });
+      } finally {
+        release();
+      }
+    },
   };
 
   const shiftRepository = {
@@ -68,12 +117,18 @@ function createService(director = createDirector()) {
   };
 
   const jwtService = {
-    signAsync: async () => 'director-token',
+    signAsync: async (payload) => {
+      signedPayloads.push(payload);
+      return `director-token-${payload.directorSessionVersion ?? 'unversioned'}`;
+    },
   };
 
   return {
     director,
     service: new StaffService(repository, shiftRepository, jwtService),
+    setAfterDirectorUpdate: (callback) => { afterDirectorUpdate = callback; },
+    signedPayloads,
+    waitForDirectorLoginLock: () => transactionStarted,
   };
 }
 
@@ -85,7 +140,7 @@ test('temporary PIN 1111 opens Director panel before credentials are configured'
     temporaryPin: '1111',
   });
 
-  assert.equal(result.accessToken, 'director-token');
+  assert.match(result.accessToken, /^director-token-/);
   assert.equal(result.user.role, 'owner');
   assert.equal(result.mustConfigureDirectorAccess, true);
 });
@@ -199,6 +254,57 @@ test('changing configured Director credentials requires current password', async
   assert.equal(updated.loginName, 'new-director');
 });
 
+test('credential update token never adopts a later concurrent CAS version', async () => {
+  const {
+    service,
+    director,
+    setAfterDirectorUpdate,
+    signedPayloads,
+  } = createService();
+  const user = {
+    sub: director.id,
+    staffId: director.id,
+    role: 'owner',
+    name: director.fullName,
+  };
+
+  await service.updateDirectorAccess(user, {
+    fullName: director.fullName,
+    loginName: 'director',
+    newPassword: 'initial-password',
+    confirmPassword: 'initial-password',
+  });
+
+  let laterUpdate;
+  setAfterDirectorUpdate(async () => {
+    laterUpdate = await service.updateDirectorAccess(user, {
+      fullName: 'Другий Директор',
+      loginName: 'director-two',
+      currentPassword: 'password-one',
+      newPassword: 'password-two',
+      confirmPassword: 'password-two',
+    });
+  });
+
+  const firstUpdate = await service.updateDirectorAccess(user, {
+    fullName: 'Перший Директор',
+    loginName: 'director-one',
+    currentPassword: 'initial-password',
+    newPassword: 'password-one',
+    confirmPassword: 'password-one',
+  });
+
+  const firstVersion = Number(firstUpdate.accessToken.split('-').at(-1));
+  const laterVersion = Number(laterUpdate.accessToken.split('-').at(-1));
+  assert.ok(laterVersion > firstVersion);
+  assert.equal(firstUpdate.fullName, 'Перший Директор');
+  assert.equal(firstUpdate.loginName, 'director-one');
+  assert.equal(director.fullName, 'Другий Директор');
+  assert.equal(director.directorCredentialsConfiguredAt.getTime(), laterVersion);
+  assert.equal(signedPayloads.at(-1).directorSessionVersion, firstVersion);
+  assert.notEqual(firstVersion, director.directorCredentialsConfiguredAt.getTime());
+});
+
 test('Director login is locked for 15 minutes after five wrong passwords', async () => {
   const { service, director } = createService();
 
@@ -239,4 +345,87 @@ test('Director login is locked for 15 minutes after five wrong passwords', async
   );
 
   assert.ok(director.directorLockedUntil instanceof Date);
+});
+
+test('concurrent failed login cannot restore credentials changed after its row lock', async () => {
+  const { service, director, waitForDirectorLoginLock } = createService();
+  const user = {
+    sub: director.id,
+    staffId: director.id,
+    role: 'owner',
+    name: director.fullName,
+  };
+  await service.updateDirectorAccess(user, {
+    fullName: director.fullName,
+    loginName: 'director',
+    newPassword: 'old-password',
+    confirmPassword: 'old-password',
+  });
+
+  const failedLogin = service.loginDirector({
+    loginName: 'director',
+    password: 'wrong-password',
+  });
+  await waitForDirectorLoginLock();
+  const changed = service.updateDirectorAccess(user, {
+    fullName: director.fullName,
+    loginName: 'director',
+    currentPassword: 'old-password',
+    newPassword: 'new-password',
+    confirmPassword: 'new-password',
+  });
+
+  await assert.rejects(failedLogin, /Залишилось спроб: 4/);
+  await changed;
+  await assert.rejects(
+    () => service.loginDirector({ loginName: 'director', password: 'old-password' }),
+    /Невірні дані входу/,
+  );
+  assert.equal(
+    (await service.loginDirector({ loginName: 'director', password: 'new-password' })).user.role,
+    'owner',
+  );
+});
+
+test('concurrent successful login reset cannot restore credentials after password change', async () => {
+  const director = createDirector({ directorFailedLoginAttempts: 2 });
+  const { service, waitForDirectorLoginLock } = createService(director);
+  const user = {
+    sub: director.id,
+    staffId: director.id,
+    role: 'owner',
+    name: director.fullName,
+  };
+  await service.updateDirectorAccess(user, {
+    fullName: director.fullName,
+    loginName: 'director',
+    newPassword: 'old-password',
+    confirmPassword: 'old-password',
+  });
+  director.directorFailedLoginAttempts = 2;
+
+  const successfulLogin = service.loginDirector({
+    loginName: 'director',
+    password: 'old-password',
+  });
+  await waitForDirectorLoginLock();
+  const changed = service.updateDirectorAccess(user, {
+    fullName: director.fullName,
+    loginName: 'director',
+    currentPassword: 'old-password',
+    newPassword: 'new-password',
+    confirmPassword: 'new-password',
+  });
+
+  await successfulLogin;
+  await changed;
+  assert.equal(director.directorFailedLoginAttempts, 0);
+  await assert.rejects(
+    () => service.loginDirector({ loginName: 'director', password: 'old-password' }),
+    /Невірні дані входу/,
+  );
+  assert.equal(
+    (await service.loginDirector({ loginName: 'director', password: 'new-password' })).user.role,
+    'owner',
+  );
 });
