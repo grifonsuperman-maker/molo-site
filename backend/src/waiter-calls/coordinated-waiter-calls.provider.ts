@@ -107,6 +107,7 @@ export function createCoordinatedWaiterCallsService(
           bookingId: string; tableId?: string | null; tableNumber?: string | null;
           waiterId: string; waiterName: string;
         }) => {
+          if (!dto.bookingId) throw new BadRequestException('bookingId обовʼязковий');
           const booking = await dataSource.getRepository(Booking).findOne({
             where: { id: dto.bookingId }, relations: ['table'],
           });
@@ -115,11 +116,33 @@ export function createCoordinatedWaiterCallsService(
           if (dto.tableId && dto.tableId !== booking.table.id) {
             throw new BadRequestException('Стіл бронювання не збігається');
           }
-          return ownership.withWaiterTableLock(
-            booking.table.id, dto.waiterId,
-            () => target.assign({ ...dto, tableId: booking.table!.id, tableNumber: booking.table!.tableNumber }),
-            Boolean(booking.checkedInAt && booking.status === 'approved'),
+
+          // The UI calls this endpoint only after "Гість прийшов". A direct API call
+          // must not create an in-memory assignment for a reservation that has no guests.
+          // Re-read inside the table lock: a booking/table may have changed since lookup.
+          const current = await ownership.withWaiterTableLock(
+            booking.table.id,
+            dto.waiterId,
+            async (manager) => {
+              const visit = await manager.getRepository(Booking).findOne({
+                where: { id: dto.bookingId }, relations: ['table'],
+              });
+              if (!visit?.table?.id || visit.table.id !== booking.table!.id) {
+                throw new BadRequestException('Стіл бронювання вже змінено');
+              }
+              const table = await manager.getRepository(TableEntity).findOne({
+                where: { id: visit.table.id },
+              });
+              if (visit.status !== 'approved' || !visit.checkedInAt || table?.status !== 'occupied') {
+                throw new BadRequestException('Офіціанта можна закріпити лише після приходу гостей');
+              }
+              return { tableId: table.id, tableNumber: table.tableNumber };
+            },
+            true,
           );
+
+          // The durable claim must commit before the legacy in-memory call routing is updated.
+          return target.assign({ ...dto, tableId: current.tableId, tableNumber: current.tableNumber });
         };
       }
       if (property === 'accept') {
