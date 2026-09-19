@@ -14,12 +14,15 @@ assert.match(controller, /noShowNoticeApi\.listUnreadForDevice\(guestDeviceId\)/
 assert.match(controller, /Promise\.allSettled/, 'failed guest booking lookup does not suppress a successful notice lookup');
 assert.match(controller, /if \(bookingsResult\.status === 'rejected' \|\| noticesResult\.status === 'rejected'\) return;/, 'partial polling failures cannot dismiss an already displayed unread notice');
 assert.match(controller, /const notice = notices\[0\]/, 'separate unread no-show notice is presented in decision overlay');
+assert.match(controller, /bookingId: null,\s*noticeHandle: notice\.noticeHandle/, 'device no-show overlay never carries a historical booking ID');
 assert.match(controller, /isNoShow: true/, 'device no-show is tagged as a notice, not a booking card');
 assert.match(controller, /!decision\.isNoShow && decision\.bookingDate/, 'no historical booking date or table is rendered for no-show notice');
-assert.match(controller, /if \(token\) \{\s*await bookingsApi\.guestAcknowledgeNotification/, 'token-based acknowledgement is preserved');
-assert.match(controller, /noShowNoticeApi\.acknowledgeByDevice\(bookingId, guestDeviceId\)/, 'tokenless notice has a working acknowledgement action');
+assert.match(controller, /await bookingsApi\.guestAcknowledgeNotification\(bookingId, token\)/, 'existing token-based acknowledgement is preserved');
+assert.match(controller, /noShowNoticeApi\.acknowledgeByDevice\(noticeHandle, guestDeviceId\)/, 'device ACK uses only an opaque one-purpose handle');
 assert.match(api, /\/bookings\/guest\/no-show\/notices/, 'device-only notice list uses a dedicated endpoint');
 assert.match(api, /\/guest\/no-show\/ack-by-device/, 'device-only acknowledgement uses a dedicated limited endpoint');
+assert.match(api, /noticeHandle: string/, 'no-show public payload has an opaque handle, not a booking ID');
+assert.doesNotMatch(api, /bookingId: string/, 'no-show public payload never contains bookingId');
 assert.match(api, /\{ guestDeviceId \}/, 'device ID is sent only to the narrow notice API');
 assert.match(guestApp, /const activeMyBookings = myBookings\.filter/, 'main guest cards preserve the active booking filter');
 assert.match(guestApp, /const myBookingCards = \[\.\.\.activeMyBookings, \.\.\.unreadNotificationBookings\]/, 'existing token-scoped notification behavior stays unchanged');
@@ -29,4 +32,4 @@ assert.match(notice, /Поки Адміністратор розглядає в�
 assert.match(notice, /Після підтвердження нового часу 30 хвилин відраховуються від нового часу прибуття/, 'approved arrival time starts a new 30-minute deadline');
 assert.match(notice, /протягом 30 хвилин після підтвердженого часу прибуття/, 'notice explains no-show deadline');
 
-console.log('guest device no-show notice-only UI and rule checks passed');
+console.log('guest opaque no-show notice UI and rule checks passed');
