@@ -83,11 +83,6 @@ export default function AdminWorkspace() {
       } else if (image.complete) {
         revealCurrentPhoto();
       }
-
-      const activeElement = document.activeElement;
-      if (activeElement instanceof HTMLElement && root.contains(activeElement)) {
-        activeElement.blur();
-      }
     };
 
     const scheduleSync = () => {
@@ -172,13 +167,12 @@ export default function AdminWorkspace() {
               <CalendarClock size={18} />
               <span className="truncate">План столів</span>
             </button>
-
             <button
               type="button"
               onClick={() => setSection('staff')}
               className={`inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl border px-3 py-3 text-sm font-black transition active:scale-[0.98] ${
                 section === 'staff'
-                  ? 'border-fuchsia-300/60 bg-fuchsia-300 text-neutral-950 shadow-[0_0_22px_rgba(217,70,239,.14)]'
+                  ? 'border-fuchsia-300/60 bg-fuchsia-300 text-neutral-950'
                   : 'border-white/10 bg-white/[0.04] text-white/65'
               }`}
             >
@@ -198,12 +192,12 @@ export default function AdminWorkspace() {
           <main className="mx-auto min-h-screen max-w-5xl px-3 pb-36 pt-3 sm:px-4 lg:px-8">
             <section className="rounded-[28px] border border-fuchsia-300/20 bg-[radial-gradient(circle_at_top,rgba(217,70,239,.10),transparent_38%),rgba(10,10,10,.96)] p-3 shadow-[0_0_38px_rgba(217,70,239,.08)] sm:p-5">
               <div className="mb-4 flex items-center gap-3">
-                <span className="grid h-11 w-11 place-items-center rounded-2xl border border-fuchsia-300/30 bg-fuchsia-400/10 text-fuchsia-100">
-                  <UsersRound size={20} />
+                <span className="grid h-11 w-11 place-items-center rounded-2xl border border-fuchsia-300/30 bg-fuchsia-400/10">
+                  <UsersRound size={18} />
                 </span>
                 <div>
                   <h1 className="text-xl font-black">Персонал</h1>
-                  <p className="text-xs text-white/45">Зміни, доступ і працівники ресторану</p>
+                  <p className="text-xs text-white/40">Зміни, доступ і працівники ресторану</p>
                 </div>
               </div>
               <AdminStaffPanel />
