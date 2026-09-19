@@ -22,4 +22,6 @@ assert.match(api, /\/bookings\/admin\/manual/);
 assert.match(waiter, /bookingsApi\.getToday\(\)/);
 assert.match(waiter, /setInterval\(\(\) => void load\(\), 15000\)/);
 
+require('./admin-planner-keyboard-focus.test.cjs');
+
 console.log('admin manual booking frontend regression passed');
