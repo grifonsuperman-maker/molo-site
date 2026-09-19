@@ -10,18 +10,21 @@ const main = read('src/main.tsx');
 const guestApp = read('src/guest/GuestApp.tsx');
 
 assert.match(controller, /const POLLING_MS = 15_000;/, 'booking-decision polling stays 15 seconds');
-assert.match(controller, /item\.status === 'cancelled' &&\s*item\.guestNotification\?\.type === 'no_show'/, 'only unread no-show is eligible for device fallback');
-assert.match(controller, /!tokenFor\(item\.bookingId\)/, 'device fallback is reserved for lost booking tokens');
+assert.match(controller, /noShowNoticeApi\.listUnreadForDevice\(guestDeviceId\)/, 'no-show notice is fetched separately from guest booking list');
+assert.match(controller, /const notice = notices\[0\]/, 'separate unread no-show notice is presented in decision overlay');
+assert.match(controller, /isNoShow: true/, 'device no-show is tagged as a notice, not a booking card');
+assert.match(controller, /!decision\.isNoShow && decision\.bookingDate/, 'no historical booking date or table is rendered for no-show notice');
 assert.match(controller, /if \(token\) \{\s*await bookingsApi\.guestAcknowledgeNotification/, 'token-based acknowledgement is preserved');
-assert.match(controller, /noShowNoticeApi\.acknowledgeByDevice\(booking\.bookingId, guestDeviceId\)/, 'tokenless notice has a working acknowledgement action');
-assert.match(api, /\/guest\/no-show\/ack-by-device/, 'device-only API uses a dedicated limited endpoint');
-assert.match(api, /\{ guestDeviceId \}/, 'device ID is sent only to the dedicated endpoint');
-assert.match(guestApp, /const unreadNotificationBookings = myBookings\.filter/, 'main guest cards preserve unread notifications');
-assert.match(guestApp, /booking\.guestNotification &&\s*!booking\.guestNotification\.acknowledgedAt/, 'main guest cards hide acknowledged notices');
+assert.match(controller, /noShowNoticeApi\.acknowledgeByDevice\(bookingId, guestDeviceId\)/, 'tokenless notice has a working acknowledgement action');
+assert.match(api, /\/bookings\/guest\/no-show\/notices/, 'device-only notice list uses a dedicated endpoint');
+assert.match(api, /\/guest\/no-show\/ack-by-device/, 'device-only acknowledgement uses a dedicated limited endpoint');
+assert.match(api, /\{ guestDeviceId \}/, 'device ID is sent only to the narrow notice API');
+assert.match(guestApp, /const activeMyBookings = myBookings\.filter/, 'main guest cards preserve the active booking filter');
+assert.match(guestApp, /const myBookingCards = \[\.\.\.activeMyBookings, \.\.\.unreadNotificationBookings\]/, 'existing token-scoped notification behavior stays unchanged');
 
 assert.ok(main.indexOf("import './guest/no-show-rule.css';") > main.indexOf("import './styles.css';"), 'clarification overrides old guest warning');
 assert.match(notice, /Поки Адміністратор розглядає ваш запит на зміну часу, відлік призупинено/, 'pending request pauses the deadline');
 assert.match(notice, /Після підтвердження нового часу 30 хвилин відраховуються від нового часу прибуття/, 'approved arrival time starts a new 30-minute deadline');
 assert.match(notice, /протягом 30 хвилин після підтвердженого часу прибуття/, 'notice explains no-show deadline');
 
-console.log('guest device no-show notice and rule tests passed');
+console.log('guest device no-show notice-only UI and rule checks passed');
