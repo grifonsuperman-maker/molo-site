@@ -7,7 +7,6 @@ import { BookingHistory } from './entities/booking-history.entity';
 import { Booking } from './entities/booking.entity';
 
 const AUTOMATIC_NO_SHOW_REASON = 'automatic_no_show_30m';
-const DEFAULT_DURATION_MINUTES = 120;
 
 @Injectable()
 export class GuestNoShowNoticesService {
@@ -23,16 +22,14 @@ export class GuestNoShowNoticesService {
     return createHash('sha256').update(normalized).digest('hex');
   }
 
-  // Only unread *automatic* no-show notices are recoverable by device.
-  // Other cancelled bookings and guest history remain token-scoped.
+  // Return only the unread notice and the ID needed for its narrow acknowledgement.
+  // Never expose a historical booking or its table/date/contact details by device.
   async listUnreadForDevice(deviceId: string | undefined) {
     const hash = this.deviceHash(deviceId);
     if (!hash) return [];
 
     const bookings = await this.bookings
       .createQueryBuilder('booking')
-      .leftJoinAndSelect('booking.table', 'table')
-      .leftJoinAndSelect('table.zone', 'zone')
       .where('booking.guestDeviceIdHash = :deviceHash', { deviceHash: hash })
       .andWhere('booking.status = :cancelled', { cancelled: 'cancelled' })
       .andWhere('booking.cancellationReason = :reason', { reason: 'no_show' })
@@ -44,36 +41,12 @@ export class GuestNoShowNoticesService {
 
     return bookings.map((booking) => ({
       bookingId: booking.id,
-      status: booking.status,
-      tableId: booking.table?.id || null,
-      tableNumber: booking.table?.tableNumber || null,
-      zoneId: booking.table?.zone?.id || null,
-      zoneName: booking.table?.zone?.name || null,
-      bookingDate: booking.bookingDate,
-      bookingTime: booking.bookingTime,
-      durationMinutes: this.duration(booking),
-      guestsCount: booking.guestsCount,
-      wishes: booking.wishes,
-      createdAt: booking.createdAt,
-      approvedAt: booking.approvedAt,
-      rejectedAt: booking.rejectedAt,
-      checkedInAt: booking.checkedInAt,
-      cancelledAt: booking.cancelledAt,
-      completedAt: booking.completedAt,
-      cancellationReason: booking.cancellationReason,
-      lateNotifiedAt: booking.lateNotifiedAt,
-      latenessHours: booking.latenessHours,
-      latenessMinutes: booking.latenessMinutes,
-      expectedArrivalAt: booking.expectedArrivalAt,
-      isLatenessPromptDue: false,
-      isExpectedArrivalOverdue: false,
-      canGuestCancel: false,
-      canGuestChangeTable: false,
-      canGuestChangeTime: false,
-      canReportLateness: false,
-      canLeaveReview: false,
-      guestNotification: booking.guestNotification,
-      restaurantPhone: null,
+      guestNotification: {
+        type: booking.guestNotification!.type,
+        title: booking.guestNotification!.title,
+        message: booking.guestNotification!.message,
+        createdAt: booking.guestNotification!.createdAt,
+      },
     }));
   }
 
@@ -127,20 +100,5 @@ export class GuestNoShowNoticesService {
 
       return { message: 'Повідомлення прочитано' };
     });
-  }
-
-  private duration(booking: Booking) {
-    if (Number.isFinite(Number(booking.durationMinutes)) && Number(booking.durationMinutes) >= 30) {
-      return Math.min(720, Math.round(Number(booking.durationMinutes)));
-    }
-    const match = String(booking.wishes || '').match(/\((\d{2}:\d{2})\s*[—-]\s*(\d{2}:\d{2})\)/);
-    if (!match) return DEFAULT_DURATION_MINUTES;
-    const minutes = (time: string) => {
-      const [hours, minutes] = time.split(':').map(Number);
-      return hours * 60 + minutes;
-    };
-    const start = minutes(match[1]);
-    const end = minutes(match[2]);
-    return Math.min(720, Math.max(30, end >= start ? end - start : end + 1440 - start));
   }
 }
