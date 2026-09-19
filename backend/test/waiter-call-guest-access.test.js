@@ -17,6 +17,7 @@ function createService() {
   const booking = {
     id: 'booking-1',
     status: 'approved',
+    checkedInAt: new Date(),
     table: {
       id: 'table-1',
       tableNumber: '8',
@@ -101,6 +102,7 @@ function createService() {
 
   return {
     booking,
+    calls,
     guestToken,
     get bookingLoads() {
       return bookingLoads;
@@ -155,6 +157,33 @@ test('guest waiter call rejects another booking token', async () => {
   );
 
   assert.equal(state.bookingLoads, 0);
+});
+
+test('approved booking at an occupied table cannot call before its own guest checks in', async () => {
+  const state = createService();
+  state.booking.checkedInAt = null;
+
+  const status = await state.service.guestStatus(state.booking.id, state.guestToken);
+  assert.equal(status.bookingStatus, 'approved');
+  assert.equal(status.tableStatus, 'occupied');
+  assert.equal(status.canCall, false);
+
+  await assert.rejects(
+    () => state.service.createFromGuest({ bookingId: state.booking.id }, state.guestToken),
+    (error) => {
+      assert.equal(error.status, 400);
+      assert.match(error.message, /тільки після приходу гостя/);
+      return true;
+    },
+  );
+  assert.equal(state.calls.length, 0);
+
+  state.booking.checkedInAt = new Date();
+  const afterArrival = await state.service.guestStatus(state.booking.id, state.guestToken);
+  assert.equal(afterArrival.canCall, true);
+  const created = await state.service.createFromGuest({ bookingId: state.booking.id }, state.guestToken);
+  assert.equal(created.call.bookingId, state.booking.id);
+  assert.equal(state.calls.length, 1);
 });
 
 test('guest waiter call keeps working with its own booking token', async () => {
