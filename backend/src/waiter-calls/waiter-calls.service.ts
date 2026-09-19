@@ -315,7 +315,7 @@ export class WaiterCallsService {
 
   private async buildGuestStatus(booking: Booking) {
     const tableStatus = booking.table?.status || null;
-    const canCall = booking.status === 'approved' && tableStatus === 'occupied';
+    const canCall = booking.status === 'approved' && Boolean(booking.checkedInAt) && tableStatus === 'occupied';
     const activeCall = await this.activeCallForBooking(booking.id);
     const assignment = await this.resolveAssignment(booking);
 
@@ -387,7 +387,7 @@ export class WaiterCallsService {
 
         const booking = await this.getBooking(dto.bookingId, bookingRepo);
         const tableStatus = booking.table?.status || null;
-        const canCall = booking.status === 'approved' && tableStatus === 'occupied';
+        const canCall = booking.status === 'approved' && Boolean(booking.checkedInAt) && tableStatus === 'occupied';
 
         if (!canCall) {
           throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
