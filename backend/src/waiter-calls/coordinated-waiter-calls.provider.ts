@@ -9,6 +9,14 @@ import { WaiterCallsService } from './waiter-calls.service';
 
 export const RAW_WAITER_CALLS_SERVICE = Symbol('RAW_WAITER_CALLS_SERVICE');
 
+function restaurantDateToday() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const value = (type: string) => parts.find((part) => part.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
 /** Serialize the committed call using the existing public response shape. */
 function publicCall(call: WaiterCallRecord) {
   return {
@@ -117,9 +125,6 @@ export function createCoordinatedWaiterCallsService(
             throw new BadRequestException('Стіл бронювання не збігається');
           }
 
-          // The UI calls this endpoint only after "Гість прийшов". A direct API call
-          // must not create an in-memory assignment for a reservation that has no guests.
-          // Re-read inside the table lock: a booking/table may have changed since lookup.
           const current = await ownership.withWaiterTableLock(
             booking.table.id,
             dto.waiterId,
@@ -133,42 +138,72 @@ export function createCoordinatedWaiterCallsService(
               const table = await manager.getRepository(TableEntity).findOne({
                 where: { id: visit.table.id },
               });
-              if (visit.status !== 'approved' || !visit.checkedInAt || table?.status !== 'occupied') {
-                throw new BadRequestException('Офіціанта можна закріпити лише після приходу гостей');
+              if (visit.status !== 'approved' || !visit.checkedInAt ||
+                  visit.bookingDate !== restaurantDateToday() || table?.status !== 'occupied') {
+                throw new BadRequestException('Офіціанта можна закріпити лише після приходу гостей за бронюванням на сьогодні');
               }
               return { tableId: table.id, tableNumber: table.tableNumber };
             },
             true,
           );
 
-          // The durable claim must commit before the legacy in-memory call routing is updated.
-          return target.assign({ ...dto, tableId: current.tableId, tableNumber: current.tableNumber });
+          // The database table is authoritative. Publishing a second in-memory
+          // assignment after the transaction can race with the next visit and
+          // redirect its guest call to the previous waiter.
+          return {
+            message: 'Офіціанта закріплено за столом',
+            assignment: {
+              bookingId: dto.bookingId,
+              tableId: current.tableId,
+              tableNumber: current.tableNumber,
+              waiterId: dto.waiterId,
+              waiterName: dto.waiterName || 'Офіціант',
+              assignedAt: new Date().toISOString(),
+            },
+          };
         };
       }
       if (property === 'accept') {
-        return async (id: string, dto: { waiterId: string; waiterName: string }) =>
-          ownership.withWaiterTableLock(
-            await callTableId(id), dto.waiterId,
-            async (manager) => {
-              const call = await manager.getRepository(WaiterCallRecord).findOne({
-                where: { id }, relations: ['booking', 'booking.table'],
-              });
-              if (!call || !call.booking?.table || call.booking.table.id !== call.tableId ||
-                  call.booking.status !== 'approved' || !call.booking.checkedInAt) {
-                throw new BadRequestException('Виклик не належить чинному відвідуванню за цим столом');
-              }
-              // Ownership is locked, but a booking can retain checkedInAt after the
-              // physical table was released. Do not accept or claim that old call.
-              const table = await manager.getRepository(TableEntity).findOne({
-                where: { id: call.tableId },
-              });
-              if (!table || table.status !== 'occupied') {
-                throw new BadRequestException('Виклик не належить зайнятому столу');
-              }
-              return mutateCall(manager, id, dto.waiterId, 'accept', dto.waiterName);
-            },
-            true,
-          );
+        return async (id: string, dto: { waiterId: string; waiterName: string }) => {
+          if (!dto.waiterId) throw new ForbiddenException('Не вдалося визначити офіціанта');
+          // Resolve an identifier without locking. The booking is always locked
+          // FIRST, followed by the table and call, matching check-in/completion.
+          const initial = await dataSource.getRepository(WaiterCallRecord).findOne({
+            where: { id }, relations: ['booking'],
+          });
+          if (!initial?.booking?.id) throw new NotFoundException('Виклик не знайдено');
+
+          return dataSource.transaction(async (manager) => {
+            const lockedBooking = await manager.getRepository(Booking).findOne({
+              where: { id: initial.booking.id },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (!lockedBooking) throw new NotFoundException('Бронювання не знайдено');
+            const call = await manager.getRepository(WaiterCallRecord).findOne({
+              where: { id }, relations: ['booking', 'booking.table'],
+            });
+            if (!call || call.booking?.id !== lockedBooking.id || !call.booking.table ||
+                call.booking.table.id !== call.tableId || lockedBooking.status !== 'approved' ||
+                !lockedBooking.checkedInAt || lockedBooking.bookingDate !== restaurantDateToday()) {
+              throw new BadRequestException('Виклик не належить чинному відвідуванню за цим столом');
+            }
+            const tableRepo = manager.getRepository(TableEntity);
+            const table = await tableRepo.findOne({
+              where: { id: call.tableId },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (!table || table.status !== 'occupied') {
+              throw new BadRequestException('Виклик не належить зайнятому столу');
+            }
+            ownership.assertCanModify(table, { role: 'waiter', staffId: dto.waiterId } as Parameters<typeof ownership.assertCanModify>[1]);
+            const result = await mutateCall(manager, id, dto.waiterId, 'accept', dto.waiterName);
+            if (!table.assignedWaiterId) {
+              table.assignedWaiterId = dto.waiterId;
+              await tableRepo.save(table);
+            }
+            return result;
+          });
+        };
       }
       if (property === 'close') {
         return async (id: string, waiterId: string) =>
