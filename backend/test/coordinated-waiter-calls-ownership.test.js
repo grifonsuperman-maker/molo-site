@@ -6,9 +6,9 @@ const test = require('node:test');
 const { createCoordinatedWaiterCallsService } = require('../dist/waiter-calls/coordinated-waiter-calls.provider.js');
 const { TableOwnershipService } = require('../dist/tables/table-ownership.service.js');
 
-function harness({ owner = null, failOwnerWrite = false } = {}) {
+function harness({ owner = null, failOwnerWrite = false, checkedIn = true } = {}) {
   const table = { id: 'table-1', status: 'occupied', assignedWaiterId: owner };
-  const booking = { id: 'booking-1', table };
+  const booking = { id: 'booking-1', table, status: 'approved', checkedInAt: checkedIn ? new Date() : null };
   const call = {
     id: 'call-1', booking, tableId: table.id, tableNumber: '1', clientName: 'Гість',
     waiterId: null, waiterName: null, assignmentActive: true, status: 'new',
@@ -72,4 +72,14 @@ test('owner write failure propagates instead of committing an independent call t
   );
   assert.equal(h.transactions(), 1);
   assert.equal(h.rawAcceptCalls(), 0);
+});
+
+test('a stale call cannot be accepted before arrival and cannot claim its table', async () => {
+  const h = harness({ checkedIn: false });
+  await assert.rejects(
+    () => h.service.accept('call-1', { waiterId: 'waiter-1', waiterName: 'Андрій' }),
+    /чинному відвідуванню/,
+  );
+  assert.equal(h.call.status, 'new');
+  assert.equal(h.table.assignedWaiterId, null);
 });
