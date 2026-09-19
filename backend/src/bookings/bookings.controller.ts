@@ -93,7 +93,9 @@ export class BookingsController {
   @Post('guest/list')
   async guestList(@Body() dto: GuestBookingListDto) {
     const bookings = await this.guestService.list(dto);
-    const unreadNoShows = await this.noShowNotices.listUnreadForDevice(dto.guestDeviceId);
+    const unreadNoShows = dto.guestDeviceId
+      ? await this.noShowNotices.listUnreadForDevice(dto.guestDeviceId)
+      : [];
     const includedIds = new Set(bookings.map((booking) => booking.bookingId));
     return [
       ...bookings,
