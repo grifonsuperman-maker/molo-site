@@ -4,8 +4,17 @@ export class AddTableWaiterOwnership2026091901000 implements MigrationInterface 
   name = 'AddTableWaiterOwnership2026091901000';
 
   async up(queryRunner: QueryRunner): Promise<void> {
+    // This guard must remain effective until the new column, FK and release
+    // trigger have been installed. Without a transaction the lock would be
+    // released between statements, making the cutover check unsafe.
+    if (!queryRunner.isTransactionActive) {
+      throw new Error('Міграцію закріплення офіціантів необхідно виконувати в одній транзакції');
+    }
+    await queryRunner.query('LOCK TABLE "tables" IN ACCESS EXCLUSIVE MODE');
+
     // Before launch there is no trustworthy owner for an already occupied table.
-    // Fail before changing the schema rather than silently make an active visit unowned.
+    // Block concurrent table writes before checking; fail rather than silently
+    // make an in-progress visit unowned.
     const activeTables: Array<{ count: number | string }> = await queryRunner.query(`
       SELECT COUNT(*)::int AS count FROM "tables" WHERE "status" IN ('occupied', 'cleaning')
     `);
