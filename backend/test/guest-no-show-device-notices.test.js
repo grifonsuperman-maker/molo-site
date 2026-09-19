@@ -11,7 +11,8 @@ const HASH = createHash('sha256').update(DEVICE).digest('hex');
 
 function booking(overrides = {}) {
   return {
-    id: 'owned-booking',
+    id: '7ae79432-09e3-47f2-ac16-a79384932128',
+    guestDeviceIdHash: HASH,
     status: 'cancelled',
     cancellationReason: 'no_show',
     bookingDate: '2026-09-18',
@@ -34,29 +35,41 @@ function harness(rows = [booking()]) {
   const calls = [];
   const records = rows;
   let lookup = null;
-  const listQuery = {
-    where(sql, params) { calls.push(['where', sql, params]); return this; },
-    andWhere(sql, params) { calls.push(['andWhere', sql, params]); return this; },
-    orderBy() { return this; },
-    async getMany() { return records.filter((row) =>
-      row.status === 'cancelled' &&
-      row.cancellationReason === 'no_show' &&
-      row.guestNotification?.type === 'no_show' &&
-      row.guestNotification?.reason === 'automatic_no_show_30m' &&
-      !row.guestNotification?.acknowledgedAt,
-    ); },
-  };
-  const acknowledgementQuery = {
-    where(sql, params) { lookup = { ...(lookup || {}), bookingId: params.bookingId }; return this; },
-    andWhere(sql, params) { lookup = { ...lookup, deviceHash: params.deviceHash }; return this; },
-    setLock(mode) { calls.push(['lock', mode]); return this; },
-    async getOne() {
-      if (lookup.deviceHash !== HASH) return null;
-      return records.find((row) => row.id === lookup.bookingId) || null;
+  const repository = {
+    createQueryBuilder() {
+      let deviceHash = null;
+      let unreadOnly = false;
+      return {
+        where(sql, params) {
+          calls.push(['where', sql, params]);
+          deviceHash = params.deviceHash || null;
+          if (params.bookingId) lookup = { bookingId: params.bookingId };
+          return this;
+        },
+        andWhere(sql, params = {}) {
+          calls.push(['andWhere', sql, params]);
+          if (params.deviceHash) deviceHash = params.deviceHash;
+          if (sql.includes('acknowledgedAt')) unreadOnly = true;
+          return this;
+        },
+        orderBy() { return this; },
+        setLock(mode) { calls.push(['lock', mode]); return this; },
+        async getMany() {
+          return records.filter((row) =>
+            row.guestDeviceIdHash === deviceHash &&
+            row.status === 'cancelled' &&
+            row.cancellationReason === 'no_show' &&
+            row.guestNotification?.type === 'no_show' &&
+            row.guestNotification?.reason === 'automatic_no_show_30m' &&
+            (!unreadOnly || !row.guestNotification?.acknowledgedAt),
+          );
+        },
+        async getOne() {
+          if (!lookup) return null;
+          return records.find((row) => row.id === lookup.bookingId && row.guestDeviceIdHash === deviceHash) || null;
+        },
+      };
     },
-  };
-  const transactionBookings = {
-    createQueryBuilder: () => acknowledgementQuery,
     async save(row) { calls.push(['booking.save', row.id]); return row; },
   };
   const history = {
@@ -66,42 +79,40 @@ function harness(rows = [booking()]) {
   const dataSource = {
     async transaction(callback) {
       calls.push(['transaction']);
-      return callback({ getRepository: (entity) => entity.name === 'Booking' ? transactionBookings : history });
+      return callback({ getRepository: (entity) => entity.name === 'Booking' ? repository : history });
     },
   };
-  const repository = { createQueryBuilder: () => listQuery };
   return { service: new GuestNoShowNoticesService(repository, dataSource), calls, rows: records };
 }
 
-test('only unread automatic no-show notices are returned by device without historical booking details', async () => {
-  const { service, calls } = harness([
+test('device notice returns an opaque one-purpose handle without any booking identity or historical details', async () => {
+  const { service, calls, rows } = harness([
     booking(),
     booking({ id: 'manual-cancellation', cancellationReason: 'guest_cancelled' }),
     booking({ id: 'manual-no-show', guestNotification: { type: 'no_show', reason: 'manual' } }),
     booking({ id: 'already-read', guestNotification: { type: 'no_show', reason: 'automatic_no_show_30m', acknowledgedAt: '2026-09-19T01:00:00Z' } }),
+    booking({ id: 'another-device', guestDeviceIdHash: 'different-hash' }),
   ]);
   const notices = await service.listUnreadForDevice(DEVICE);
   assert.equal(notices.length, 1);
-  assert.equal(notices[0].bookingId, 'owned-booking');
-  assert.deepEqual(Object.keys(notices[0]).sort(), ['bookingId', 'guestNotification']);
+  assert.deepEqual(Object.keys(notices[0]).sort(), ['guestNotification', 'noticeHandle']);
+  assert.match(notices[0].noticeHandle, /^[a-f0-9]{64}$/);
+  assert.notEqual(notices[0].noticeHandle, rows[0].id);
   assert.deepEqual(Object.keys(notices[0].guestNotification).sort(), ['createdAt', 'message', 'title', 'type']);
   assert.equal(notices[0].guestNotification.type, 'no_show');
-  assert.equal(Object.hasOwn(notices[0], 'bookingDate'), false);
-  assert.equal(Object.hasOwn(notices[0], 'tableNumber'), false);
-  assert.equal(Object.hasOwn(notices[0], 'guestDeviceIdHash'), false);
-  assert.equal(Object.hasOwn(notices[0], 'guestAccessTokenHash'), false);
+  for (const key of ['bookingId', 'bookingDate', 'bookingTime', 'tableNumber', 'status', 'guestDeviceIdHash', 'guestAccessTokenHash']) {
+    assert.equal(Object.hasOwn(notices[0], key), false, `must not disclose ${key}`);
+  }
   assert.ok(calls.some((call) => call[0] === 'where' && call[2].deviceHash === HASH));
   assert.ok(calls.some((call) => call[0] === 'andWhere' && call[1].includes('acknowledgedAt')));
   assert.ok(calls.some((call) => call[0] === 'andWhere' && call[1].includes('guest_notification') && call[1].includes('reason')));
-  assert.equal(calls.some((call) => String(call[1]).includes('bookingDate')), false);
 });
 
-test('controller keeps unread no-shows outside guest/list and exposes a dedicated notice-only response', async () => {
+test('controller keeps historical no-shows out of guest/list and exposes notice-only handle', async () => {
   const { service } = harness();
   const active = { bookingId: 'active-booking', status: 'approved', checkedInAt: null };
-  const guestBookings = { async list() { return [active]; } };
   const controller = new BookingsController(
-    {}, guestBookings, {}, {}, {}, {}, {}, {}, {}, {}, service,
+    {}, { async list() { return [active]; } }, {}, {}, {}, {}, {}, {}, {}, {}, service,
   );
   const list = await controller.guestList({ guestDeviceId: DEVICE });
   assert.equal(list.length, 1);
@@ -109,7 +120,7 @@ test('controller keeps unread no-shows outside guest/list and exposes a dedicate
   assert.equal(list[0].canGuestChangeTime, true);
   const notices = await controller.guestNoShowNotices({ guestDeviceId: DEVICE });
   assert.equal(notices.length, 1);
-  assert.deepEqual(Object.keys(notices[0]).sort(), ['bookingId', 'guestNotification']);
+  assert.deepEqual(Object.keys(notices[0]).sort(), ['guestNotification', 'noticeHandle']);
 });
 
 test('old unread automatic no-show never adds historical booking to an empty guest list', async () => {
@@ -120,8 +131,9 @@ test('old unread automatic no-show never adds historical booking to an empty gue
   assert.deepEqual(await controller.guestList({ guestDeviceId: DEVICE }), []);
   const notices = await controller.guestNoShowNotices({ guestDeviceId: DEVICE });
   assert.equal(notices.length, 1);
-  assert.equal(notices[0].bookingId, 'owned-booking');
+  assert.match(notices[0].noticeHandle, /^[a-f0-9]{64}$/);
   assert.equal('bookingDate' in notices[0], false);
+  assert.equal('bookingId' in notices[0], false);
 });
 
 test('blank or excessively long device IDs never list notices', async () => {
@@ -131,16 +143,19 @@ test('blank or excessively long device IDs never list notices', async () => {
   assert.equal(calls.length, 0);
 });
 
-test('device acknowledgement locks only its own automatic no-show and removes unread notice', async () => {
-  const { service, calls } = harness();
-  await assert.rejects(service.acknowledgeByDevice('owned-booking', 'wrong-device'), /Недійсний доступ/);
+test('device acknowledgement locks the booking privately using only its own opaque handle', async () => {
+  const { service, calls, rows } = harness();
+  const [{ noticeHandle }] = await service.listUnreadForDevice(DEVICE);
+  await assert.rejects(service.acknowledgeByDevice(noticeHandle, 'wrong-device'), /Недійсний доступ/);
+  await assert.rejects(service.acknowledgeByDevice(rows[0].id, DEVICE), /Недійсний доступ/);
+  await assert.rejects(service.acknowledgeByDevice('a'.repeat(64), DEVICE), /Недійсний доступ/);
   assert.ok(!calls.some((call) => call[0] === 'booking.save'));
-  const response = await service.acknowledgeByDevice('owned-booking', DEVICE);
+  const response = await service.acknowledgeByDevice(noticeHandle, DEVICE);
   assert.equal(response.message, 'Повідомлення прочитано');
   assert.ok(calls.some((call) => call[0] === 'lock' && call[1] === 'pessimistic_write'));
   assert.equal(calls.filter((call) => call[0] === 'history.save').length, 1);
   assert.deepEqual(await service.listUnreadForDevice(DEVICE), []);
-  await service.acknowledgeByDevice('owned-booking', DEVICE);
+  await service.acknowledgeByDevice(noticeHandle, DEVICE);
   assert.equal(calls.filter((call) => call[0] === 'history.save').length, 1);
 });
 
@@ -152,7 +167,7 @@ test('device acknowledgement cannot operate on active bookings or unrelated noti
     booking({ guestNotification: { type: 'no_show', reason: 'manual_no_show' } }),
   ]) {
     const { service, calls } = harness([row]);
-    await assert.rejects(service.acknowledgeByDevice(row.id, DEVICE), /Недійсний доступ/);
+    await assert.rejects(service.acknowledgeByDevice('a'.repeat(64), DEVICE), /Недійсний доступ/);
     assert.ok(!calls.some((call) => call[0] === 'booking.save'));
   }
 });
