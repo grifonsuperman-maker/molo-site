@@ -112,6 +112,18 @@ test('controller keeps unread no-shows outside guest/list and exposes a dedicate
   assert.deepEqual(Object.keys(notices[0]).sort(), ['bookingId', 'guestNotification']);
 });
 
+test('old unread automatic no-show never adds historical booking to an empty guest list', async () => {
+  const { service } = harness([booking({ bookingDate: '2026-09-17' })]);
+  const controller = new BookingsController(
+    {}, { async list() { return []; } }, {}, {}, {}, {}, {}, {}, {}, {}, service,
+  );
+  assert.deepEqual(await controller.guestList({ guestDeviceId: DEVICE }), []);
+  const notices = await controller.guestNoShowNotices({ guestDeviceId: DEVICE });
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].bookingId, 'owned-booking');
+  assert.equal('bookingDate' in notices[0], false);
+});
+
 test('blank or excessively long device IDs never list notices', async () => {
   const { service, calls } = harness();
   assert.deepEqual(await service.listUnreadForDevice(''), []);
