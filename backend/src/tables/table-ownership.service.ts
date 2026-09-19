@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { TableEntity } from './entities/table.entity';
@@ -24,11 +24,11 @@ export class TableOwnershipService {
     if (actor?.role === 'waiter') table.assignedWaiterId = actor.staffId!;
   }
 
-  /** Locks the table while a call assignment is checked and written, including Telegram calls. */
+  /** Locks the table and performs the associated writes on the same transaction. */
   async withWaiterTableLock<T>(
     tableId: string | null | undefined,
     waiterId: string,
-    action: () => Promise<T>,
+    action: (manager: EntityManager) => Promise<T>,
     claimIfOccupied = false,
   ): Promise<T> {
     if (!waiterId) throw new ForbiddenException('Не вдалося визначити офіціанта');
@@ -42,7 +42,7 @@ export class TableOwnershipService {
       });
       if (!table) throw new NotFoundException('Стіл не знайдено');
       this.assertCanModify(table, { role: 'waiter', staffId: waiterId } as AuthUser);
-      const result = await action();
+      const result = await action(manager);
       if (claimIfOccupied && table.status === 'occupied' && !table.assignedWaiterId) {
         table.assignedWaiterId = waiterId;
         await tables.save(table);
