@@ -94,10 +94,6 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
   const selectedTable = tables.find((table) => table.id === selectedTableId) || null;
 
   async function setStatus(table: TableItem, status: 'occupied' | 'free') {
-    if (cannotManage(table)) {
-      setError('Цей стіл закріплено за іншим офіціантом. Дії недоступні.');
-      return;
-    }
     const key = `${table.id}:${status}`;
     setBusy(key);
     setNotice(null);
