@@ -18,6 +18,8 @@ const SESSION_KEY = 'molo_waiter_staff';
 const SHIFT_ENDED_KEY = 'molo_waiter_shift_ended_name';
 const ACTIVE = new Set(['pending', 'approved']);
 
+type OwnedBookingTable = NonNullable<Booking['table']> & { assignedWaiterId?: string | null };
+
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Очікує',
   approved: 'Підтверджено',
@@ -218,9 +220,11 @@ export default function WaiterAppV2() {
           <section className="mt-4 grid gap-3">
             {cards.length > 0 ? cards.map((booking) => {
               const tableStatus = booking.table?.status;
+              const tableOwner = (booking.table as OwnedBookingTable | null)?.assignedWaiterId;
+              const otherWaiterOwns = Boolean(tableOwner && tableOwner !== staff.id);
               const checkedIn = Boolean(booking.checkedInAt);
               const displayStatus = booking.status === 'approved' && checkedIn && (tableStatus === 'occupied' || tableStatus === 'cleaning') ? tableStatus : booking.status;
-              const primaryAction = booking.status !== 'approved' || !booking.table ? null
+              const primaryAction = otherWaiterOwns || booking.status !== 'approved' || !booking.table ? null
                 : checkedIn && tableStatus === 'occupied'
                   ? { label: 'Гості пішли, почати прибирання', run: () => tablesApi.cleaning(booking.table!.id), tone: 'cyan' }
                   : checkedIn && tableStatus === 'cleaning'
@@ -232,6 +236,7 @@ export default function WaiterAppV2() {
                 <article key={booking.id} className="rounded-[28px] border border-white/12 bg-black/50 p-4 shadow-[0_0_30px_rgba(255,255,255,.03)] backdrop-blur-xl">
                   <div className="flex justify-between gap-3"><div><h2 className="text-2xl font-black">Стіл №{booking.table?.tableNumber || '—'}</h2><p className="mt-1 text-lg">{time(booking.bookingTime)} · {booking.client?.fullName || 'Гість'}</p><p className="text-sm text-white/50">{locationForTable(booking.table?.tableNumber)?.label || booking.table?.zone?.name || 'Без локації'} · {booking.guestsCount} гостей</p></div><span className="h-fit rounded-full border border-white/15 bg-white/[.04] px-3 py-1 text-sm text-white/65">{STATUS_LABELS[displayStatus || ''] || displayStatus}</span></div>
                   {booking.wishes && <p className="mt-3 rounded-xl border border-white/8 bg-white/[.025] p-3 text-sm text-white/55">{booking.wishes}</p>}
+                  {otherWaiterOwns && <p className="mt-3 rounded-xl border border-white/15 bg-white/[.025] p-3 text-sm text-white/60">Стіл закріплено за іншим офіціантом. Доступний лише перегляд.</p>}
                   {primaryAction && <div className="mt-4 grid gap-2"><button type="button" disabled={Boolean(busy)} onClick={() => window.confirm(`${primaryAction.label}?`) && void act(`primary:${booking.id}`, primaryAction.run, 'Статус столу оновлено')} className={`rounded-2xl border bg-white/[.03] p-3 font-black transition active:scale-[.98] ${primaryAction.tone === 'gold' ? 'border-amber-200/60 text-amber-100' : primaryAction.tone === 'cyan' ? 'border-cyan-200/55 text-cyan-100' : 'border-emerald-200/55 text-emerald-100'}`}>{primaryAction.label}</button></div>}
                 </article>
               );
