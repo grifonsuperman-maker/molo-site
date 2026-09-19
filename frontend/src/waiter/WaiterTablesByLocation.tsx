@@ -6,6 +6,17 @@ import type { TableItem, TableStatus } from '../api/types';
 
 const POLLING_MS = 15_000;
 
+type WaiterOwnedTable = TableItem & { assignedWaiterId?: string | null };
+
+function currentWaiterId(): string | null {
+  try {
+    const staff = JSON.parse(window.localStorage.getItem('molo_waiter_staff') || 'null');
+    return typeof staff?.id === 'string' ? staff.id : null;
+  } catch {
+    return null;
+  }
+}
+
 const LOCATIONS = [
   { key: 'hall', label: 'Зал ресторану', range: '1–14', accepts: (number: number) => number >= 1 && number <= 14 },
   { key: 'canopy', label: 'Навіс', range: '15–20', accepts: (number: number) => number >= 15 && number <= 20 },
@@ -43,6 +54,12 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const waiterId = currentWaiterId();
+
+  function cannotManage(table: TableItem) {
+    const owner = (table as WaiterOwnedTable).assignedWaiterId;
+    return !waiterId || Boolean(owner && owner !== waiterId);
+  }
 
   async function load(silent = false) {
     if (!silent) setLoading(true);
@@ -77,6 +94,10 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
   const selectedTable = tables.find((table) => table.id === selectedTableId) || null;
 
   async function setStatus(table: TableItem, status: 'occupied' | 'free') {
+    if (cannotManage(table)) {
+      setError('Цей стіл закріплено за іншим офіціантом. Дії недоступні.');
+      return;
+    }
     const key = `${table.id}:${status}`;
     setBusy(key);
     setNotice(null);
@@ -110,6 +131,7 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
         <p className="text-2xl font-black">№{table.tableNumber}</p>
         <p className="mt-2 text-sm opacity-85">{STATUS_LABELS[table.status]}</p>
         <p className="mt-2 text-xs opacity-45">{table.seats} місць</p>
+        {cannotManage(table) && <p className="mt-2 text-xs opacity-65">Лише перегляд</p>}
       </button>
     );
   }
@@ -174,10 +196,14 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
               <div><p className="text-2xl font-black">Стіл №{selectedTable.tableNumber}</p><p className="mt-1 text-sm text-white/50">{selectedTable.zone?.name || 'Без локації'} · {selectedTable.seats} місць</p></div>
               <button type="button" onClick={() => setSelectedTableId(null)} className="rounded-xl border border-white/10 bg-white/[.04] p-2 text-white/60"><X size={17} /></button>
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button type="button" disabled={Boolean(busy)} onClick={() => void setStatus(selectedTable, 'occupied')} className="rounded-2xl border border-red-400/65 bg-transparent p-3 font-black text-red-100 shadow-[0_0_14px_rgba(255,59,79,.14)] disabled:opacity-40">Зайнятий</button>
-              <button type="button" disabled={Boolean(busy)} onClick={() => void setStatus(selectedTable, 'free')} className="rounded-2xl border border-white/45 bg-transparent p-3 font-black text-white/85 disabled:opacity-40">Вільний</button>
-            </div>
+            {cannotManage(selectedTable) ? (
+              <p className="mt-4 rounded-2xl border border-white/15 bg-white/[.035] p-3 text-sm text-white/65">Стіл закріплено за іншим офіціантом. Доступний лише перегляд.</p>
+            ) : (
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button type="button" disabled={Boolean(busy)} onClick={() => void setStatus(selectedTable, 'occupied')} className="rounded-2xl border border-red-400/65 bg-transparent p-3 font-black text-red-100 shadow-[0_0_14px_rgba(255,59,79,.14)] disabled:opacity-40">Зайнятий</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void setStatus(selectedTable, 'free')} className="rounded-2xl border border-white/45 bg-transparent p-3 font-black text-white/85 disabled:opacity-40">Вільний</button>
+              </div>
+            )}
           </section>
         </div>
       )}
