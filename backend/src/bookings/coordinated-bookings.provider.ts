@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, IsNull, Not } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { TableEntity } from '../tables/entities/table.entity';
@@ -191,11 +191,24 @@ async function coordinatedComplete(
       }),
     );
 
-    // A future booking cannot change today's physical table; a closed table stays closed.
+    // Hold the physical table lock while deciding whether it can be released.
+    // Admin may have checked in a later visit; completing the earlier booking
+    // must not clear that visit's table status or waiter ownership.
     if (table && booking.bookingDate === restaurantDateToday() && table.status !== 'closed') {
-      table.status = 'free';
-      table.assignedWaiterId = null;
-      await tables.save(table);
+      const anotherVisit = await bookings.exist({
+        where: {
+          id: Not(booking.id),
+          table: { id: table.id },
+          bookingDate: booking.bookingDate,
+          status: 'approved',
+          checkedInAt: Not(IsNull()),
+        },
+      });
+      if (!anotherVisit) {
+        table.status = 'free';
+        table.assignedWaiterId = null;
+        await tables.save(table);
+      }
     }
     return { message: 'Стіл звільнено' };
   });
