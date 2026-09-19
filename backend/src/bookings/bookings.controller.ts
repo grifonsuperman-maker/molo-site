@@ -16,9 +16,11 @@ import { GuestBookingListDto } from './dto/guest-booking-list.dto';
 import { GuestCancelBookingDto } from './dto/guest-cancel-booking.dto';
 import { GuestChangeTableDto } from './dto/guest-change-table.dto';
 import { GuestLatenessDto } from './dto/guest-lateness.dto';
+import { GuestNoShowAcknowledgeDto } from './dto/guest-no-show-acknowledge.dto';
 import { GuestReviewDto } from './dto/guest-review.dto';
 import { RequestRescheduleDto } from './dto/request-reschedule.dto';
 import { GuestBookingsService } from './guest-bookings.service';
+import { GuestNoShowNoticesService } from './guest-no-show-notices.service';
 import { GuestTableNumberValidationService } from './guest-table-number-validation.service';
 import { GuestTelegramLinkService } from './guest-telegram-link.service';
 import { GuestTimeChangeService } from './guest-time-change.service';
@@ -36,6 +38,7 @@ export class BookingsController {
     private readonly guestTimeChange: GuestTimeChangeService,
     private readonly guestTableNumbers: GuestTableNumberValidationService,
     private readonly arrivalLock: BookingArrivalLockService,
+    private readonly noShowNotices: GuestNoShowNoticesService,
   ) {}
 
   private withGuestArrivalTimeCapabilities<T extends { status?: string; checkedInAt?: unknown }>(booking: T) {
@@ -90,7 +93,12 @@ export class BookingsController {
   @Post('guest/list')
   async guestList(@Body() dto: GuestBookingListDto) {
     const bookings = await this.guestService.list(dto);
-    return bookings.map((booking) => this.withGuestArrivalTimeCapabilities(booking));
+    const unreadNoShows = await this.noShowNotices.listUnreadForDevice(dto.guestDeviceId);
+    const includedIds = new Set(bookings.map((booking) => booking.bookingId));
+    return [
+      ...bookings,
+      ...unreadNoShows.filter((booking) => !includedIds.has(booking.bookingId)),
+    ].map((booking) => this.withGuestArrivalTimeCapabilities(booking));
   }
 
   @Patch(':id/guest/telegram')
@@ -219,6 +227,15 @@ export class BookingsController {
     @Headers('x-guest-booking-token') token: string,
   ) {
     return this.guestService.acknowledgeNotification(id, token);
+  }
+
+  @Public()
+  @Patch(':id/guest/no-show/ack-by-device')
+  guestAcknowledgeNoShowByDevice(
+    @Param('id') id: string,
+    @Body() dto: GuestNoShowAcknowledgeDto,
+  ) {
+    return this.noShowNotices.acknowledgeByDevice(id, dto.guestDeviceId);
   }
 
   @Public()
