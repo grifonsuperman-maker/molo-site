@@ -7,10 +7,12 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Not, Repository } from 'typeorm';
 
 import { BookingHistory } from '../bookings/entities/booking-history.entity';
 import { Booking } from '../bookings/entities/booking.entity';
+import { Staff } from '../staff/entities/staff.entity';
+import { TableEntity } from '../tables/entities/table.entity';
 import {
   WaiterCallRecord,
   type WaiterCallStatus,
@@ -238,10 +240,29 @@ export class WaiterCallsService {
     return call ? this.toAssignment(call) : null;
   }
 
-  private async resolveAssignment(booking: Booking) {
+  private async resolveAssignment(booking: Booking, manager?: EntityManager) {
     if (booking.status !== 'approved') {
       this.detachBooking(booking.id);
       return null;
+    }
+
+    // The current physical table owner takes precedence over old check-in
+    // history, closed calls and any in-memory assignments. A deliberately
+    // released table must not inherit a previous waiter's identity.
+    if (booking.table && booking.table.assignedWaiterId !== undefined) {
+      const waiterId = booking.table.assignedWaiterId;
+      if (!waiterId) return null;
+      const staff = await (manager || this.dataSource).getRepository(Staff).findOne({
+        where: { id: waiterId },
+      });
+      return {
+        bookingId: booking.id,
+        tableId: booking.table.id,
+        tableNumber: booking.table.tableNumber,
+        waiterId,
+        waiterName: staff?.fullName || 'Офіціант',
+        assignedAt: this.now(),
+      };
     }
 
     const inMemoryAssignment = this.findAssignment(booking);
@@ -315,7 +336,9 @@ export class WaiterCallsService {
 
   private async buildGuestStatus(booking: Booking) {
     const tableStatus = booking.table?.status || null;
-    const canCall = booking.status === 'approved' && Boolean(booking.checkedInAt) && tableStatus === 'occupied';
+    const canCall = booking.status === 'approved' &&
+      booking.bookingDate === this.kyivDate() &&
+      Boolean(booking.checkedInAt) && tableStatus === 'occupied';
     const activeCall = await this.activeCallForBooking(booking.id);
     const assignment = await this.resolveAssignment(booking);
 
@@ -386,10 +409,29 @@ export class WaiterCallsService {
         if (!lockedBooking) throw new NotFoundException('Бронювання не знайдено');
 
         const booking = await this.getBooking(dto.bookingId, bookingRepo);
-        const tableStatus = booking.table?.status || null;
-        const canCall = booking.status === 'approved' && Boolean(booking.checkedInAt) && tableStatus === 'occupied';
+        // Read today's actual visit; yesterday's or tomorrow's check-in must
+        // never allow a call to the guests currently sitting at this table.
+        const validVisit = booking.status === 'approved' &&
+          booking.bookingDate === this.kyivDate() && Boolean(booking.checkedInAt);
+        if (!validVisit || !booking.table?.id) {
+          throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
+        }
 
-        if (!canCall) {
+        // Lock the current owner before choosing the recipient. In particular,
+        // an admin release and a new waiter's claim cannot overtake this read.
+        // The legacy no-ownership fixtures omit assignedWaiterId altogether;
+        // a deployed table always has this column after the required migration.
+        if (booking.table.assignedWaiterId !== undefined) {
+          const table = await manager.getRepository(TableEntity).findOne({
+            where: { id: booking.table.id },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!table || table.status !== 'occupied') {
+            throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
+          }
+          booking.table = table;
+        }
+        if (booking.table.status !== 'occupied') {
           throw new BadRequestException('Виклик офіціанта доступний тільки після приходу гостя за стіл');
         }
 
@@ -401,7 +443,7 @@ export class WaiterCallsService {
           };
         }
 
-        const assignment = await this.resolveAssignment(booking);
+        const assignment = await this.resolveAssignment(booking, manager);
         const call = callRepo.create({
           id: this.makeId(),
           booking,
