@@ -31,6 +31,10 @@ export class TableEntity {
   })
   status: TableStatus;
 
+  /** Durable assignment shared by site and Telegram; null means no waiter owns this table. */
+  @Column({ name: 'assigned_waiter_id', type: 'uuid', nullable: true })
+  assignedWaiterId: string | null;
+
   @Column({ type: 'numeric', default: 0 })
   x: number;
 
