@@ -17,11 +17,22 @@ export class AddTableWaiterOwnership2026091901000 implements MigrationInterface 
       ALTER TABLE "tables"
       ADD COLUMN IF NOT EXISTS "assigned_waiter_id" uuid
     `);
+    // In existing deployments TypeORM may have already created this FK during
+    // schema synchronization. Do not fail when the constraint is already present.
     await queryRunner.query(`
-      ALTER TABLE "tables"
-      ADD CONSTRAINT "FK_tables_assigned_waiter"
-      FOREIGN KEY ("assigned_waiter_id") REFERENCES "staff"("id")
-      ON DELETE SET NULL
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = '"tables"'::regclass AND conname = 'FK_tables_assigned_waiter'
+        ) THEN
+          ALTER TABLE "tables"
+          ADD CONSTRAINT "FK_tables_assigned_waiter"
+          FOREIGN KEY ("assigned_waiter_id") REFERENCES "staff"("id")
+          ON DELETE SET NULL;
+        END IF;
+      END;
+      $$
     `);
     await queryRunner.query(`
       CREATE INDEX IF NOT EXISTS "IDX_tables_assigned_waiter"
