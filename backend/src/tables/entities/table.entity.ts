@@ -1,9 +1,11 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { Zone } from '../../zones/entities/zone.entity';
 import { Booking } from '../../bookings/entities/booking.entity';
+import { Staff } from '../../staff/entities/staff.entity';
 
 export type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'cleaning' | 'closed';
 
+@Index('IDX_tables_assigned_waiter', ['assignedWaiterId'])
 @Entity('tables')
 export class TableEntity {
   @PrimaryGeneratedColumn('uuid') id: string;
@@ -34,6 +36,11 @@ export class TableEntity {
   /** Durable assignment shared by site and Telegram; null means no waiter owns this table. */
   @Column({ name: 'assigned_waiter_id', type: 'uuid', nullable: true })
   assignedWaiterId: string | null;
+
+  // Keep the migration's FK in TypeORM metadata; synchronization must not remove ON DELETE SET NULL.
+  @ManyToOne(() => Staff, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'assigned_waiter_id', referencedColumnName: 'id', foreignKeyConstraintName: 'FK_tables_assigned_waiter' })
+  assignedWaiter: Staff | null;
 
   @Column({ type: 'numeric', default: 0 })
   x: number;
