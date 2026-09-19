@@ -42,12 +42,18 @@ function createHarness({
     bookingDate: kyivToday(), bookingTime: '19:20:00', durationMinutes: 110,
     table, client: { id: 'client-1' },
   };
+  let externalCommittedBooking = null;
 
   const bookingRepo = {
     async findOne(options) {
       calls.push(['booking.findOne', options]);
       if (options.lock) {
-        if (onBookingLock) onBookingLock(booking);
+        if (onBookingLock) {
+          // A different transaction commits while this operation waits
+          // for FOR UPDATE. Its result must survive our rollback.
+          onBookingLock(booking);
+          externalCommittedBooking = { ...booking };
+        }
         return { ...booking, table: undefined, client: undefined };
       }
       return booking;
@@ -103,7 +109,7 @@ function createHarness({
       try {
         return await work(manager);
       } catch (error) {
-        Object.assign(booking, previousBooking);
+        Object.assign(booking, externalCommittedBooking || previousBooking);
         table.status = previousTableStatus;
         throw error;
       }
@@ -283,7 +289,7 @@ test('a closed table or location cannot be activated', async () => {
   assert.deepEqual(writes(hidden.calls), []);
 });
 
-test('cancellation committed while an action waits for the row lock cannot be undone', async () => {
+test('externally committed cancellation while waiting for row lock remains cancelled', async () => {
   const { coordinated, booking, calls } = createHarness({
     status: 'pending',
     onBookingLock(value) {
@@ -292,7 +298,8 @@ test('cancellation committed while an action waits for the row lock cannot be un
     },
   });
   await assert.rejects(coordinated.approve('booking-1'), /Закрите бронювання/);
-  assert.equal(booking.status, 'pending'); // simulated rollback of this isolated transaction
+  assert.equal(booking.status, 'cancelled');
+  assert.equal(booking.cancellationReason, 'guest_cancelled');
   assert.deepEqual(writes(calls), []);
 });
 
