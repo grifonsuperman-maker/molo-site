@@ -90,6 +90,17 @@ export function createWaiterBookingProtectionService(
                 history.actorRole !== 'waiter' || history.actorStaffId !== actor.staffId) {
               throw new ForbiddenException('Цей стіл обслуговує інший офіціант');
             }
+            // Never report the table as free while a second checked-in visit still uses it.
+            const anotherVisit = await bookings.exist({
+              where: {
+                id: Not(booking.id), table: { id: table.id },
+                bookingDate: booking.bookingDate, status: 'approved',
+                checkedInAt: Not(IsNull()),
+              },
+            });
+            if (anotherVisit) {
+              throw new ConflictException('За цим столом триває інше відвідування. Зверніться до Адміністратора');
+            }
             const previousData = operations.bookingSnapshot(booking);
             booking.status = 'completed';
             booking.completedAt = new Date();
@@ -101,18 +112,8 @@ export function createWaiterBookingProtectionService(
               previousData, newData: operations.bookingSnapshot(booking),
               reason: null, isManualMode: false,
             }));
-            // Do not free a table that has another actually checked-in visit.
-            const anotherVisit = await bookings.exist({
-              where: {
-                id: Not(booking.id), table: { id: table.id },
-                bookingDate: booking.bookingDate, status: 'approved',
-                checkedInAt: Not(IsNull()),
-              },
-            });
-            if (!anotherVisit) {
-              table.status = 'free';
-              await tables.save(table);
-            }
+            table.status = 'free';
+            await tables.save(table);
             return { message: 'Стіл звільнено' };
           });
           await operations.safeLog('Стіл звільнено', {
