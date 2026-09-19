@@ -17,12 +17,12 @@ function kyivToday() {
 const andrii = { role: 'waiter', staffId: 'waiter-1', name: 'Андрій' };
 const serhii = { role: 'waiter', staffId: 'waiter-2', name: 'Сергій' };
 
-function createHarness({ status = 'approved', cancellationReason = null, owner = null } = {}) {
+function createHarness({ status = 'approved', cancellationReason = null, owner = null, checkedIn = false, tableStatus = 'reserved' } = {}) {
   const calls = [];
-  const table = { id: 'table-8', tableNumber: '8', status: 'reserved', assignedWaiterId: owner };
+  const table = { id: 'table-8', tableNumber: '8', status: tableStatus, assignedWaiterId: owner };
   const booking = {
     id: 'booking-1', status, cancellationReason,
-    approvedAt: new Date('2026-09-12T12:00:00.000Z'), checkedInAt: null,
+    approvedAt: new Date('2026-09-12T12:00:00.000Z'), checkedInAt: checkedIn ? new Date() : null,
     cancelledAt: status === 'cancelled' ? new Date('2026-09-12T12:30:00.000Z') : null,
     completedAt: null, expectedArrivalAt: null, bookingDate: kyivToday(),
     bookingTime: '19:20:00', durationMinutes: 110, table, client: { id: 'client-1' },
@@ -88,9 +88,10 @@ test('all BookingsService check-in callers serialize on booking and table rows i
   assert.ok(calls.some((call) => call[0] === 'log' && call[2] === 'booking-1'));
 });
 
-test('second waiter cannot check in or complete another waiter’s booking', async () => {
+test('a different waiter cannot check in or complete another waiter’s booking', async () => {
   const { coordinated, booking, table, calls } = createHarness({ owner: andrii.staffId });
   await assert.rejects(() => coordinated.checkIn('booking-1', serhii), /закріплено за іншим офіціантом/);
+  booking.checkedInAt = new Date();
   await assert.rejects(() => coordinated.complete('booking-1', serhii), /закріплено за іншим офіціантом/);
   assert.equal(booking.status, 'approved');
   assert.equal(table.assignedWaiterId, andrii.staffId);
@@ -98,7 +99,7 @@ test('second waiter cannot check in or complete another waiter’s booking', asy
 });
 
 test('same waiter completion releases ownership; Admin may override', async () => {
-  const { coordinated, table } = createHarness({ owner: andrii.staffId });
+  const { coordinated, table } = createHarness({ owner: andrii.staffId, checkedIn: true, tableStatus: 'occupied' });
   await coordinated.complete('booking-1', andrii);
   assert.equal(table.status, 'free');
   assert.equal(table.assignedWaiterId, null);
@@ -111,6 +112,48 @@ test('coordinated check-in cannot resurrect a booking already cancelled as no-sh
   const { coordinated, calls } = createHarness({ status: 'cancelled', cancellationReason: 'no_show' });
   await assert.rejects(coordinated.checkIn('booking-1', andrii), /Бронювання вже анульовано через неявку/);
   assert.deepEqual(calls.map((call) => call[0]), ['transaction', 'booking.findOne']);
+});
+
+test('direct waiter check-in cannot approve an unconfirmed or cancelled reservation', async () => {
+  for (const status of ['pending', 'rejected', 'cancelled', 'completed']) {
+    const h = createHarness({ status });
+    await assert.rejects(() => h.coordinated.checkIn('booking-1', andrii), /Адміністратор має підтвердити/);
+    assert.equal(h.booking.status, status);
+    assert.equal(h.table.status, 'reserved');
+    assert.equal(h.table.assignedWaiterId, null);
+    assert.ok(!h.calls.some((call) => call[0] === 'booking.save' || call[0] === 'history.save'));
+  }
+});
+
+test('direct waiter check-in cannot take an already occupied or cleaning table', async () => {
+  for (const tableStatus of ['occupied', 'cleaning', 'closed']) {
+    const h = createHarness({ tableStatus });
+    await assert.rejects(() => h.coordinated.checkIn('booking-1', andrii), /зайнятий, прибирається або закритий/);
+    assert.equal(h.booking.checkedInAt, null);
+    assert.equal(h.table.assignedWaiterId, null);
+    assert.ok(!h.calls.some((call) => call[0] === 'booking.save'));
+  }
+});
+
+test('direct waiter check-in cannot repeat arrival after first check-in', async () => {
+  const h = createHarness({ checkedIn: true, tableStatus: 'occupied' });
+  await assert.rejects(() => h.coordinated.checkIn('booking-1', andrii), /уже відмічено/);
+  assert.ok(!h.calls.some((call) => call[0] === 'booking.save'));
+});
+
+test('direct waiter completion cannot complete an unconfirmed or unarrived reservation', async () => {
+  for (const options of [{ status: 'pending' }, { checkedIn: false }, { checkedIn: true, status: 'completed' }]) {
+    const h = createHarness(options);
+    await assert.rejects(() => h.coordinated.complete('booking-1', andrii), /лише підтверджене відвідування/);
+    assert.ok(!h.calls.some((call) => call[0] === 'booking.save' || call[0] === 'table.save'));
+  }
+});
+
+test('direct waiter completion cannot alter a booking from another day', async () => {
+  const h = createHarness({ checkedIn: true });
+  h.booking.bookingDate = '2099-01-01';
+  await assert.rejects(() => h.coordinated.complete('booking-1', andrii), /лише підтверджене відвідування/);
+  assert.ok(!h.calls.some((call) => call[0] === 'table.save'));
 });
 
 test('non-check-in methods still delegate to the existing BookingsService', async () => {
