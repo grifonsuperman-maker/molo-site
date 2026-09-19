@@ -11,7 +11,8 @@ const TABLE_CHANGE_TITLES = new Set([
 ]);
 
 type Decision = {
-  bookingId: string;
+  bookingId: string | null;
+  noticeHandle: string | null;
   guestNotification: NonNullable<GuestBooking['guestNotification']>;
   token: string | null;
   guestDeviceId: string;
@@ -48,9 +49,10 @@ export default function GuestBookingDecisionController() {
       const notice = notices[0];
       if (notice) {
         setDecision({
-          bookingId: notice.bookingId,
+          bookingId: null,
+          noticeHandle: notice.noticeHandle,
           guestNotification: notice.guestNotification,
-          token: tokenFor(notice.bookingId),
+          token: null,
           guestDeviceId,
           isNoShow: true,
         });
@@ -75,6 +77,7 @@ export default function GuestBookingDecisionController() {
 
       setDecision({
         bookingId: booking.bookingId,
+        noticeHandle: null,
         guestNotification: booking.guestNotification,
         token: tokenFor(booking.bookingId),
         guestDeviceId,
@@ -98,16 +101,16 @@ export default function GuestBookingDecisionController() {
 
   async function acknowledge() {
     if (!decision) return;
-    const { bookingId, token, guestDeviceId, isNoShow } = decision;
-    if (!token && !(isNoShow && guestDeviceId)) return;
+    const { bookingId, noticeHandle, token, guestDeviceId, isNoShow } = decision;
+    if (!(token && bookingId) && !(isNoShow && noticeHandle && guestDeviceId)) return;
 
     setBusy(true);
     setError(null);
     try {
-      if (token) {
+      if (isNoShow && noticeHandle && guestDeviceId) {
+        await noShowNoticeApi.acknowledgeByDevice(noticeHandle, guestDeviceId);
+      } else if (token && bookingId) {
         await bookingsApi.guestAcknowledgeNotification(bookingId, token);
-      } else {
-        await noShowNoticeApi.acknowledgeByDevice(bookingId, guestDeviceId);
       }
       setDecision(null);
       await load();
@@ -118,7 +121,10 @@ export default function GuestBookingDecisionController() {
     }
   }
 
-  const canAcknowledge = Boolean(decision.token || (decision.isNoShow && decision.guestDeviceId));
+  const canAcknowledge = Boolean(
+    (decision.token && decision.bookingId) ||
+    (decision.isNoShow && decision.noticeHandle && decision.guestDeviceId),
+  );
 
   return (
     <aside className="fixed left-3 right-3 top-3 z-[130] mx-auto max-w-xl rounded-[24px] border border-amber-200/60 bg-neutral-950/95 p-4 text-white shadow-[0_0_34px_rgba(251,191,36,.28)] backdrop-blur-xl">
