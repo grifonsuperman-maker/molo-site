@@ -1,5 +1,5 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { DataSource, In } from 'typeorm';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { DataSource, EntityManager, In } from 'typeorm';
 
 import { Booking } from '../bookings/entities/booking.entity';
 import { TableEntity } from '../tables/entities/table.entity';
@@ -8,6 +8,68 @@ import { WaiterCallRecord } from './entities/waiter-call.entity';
 import { WaiterCallsService } from './waiter-calls.service';
 
 export const RAW_WAITER_CALLS_SERVICE = Symbol('RAW_WAITER_CALLS_SERVICE');
+
+/** Serialize the committed call using the existing public response shape. */
+function publicCall(call: WaiterCallRecord) {
+  return {
+    id: call.id,
+    bookingId: call.booking.id,
+    tableId: call.tableId,
+    tableNumber: call.tableNumber,
+    clientName: call.clientName,
+    waiterId: call.waiterId,
+    waiterName: call.waiterName,
+    status: call.status,
+    createdAt: call.createdAt.toISOString(),
+    acceptedAt: call.acceptedAt?.toISOString() || null,
+    closedAt: call.closedAt?.toISOString() || null,
+  };
+}
+
+/** The caller already holds the table lock; never acquire a second connection here. */
+async function mutateCall(
+  manager: EntityManager,
+  id: string,
+  waiterId: string,
+  operation: 'accept' | 'close',
+  waiterName?: string,
+) {
+  const calls = manager.getRepository(WaiterCallRecord);
+  const call = await calls.findOne({
+    where: { id },
+    relations: { booking: true },
+    relationLoadStrategy: 'query',
+    lock: { mode: 'pessimistic_write' },
+  });
+  if (!call) throw new NotFoundException('Виклик не знайдено');
+  if (call.status === 'closed') throw new BadRequestException('Виклик вже закрито');
+  if (!waiterId) throw new BadRequestException('waiterId обовʼязковий');
+
+  if (operation === 'accept') {
+    if (call.waiterId && call.waiterId !== waiterId) {
+      throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+    }
+    if (call.status === 'accepted') {
+      return { message: 'Виклик вже прийнято', call: publicCall(call) };
+    }
+    call.status = 'accepted';
+    call.waiterId = waiterId;
+    call.waiterName = waiterName || 'Офіціант';
+    call.assignmentActive = true;
+    call.acceptedAt = new Date();
+    const saved = await calls.save(call);
+    return { message: 'Виклик прийнято', call: publicCall(saved) };
+  }
+
+  if (call.status !== 'accepted') throw new BadRequestException('Спочатку прийміть виклик');
+  if (call.waiterId !== waiterId) {
+    throw new ForbiddenException('Цей виклик призначено іншому офіціанту');
+  }
+  call.status = 'closed';
+  call.closedAt = new Date();
+  const saved = await calls.save(call);
+  return { message: 'Виклик закрито', call: publicCall(saved) };
+}
 
 export function createCoordinatedWaiterCallsService(
   raw: WaiterCallsService,
@@ -64,13 +126,16 @@ export function createCoordinatedWaiterCallsService(
         return async (id: string, dto: { waiterId: string; waiterName: string }) =>
           ownership.withWaiterTableLock(
             await callTableId(id), dto.waiterId,
-            () => target.accept(id, dto),
+            (manager) => mutateCall(manager, id, dto.waiterId, 'accept', dto.waiterName),
             true,
           );
       }
       if (property === 'close') {
         return async (id: string, waiterId: string) =>
-          ownership.withWaiterTableLock(await callTableId(id), waiterId, () => target.close(id, waiterId));
+          ownership.withWaiterTableLock(
+            await callTableId(id), waiterId,
+            (manager) => mutateCall(manager, id, waiterId, 'close'),
+          );
       }
       if (property === 'list') {
         return async (waiterId?: string) => {
