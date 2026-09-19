@@ -8,9 +8,17 @@ const { createCoordinatedWaiterCallsService } = require('../dist/waiter-calls/co
 const { TableEntity } = require('../dist/tables/entities/table.entity.js');
 const { TableOwnershipService } = require('../dist/tables/table-ownership.service.js');
 
-function harness({ checkedIn = false, owner = null, status = 'occupied', failOwnerWrite = false } = {}) {
+function kyivToday() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const value = (type) => parts.find((part) => part.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
+function harness({ checkedIn = false, owner = null, status = 'occupied', failOwnerWrite = false, bookingDate = kyivToday() } = {}) {
   const table = { id: 'table-1', tableNumber: '1', assignedWaiterId: owner, status };
-  const booking = { id: 'booking-1', table, status: 'approved', checkedInAt: checkedIn ? new Date() : null };
+  const booking = { id: 'booking-1', table, status: 'approved', bookingDate, checkedInAt: checkedIn ? new Date() : null };
   const calls = [];
   const manager = {
     getRepository(entity) {
@@ -34,26 +42,35 @@ function harness({ checkedIn = false, owner = null, status = 'occupied', failOwn
     async transaction(action) { calls.push('transaction'); return action(manager); },
   };
   const raw = {
-    async assign(dto) { calls.push('raw.assign'); return { message: 'Офіціанта закріплено за столом', assignment: dto }; },
+    async assign() { calls.push('raw.assign'); throw new Error('legacy memory assignment must not be used'); },
   };
   const service = createCoordinatedWaiterCallsService(raw, dataSource, new TableOwnershipService(dataSource));
   const dto = { bookingId: booking.id, tableId: table.id, waiterId: 'waiter-1', waiterName: 'Андрій' };
   return { service, table, booking, calls, dto };
 }
 
-test('direct assignment before actual check-in does not record an in-memory owner', async () => {
+test('direct assignment before actual check-in does not claim a table', async () => {
   const h = harness();
   await assert.rejects(() => h.service.assign(h.dto), /лише після приходу гостей/);
   assert.ok(!h.calls.includes('raw.assign'));
   assert.equal(h.table.assignedWaiterId, null);
 });
 
-test('checked-in waiter preserves the existing after-arrival assignment flow', async () => {
+test('checked-in waiter uses durable ownership and never publishes a second in-memory assignment', async () => {
   const h = harness({ checkedIn: true });
   const result = await h.service.assign(h.dto);
   assert.equal(result.assignment.waiterId, 'waiter-1');
   assert.equal(h.table.assignedWaiterId, 'waiter-1');
-  assert.deepEqual(h.calls, ['transaction', 'table.save', 'raw.assign']);
+  assert.deepEqual(h.calls, ['transaction', 'table.save']);
+});
+
+test('cannot assign a future or previous booking on an independently occupied table', async () => {
+  for (const bookingDate of ['2000-01-01', '2099-01-01']) {
+    const h = harness({ checkedIn: true, bookingDate });
+    await assert.rejects(() => h.service.assign(h.dto), /бронюванням на сьогодні/);
+    assert.equal(h.table.assignedWaiterId, null);
+    assert.ok(!h.calls.includes('raw.assign'));
+  }
 });
 
 test('another waiter cannot assign a call on an already owned table', async () => {
@@ -62,7 +79,7 @@ test('another waiter cannot assign a call on an already owned table', async () =
   assert.ok(!h.calls.includes('raw.assign'));
 });
 
-test('failed owner write cannot publish an in-memory assignment', async () => {
+test('failed owner write cannot publish a second assignment', async () => {
   const h = harness({ checkedIn: true, failOwnerWrite: true });
   await assert.rejects(() => h.service.assign(h.dto), /owner write failed/);
   assert.ok(!h.calls.includes('raw.assign'));
