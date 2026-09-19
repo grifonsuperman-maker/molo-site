@@ -149,7 +149,16 @@ export function createCoordinatedWaiterCallsService(
         return async (id: string, dto: { waiterId: string; waiterName: string }) =>
           ownership.withWaiterTableLock(
             await callTableId(id), dto.waiterId,
-            (manager) => mutateCall(manager, id, dto.waiterId, 'accept', dto.waiterName),
+            async (manager) => {
+              const call = await manager.getRepository(WaiterCallRecord).findOne({
+                where: { id }, relations: ['booking', 'booking.table'],
+              });
+              if (!call || !call.booking?.table || call.booking.table.id !== call.tableId ||
+                  call.booking.status !== 'approved' || !call.booking.checkedInAt) {
+                throw new BadRequestException('Виклик не належить чинному відвідуванню за цим столом');
+              }
+              return mutateCall(manager, id, dto.waiterId, 'accept', dto.waiterName);
+            },
             true,
           );
       }
