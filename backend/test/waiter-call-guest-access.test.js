@@ -211,7 +211,7 @@ test('approved booking at an occupied table cannot call before its own guest che
   assert.equal(state.calls.length, 1);
 });
 
-test('past and future checked-in bookings cannot call today's occupied table', async () => {
+test('past and future checked-in bookings cannot call the currently occupied table', async () => {
   for (const bookingDate of ['2000-01-01', '2099-01-01']) {
     const state = createService();
     state.booking.bookingDate = bookingDate;
