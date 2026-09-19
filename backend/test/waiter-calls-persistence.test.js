@@ -29,6 +29,7 @@ function createStore() {
   const booking = {
     id: 'booking-1',
     status: 'approved',
+    checkedInAt: new Date(),
     bookingDate: kyivToday(),
     approvedAt: new Date(Date.now() - 60_000),
     table: { id: 'table-1', tableNumber: '8', status: 'occupied' },
