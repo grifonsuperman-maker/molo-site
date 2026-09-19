@@ -4,6 +4,15 @@ export class AddTableWaiterOwnership2026091901000 implements MigrationInterface 
   name = 'AddTableWaiterOwnership2026091901000';
 
   async up(queryRunner: QueryRunner): Promise<void> {
+    // Before launch there is no trustworthy owner for an already occupied table.
+    // Fail before changing the schema rather than silently make an active visit unowned.
+    const activeTables: Array<{ count: number | string }> = await queryRunner.query(`
+      SELECT COUNT(*)::int AS count FROM "tables" WHERE "status" IN ('occupied', 'cleaning')
+    `);
+    if (Number(activeTables[0]?.count || 0) > 0) {
+      throw new Error('Перед встановленням закріплення офіціантів звільніть усі зайняті столи та завершіть прибирання');
+    }
+
     await queryRunner.query(`
       ALTER TABLE "tables"
       ADD COLUMN IF NOT EXISTS "assigned_waiter_id" uuid
