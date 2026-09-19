@@ -114,6 +114,9 @@ export class TablesService {
         }
         this.ownership.claim(table, actor);
       }
+      if (actor?.role === 'waiter' && status === 'cleaning' && table.status !== 'occupied') {
+        throw new BadRequestException('Прибирання можна почати лише після того, як стіл був зайнятий');
+      }
       table.status = status;
       if (status === 'free') table.assignedWaiterId = null;
       await tables.save(table);
@@ -179,7 +182,10 @@ export class TablesService {
   }
 
   markOccupied(id: string, actor?: AuthUser) {
-    return this.setStatus(id, 'occupied', actor);
+    // All waiter-facing paths must use the same booking-aware walk-in operation.
+    return actor?.role === 'waiter'
+      ? this.setWaiterStatus(id, 'occupied', actor)
+      : this.setStatus(id, 'occupied', actor);
   }
 
   markCleaning(id: string, actor?: AuthUser) {
@@ -187,7 +193,10 @@ export class TablesService {
   }
 
   markFree(id: string, actor?: AuthUser) {
-    return this.setStatus(id, 'free', actor);
+    // Do not let the alternate endpoint free a checked-in booking as a walk-in.
+    return actor?.role === 'waiter'
+      ? this.setWaiterStatus(id, 'free', actor)
+      : this.setStatus(id, 'free', actor);
   }
 
   close(id: string) {
