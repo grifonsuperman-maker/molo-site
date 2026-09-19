@@ -9,6 +9,7 @@ import { AvailabilityBlocksService } from './availability-blocks.service';
 import { BookingArrivalLockService } from './booking-arrival-lock.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
+import { waiterCanSeeBooking } from './waiter-booking-visibility';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
 import { CreateAdminManualBookingDto } from './dto/create-admin-manual-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
@@ -121,8 +122,11 @@ export class BookingsController {
 
   @Get('today')
   @Roles('waiter', 'admin', 'owner')
-  today() {
-    return this.service.getToday();
+  async today(@Req() request: { user: AuthUser }) {
+    const bookings = await this.service.getToday();
+    return request.user.role === 'waiter'
+      ? bookings.filter((booking) => waiterCanSeeBooking(booking, request.user.staffId))
+      : bookings;
   }
 
   @Get('by-date')
@@ -196,7 +200,7 @@ export class BookingsController {
     try {
       await this.notifications.notifyRescheduleRequest(rescheduleRequest);
     } catch (error) {
-      console.error('Telegram guest time-change reschedule notification failed', error);
+      console.error('Telegram guest time-change notification failed', error);
     }
 
     return {
