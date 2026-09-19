@@ -83,11 +83,6 @@ export default function AdminWorkspace() {
       } else if (image.complete) {
         revealCurrentPhoto();
       }
-
-      const activeElement = document.activeElement;
-      if (activeElement instanceof HTMLElement && root.contains(activeElement)) {
-        activeElement.blur();
-      }
     };
 
     const scheduleSync = () => {
