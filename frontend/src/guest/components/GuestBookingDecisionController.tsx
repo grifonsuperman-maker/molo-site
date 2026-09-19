@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { bookingsApi, type GuestBooking } from '../../api/bookings';
 import { readGuestBrowserAccess } from '../../api/guestAccessRuntime';
+import { noShowNoticeApi } from '../services/noShowNoticeApi';
 
 const POLLING_MS = 15_000;
 const TABLE_CHANGE_TITLES = new Set([
@@ -10,13 +11,21 @@ const TABLE_CHANGE_TITLES = new Set([
 ]);
 
 type Decision = {
-  booking: GuestBooking;
+  bookingId: string | null;
+  noticeHandle: string | null;
+  guestNotification: NonNullable<GuestBooking['guestNotification']>;
   token: string | null;
+  guestDeviceId: string;
+  isNoShow: boolean;
+  bookingDate?: string;
+  bookingTime?: string;
+  tableNumber?: string | number | null;
 };
 
 export default function GuestBookingDecisionController() {
   const [decision, setDecision] = useState<Decision | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { guestDeviceId, bookings: access } = readGuestBrowserAccess();
@@ -26,10 +35,31 @@ export default function GuestBookingDecisionController() {
     }
 
     try {
-      const bookings = await bookingsApi.guestList(
-        guestDeviceId,
-        access.map((item) => item.token),
-      );
+      const [bookingsResult, noticesResult] = await Promise.allSettled([
+        bookingsApi.guestList(guestDeviceId, access.map((item) => item.token)),
+        guestDeviceId
+          ? noShowNoticeApi.listUnreadForDevice(guestDeviceId)
+          : Promise.resolve([]),
+      ]);
+      if (bookingsResult.status === 'rejected' && noticesResult.status === 'rejected') return;
+      const bookings = bookingsResult.status === 'fulfilled' ? bookingsResult.value : [];
+      const notices = noticesResult.status === 'fulfilled' ? noticesResult.value : [];
+      const tokenFor = (bookingId: string) =>
+        access.find((item) => item.bookingId === bookingId)?.token || null;
+      const notice = notices[0];
+      if (notice) {
+        setDecision({
+          bookingId: null,
+          noticeHandle: notice.noticeHandle,
+          guestNotification: notice.guestNotification,
+          token: null,
+          guestDeviceId,
+          isNoShow: true,
+        });
+        setError(null);
+        return;
+      }
+
       const booking = bookings.find(
         (item) =>
           item.guestNotification &&
@@ -37,14 +67,28 @@ export default function GuestBookingDecisionController() {
           TABLE_CHANGE_TITLES.has(item.guestNotification.title || ''),
       );
 
-      if (!booking) {
+      if (!booking?.guestNotification) {
+        // A temporary failure of either independent endpoint must not dismiss its notice.
+        if (bookingsResult.status === 'rejected' || noticesResult.status === 'rejected') return;
         setDecision(null);
+        setError(null);
         return;
       }
 
-      setDecision({
-        booking,
-        token: access.find((item) => item.bookingId === booking.bookingId)?.token || null,
+      // A successful table-change poll must not replace a displayed no-show whose own poll failed.
+      setDecision((current) => {
+        if (noticesResult.status === 'rejected' && current?.isNoShow) return current;
+        return {
+          bookingId: booking.bookingId,
+          noticeHandle: null,
+          guestNotification: booking.guestNotification!,
+          token: tokenFor(booking.bookingId),
+          guestDeviceId,
+          isNoShow: false,
+          bookingDate: booking.bookingDate,
+          bookingTime: booking.bookingTime,
+          tableNumber: booking.tableNumber,
+        };
       });
     } catch {
       // Основний гостьовий застосунок продовжує працювати навіть без цього повідомлення.
@@ -57,22 +101,34 @@ export default function GuestBookingDecisionController() {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  if (!decision?.booking.guestNotification) return null;
+  if (!decision) return null;
 
   async function acknowledge() {
-    if (!decision?.token) return;
+    if (!decision) return;
+    const { bookingId, noticeHandle, token, guestDeviceId, isNoShow } = decision;
+    if (!(token && bookingId) && !(isNoShow && noticeHandle && guestDeviceId)) return;
+
     setBusy(true);
+    setError(null);
     try {
-      await bookingsApi.guestAcknowledgeNotification(
-        decision.booking.bookingId,
-        decision.token,
-      );
+      if (isNoShow && noticeHandle && guestDeviceId) {
+        await noShowNoticeApi.acknowledgeByDevice(noticeHandle, guestDeviceId);
+      } else if (token && bookingId) {
+        await bookingsApi.guestAcknowledgeNotification(bookingId, token);
+      }
       setDecision(null);
       await load();
+    } catch {
+      setError('Не вдалося підтвердити повідомлення. Спробуйте ще раз.');
     } finally {
       setBusy(false);
     }
   }
+
+  const canAcknowledge = Boolean(
+    (decision.token && decision.bookingId) ||
+    (decision.isNoShow && decision.noticeHandle && decision.guestDeviceId),
+  );
 
   return (
     <aside className="fixed left-3 right-3 top-3 z-[130] mx-auto max-w-xl rounded-[24px] border border-amber-200/60 bg-neutral-950/95 p-4 text-white shadow-[0_0_34px_rgba(251,191,36,.28)] backdrop-blur-xl">
@@ -80,17 +136,20 @@ export default function GuestBookingDecisionController() {
         Оновлення бронювання
       </p>
       <h2 className="mt-1 text-lg font-black text-amber-100">
-        {decision.booking.guestNotification.title}
+        {decision.guestNotification.title}
       </h2>
-      {decision.booking.guestNotification.message && (
+      {decision.guestNotification.message && (
         <p className="mt-2 text-sm leading-6 text-white/75">
-          {decision.booking.guestNotification.message}
+          {decision.guestNotification.message}
         </p>
       )}
-      <p className="mt-2 text-xs text-white/45">
-        {decision.booking.bookingDate} · {String(decision.booking.bookingTime).slice(0, 5)} · Стіл №{decision.booking.tableNumber || '—'}
-      </p>
-      {decision.token && (
+      {!decision.isNoShow && decision.bookingDate && (
+        <p className="mt-2 text-xs text-white/45">
+          {decision.bookingDate} · {String(decision.bookingTime || '').slice(0, 5)} · Стіл №{decision.tableNumber || '—'}
+        </p>
+      )}
+      {error && <p role="alert" className="mt-2 text-sm text-red-200">{error}</p>}
+      {canAcknowledge && (
         <button
           type="button"
           disabled={busy}

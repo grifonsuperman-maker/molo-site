@@ -34,6 +34,7 @@ import { BookingTableChangeRequest } from './entities/booking-table-change-reque
 import { Booking } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
+import { GuestNoShowNoticesService } from './guest-no-show-notices.service';
 import { GuestReviewsController } from './guest-reviews.controller';
 import { GuestTableNumberValidationService } from './guest-table-number-validation.service';
 import { GuestTelegramLinkService } from './guest-telegram-link.service';
@@ -74,6 +75,7 @@ import { GuestTimeChangeService } from './guest-time-change.service';
       inject: [RAW_BOOKINGS_SERVICE, DataSource],
     },
     GuestBookingsService,
+    GuestNoShowNoticesService,
     GuestTimeChangeService,
     GuestTableNumberValidationService,
     GuestTelegramLinkService,
