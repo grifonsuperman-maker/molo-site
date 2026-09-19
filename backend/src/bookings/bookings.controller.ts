@@ -93,14 +93,14 @@ export class BookingsController {
   @Post('guest/list')
   async guestList(@Body() dto: GuestBookingListDto) {
     const bookings = await this.guestService.list(dto);
-    const unreadNoShows = dto.guestDeviceId
-      ? await this.noShowNotices.listUnreadForDevice(dto.guestDeviceId)
-      : [];
-    const includedIds = new Set(bookings.map((booking) => booking.bookingId));
-    return [
-      ...bookings,
-      ...unreadNoShows.filter((booking) => !includedIds.has(booking.bookingId)),
-    ].map((booking) => this.withGuestArrivalTimeCapabilities(booking));
+    return bookings.map((booking) => this.withGuestArrivalTimeCapabilities(booking));
+  }
+
+  // Device recovery returns only an unread notice, never a historical booking card.
+  @Public()
+  @Post('guest/no-show/notices')
+  guestNoShowNotices(@Body() dto: GuestNoShowAcknowledgeDto) {
+    return this.noShowNotices.listUnreadForDevice(dto.guestDeviceId);
   }
 
   @Patch(':id/guest/telegram')
