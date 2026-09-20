@@ -112,3 +112,19 @@ test('denied push permission shows recovery guidance before the support gate', (
   assert.match(deniedBranch, /onClick=\{dismiss\}/);
   assert.doesNotMatch(deniedBranch, /hasPushSupport\(\)/);
 });
+
+test('restored push permission clears only the stale denial guidance on PWA resume', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/guest/components/GuestPushOptIn.tsx'), 'utf8');
+  const resume = source.slice(source.indexOf('const refreshOnResume = () => {'), source.indexOf('const onVisibilityChange = () => {'));
+  assert.match(resume, /'Notification' in window && Notification\.permission !== 'denied'/);
+  assert.match(resume, /setConfigRefresh\(\(current\) => current \+ 1\)/);
+  assert.match(source, /window\.addEventListener\('pageshow', refreshOnResume\)/);
+  assert.match(source, /document\.addEventListener\('visibilitychange', onVisibilityChange\)/);
+  const callback = resume.match(/setError\(\(current\) => ([^\n]+)\);/);
+  assert.ok(callback);
+  const message = source.match(/const PERMISSION_DENIED_MESSAGE = '([^']+)'/);
+  assert.ok(message);
+  const clearError = vm.runInNewContext(`(current) => ${callback[1]}`, { PERMISSION_DENIED_MESSAGE: message[1] });
+  assert.equal(clearError(message[1]), '');
+  assert.equal(clearError('Не вдалося підключити сповіщення.'), 'Не вдалося підключити сповіщення.');
+});
