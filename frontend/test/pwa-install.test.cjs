@@ -98,18 +98,40 @@ test('permission is requested only from the click action and registration proves
 
 test('revoked or failed server readiness clears the previously offered push key', () => {
   const source = read('src/guest/components/GuestPushOptIn.tsx');
-  assert.match(source, /setVapidKey\(''\);\s*if \(!onGuestHome/);
+  assert.match(source, /setVapidKey\(''\);\s*setCompleted\(false\);\s*if \(!onGuestHome/);
   assert.match(source, /const key = config\?\.enabled === true/);
+  assert.match(source, /if \(!key\) return;/);
   assert.match(source, /setVapidKey\(key\);/);
-  assert.match(source, /\.catch\(\(\) => \{ if \(!cancelled\) setVapidKey\(''\); \}\)/);
+  assert.match(source, /\.catch\(\(\) => \{\s*if \(!cancelled\) \{\s*setVapidKey\(''\);/);
 });
 
 test('an old VAPID subscription is replaced rather than silently reused', () => {
   const source = read('src/guest/components/GuestPushOptIn.tsx');
-  assert.match(source, /existing\?\.options\.applicationServerKey/);
+  assert.match(source, /subscription\?\.options\.applicationServerKey/);
   assert.match(source, /previousKey\.every\(\(byte, index\) => byte === key\[index\]\)/);
   assert.match(source, /if \(existing && !keyMatches\) await existing\.unsubscribe\(\)/);
   assert.match(source, /existing && keyMatches \? existing : await worker\.pushManager\.subscribe/);
+});
+
+test('resuming the same PWA screen rechecks the backend even when route does not change', () => {
+  const source = read('src/guest/components/GuestPushOptIn.tsx');
+  assert.match(source, /const \[configRefresh, setConfigRefresh\] = useState\(0\)/);
+  assert.match(source, /setConfigRefresh\(\(current\) => current \+ 1\)/);
+  assert.match(source, /window\.addEventListener\('pageshow', refreshOnResume\)/);
+  assert.match(source, /document\.addEventListener\('visibilitychange', onVisibilityChange\)/);
+  assert.match(source, /dismissed, configRefresh\]\)/);
+});
+
+test('confirmed subscription survives launch without storing guest token or raw endpoint', () => {
+  const source = read('src/guest/components/GuestPushOptIn.tsx');
+  assert.match(source, /CONFIRMED_SUBSCRIPTION_KEY = 'molo:push:confirmed-subscription:v1'/);
+  assert.match(source, /crypto\.subtle\.digest\('SHA-256', data\)/);
+  assert.match(source, /fingerprint === readConfirmedFingerprint\(\)/);
+  assert.match(source, /rememberConfirmedFingerprint\(fingerprint\)/);
+  assert.match(source, /setCompleted\(alreadyConfirmed\)/);
+  assert.match(source, /if \(!vapidKey \|\| !onGuestHome[\s\S]*\|\| dismissed \|\| completed\) return null;/);
+  assert.doesNotMatch(source, /localStorage\.setItem\([^,]+,\s*booking\.token/);
+  assert.doesNotMatch(source, /localStorage\.setItem\([^,]+,\s*subscription\.endpoint/);
 });
 
 test('VAPID key decoder rejects malformed keys before permission is offered', () => {
