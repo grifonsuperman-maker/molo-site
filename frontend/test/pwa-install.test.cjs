@@ -14,6 +14,7 @@ function pngSize(filename) {
 
 test('MOLO install manifest uses approved icon assets and guest start page', () => {
   const manifest = JSON.parse(read('public/manifest.webmanifest'));
+  assert.equal(manifest.name, 'Ресторан MOLO');
   assert.equal(manifest.short_name, 'MOLO');
   assert.equal(manifest.start_url, '/');
   assert.equal(manifest.scope, '/');
