@@ -41,6 +41,11 @@ function findExistingVisibleTable(tables: TableItem[], tableNumber: string): Tab
   return tables.find((table) => table.isVisible !== false && String(table.tableNumber) === tableNumber) || null;
 }
 
+function prioritizeExistingTable(tables: TableItem[], matchedTable: TableItem | null): TableItem[] {
+  if (!matchedTable || !tables.some((table) => table.id === matchedTable.id)) return tables;
+  return [matchedTable, ...tables.filter((table) => table.id !== matchedTable.id)];
+}
+
 export default function WaiterTablesByLocation({ onClose }: { onClose: () => void }) {
   const [tables, setTables] = useState<TableItem[]>([]);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
@@ -80,6 +85,18 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
     .filter((table) => table.isVisible !== false && !LOCATIONS.some((location) => location.accepts(Number(table.tableNumber))))
     .sort((left, right) => Number(left.tableNumber) - Number(right.tableNumber)), [tables]);
 
+  const searchedTable = findExistingVisibleTable(tables, tableSearch);
+  const searchedLocation = searchedTable
+    ? locationGroups.find((location) => location.tables.some((table) => table.id === searchedTable.id))
+    : null;
+  const orderedLocationGroups = searchedLocation
+    ? [
+        { ...searchedLocation, tables: prioritizeExistingTable(searchedLocation.tables, searchedTable) },
+        ...locationGroups.filter((location) => location.key !== searchedLocation.key),
+      ]
+    : locationGroups;
+  const orderedUnassignedTables = prioritizeExistingTable(unassignedTables, searchedTable);
+  const searchedUnassigned = Boolean(searchedTable && unassignedTables.some((table) => table.id === searchedTable.id));
   const selectedTable = tables.find((table) => table.id === selectedTableId) || null;
 
   async function setStatus(table: TableItem, status: 'occupied' | 'free') {
@@ -105,11 +122,7 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
   }
 
   function searchTable(value: string) {
-    const digits = value.replace(/\D/g, '');
-    setTableSearch(digits);
-    const found = findExistingVisibleTable(tables, digits);
-    if (!found) return;
-    document.getElementById(`waiter-table-${found.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTableSearch(value.replace(/\D/g, ''));
   }
 
   function renderTable(table: TableItem) {
@@ -128,6 +141,13 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
       </button>
     );
   }
+
+  const unassignedSection = orderedUnassignedTables.length > 0 ? (
+    <section className="rounded-[28px] border border-white/12 bg-black/50 p-4">
+      <div className="mb-4"><h2 className="text-xl font-black">Без визначеної локації</h2><p className="text-xs text-white/40">Потрібно перевірити номер або локацію столу</p></div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{orderedUnassignedTables.map(renderTable)}</div>
+    </section>
+  ) : null;
 
   return (
     <div className="fixed inset-0 z-[85] overflow-y-auto bg-[#020607] text-white">
@@ -173,7 +193,8 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
         )}
 
         <div className="mt-4 space-y-4">
-          {locationGroups.map((location) => (
+          {searchedUnassigned && unassignedSection}
+          {orderedLocationGroups.map((location) => (
             <section id={`waiter-location-${location.key}`} key={location.key} className="scroll-mt-64 rounded-[28px] border border-white/12 bg-black/50 p-4 shadow-[0_0_30px_rgba(255,255,255,.03)] backdrop-blur-xl">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-200/35 bg-amber-300/10 text-amber-100"><MapPinned size={19} /></span><div><h2 className="text-xl font-black">{location.label}</h2><p className="text-xs text-white/40">Столи {location.range}</p></div></div>
@@ -183,13 +204,7 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
               {!location.tables.length && <p className="rounded-2xl border border-dashed border-white/15 p-5 text-center text-sm text-white/40">У цій локації столи не знайдено.</p>}
             </section>
           ))}
-
-          {unassignedTables.length > 0 && (
-            <section className="rounded-[28px] border border-white/12 bg-black/50 p-4">
-              <div className="mb-4"><h2 className="text-xl font-black">Без визначеної локації</h2><p className="text-xs text-white/40">Потрібно перевірити номер або локацію столу</p></div>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{unassignedTables.map(renderTable)}</div>
-            </section>
-          )}
+          {!searchedUnassigned && unassignedSection}
         </div>
 
         <button type="button" onClick={onClose} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[.03] p-4 font-black text-white/60"><ArrowLeft size={18} />Назад у пульт</button>
