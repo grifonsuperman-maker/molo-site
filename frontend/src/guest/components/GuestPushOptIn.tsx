@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { readGuestBrowserAccess } from '../../api/guestAccessRuntime';
 import { isDeveloperRoleSwitcherPath } from '../../developer/developerRoleSwitcher';
@@ -55,6 +55,19 @@ function decodeVapidPublicKey(key: string): Uint8Array | null {
   }
 }
 
+async function isValidVapidPublicKey(key: string) {
+  const bytes = decodeVapidPublicKey(key);
+  if (!bytes) return false;
+  try {
+    // Length and prefix alone do not prove that this is a usable P-256 point.
+    await crypto.subtle.importKey('raw', bytes as Uint8Array<ArrayBuffer>,
+      { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function subscriptionMatchesKey(subscription: PushSubscription | null, key: Uint8Array) {
   const applicationServerKey = subscription?.options.applicationServerKey;
   if (!applicationServerKey) return false;
@@ -102,6 +115,7 @@ export default function GuestPushOptIn() {
     () => readGuestBrowserAccess().bookings.length > 0,
   );
   const [dismissed, setDismissed] = useState(wasRecentlyDismissed);
+  const dismissedInTabAt = useRef(0);
   const [vapidKey, setVapidKey] = useState('');
   const [configRefresh, setConfigRefresh] = useState(0);
   const [working, setWorking] = useState(false);
@@ -117,6 +131,9 @@ export default function GuestPushOptIn() {
     };
     const refreshOnResume = () => {
       refreshContext();
+      const dismissedInTab = dismissedInTabAt.current > 0 &&
+        Date.now() - dismissedInTabAt.current < DISMISS_FOR_MS;
+      setDismissed(dismissedInTab || wasRecentlyDismissed());
       setConfigRefresh((current) => current + 1);
     };
     const onVisibilityChange = () => {
@@ -150,11 +167,9 @@ export default function GuestPushOptIn() {
     void (async () => {
       const config = await api.get<PushConfig>('/push/guest/config');
       if (cancelled) return;
-      const key = config?.enabled === true &&
-        typeof config.vapidPublicKey === 'string' &&
-        decodeVapidPublicKey(config.vapidPublicKey)
+      const key = config?.enabled === true && typeof config.vapidPublicKey === 'string'
         ? config.vapidPublicKey : '';
-      if (!key) return;
+      if (!key || !(await isValidVapidPublicKey(key)) || cancelled) return;
 
       let alreadyConfirmed = false;
       if (Notification.permission === 'granted') {
@@ -184,8 +199,9 @@ export default function GuestPushOptIn() {
   }, [onGuestHome, inGuestContext, installed, hasBookingAccess, dismissed, configRefresh]);
 
   function dismiss() {
+    dismissedInTabAt.current = Date.now();
     try {
-      window.localStorage.setItem(DISMISSED_AT_KEY, String(Date.now()));
+      window.localStorage.setItem(DISMISSED_AT_KEY, String(dismissedInTabAt.current));
     } catch {
       // Dismiss for this tab even when storage is unavailable.
     }
