@@ -8,6 +8,7 @@ import { readTelegramStaffInviteToken } from '../../telegram/TelegramStaffLinkGa
 type PushConfig = { enabled?: boolean; vapidPublicKey?: string };
 
 const DISMISSED_AT_KEY = 'molo:push:opt-in-dismissed-at:v1';
+const CONFIRMED_SUBSCRIPTION_KEY = 'molo:push:confirmed-subscription:v1';
 const DISMISS_FOR_MS = 30 * 24 * 60 * 60 * 1000;
 
 function isInstalled() {
@@ -54,6 +55,45 @@ function decodeVapidPublicKey(key: string): Uint8Array | null {
   }
 }
 
+function subscriptionMatchesKey(subscription: PushSubscription | null, key: Uint8Array) {
+  const applicationServerKey = subscription?.options.applicationServerKey;
+  if (!applicationServerKey) return false;
+  const previousKey = new Uint8Array(applicationServerKey as ArrayBuffer);
+  return previousKey.length === key.length &&
+    previousKey.every((byte, index) => byte === key[index]);
+}
+
+async function subscriptionFingerprint(bookingId: string, publicKey: string, endpoint: string) {
+  // Do not persist the private guest booking token or raw push endpoint.
+  const data = new TextEncoder().encode(`${bookingId}\n${publicKey}\n${endpoint}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function readConfirmedFingerprint() {
+  try {
+    return window.localStorage.getItem(CONFIRMED_SUBSCRIPTION_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function rememberConfirmedFingerprint(fingerprint: string) {
+  try {
+    window.localStorage.setItem(CONFIRMED_SUBSCRIPTION_KEY, fingerprint);
+  } catch {
+    // The current session can still use the subscription without storage.
+  }
+}
+
+function clearConfirmedFingerprint() {
+  try {
+    window.localStorage.removeItem(CONFIRMED_SUBSCRIPTION_KEY);
+  } catch {
+    // Browser storage is optional.
+  }
+}
+
 export default function GuestPushOptIn() {
   const [onGuestHome, setOnGuestHome] = useState(isGuestHomeVisible);
   const [inGuestContext, setInGuestContext] = useState(isGuestContext);
@@ -63,6 +103,7 @@ export default function GuestPushOptIn() {
   );
   const [dismissed, setDismissed] = useState(wasRecentlyDismissed);
   const [vapidKey, setVapidKey] = useState('');
+  const [configRefresh, setConfigRefresh] = useState(0);
   const [working, setWorking] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [error, setError] = useState('');
@@ -74,38 +115,73 @@ export default function GuestPushOptIn() {
       setHasBookingAccess(readGuestBrowserAccess().bookings.length > 0);
       setInstalled(isInstalled());
     };
+    const refreshOnResume = () => {
+      refreshContext();
+      setConfigRefresh((current) => current + 1);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshOnResume();
+    };
     const root = document.getElementById('root');
     const observer = root ? new MutationObserver(refreshContext) : null;
     if (root) observer?.observe(root, { childList: true, subtree: true });
     window.addEventListener('hashchange', refreshContext);
     window.addEventListener('appinstalled', refreshContext);
-    window.addEventListener('pageshow', refreshContext);
+    window.addEventListener('pageshow', refreshOnResume);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     refreshContext();
     return () => {
       observer?.disconnect();
       window.removeEventListener('hashchange', refreshContext);
       window.removeEventListener('appinstalled', refreshContext);
-      window.removeEventListener('pageshow', refreshContext);
+      window.removeEventListener('pageshow', refreshOnResume);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
 
   useEffect(() => {
     // Never keep an enabled key across a changed guest context or readiness check.
     setVapidKey('');
+    setCompleted(false);
     if (!onGuestHome || !inGuestContext || !installed || !hasBookingAccess ||
-      !hasPushSupport() || dismissed || completed) return;
+      !hasPushSupport() || dismissed) return;
     let cancelled = false;
     // No server endpoint or public VAPID key yet: no button and no permission request.
-    void api.get<PushConfig>('/push/guest/config').then((config) => {
+    void (async () => {
+      const config = await api.get<PushConfig>('/push/guest/config');
       if (cancelled) return;
       const key = config?.enabled === true &&
         typeof config.vapidPublicKey === 'string' &&
         decodeVapidPublicKey(config.vapidPublicKey)
         ? config.vapidPublicKey : '';
+      if (!key) return;
+
+      let alreadyConfirmed = false;
+      if (Notification.permission === 'granted') {
+        try {
+          const worker = await navigator.serviceWorker.getRegistration('/');
+          const subscription = await worker?.pushManager.getSubscription();
+          const booking = readGuestBrowserAccess().bookings[0];
+          const decodedKey = decodeVapidPublicKey(key);
+          if (subscription && booking && decodedKey && subscriptionMatchesKey(subscription, decodedKey)) {
+            const fingerprint = await subscriptionFingerprint(booking.bookingId, key, subscription.endpoint);
+            alreadyConfirmed = fingerprint === readConfirmedFingerprint();
+          }
+        } catch {
+          // A failed status lookup must never claim successful registration.
+        }
+      }
+      if (cancelled) return;
+      setCompleted(alreadyConfirmed);
       setVapidKey(key);
-    }).catch(() => { if (!cancelled) setVapidKey(''); });
+    })().catch(() => {
+      if (!cancelled) {
+        setVapidKey('');
+        setCompleted(false);
+      }
+    });
     return () => { cancelled = true; };
-  }, [onGuestHome, inGuestContext, installed, hasBookingAccess, dismissed, completed]);
+  }, [onGuestHome, inGuestContext, installed, hasBookingAccess, dismissed, configRefresh]);
 
   function dismiss() {
     try {
@@ -136,10 +212,7 @@ export default function GuestPushOptIn() {
       if (!key) throw new Error('Invalid push configuration');
       const worker = await navigator.serviceWorker.register('/sw.js');
       const existing = await worker.pushManager.getSubscription();
-      const existingServerKey = existing?.options.applicationServerKey;
-      const previousKey = existingServerKey ? new Uint8Array(existingServerKey as ArrayBuffer) : null;
-      const keyMatches = Boolean(previousKey && previousKey.length === key.length &&
-        previousKey.every((byte, index) => byte === key[index]));
+      const keyMatches = Boolean(existing && subscriptionMatchesKey(existing, key));
       if (existing && !keyMatches) await existing.unsubscribe();
       const subscription = existing && keyMatches ? existing : await worker.pushManager.subscribe({
         userVisibleOnly: true,
@@ -155,8 +228,11 @@ export default function GuestPushOptIn() {
         subscription: subscription.toJSON(),
       });
       if (result?.enabled !== true) throw new Error('Push registration was not confirmed');
+      const fingerprint = await subscriptionFingerprint(booking.bookingId, vapidKey, subscription.endpoint);
+      rememberConfirmedFingerprint(fingerprint);
       setCompleted(true);
     } catch {
+      clearConfirmedFingerprint();
       setError('Не вдалося підключити сповіщення. Спробуйте ще раз пізніше.');
     } finally {
       setWorking(false);
