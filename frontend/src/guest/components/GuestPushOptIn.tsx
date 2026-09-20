@@ -255,6 +255,18 @@ export default function GuestPushOptIn() {
     }
   }
 
+  // A denied permission must not hide the recovery guidance behind hasPushSupport().
+  // Keep it visible even if a foreground refresh clears the server configuration.
+  if (error && 'Notification' in window && Notification.permission === 'denied' &&
+    onGuestHome && inGuestContext && installed && hasBookingAccess && !dismissed) {
+    return (
+      <aside aria-label="Сповіщення MOLO" className="fixed bottom-[calc(env(safe-area-inset-bottom)+12px)] left-1/2 z-[65] w-[calc(100%-24px)] max-w-sm -translate-x-1/2 rounded-2xl border border-amber-300/50 bg-[#141414]/95 p-3 text-left text-white shadow-2xl backdrop-blur-md">
+        <p role="status" className="text-sm text-white/90">{error}</p>
+        <button type="button" onClick={dismiss} className="mt-3 rounded-xl border border-amber-300/50 px-4 py-2 text-sm text-white">Закрити</button>
+      </aside>
+    );
+  }
+
   if (!vapidKey || !onGuestHome || !inGuestContext || !installed || !hasBookingAccess ||
     !hasPushSupport() || dismissed || completed) return null;
 
