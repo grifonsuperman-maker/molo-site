@@ -1,0 +1,45 @@
+name: Guest Push test-branch preflight (check only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guest-push-test-preflight
+  cancel-in-progress: false
+
+jobs:
+  check-test-branch:
+    # Never run this secret-consuming job for PRs, pushes, or non-main refs.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'grifonsuperman-maker/molo-site'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out reviewed main without persisted credentials
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5; pinned full commit SHA
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7; pinned full commit SHA
+        with:
+          node-version: 24
+      - name: Install backend dependencies (no database credentials)
+        run: npm --prefix backend ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+      - name: Build backend (no database credentials)
+        run: npm --prefix backend run build
+      - name: Check the independently verified Neon test endpoint (no writes)
+        shell: bash
+        env:
+          DB_URL: ${{ secrets.MOLO_TEST_PUSH_DB_URL }}
+          MOLO_PUSH_EXPECTED_HOST: ${{ vars.MOLO_TEST_PUSH_EXPECTED_HOST }}
+          MOLO_PUSH_BRANCH: test-push-migration
+          DB_SYNCHRONIZE: 'false'
+        run: |
+          set -euo pipefail
+          if [[ -z "$DB_URL" || -z "$MOLO_PUSH_EXPECTED_HOST" ]]; then
+            echo '::error::Configure the test-branch-only Neon secret and independently verified endpoint hostname; no migration was run.'
+            exit 1
+          fi
+          node backend/scripts/guest-push-migration-operator.mjs --check
