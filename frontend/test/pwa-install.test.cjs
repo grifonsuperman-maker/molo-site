@@ -96,6 +96,22 @@ test('permission is requested only from the click action and registration proves
   assert.doesNotMatch(read('public/sw.js'), /guestAccessToken|guestDeviceId/);
 });
 
+test('revoked or failed server readiness clears the previously offered push key', () => {
+  const source = read('src/guest/components/GuestPushOptIn.tsx');
+  assert.match(source, /setVapidKey\(''\);\s*if \(!onGuestHome/);
+  assert.match(source, /const key = config\?\.enabled === true/);
+  assert.match(source, /setVapidKey\(key\);/);
+  assert.match(source, /\.catch\(\(\) => \{ if \(!cancelled\) setVapidKey\(''\); \}\)/);
+});
+
+test('an old VAPID subscription is replaced rather than silently reused', () => {
+  const source = read('src/guest/components/GuestPushOptIn.tsx');
+  assert.match(source, /existing\?\.options\.applicationServerKey/);
+  assert.match(source, /previousKey\.every\(\(byte, index\) => byte === key\[index\]\)/);
+  assert.match(source, /if \(existing && !keyMatches\) await existing\.unsubscribe\(\)/);
+  assert.match(source, /existing && keyMatches \? existing : await worker\.pushManager\.subscribe/);
+});
+
 test('VAPID key decoder rejects malformed keys before permission is offered', () => {
   const source = read('src/guest/components/GuestPushOptIn.tsx');
   const match = source.match(/function decodeVapidPublicKey\(key: string\): Uint8Array \| null \{[\s\S]*?\n\}/);
