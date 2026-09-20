@@ -30,3 +30,13 @@ test('test connection is a dedicated secret exposed only after install and build
   assert.ok(build >= 0 && secret > build, 'the secret must not be available to dependency installation or builds');
   assert.doesNotMatch(workflow, /upload-artifact|echo [^\n]*\$DB_URL|set -x/);
 });
+
+test('checkout and setup-node are pinned to full immutable, reviewed commit SHAs', () => {
+  assert.match(workflow, /uses: actions\/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09(?:\s|$)/);
+  assert.match(workflow, /uses: actions\/setup-node@820762786026740c76f36085b0efc47a31fe5020(?:\s|$)/);
+  const actions = [...workflow.matchAll(/^\s*uses:\s*([^\s#]+)/gm)].map((match) => match[1]);
+  assert.equal(actions.length, 2, 'do not introduce unreviewed third-party actions');
+  for (const action of actions) {
+    assert.match(action, /^actions\/(?:checkout|setup-node)@[a-f0-9]{40}$/, 'action must be pinned to a full commit SHA');
+  }
+});
