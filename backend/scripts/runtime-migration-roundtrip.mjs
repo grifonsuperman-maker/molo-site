@@ -12,9 +12,15 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'AddGuestReviewArchive2026082200010',
   'AddLogArchive2026082400010',
   'AddManualBookingGuestName2026082400020',
+  'CreateGuestPushSubscriptions2026092000010',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  8: {
+    guestNameColumn: true,
+    logArchiveTable: true,
+    reviewArchiveTable: true,
+  },
   7: {
     guestNameColumn: false,
     logArchiveTable: true,
@@ -121,6 +127,9 @@ function loadRuntimeMigrations(require) {
   const {
     AddManualBookingGuestName2026082400020,
   } = require('../dist/migrations/2026082400020-AddManualBookingGuestName.js');
+  const {
+    CreateGuestPushSubscriptions2026092000010,
+  } = require('../dist/migrations/2026092000010-CreateGuestPushSubscriptions.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -131,6 +140,7 @@ function loadRuntimeMigrations(require) {
     AddGuestReviewArchive2026082200010,
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
+    CreateGuestPushSubscriptions2026092000010,
   ];
 }
 
@@ -148,6 +158,7 @@ async function readRewindState(dataSource) {
       to_regclass('public.waiter_calls') IS NOT NULL AS "waiterCallsTable",
       to_regclass('public.guest_review_archives') IS NOT NULL AS "reviewArchiveTable",
       to_regclass('public.log_archives') IS NOT NULL AS "logArchiveTable",
+      to_regclass('public.guest_push_subscriptions') IS NOT NULL AS "guestPushSubscriptionsTable",
       EXISTS (
         SELECT 1
         FROM information_schema.columns
@@ -235,7 +246,7 @@ async function assertRewindCheckpoint(dataSource, remainingMigrationCount) {
   const state = await readRewindState(dataSource);
   assertRewindState(
     state,
-    EXPECTED_REWIND_STATE[remainingMigrationCount],
+    { ...EXPECTED_REWIND_STATE[remainingMigrationCount], guestPushSubscriptionsTable: false },
     `after ${EXPECTED_RUNTIME_MIGRATIONS.length - remainingMigrationCount} undo(s)`,
   );
 }
@@ -276,6 +287,9 @@ export async function runRuntimeMigrationRoundtripStep(
 
     if (mode === 'rewind') {
       assertMigrationHistory(before, EXPECTED_RUNTIME_MIGRATIONS);
+      assertRewindState(await readRewindState(dataSource), {
+        guestPushSubscriptionsTable: true,
+      }, 'before undo');
 
       for (
         let index = EXPECTED_RUNTIME_MIGRATIONS.length - 1;
@@ -297,6 +311,9 @@ export async function runRuntimeMigrationRoundtripStep(
 
     const after = await readMigrationHistory(dataSource);
     assertMigrationHistory(after, EXPECTED_RUNTIME_MIGRATIONS);
+    assertRewindState(await readRewindState(dataSource), {
+      guestPushSubscriptionsTable: true,
+    }, 'after forward');
   } finally {
     await dataSource.destroy();
   }
