@@ -100,7 +100,7 @@ test('revoked or failed server readiness clears the previously offered push key'
   const source = read('src/guest/components/GuestPushOptIn.tsx');
   assert.match(source, /setVapidKey\(''\);\s*setCompleted\(false\);\s*if \(!onGuestHome/);
   assert.match(source, /const key = config\?\.enabled === true/);
-  assert.match(source, /if \(!key\) return;/);
+  assert.match(source, /if \(!key \|\| !\(await isValidVapidPublicKey\(key\)\) \|\| cancelled\) return;/);
   assert.match(source, /setVapidKey\(key\);/);
   assert.match(source, /\.catch\(\(\) => \{\s*if \(!cancelled\) \{\s*setVapidKey\(''\);/);
 });
@@ -122,6 +122,14 @@ test('resuming the same PWA screen rechecks the backend even when route does not
   assert.match(source, /dismissed, configRefresh\]\)/);
 });
 
+test('dismissal expires after 30 days without losing tab-only dismissal when storage is blocked', () => {
+  const source = read('src/guest/components/GuestPushOptIn.tsx');
+  assert.match(source, /const dismissedInTabAt = useRef\(0\)/);
+  assert.match(source, /Date\.now\(\) - dismissedInTabAt\.current < DISMISS_FOR_MS/);
+  assert.match(source, /setDismissed\(dismissedInTab \|\| wasRecentlyDismissed\(\)\)/);
+  assert.match(source, /dismissedInTabAt\.current = Date\.now\(\)/);
+});
+
 test('confirmed subscription survives launch without storing guest token or raw endpoint', () => {
   const source = read('src/guest/components/GuestPushOptIn.tsx');
   assert.match(source, /CONFIRMED_SUBSCRIPTION_KEY = 'molo:push:confirmed-subscription:v1'/);
@@ -140,12 +148,34 @@ test('VAPID key decoder rejects malformed keys before permission is offered', ()
   assert.ok(match);
   const decoder = match[0].replace('(key: string): Uint8Array | null', '(key)');
   const decode = require('node:vm').runInNewContext(`${decoder}\ndecodeVapidPublicKey`, { atob, Uint8Array });
-  const valid = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url');
-  assert.equal(valid.length, 87);
-  assert.equal(Array.from(decode(valid)).length, 65);
-  assert.equal(decode(valid.slice(1)), null);
+  const validShape = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url');
+  assert.equal(validShape.length, 87);
+  assert.equal(Array.from(decode(validShape)).length, 65);
+  assert.equal(decode(validShape.slice(1)), null);
   assert.equal(decode('not-a-key'), null);
   assert.equal(decode(Buffer.alloc(65, 3).toString('base64url')), null);
+});
+
+test('only a valid P-256 point passes the VAPID readiness gate', async () => {
+  const source = read('src/guest/components/GuestPushOptIn.tsx');
+  const decodeMatch = source.match(/function decodeVapidPublicKey\(key: string\): Uint8Array \| null \{[\s\S]*?\n\}/);
+  const validateMatch = source.match(/async function isValidVapidPublicKey\(key: string\) \{[\s\S]*?\n\}/);
+  assert.ok(decodeMatch);
+  assert.ok(validateMatch);
+  assert.match(source, /if \(!key \|\| !\(await isValidVapidPublicKey\(key\)\) \|\| cancelled\) return;/);
+  const decoder = decodeMatch[0].replace('(key: string): Uint8Array | null', '(key)');
+  const validator = validateMatch[0].replace('(key: string)', '(key)')
+    .replace('bytes as Uint8Array<ArrayBuffer>', 'bytes');
+  const { webcrypto } = require('node:crypto');
+  const validate = require('node:vm').runInNewContext(
+    `${decoder}\n${validator}\nisValidVapidPublicKey`,
+    { atob, Uint8Array, crypto: webcrypto },
+  );
+  const invalidPoint = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url');
+  assert.equal(await validate(invalidPoint), false);
+  const pair = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const validPoint = Buffer.from(await webcrypto.subtle.exportKey('raw', pair.publicKey)).toString('base64url');
+  assert.equal(await validate(validPoint), true);
 });
 
 // Keep the push-display regression in the already wired frontend test command.
