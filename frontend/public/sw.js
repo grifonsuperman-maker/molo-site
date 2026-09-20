@@ -45,7 +45,7 @@ self.addEventListener('notificationclick', (event) => {
       try {
         const url = new URL(client.url);
         return url.origin === self.location.origin && url.pathname === '/' &&
-          (!url.hash || url.hash === '#guest');
+          !url.search && (!url.hash || url.hash === '#guest');
       } catch {
         return false;
       }

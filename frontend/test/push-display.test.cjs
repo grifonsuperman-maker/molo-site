@@ -69,6 +69,7 @@ test('notification click focuses guest MOLO, never staff or an external URL', as
   const h = harness([
     { url: 'https://outside.example/', focus: async () => assert.fail('external focused') },
     { url: 'https://molo.example/#admin', focus: async () => assert.fail('staff focused') },
+    { url: 'https://molo.example/?tgWebAppStartParam=staff_secret', focus: async () => assert.fail('staff invite focused') },
     { url: 'https://molo.example/#guest', focus: async () => { focused += 1; } },
   ]);
   let closed = 0;
@@ -83,7 +84,10 @@ test('notification click focuses guest MOLO, never staff or an external URL', as
 });
 
 test('notification click opens only the MOLO homepage when no guest window exists', async () => {
-  const h = harness([{ url: 'https://molo.example/#director', focus: () => assert.fail('staff focused') }]);
+  const h = harness([
+    { url: 'https://molo.example/#director', focus: () => assert.fail('staff focused') },
+    { url: 'https://molo.example/?tgWebAppStartParam=staff_secret', focus: () => assert.fail('staff invite focused') },
+  ]);
   let task;
   h.listeners.get('notificationclick')({ notification: { close: () => {} }, waitUntil: (promise) => { task = promise; } });
   await task;
