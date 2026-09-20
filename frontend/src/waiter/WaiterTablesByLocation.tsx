@@ -120,7 +120,7 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
         id={`waiter-table-${table.id}`}
         type="button"
         onClick={() => setSelectedTableId(table.id)}
-        className={`rounded-[22px] border bg-black/25 p-4 text-left transition active:scale-[0.98] ${tableTone(table.status)} ${selected ? (table.status === 'occupied' ? 'ring-2 ring-[#ff3b4f]/80' : 'ring-2 ring-amber-200/80 shadow-[0_0_24px_rgba(250,204,21,.26)]') : ''}`}
+        className={`rounded-[22px] border bg-black/25 p-4 text-left transition active:scale-[0.98] ${tableTone(table.status)} ${selected ? (table.status === 'occupied' ? 'ring-2 ring-[#facc15]' : 'ring-2 ring-amber-200/80 shadow-[0_0_24px_rgba(250,204,21,.26)]') : ''}`}
       >
         <p className="text-2xl font-black">№{table.tableNumber}</p>
         <p className="mt-2 text-sm opacity-85">{STATUS_LABELS[table.status]}</p>
@@ -153,8 +153,9 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
             autoComplete="off"
             value={tableSearch}
             onChange={(event) => searchTable(event.target.value)}
+            disabled={loading}
             placeholder="Номер столу"
-            className="mt-2 w-full rounded-2xl border border-white/20 bg-black/60 px-4 py-3 text-base text-white outline-none placeholder:text-white/35 focus:border-amber-200/70"
+            className="mt-2 w-full rounded-2xl border border-white/20 bg-black/60 px-4 py-3 text-base text-white outline-none placeholder:text-white/35 focus:border-amber-200/70 disabled:opacity-40"
           />
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
             {locationGroups.map((location) => (
@@ -173,7 +174,7 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
 
         <div className="mt-4 space-y-4">
           {locationGroups.map((location) => (
-            <section id={`waiter-location-${location.key}`} key={location.key} className="scroll-mt-40 rounded-[28px] border border-white/12 bg-black/50 p-4 shadow-[0_0_30px_rgba(255,255,255,.03)] backdrop-blur-xl">
+            <section id={`waiter-location-${location.key}`} key={location.key} className="scroll-mt-64 rounded-[28px] border border-white/12 bg-black/50 p-4 shadow-[0_0_30px_rgba(255,255,255,.03)] backdrop-blur-xl">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-200/35 bg-amber-300/10 text-amber-100"><MapPinned size={19} /></span><div><h2 className="text-xl font-black">{location.label}</h2><p className="text-xs text-white/40">Столи {location.range}</p></div></div>
                 <span className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/55">{location.tables.length}</span>
