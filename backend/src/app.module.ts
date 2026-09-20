@@ -44,7 +44,6 @@ const staffPinMigrationOptions = {
     AddGuestReviewArchive2026082200010,
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
-    CreateGuestPushSubscriptions2026092000010,
   ],
 };
 
@@ -64,6 +63,26 @@ const staffPinMigrationOptions = {
           configService.get<string>('DB_SYNCHRONIZE'),
         );
         const dbUrl = configService.get<string>('DB_URL');
+        const dbHost = configService.get<string>('DB_HOST');
+        const dbName = configService.get<string>('DB_NAME');
+
+        // Only the disposable CI schema reference may bootstrap this migration.
+        // Production adoption requires a separate, explicitly approved change.
+        const isDisposableSchemaReference =
+          configService.get<string>('NODE_ENV') === 'test' &&
+          configService.get<string>('FRESH_SCHEMA_REFERENCE_ALLOW') === 'true' &&
+          !dbUrl &&
+          ['localhost', '127.0.0.1', '::1'].includes(dbHost || '') &&
+          dbName === 'molo_fresh_schema_reference' &&
+          databaseSynchronize;
+        const migrationOptions = {
+          migrations: isDisposableSchemaReference
+            ? [
+                ...staffPinMigrationOptions.migrations,
+                CreateGuestPushSubscriptions2026092000010,
+              ]
+            : staffPinMigrationOptions.migrations,
+        };
 
         return dbUrl
           ? {
@@ -79,20 +98,19 @@ const staffPinMigrationOptions = {
               },
               autoLoadEntities: true,
               synchronize: databaseSynchronize,
-              ...staffPinMigrationOptions,
+              ...migrationOptions,
             }
           : {
               type: 'postgres' as const,
-              host: configService.get<string>('DB_HOST') || 'localhost',
+              host: dbHost || 'localhost',
               port: Number(configService.get<string>('DB_PORT') || 5432),
               username: configService.get<string>('DB_USER') || 'postgres',
               password:
                 configService.get<string>('DB_PASSWORD') || 'postgres',
-              database:
-                configService.get<string>('DB_NAME') || 'molo_restaurant',
+              database: dbName || 'molo_restaurant',
               autoLoadEntities: true,
               synchronize: databaseSynchronize,
-              ...staffPinMigrationOptions,
+              ...migrationOptions,
             };
       },
     }),
