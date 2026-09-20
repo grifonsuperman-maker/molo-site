@@ -135,7 +135,8 @@ export default function GuestPushOptIn() {
       const existing = await worker.pushManager.getSubscription();
       const subscription = existing || await worker.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: key,
+        // Uint8Array.from above allocates an ArrayBuffer, never a SharedArrayBuffer.
+        applicationServerKey: key as Uint8Array<ArrayBuffer>,
       });
       // A booking access token proves ownership; the backend must validate it,
       // hash guestDeviceId, and never include tokens in notification payloads.
