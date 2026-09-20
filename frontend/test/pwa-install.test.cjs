@@ -59,3 +59,6 @@ test('service worker does not cache booking requests or 15-second polling', () =
   assert.doesNotMatch(worker, /caches\.|CacheStorage|respondWith\(/);
   assert.match(read('src/guest/components/GuestInstallPrompt.tsx'), /serviceWorker\.register\('\/sw\.js'\)/);
 });
+
+// Keep the push-display regression in the already wired frontend test command.
+require('./push-display.test.cjs');
