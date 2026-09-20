@@ -46,6 +46,9 @@ function loadMigrations(require) {
   const {
     AddManualBookingGuestName2026082400020,
   } = require('../dist/migrations/2026082400020-AddManualBookingGuestName.js');
+  const {
+    CreateGuestPushSubscriptions2026092000010,
+  } = require('../dist/migrations/2026092000010-CreateGuestPushSubscriptions.js');
 
   return [
     InitialSchemaBaseline2026081300000,
@@ -57,6 +60,7 @@ function loadMigrations(require) {
     AddGuestReviewArchive2026082200010,
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
+    CreateGuestPushSubscriptions2026092000010,
   ];
 }
 
