@@ -100,3 +100,15 @@ test('worker does not cache requests or request permission or subscribe without 
   assert.doesNotMatch(worker, /requestPermission\(|pushManager\.subscribe\(/);
   assert.match(worker, /addEventListener\('fetch'/);
 });
+
+test('denied push permission shows recovery guidance before the support gate', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/guest/components/GuestPushOptIn.tsx'), 'utf8');
+  const guidance = source.indexOf("if (error && 'Notification' in window && Notification.permission === 'denied'");
+  const supportGate = source.indexOf('if (!vapidKey || !onGuestHome || !inGuestContext || !installed');
+  assert.ok(guidance > 0 && supportGate > guidance);
+  const deniedBranch = source.slice(guidance, supportGate);
+  assert.match(deniedBranch, /onGuestHome && inGuestContext && installed && hasBookingAccess && !dismissed/);
+  assert.match(deniedBranch, /<p role="status"[^>]*>\{error\}<\/p>/);
+  assert.match(deniedBranch, /onClick=\{dismiss\}/);
+  assert.doesNotMatch(deniedBranch, /hasPushSupport\(\)/);
+});
