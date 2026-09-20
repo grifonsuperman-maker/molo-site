@@ -31,7 +31,8 @@ function isGuestRoute() {
 }
 
 function isGuestHomeVisible() {
-  return Boolean(document.querySelector('section.molo-screen img[src="/hero-bg.jpg"]'));
+  // Stable home-only element: title rotation can replace /hero-bg.jpg at runtime.
+  return Boolean(document.querySelector('section.molo-screen .molo-site-mode-badge'));
 }
 
 export default function GuestInstallPrompt() {

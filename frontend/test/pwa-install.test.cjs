@@ -39,7 +39,11 @@ test('installation metadata is wired to the actual frontend entrypoint', () => {
 
 test('install invitation is guest-home-only and excludes Telegram and staff invite', () => {
   const source = read('src/guest/components/GuestInstallPrompt.tsx');
+  const home = read('src/guest/GuestApp.tsx');
   assert.match(source, /isGuestHomeVisible\(\)/);
+  assert.match(home, /className="molo-site-mode-badge /);
+  assert.match(source, /document\.querySelector\('section\.molo-screen \.molo-site-mode-badge'\)/);
+  assert.doesNotMatch(source, /img\[src=/);
   assert.match(source, /isTelegramMiniApp\(\)/);
   assert.match(source, /readTelegramStaffInviteToken\(\)/);
   assert.match(source, /isDeveloperRoleSwitcherPath\(window\.location\.pathname\)/);
