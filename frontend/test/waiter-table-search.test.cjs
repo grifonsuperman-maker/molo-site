@@ -60,6 +60,8 @@ assert.equal(scrolled[0].options.block, 'center', 'the existing card must be bro
 assert.match(source, /id=\{`waiter-table-\$\{table\.id\}`\}/);
 assert.match(source, /value=\{tableSearch\}/);
 assert.match(source, /occupied: 'border-\[3px\] border-\[#ff3b4f\].*shadow-\[/);
-assert.match(source, /table\.status === 'occupied' \? 'ring-2 ring-\[#ff3b4f\]\/80'/);
+assert.match(source, /table\.status === 'occupied' \? 'ring-2 ring-\[#facc15\]'/);
+assert.match(source, /disabled=\{loading\}\s+placeholder="Номер столу"/);
+assert.match(source, /scroll-mt-64 rounded-\[28px\]/);
 assert.match(source, /const POLLING_MS = 15_000;/);
 console.log('waiter table search and occupied neon regression passed');
