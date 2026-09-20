@@ -30,15 +30,21 @@ function tableTone(status: TableStatus) {
     free: 'border-white/35 text-white/85 shadow-[0_0_16px_rgba(255,255,255,.07)]',
     pending: 'border-sky-300/70 text-sky-100 shadow-[0_0_18px_rgba(56,189,248,.20)]',
     reserved: 'border-orange-300/70 text-orange-100 shadow-[0_0_18px_rgba(251,146,60,.20)]',
-    occupied: 'border-red-400/75 text-red-100 shadow-[0_0_18px_rgba(255,59,79,.24)]',
+    occupied: 'border-[3px] border-[#ff3b4f] text-red-100 shadow-[0_0_12px_rgba(255,59,79,.95),0_0_30px_rgba(255,59,79,.70),0_0_55px_rgba(255,59,79,.35),inset_0_0_14px_rgba(255,59,79,.16)]',
     cleaning: 'border-cyan-200/70 text-cyan-100 shadow-[0_0_18px_rgba(103,232,249,.20)]',
     closed: 'border-neutral-300/55 text-neutral-200 shadow-[0_0_14px_rgba(189,189,189,.12)]',
   }[status];
 }
 
+function findExistingVisibleTable(tables: TableItem[], tableNumber: string): TableItem | null {
+  if (!/^[1-9]\d*$/.test(tableNumber)) return null;
+  return tables.find((table) => table.isVisible !== false && String(table.tableNumber) === tableNumber) || null;
+}
+
 export default function WaiterTablesByLocation({ onClose }: { onClose: () => void }) {
   const [tables, setTables] = useState<TableItem[]>([]);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [tableSearch, setTableSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -98,14 +104,23 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
     document.getElementById(`waiter-location-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  function searchTable(value: string) {
+    const digits = value.replace(/\D/g, '');
+    setTableSearch(digits);
+    const found = findExistingVisibleTable(tables, digits);
+    if (!found) return;
+    document.getElementById(`waiter-table-${found.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   function renderTable(table: TableItem) {
     const selected = selectedTableId === table.id;
     return (
       <button
         key={table.id}
+        id={`waiter-table-${table.id}`}
         type="button"
         onClick={() => setSelectedTableId(table.id)}
-        className={`rounded-[22px] border bg-black/25 p-4 text-left transition active:scale-[0.98] ${tableTone(table.status)} ${selected ? 'ring-2 ring-amber-200/80 shadow-[0_0_24px_rgba(250,204,21,.26)]' : ''}`}
+        className={`rounded-[22px] border bg-black/25 p-4 text-left transition active:scale-[0.98] ${tableTone(table.status)} ${selected ? (table.status === 'occupied' ? 'ring-2 ring-[#facc15]' : 'ring-2 ring-amber-200/80 shadow-[0_0_24px_rgba(250,204,21,.26)]') : ''}`}
       >
         <p className="text-2xl font-black">№{table.tableNumber}</p>
         <p className="mt-2 text-sm opacity-85">{STATUS_LABELS[table.status]}</p>
@@ -129,6 +144,19 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
               <button type="button" onClick={onClose} className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/[.04] text-white/75"><X size={19} /></button>
             </div>
           </div>
+          <label htmlFor="waiter-table-search" className="mt-3 block text-xs font-semibold text-white/65">Пошук столу за номером</label>
+          <input
+            id="waiter-table-search"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            autoComplete="off"
+            value={tableSearch}
+            onChange={(event) => searchTable(event.target.value)}
+            disabled={loading}
+            placeholder="Номер столу"
+            className="mt-2 w-full rounded-2xl border border-white/20 bg-black/60 px-4 py-3 text-base text-white outline-none placeholder:text-white/35 focus:border-amber-200/70 disabled:opacity-40"
+          />
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
             {locationGroups.map((location) => (
               <button key={location.key} type="button" onClick={() => scrollToLocation(location.key)} className="shrink-0 rounded-2xl border border-white/10 bg-white/[.035] px-3 py-2 text-xs font-black text-white/60">
@@ -146,7 +174,7 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
 
         <div className="mt-4 space-y-4">
           {locationGroups.map((location) => (
-            <section id={`waiter-location-${location.key}`} key={location.key} className="scroll-mt-40 rounded-[28px] border border-white/12 bg-black/50 p-4 shadow-[0_0_30px_rgba(255,255,255,.03)] backdrop-blur-xl">
+            <section id={`waiter-location-${location.key}`} key={location.key} className="scroll-mt-64 rounded-[28px] border border-white/12 bg-black/50 p-4 shadow-[0_0_30px_rgba(255,255,255,.03)] backdrop-blur-xl">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-200/35 bg-amber-300/10 text-amber-100"><MapPinned size={19} /></span><div><h2 className="text-xl font-black">{location.label}</h2><p className="text-xs text-white/40">Столи {location.range}</p></div></div>
                 <span className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/55">{location.tables.length}</span>
