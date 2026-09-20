@@ -10,6 +10,7 @@ type PushConfig = { enabled?: boolean; vapidPublicKey?: string };
 const DISMISSED_AT_KEY = 'molo:push:opt-in-dismissed-at:v1';
 const CONFIRMED_SUBSCRIPTION_KEY = 'molo:push:confirmed-subscription:v1';
 const DISMISS_FOR_MS = 30 * 24 * 60 * 60 * 1000;
+const PERMISSION_DENIED_MESSAGE = 'Сповіщення не дозволено. Дозвіл можна змінити в налаштуваннях пристрою.';
 
 function isInstalled() {
   return window.matchMedia('(display-mode: standalone)').matches ||
@@ -131,6 +132,11 @@ export default function GuestPushOptIn() {
     };
     const refreshOnResume = () => {
       refreshContext();
+      // Device settings may restore permission while this PWA is suspended.
+      // Remove only the old denial guidance; preserve unrelated registration errors.
+      if ('Notification' in window && Notification.permission !== 'denied') {
+        setError((current) => current === PERMISSION_DENIED_MESSAGE ? '' : current);
+      }
       const dismissedInTab = dismissedInTabAt.current > 0 &&
         Date.now() - dismissedInTabAt.current < DISMISS_FOR_MS;
       setDismissed(dismissedInTab || wasRecentlyDismissed());
@@ -221,7 +227,7 @@ export default function GuestPushOptIn() {
       // The permission request starts directly from the guest's button click (iOS requirement).
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
-        setError('Сповіщення не дозволено. Дозвіл можна змінити в налаштуваннях пристрою.');
+        setError(PERMISSION_DENIED_MESSAGE);
         return;
       }
       const key = decodeVapidPublicKey(vapidKey);
