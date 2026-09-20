@@ -23,12 +23,18 @@ export class CreateGuestPushSubscriptions2026092000010 implements MigrationInter
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
-    // Never silently delete real guest subscriptions during a rollback.
+    // The lock must persist through the empty check and DROP in one transaction.
+    if (!queryRunner.isTransactionActive) {
+      throw new Error('Guest push subscription rollback requires an active transaction');
+    }
+
     const [table] = await queryRunner.query(`
       SELECT to_regclass('public.guest_push_subscriptions') IS NOT NULL AS "present"
     `);
     if (!table?.present) return;
 
+    // Block concurrent inserts before checking emptiness; keep this lock until DROP.
+    await queryRunner.query('LOCK TABLE "guest_push_subscriptions" IN ACCESS EXCLUSIVE MODE');
     const [state] = await queryRunner.query(`
       SELECT EXISTS (SELECT 1 FROM "guest_push_subscriptions") AS "hasSubscriptions"
     `);
