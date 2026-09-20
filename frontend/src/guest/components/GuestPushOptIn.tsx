@@ -90,17 +90,20 @@ export default function GuestPushOptIn() {
   }, []);
 
   useEffect(() => {
+    // Never keep an enabled key across a changed guest context or readiness check.
+    setVapidKey('');
     if (!onGuestHome || !inGuestContext || !installed || !hasBookingAccess ||
       !hasPushSupport() || dismissed || completed) return;
     let cancelled = false;
     // No server endpoint or public VAPID key yet: no button and no permission request.
     void api.get<PushConfig>('/push/guest/config').then((config) => {
-      if (!cancelled && config?.enabled === true &&
+      if (cancelled) return;
+      const key = config?.enabled === true &&
         typeof config.vapidPublicKey === 'string' &&
-        decodeVapidPublicKey(config.vapidPublicKey)) {
-        setVapidKey(config.vapidPublicKey);
-      }
-    }).catch(() => {});
+        decodeVapidPublicKey(config.vapidPublicKey)
+        ? config.vapidPublicKey : '';
+      setVapidKey(key);
+    }).catch(() => { if (!cancelled) setVapidKey(''); });
     return () => { cancelled = true; };
   }, [onGuestHome, inGuestContext, installed, hasBookingAccess, dismissed, completed]);
 
@@ -133,7 +136,12 @@ export default function GuestPushOptIn() {
       if (!key) throw new Error('Invalid push configuration');
       const worker = await navigator.serviceWorker.register('/sw.js');
       const existing = await worker.pushManager.getSubscription();
-      const subscription = existing || await worker.pushManager.subscribe({
+      const existingServerKey = existing?.options.applicationServerKey;
+      const previousKey = existingServerKey ? new Uint8Array(existingServerKey as ArrayBuffer) : null;
+      const keyMatches = Boolean(previousKey && previousKey.length === key.length &&
+        previousKey.every((byte, index) => byte === key[index]));
+      if (existing && !keyMatches) await existing.unsubscribe();
+      const subscription = existing && keyMatches ? existing : await worker.pushManager.subscribe({
         userVisibleOnly: true,
         // Uint8Array.from above allocates an ArrayBuffer, never a SharedArrayBuffer.
         applicationServerKey: key as Uint8Array<ArrayBuffer>,
