@@ -5,6 +5,7 @@ import { TelegramService } from './telegram.service';
 import { Staff } from '../staff/entities/staff.entity';
 import { Booking } from '../bookings/entities/booking.entity';
 import { BookingRescheduleRequest } from '../bookings/entities/booking-reschedule-request.entity';
+import { GuestPushService } from '../guest-push/guest-push.service';
 
 type GuestReportedLatenessNotification = {
   tableNumber?: string | null;
@@ -15,11 +16,16 @@ type GuestReportedLatenessNotification = {
 };
 
 type GuestRescheduleDecisionNotification = {
+  bookingId: string;
   telegramId?: string | null;
   decision: 'approved' | 'rejected';
   bookingDate: string;
   bookingTime: string;
   adminComment?: string | null;
+  guestNotification?: {
+    title?: string | null;
+    message?: string | null;
+  } | null;
 };
 
 export type NotificationDeliverySummary = {
@@ -33,6 +39,7 @@ export class NotificationsService {
   constructor(
     @InjectRepository(Staff) private readonly staffRepo: Repository<Staff>,
     private readonly telegramService: TelegramService,
+    private readonly guestPush: GuestPushService,
   ) {}
 
   async getActiveStaffTelegramIds(roles: Array<'owner' | 'admin' | 'waiter'>) {
@@ -102,6 +109,48 @@ export class NotificationsService {
       ? booking.guestName || booking.client?.fullName || '-'
       : booking.client?.fullName || '-';
     return this.escapeHtml(String(value));
+  }
+
+  private guestBookingPushText(
+    booking: Booking,
+    fallbackTitle: string,
+  ) {
+    const title = String(booking.guestNotification?.title || '').trim();
+    const message = String(booking.guestNotification?.message || '').trim();
+
+    if (title || message) {
+      return [title, message].filter(Boolean).join('\n');
+    }
+
+    const tableNumber = String(booking.table?.tableNumber || '').trim();
+    return [
+      fallbackTitle,
+      `${booking.bookingDate} о ${this.timeLabel(booking.bookingTime)}`,
+      tableNumber ? `Стіл №${tableNumber}` : null,
+    ].filter(Boolean).join('\n');
+  }
+
+  private reschedulePushText(
+    notification: GuestRescheduleDecisionNotification,
+  ) {
+    const title = String(notification.guestNotification?.title || '').trim();
+    const message = String(notification.guestNotification?.message || '').trim();
+
+    if (title || message) {
+      return [title, message].filter(Boolean).join('\n');
+    }
+
+    const approved = notification.decision === 'approved';
+    const adminComment = String(notification.adminComment || '').trim();
+    return [
+      approved
+        ? 'Зміну часу бронювання підтверджено'
+        : 'Зміну часу бронювання не підтверджено',
+      approved
+        ? `Нове бронювання: ${notification.bookingDate} о ${this.timeLabel(notification.bookingTime)}.`
+        : `Бронювання залишається на ${notification.bookingDate} о ${this.timeLabel(notification.bookingTime)}.`,
+      !approved && adminComment ? `Причина: ${adminComment}` : null,
+    ].filter(Boolean).join('\n');
   }
 
   private bookingTimeRange(booking: Booking) {
@@ -231,7 +280,13 @@ export class NotificationsService {
       `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
     ].join('\n');
 
-    await this.sendToRoles(['admin', 'waiter'], text);
+    await Promise.all([
+      this.sendToRoles(['admin', 'waiter'], text),
+      this.guestPush.sendBookingNotification(
+        booking.id,
+        this.guestBookingPushText(booking, 'Бронювання підтверджено'),
+      ),
+    ]);
   }
 
   async notifyBookingCancelled(booking: Booking) {
@@ -243,8 +298,25 @@ export class NotificationsService {
       `📅 Дата: <b>${booking.bookingDate}</b>`,
       `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
     ].join('\n');
+    const pushTitle = booking.cancellationReason === 'admin_rejected'
+      ? 'Бронювання не підтверджено'
+      : 'Бронювання скасовано';
 
-    await this.sendToRoles(['admin', 'waiter'], text);
+    await Promise.all([
+      this.sendToRoles(['admin', 'waiter'], text),
+      this.guestPush.sendBookingNotification(
+        booking.id,
+        this.guestBookingPushText(booking, pushTitle),
+      ),
+    ]);
+  }
+
+  async notifyGuestBookingUpdated(booking: Booking) {
+    const body = this.guestBookingPushText(
+      booking,
+      'Бронювання оновлено',
+    );
+    return this.guestPush.sendBookingNotification(booking.id, body);
   }
 
   async notifyRescheduleRequest(request: BookingRescheduleRequest) {
@@ -275,8 +347,13 @@ export class NotificationsService {
   async notifyGuestRescheduleDecision(
     notification: GuestRescheduleDecisionNotification,
   ): Promise<NotificationDeliverySummary> {
+    const pushDelivery = this.guestPush.sendBookingNotification(
+      notification.bookingId,
+      this.reschedulePushText(notification),
+    );
     const telegramId = String(notification.telegramId || '').trim();
     if (!telegramId) {
+      await pushDelivery;
       return { attempted: 0, delivered: 0, failed: 0 };
     }
 
@@ -297,7 +374,10 @@ export class NotificationsService {
       !approved && adminComment ? `💬 Причина: ${escapedAdminComment}` : null,
     ].filter(Boolean).join('\n');
 
-    await this.telegramService.sendMessage(telegramId, text);
+    await Promise.all([
+      this.telegramService.sendMessage(telegramId, text),
+      pushDelivery,
+    ]);
     return { attempted: 1, delivered: 1, failed: 0 };
   }
 
