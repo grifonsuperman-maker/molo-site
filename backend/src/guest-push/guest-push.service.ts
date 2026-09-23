@@ -171,10 +171,10 @@ export class GuestPushService {
               console.warn('Guest Push stale subscription cleanup failed', {
                 bookingId,
                 statusCode,
-                error:
+                errorName:
                   cleanupError instanceof Error
-                    ? cleanupError.message
-                    : String(cleanupError),
+                    ? cleanupError.name
+                    : 'UnknownError',
               });
             }
           }
@@ -182,7 +182,7 @@ export class GuestPushService {
           console.warn('Guest Push delivery failed', {
             bookingId,
             statusCode,
-            error: error instanceof Error ? error.message : String(error),
+            errorName: error instanceof Error ? error.name : 'UnknownError',
           });
           return false;
         }
