@@ -97,7 +97,7 @@ test('permission is requested only from the click action and registration proves
   assert.match(source, /bookingId: booking\.bookingId/);
   assert.match(source, /guestAccessToken: booking\.token/);
   assert.match(source, /subscription: subscription\.toJSON\(\)/);
-  assert.match(source, /activeAccess\.map\(\(booking\) => booking\.bookingId\)/);
+  assert.match(source, /activeAccess\.map\(\(booking\) =>\s*subscriptionFingerprint\(booking\.bookingId/);
   assert.match(source, /result\?\.enabled !== true/);
   assert.doesNotMatch(source, /access\.bookings\[0\]/);
   assert.doesNotMatch(read('public/sw.js'), /guestAccessToken|guestDeviceId/);
@@ -138,12 +138,17 @@ test('dismissal expires after 30 days without losing tab-only dismissal when sto
   assert.match(source, /dismissedInTabAt\.current = Date\.now\(\)/);
 });
 
-test('confirmed subscription survives launch without storing guest token or raw endpoint', () => {
+test('confirmed subscriptions survive launch, booking-set changes and blocked storage', () => {
   const source = read('src/guest/components/GuestPushOptIn.tsx');
   assert.match(source, /CONFIRMED_SUBSCRIPTION_KEY = 'molo:push:confirmed-subscription:v1'/);
   assert.match(source, /crypto\.subtle\.digest\('SHA-256', data\)/);
-  assert.match(source, /fingerprint === readConfirmedFingerprint\(\)/);
-  assert.match(source, /rememberConfirmedFingerprint\(fingerprint\)/);
+  assert.match(source, /let runtimeConfirmedFingerprints = new Set<string>\(\)/);
+  assert.match(source, /if \(CONFIRMED_FINGERPRINT\.test\(stored\)\) return \[stored\]/);
+  assert.match(source, /runtimeConfirmedFingerprints\.add\(fingerprint\)/);
+  assert.match(source, /return \[\.\.\.runtimeConfirmedFingerprints\]/);
+  assert.match(source, /JSON\.stringify\(\[\.\.\.runtimeConfirmedFingerprints\]\)/);
+  assert.match(source, /activeFingerprints\.every\(\(fingerprint\) =>\s*confirmedFingerprints\.has\(fingerprint\)/);
+  assert.match(source, /rememberConfirmedFingerprints\(fingerprints\)/);
   assert.match(source, /setCompleted\(alreadyConfirmed\)/);
   assert.match(source, /if \(!vapidKey \|\| !onGuestHome[\s\S]*\|\| dismissed \|\| completed\) return null;/);
   assert.doesNotMatch(source, /localStorage\.setItem\([^,]+,\s*booking\.token/);
