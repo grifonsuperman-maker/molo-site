@@ -9,6 +9,8 @@ const {
 } = require('../dist/guest-push/guest-push.service.js');
 
 const PUBLIC_KEY = 'B' + 'A'.repeat(86);
+const PRIVATE_KEY = 'A'.repeat(43);
+const VAPID_SUBJECT = 'https://push.example.test';
 
 function configService(values = {}) {
   return {
@@ -43,7 +45,12 @@ function guestPushService(subscriptionRepository, bookings, config) {
       });
     },
   };
-  return new GuestPushService(subscriptionRepository, bookings, config);
+  return new GuestPushService(
+    subscriptionRepository,
+    bookings,
+    config,
+    { send: async () => ({ statusCode: 201 }) },
+  );
 }
 
 function registration(overrides = {}) {
@@ -70,14 +77,31 @@ test('guest push uses the Kyiv calendar date', () => {
   );
 });
 
-test('guest push config stays disabled unless explicitly enabled with a VAPID public key', () => {
+test('guest push config stays disabled until the complete VAPID sender is ready', () => {
   assert.deepEqual(resolveGuestPushConfig(undefined, undefined), { enabled: false });
-  assert.deepEqual(resolveGuestPushConfig('true', 'not-a-vapid-key'), { enabled: false });
-  assert.deepEqual(resolveGuestPushConfig('false', PUBLIC_KEY), { enabled: false });
-  assert.deepEqual(resolveGuestPushConfig('true', PUBLIC_KEY), {
-    enabled: true,
-    vapidPublicKey: PUBLIC_KEY,
-  });
+  assert.deepEqual(
+    resolveGuestPushConfig('true', PUBLIC_KEY, undefined, VAPID_SUBJECT),
+    { enabled: false },
+  );
+  assert.deepEqual(
+    resolveGuestPushConfig('true', PUBLIC_KEY, PRIVATE_KEY, undefined),
+    { enabled: false },
+  );
+  assert.deepEqual(
+    resolveGuestPushConfig('true', 'not-a-vapid-key', PRIVATE_KEY, VAPID_SUBJECT),
+    { enabled: false },
+  );
+  assert.deepEqual(
+    resolveGuestPushConfig('false', PUBLIC_KEY, PRIVATE_KEY, VAPID_SUBJECT),
+    { enabled: false },
+  );
+  assert.deepEqual(
+    resolveGuestPushConfig('true', PUBLIC_KEY, PRIVATE_KEY, VAPID_SUBJECT),
+    {
+      enabled: true,
+      vapidPublicKey: PUBLIC_KEY,
+    },
+  );
 });
 
 test('registration proves booking token ownership and stores only hashes for guest identity', async () => {
@@ -97,6 +121,8 @@ test('registration proves booking token ownership and stores only hashes for gue
     configService({
       GUEST_PUSH_ENABLED: 'true',
       GUEST_PUSH_VAPID_PUBLIC_KEY: PUBLIC_KEY,
+      GUEST_PUSH_VAPID_PRIVATE_KEY: PRIVATE_KEY,
+      GUEST_PUSH_VAPID_SUBJECT: VAPID_SUBJECT,
     }),
   );
 
@@ -119,6 +145,8 @@ test('registration rejects a token that does not resolve to the booking', async 
     configService({
       GUEST_PUSH_ENABLED: 'true',
       GUEST_PUSH_VAPID_PUBLIC_KEY: PUBLIC_KEY,
+      GUEST_PUSH_VAPID_PRIVATE_KEY: PRIVATE_KEY,
+      GUEST_PUSH_VAPID_SUBJECT: VAPID_SUBJECT,
     }),
   );
 
@@ -135,6 +163,8 @@ test('registration rejects a mismatched device for bookings that already have a 
     configService({
       GUEST_PUSH_ENABLED: 'true',
       GUEST_PUSH_VAPID_PUBLIC_KEY: PUBLIC_KEY,
+      GUEST_PUSH_VAPID_PRIVATE_KEY: PRIVATE_KEY,
+      GUEST_PUSH_VAPID_SUBJECT: VAPID_SUBJECT,
     }),
   );
 
@@ -149,6 +179,8 @@ test('legacy token booking without a stored device hash can register the current
     configService({
       GUEST_PUSH_ENABLED: 'true',
       GUEST_PUSH_VAPID_PUBLIC_KEY: PUBLIC_KEY,
+      GUEST_PUSH_VAPID_PRIVATE_KEY: PRIVATE_KEY,
+      GUEST_PUSH_VAPID_SUBJECT: VAPID_SUBJECT,
     }),
   );
 
@@ -167,6 +199,8 @@ test('registration rejects a historical pending booking', async () => {
     configService({
       GUEST_PUSH_ENABLED: 'true',
       GUEST_PUSH_VAPID_PUBLIC_KEY: PUBLIC_KEY,
+      GUEST_PUSH_VAPID_PRIVATE_KEY: PRIVATE_KEY,
+      GUEST_PUSH_VAPID_SUBJECT: VAPID_SUBJECT,
     }),
   );
 
@@ -209,6 +243,8 @@ test('registration endpoint cannot write while guest push is disabled', async ()
     configService({
       GUEST_PUSH_ENABLED: 'false',
       GUEST_PUSH_VAPID_PUBLIC_KEY: PUBLIC_KEY,
+      GUEST_PUSH_VAPID_PRIVATE_KEY: PRIVATE_KEY,
+      GUEST_PUSH_VAPID_SUBJECT: VAPID_SUBJECT,
     }),
   );
 
