@@ -36,12 +36,37 @@ test('booking completion history records the real waiter', async () => {
   const savedHistory = [];
   const logged = [];
 
-  const bookings = {
-    async findOne() {
+  const lockedQuery = {
+    leftJoinAndSelect() { return this; },
+    where() { return this; },
+    setLock(mode, version, tables) {
+      assert.equal(mode, 'pessimistic_write');
+      assert.equal(version, undefined);
+      assert.deepEqual(tables, ['booking']);
+      return this;
+    },
+    async getOne() {
       return booking;
+    },
+  };
+  const transactionalBookings = {
+    createQueryBuilder(alias) {
+      assert.equal(alias, 'booking');
+      return lockedQuery;
     },
     async save(value) {
       return value;
+    },
+  };
+  const bookings = {
+    manager: {
+      async transaction(run) {
+        return run({
+          getRepository() {
+            return transactionalBookings;
+          },
+        });
+      },
     },
   };
   const histories = {
