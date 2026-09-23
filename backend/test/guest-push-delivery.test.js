@@ -120,6 +120,8 @@ test('stale endpoints are removed and other delivery failures stay isolated', as
   assert.deepEqual(deleted, [{
     bookingId: 'booking-1',
     endpointHash: 'a'.repeat(64),
+    p256dh: 'p256dh-value',
+    auth: 'auth-value',
   }]);
 });
 
