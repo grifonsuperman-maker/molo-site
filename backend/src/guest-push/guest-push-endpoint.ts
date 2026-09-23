@@ -1,7 +1,8 @@
 import { lookup } from 'dns/promises';
 import { BlockList, isIP } from 'net';
 
-const NON_PUBLIC_PUSH_ADDRESSES = new BlockList();
+const NON_PUBLIC_IPV4_PUSH_ADDRESSES = new BlockList();
+const NON_PUBLIC_IPV6_PUSH_ADDRESSES = new BlockList();
 
 for (const [network, prefix] of [
   ['0.0.0.0', 8],
@@ -19,7 +20,7 @@ for (const [network, prefix] of [
   ['224.0.0.0', 4],
   ['240.0.0.0', 4],
 ] as const) {
-  NON_PUBLIC_PUSH_ADDRESSES.addSubnet(network, prefix, 'ipv4');
+  NON_PUBLIC_IPV4_PUSH_ADDRESSES.addSubnet(network, prefix, 'ipv4');
 }
 
 for (const [network, prefix] of [
@@ -31,7 +32,7 @@ for (const [network, prefix] of [
   ['ff00::', 8],
   ['2001:db8::', 32],
 ] as const) {
-  NON_PUBLIC_PUSH_ADDRESSES.addSubnet(network, prefix, 'ipv6');
+  NON_PUBLIC_IPV6_PUSH_ADDRESSES.addSubnet(network, prefix, 'ipv6');
 }
 
 function matchesHostname(hostname: string, suffix: string) {
@@ -63,10 +64,10 @@ export function isRecognizedGuestPushEndpoint(value: URL) {
 export function isPublicGuestPushAddress(address: string) {
   const family = isIP(address);
   if (family === 4) {
-    return !NON_PUBLIC_PUSH_ADDRESSES.check(address, 'ipv4');
+    return !NON_PUBLIC_IPV4_PUSH_ADDRESSES.check(address, 'ipv4');
   }
   if (family === 6) {
-    return !NON_PUBLIC_PUSH_ADDRESSES.check(address, 'ipv6');
+    return !NON_PUBLIC_IPV6_PUSH_ADDRESSES.check(address, 'ipv6');
   }
   return false;
 }
