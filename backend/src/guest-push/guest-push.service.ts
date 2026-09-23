@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createECDH, createHash } from 'crypto';
-import { Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 
 import { Booking } from '../bookings/entities/booking.entity';
 import { RegisterGuestPushSubscriptionDto } from './dto/register-guest-push-subscription.dto';
@@ -22,6 +22,7 @@ const ACTIVE_BOOKING_STATUSES = new Set(['pending', 'approved']);
 const VAPID_PUBLIC_KEY = /^B[A-Za-z0-9_-]{86}$/;
 const VAPID_PRIVATE_KEY = /^[A-Za-z0-9_-]{43}$/;
 const MAX_PUSH_BODY_LENGTH = 500;
+const MAX_SUBSCRIPTIONS_PER_BOOKING = 3;
 
 export type GuestPushDeliverySummary = {
   attempted: number;
@@ -146,6 +147,11 @@ export class GuestPushService {
 
     const subscriptions = await this.subscriptions.find({
       where: { bookingId },
+      order: {
+        updatedAt: 'DESC',
+        createdAt: 'DESC',
+      },
+      take: MAX_SUBSCRIPTIONS_PER_BOOKING,
     });
     if (subscriptions.length === 0) {
       return { attempted: 0, delivered: 0, failed: 0 };
@@ -297,7 +303,9 @@ export class GuestPushService {
         throw new UnauthorizedException('Недійсний доступ до бронювання');
       }
 
-      await manager.getRepository(GuestPushSubscription).upsert(
+      const subscriptionRepository =
+        manager.getRepository(GuestPushSubscription);
+      await subscriptionRepository.upsert(
         {
           bookingId,
           endpointHash,
@@ -311,6 +319,30 @@ export class GuestPushService {
           skipUpdateIfNoValuesChanged: true,
         },
       );
+
+      const previousSubscriptions = await subscriptionRepository.find({
+        where: {
+          bookingId,
+          endpointHash: Not(endpointHash),
+        },
+        order: {
+          updatedAt: 'DESC',
+          createdAt: 'DESC',
+        },
+        take: MAX_SUBSCRIPTIONS_PER_BOOKING - 1,
+        select: {
+          bookingId: true,
+          endpointHash: true,
+        },
+      });
+      const keepEndpointHashes = [
+        endpointHash,
+        ...previousSubscriptions.map((subscription) => subscription.endpointHash),
+      ];
+      await subscriptionRepository.delete({
+        bookingId,
+        endpointHash: Not(In(keepEndpointHashes)),
+      });
     });
 
     return { enabled: true };
