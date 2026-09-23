@@ -748,11 +748,18 @@ export default function GuestApp() {
           const bookings = await bookingsApi.guestList(guestDeviceId, tokens);
           if (stopped) return;
           setMyBookings(bookings);
-          window.dispatchEvent(new Event('molo:guest-bookings-refreshed'));
-
           const activeBookings = bookings.filter(
-            (item) => item.status === 'pending' || item.status === 'approved',
+            (item) =>
+              (item.status === 'pending' || item.status === 'approved') &&
+              item.bookingDate >= getKyivDateValue(),
           );
+          window.dispatchEvent(new CustomEvent('molo:guest-bookings-refreshed', {
+            detail: {
+              activeBookingIds: activeBookings.map((item) => item.bookingId),
+            },
+          }));
+
+
           const booking =
             activeBookings.find((item) => item.bookingId === lastBookingId) ||
             activeBookings[0] ||
