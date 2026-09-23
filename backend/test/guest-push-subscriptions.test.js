@@ -239,6 +239,15 @@ test('registration refuses inactive bookings and malformed push endpoints', asyn
     })),
     /Некоректна Push-підписка/,
   );
+  await assert.rejects(
+    () => invalidEndpoint.register(registration({
+      subscription: {
+        endpoint: 'https://example.com/internal-target',
+        keys: { p256dh: 'Abc_123-xyz', auth: 'Auth_123-xyz' },
+      },
+    })),
+    /Некоректна Push-підписка/,
+  );
 });
 
 test('registration endpoint cannot write while guest push is disabled', async () => {
