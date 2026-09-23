@@ -82,6 +82,8 @@ test('only recognized browser Push services are accepted and private addresses a
     'https://fcm.googleapis.com.evil.example/fcm/send/token',
     'https://push.apple.com.evil.example/token',
     'https://fcm.googleapis.com:8443/fcm/send/token',
+    'https://user:pass@fcm.googleapis.com/fcm/send/token',
+    'https://fcm.googleapis.com/fcm/send/token#fragment',
   ]) {
     assert.equal(isRecognizedGuestPushEndpoint(new URL(endpoint)), false);
   }
@@ -111,6 +113,12 @@ test('transport keeps VAPID credentials request-scoped', () => {
 
   assert.doesNotMatch(source, /setVapidDetails/);
   assert.match(source, /await assertSafeGuestPushDeliveryEndpoint\(subscription\.endpoint\)/);
+  const guardSource = fs.readFileSync(
+    path.resolve(__dirname, '../src/guest-push/guest-push-endpoint.ts'),
+    'utf8',
+  );
+  assert.match(guardSource, /2_000/);
+  assert.match(guardSource, /Web Push DNS lookup timed out/);
   assert.match(source, /vapidDetails:\s*credentials/);
   assert.match(source, /TTL:\s*60 \* 60/);
   assert.match(source, /timeout:\s*5_000/);
