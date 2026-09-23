@@ -8,6 +8,10 @@ const {
   GuestPushService,
   resolveGuestPushConfig,
 } = require('../dist/guest-push/guest-push.service.js');
+const {
+  isPublicGuestPushAddress,
+  isRecognizedGuestPushEndpoint,
+} = require('../dist/guest-push/guest-push-endpoint.js');
 
 const vapidEcdh = createECDH('prime256v1');
 vapidEcdh.setPrivateKey(Buffer.alloc(32, 7));
@@ -63,6 +67,40 @@ test('sender readiness requires complete VAPID configuration without exposing se
   );
 });
 
+test('only recognized browser Push services are accepted and private addresses are rejected', () => {
+  for (const endpoint of [
+    'https://fcm.googleapis.com/fcm/send/token',
+    'https://updates.push.services.mozilla.com/wpush/v2/token',
+    'https://web.push.apple.com/QPush/token',
+    'https://wns2-sg2p.notify.windows.com/w/?token=value',
+  ]) {
+    assert.equal(isRecognizedGuestPushEndpoint(new URL(endpoint)), true);
+  }
+
+  for (const endpoint of [
+    'https://example.com/internal',
+    'https://fcm.googleapis.com.evil.example/fcm/send/token',
+    'https://push.apple.com.evil.example/token',
+    'https://fcm.googleapis.com:8443/fcm/send/token',
+  ]) {
+    assert.equal(isRecognizedGuestPushEndpoint(new URL(endpoint)), false);
+  }
+
+  for (const address of [
+    '10.0.0.1',
+    '127.0.0.1',
+    '169.254.169.254',
+    '192.168.1.1',
+    '::1',
+    'fc00::1',
+    'fe80::1',
+  ]) {
+    assert.equal(isPublicGuestPushAddress(address), false);
+  }
+  assert.equal(isPublicGuestPushAddress('8.8.8.8'), true);
+  assert.equal(isPublicGuestPushAddress('2606:4700:4700::1111'), true);
+});
+
 test('transport keeps VAPID credentials request-scoped', () => {
   const fs = require('node:fs');
   const path = require('node:path');
@@ -72,6 +110,7 @@ test('transport keeps VAPID credentials request-scoped', () => {
   );
 
   assert.doesNotMatch(source, /setVapidDetails/);
+  assert.match(source, /await assertSafeGuestPushDeliveryEndpoint\(subscription\.endpoint\)/);
   assert.match(source, /vapidDetails:\s*credentials/);
   assert.match(source, /TTL:\s*60 \* 60/);
   assert.match(source, /timeout:\s*5_000/);
