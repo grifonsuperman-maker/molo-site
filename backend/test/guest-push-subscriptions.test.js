@@ -43,7 +43,7 @@ function guestPushService(subscriptionRepository, bookings, config) {
       });
     },
   };
-  return guestPushService(subscriptionRepository, bookings, config);
+  return new GuestPushService(subscriptionRepository, bookings, config);
 }
 
 function registration(overrides = {}) {
@@ -244,7 +244,7 @@ test('push registration and inactive admin transitions share the booking row loc
 
   assert.match(pushSource, /setLock\('pessimistic_write'/);
   assert.match(bookingSource, /updateBookingStatusWithLock/);
-  assert.match(bookingSource, /lock:\s*\{\s*mode:\s*'pessimistic_write'\s*\}/);
+  assert.match(bookingSource, /setLock\('pessimistic_write',\s*undefined,\s*\['booking'\]\)/);
   for (const method of ['reject', 'cancel', 'noShow', 'complete']) {
     assert.match(
       bookingSource,
