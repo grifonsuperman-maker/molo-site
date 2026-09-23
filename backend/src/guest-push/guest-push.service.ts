@@ -12,6 +12,7 @@ import { Repository } from 'typeorm';
 import { Booking } from '../bookings/entities/booking.entity';
 import { RegisterGuestPushSubscriptionDto } from './dto/register-guest-push-subscription.dto';
 import { GuestPushSubscription } from './entities/guest-push-subscription.entity';
+import { isRecognizedGuestPushEndpoint } from './guest-push-endpoint';
 import {
   GuestPushTransport,
   type GuestPushVapidCredentials,
@@ -256,6 +257,7 @@ export class GuestPushService {
     if (
       endpointUrl.protocol !== 'https:' ||
       !endpointUrl.hostname ||
+      !isRecognizedGuestPushEndpoint(endpointUrl) ||
       endpointUrl.username ||
       endpointUrl.password ||
       endpointUrl.hash ||
