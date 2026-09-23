@@ -173,10 +173,12 @@ export class BookingRescheduleApprovalService {
 
   private async notifyGuestDecision(booking: Booking) {
     await this.notifications.notifyGuestRescheduleDecision({
+      bookingId: booking.id,
       telegramId: booking.client?.telegramId || null,
       decision: 'approved',
       bookingDate: booking.bookingDate,
       bookingTime: booking.bookingTime,
+      guestNotification: booking.guestNotification,
     });
   }
 
