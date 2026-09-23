@@ -45,6 +45,29 @@ test('approved booking Push contains current booking details but no guest identi
   assert.doesNotMatch(pushes[0].body, /380000/);
 });
 
+test('ordinary cancellation ignores an older unrelated guestNotification', async () => {
+  const { service, pushes } = notificationsHarness();
+
+  await service.notifyBookingCancelled({
+    id: 'booking-4',
+    bookingDate: '2026-09-27',
+    bookingTime: '18:00:00',
+    cancellationReason: 'admin_cancelled',
+    table: { tableNumber: '4' },
+    client: null,
+    guestNotification: {
+      type: 'booking_updated',
+      title: 'Старий стіл',
+      message: 'Це попереднє повідомлення.',
+    },
+  });
+
+  assert.equal(pushes.length, 1);
+  assert.match(pushes[0].body, /Бронювання скасовано/);
+  assert.match(pushes[0].body, /2026-09-27/);
+  assert.doesNotMatch(pushes[0].body, /Старий стіл|попереднє повідомлення/);
+});
+
 test('site guestNotification text is reused for no-show, reschedule and table decisions', async () => {
   const { service, pushes } = notificationsHarness();
 
