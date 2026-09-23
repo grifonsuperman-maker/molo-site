@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { createECDH } = require('node:crypto');
 const test = require('node:test');
 
 const {
@@ -8,8 +9,10 @@ const {
   resolveGuestPushConfig,
 } = require('../dist/guest-push/guest-push.service.js');
 
-const PUBLIC_KEY = 'B' + 'A'.repeat(86);
-const PRIVATE_KEY = 'A'.repeat(43);
+const vapidEcdh = createECDH('prime256v1');
+vapidEcdh.setPrivateKey(Buffer.alloc(32, 7));
+const PRIVATE_KEY = vapidEcdh.getPrivateKey().toString('base64url');
+const PUBLIC_KEY = vapidEcdh.getPublicKey().toString('base64url');
 const VAPID_SUBJECT = 'https://push.example.test';
 
 function configService(values = {}) {
