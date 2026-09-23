@@ -195,6 +195,7 @@ export default function GuestPushOptIn() {
     window.addEventListener('hashchange', refreshContext);
     window.addEventListener('appinstalled', refreshContext);
     window.addEventListener('pageshow', refreshOnResume);
+    window.addEventListener('molo:guest-bookings-refreshed', refreshOnResume);
     document.addEventListener('visibilitychange', onVisibilityChange);
     refreshContext();
     return () => {
@@ -202,6 +203,7 @@ export default function GuestPushOptIn() {
       window.removeEventListener('hashchange', refreshContext);
       window.removeEventListener('appinstalled', refreshContext);
       window.removeEventListener('pageshow', refreshOnResume);
+      window.removeEventListener('molo:guest-bookings-refreshed', refreshOnResume);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
