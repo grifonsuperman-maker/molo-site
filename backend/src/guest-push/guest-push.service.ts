@@ -12,9 +12,33 @@ import { Repository } from 'typeorm';
 import { Booking } from '../bookings/entities/booking.entity';
 import { RegisterGuestPushSubscriptionDto } from './dto/register-guest-push-subscription.dto';
 import { GuestPushSubscription } from './entities/guest-push-subscription.entity';
+import {
+  GuestPushTransport,
+  type GuestPushVapidCredentials,
+} from './guest-push.transport';
 
 const ACTIVE_BOOKING_STATUSES = new Set(['pending', 'approved']);
 const VAPID_PUBLIC_KEY = /^B[A-Za-z0-9_-]{86}$/;
+const VAPID_PRIVATE_KEY = /^[A-Za-z0-9_-]{43}$/;
+const MAX_PUSH_BODY_LENGTH = 500;
+
+export type GuestPushDeliverySummary = {
+  attempted: number;
+  delivered: number;
+  failed: number;
+};
+
+function isValidVapidSubject(value: string) {
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === 'https:' && Boolean(parsed.hostname)) ||
+      (parsed.protocol === 'mailto:' && Boolean(parsed.pathname))
+    );
+  } catch {
+    return false;
+  }
+}
 
 export function hashGuestPushValue(value: string) {
   return createHash('sha256').update(value).digest('hex');
@@ -40,11 +64,20 @@ export function guestPushKyivDate(now = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-export function resolveGuestPushConfig(enabledValue?: string, publicKeyValue?: string) {
+export function resolveGuestPushConfig(
+  enabledValue?: string,
+  publicKeyValue?: string,
+  privateKeyValue?: string,
+  subjectValue?: string,
+) {
   const publicKey = String(publicKeyValue || '').trim();
+  const privateKey = String(privateKeyValue || '').trim();
+  const subject = String(subjectValue || '').trim();
   const enabled =
     String(enabledValue || '').trim().toLowerCase() === 'true' &&
-    VAPID_PUBLIC_KEY.test(publicKey);
+    VAPID_PUBLIC_KEY.test(publicKey) &&
+    VAPID_PRIVATE_KEY.test(privateKey) &&
+    isValidVapidSubject(subject);
 
   return enabled
     ? { enabled: true, vapidPublicKey: publicKey }
@@ -59,13 +92,128 @@ export class GuestPushService {
     @InjectRepository(Booking)
     private readonly bookings: Repository<Booking>,
     private readonly configService: ConfigService,
+    private readonly transport: GuestPushTransport,
   ) {}
 
   config() {
     return resolveGuestPushConfig(
       this.configService.get<string>('GUEST_PUSH_ENABLED'),
       this.configService.get<string>('GUEST_PUSH_VAPID_PUBLIC_KEY'),
+      this.configService.get<string>('GUEST_PUSH_VAPID_PRIVATE_KEY'),
+      this.configService.get<string>('GUEST_PUSH_VAPID_SUBJECT'),
     );
+  }
+
+  private deliveryCredentials(): GuestPushVapidCredentials | null {
+    if (!this.config().enabled) return null;
+
+    return {
+      publicKey: String(
+        this.configService.get<string>('GUEST_PUSH_VAPID_PUBLIC_KEY') || '',
+      ).trim(),
+      privateKey: String(
+        this.configService.get<string>('GUEST_PUSH_VAPID_PRIVATE_KEY') || '',
+      ).trim(),
+      subject: String(
+        this.configService.get<string>('GUEST_PUSH_VAPID_SUBJECT') || '',
+      ).trim(),
+    };
+  }
+
+  async sendBookingNotification(
+    bookingIdValue: string,
+    bodyValue: string,
+  ): Promise<GuestPushDeliverySummary> {
+    const credentials = this.deliveryCredentials();
+    const bookingId = String(bookingIdValue || '').trim();
+    const body = String(bodyValue || '').trim().slice(0, MAX_PUSH_BODY_LENGTH);
+
+    if (!credentials || !bookingId || !body) {
+      return { attempted: 0, delivered: 0, failed: 0 };
+    }
+
+    const subscriptions = await this.subscriptions.find({
+      where: { bookingId },
+    });
+    if (subscriptions.length === 0) {
+      return { attempted: 0, delivered: 0, failed: 0 };
+    }
+
+    const payload = JSON.stringify({
+      category: 'booking',
+      body,
+    });
+
+    const results = await Promise.all(
+      subscriptions.map(async (subscription) => {
+        try {
+          await this.transport.send(
+            {
+              endpoint: subscription.endpoint,
+              keys: {
+                p256dh: subscription.p256dh,
+                auth: subscription.auth,
+              },
+            },
+            payload,
+            credentials,
+          );
+          return true;
+        } catch (error) {
+          const statusCode = this.deliveryStatusCode(error);
+          if (statusCode === 404 || statusCode === 410) {
+            try {
+              await this.subscriptions.delete({
+                bookingId: subscription.bookingId,
+                endpointHash: subscription.endpointHash,
+              });
+            } catch (cleanupError) {
+              console.warn('Guest Push stale subscription cleanup failed', {
+                bookingId,
+                statusCode,
+                error:
+                  cleanupError instanceof Error
+                    ? cleanupError.message
+                    : String(cleanupError),
+              });
+            }
+          }
+
+          console.warn('Guest Push delivery failed', {
+            bookingId,
+            statusCode,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return false;
+        }
+      }),
+    );
+
+    const delivered = results.filter(Boolean).length;
+    return {
+      attempted: results.length,
+      delivered,
+      failed: results.length - delivered,
+    };
+  }
+
+  private deliveryStatusCode(error: unknown) {
+    const value = error as {
+      statusCode?: unknown;
+      status?: unknown;
+      response?: { statusCode?: unknown; status?: unknown };
+    };
+    const candidates = [
+      value?.statusCode,
+      value?.status,
+      value?.response?.statusCode,
+      value?.response?.status,
+    ];
+    const status = candidates
+      .map((candidate) => Number(candidate))
+      .find((candidate) => Number.isInteger(candidate));
+
+    return status || null;
   }
 
   async register(dto: RegisterGuestPushSubscriptionDto) {
