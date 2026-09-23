@@ -122,31 +122,60 @@ async function subscriptionFingerprint(bookingId: string, publicKey: string, end
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function readConfirmedFingerprints() {
+const CONFIRMED_FINGERPRINT = /^[a-f0-9]{64}$/;
+let runtimeConfirmedFingerprints = new Set<string>();
+
+function parseConfirmedFingerprints(stored: string | null) {
+  if (!stored) return [] as string[];
+
+  // The v1 key already exists in production as a single SHA-256 fingerprint.
+  // Keep that value valid while migrating storage to the per-booking array shape.
+  if (CONFIRMED_FINGERPRINT.test(stored)) return [stored];
+
   try {
-    const stored = window.localStorage.getItem(CONFIRMED_SUBSCRIPTION_KEY);
-    if (!stored) return [] as string[];
     const parsed = JSON.parse(stored);
     return Array.isArray(parsed)
-      ? parsed.filter((value): value is string => typeof value === 'string')
+      ? parsed.filter(
+          (value): value is string =>
+            typeof value === 'string' && CONFIRMED_FINGERPRINT.test(value),
+        )
       : [];
   } catch {
     return [];
   }
 }
 
+function readConfirmedFingerprints() {
+  try {
+    for (const fingerprint of parseConfirmedFingerprints(
+      window.localStorage.getItem(CONFIRMED_SUBSCRIPTION_KEY),
+    )) {
+      runtimeConfirmedFingerprints.add(fingerprint);
+    }
+  } catch {
+    // Fall back to the confirmations retained in this tab.
+  }
+
+  return [...runtimeConfirmedFingerprints];
+}
+
 function rememberConfirmedFingerprints(fingerprints: string[]) {
+  runtimeConfirmedFingerprints = new Set(
+    fingerprints.filter((fingerprint) => CONFIRMED_FINGERPRINT.test(fingerprint)),
+  );
+
   try {
     window.localStorage.setItem(
       CONFIRMED_SUBSCRIPTION_KEY,
-      JSON.stringify([...new Set(fingerprints)]),
+      JSON.stringify([...runtimeConfirmedFingerprints]),
     );
   } catch {
-    // The current session can still use the subscription without storage.
+    // Keep the confirmed set in memory while this tab remains open.
   }
 }
 
 function clearConfirmedFingerprints() {
+  runtimeConfirmedFingerprints.clear();
   try {
     window.localStorage.removeItem(CONFIRMED_SUBSCRIPTION_KEY);
   } catch {
