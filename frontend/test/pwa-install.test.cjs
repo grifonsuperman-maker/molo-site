@@ -79,7 +79,7 @@ test('push opt-in is wired only to installed guest home and a ready backend', ()
   assert.match(source, /src="\/pwa-icon-192\.png"/);
 });
 
-test('permission is requested only from the click action and registration proves booking ownership', () => {
+test('permission is requested only from the click action and registration proves every active booking ownership', () => {
   const source = read('src/guest/components/GuestPushOptIn.tsx');
   const handler = source.indexOf('async function enableNotifications()');
   assert.ok(handler > 0);
@@ -88,11 +88,18 @@ test('permission is requested only from the click action and registration proves
   assert.match(source, /onClick=\{\(\) => \{ void enableNotifications\(\); \}\}/);
   assert.match(source, /userVisibleOnly: true/);
   assert.match(source, /applicationServerKey: key/);
+  assert.match(source, /bookingsApi\.guestList\(/);
+  assert.match(source, /booking\.status === 'pending' \|\| booking\.status === 'approved'/);
+  assert.match(source, /booking\.bookingDate >= today/);
+  assert.match(source, /timeZone: 'Europe\/Kyiv'/);
+  assert.match(source, /for \(const booking of activeAccess\)/);
   assert.match(source, /guestDeviceId: access\.guestDeviceId/);
   assert.match(source, /bookingId: booking\.bookingId/);
   assert.match(source, /guestAccessToken: booking\.token/);
   assert.match(source, /subscription: subscription\.toJSON\(\)/);
+  assert.match(source, /activeAccess\.map\(\(booking\) =>\s*subscriptionFingerprint\(booking\.bookingId/);
   assert.match(source, /result\?\.enabled !== true/);
+  assert.doesNotMatch(source, /access\.bookings\[0\]/);
   assert.doesNotMatch(read('public/sw.js'), /guestAccessToken|guestDeviceId/);
 });
 
@@ -119,7 +126,22 @@ test('resuming the same PWA screen rechecks the backend even when route does not
   assert.match(source, /setConfigRefresh\(\(current\) => current \+ 1\)/);
   assert.match(source, /window\.addEventListener\('pageshow', refreshOnResume\)/);
   assert.match(source, /document\.addEventListener\('visibilitychange', onVisibilityChange\)/);
-  assert.match(source, /dismissed, configRefresh\]\)/);
+  assert.match(source, /bookingAccessKey,/);
+  assert.match(source, /refreshedActiveBookingKey,/);
+  assert.match(source, /dismissed,\s*configRefresh,/);
+  assert.match(source, /window\.addEventListener\('molo:guest-bookings-refreshed', refreshBookingState\)/);
+  assert.match(source, /setRefreshedActiveBookingIds\(\[\.\.\.new Set\(activeBookingIds\)\]\.sort\(\)\)/);
+  assert.doesNotMatch(source, /setInterval\(/);
+});
+
+test('guest booking refresh passes active ids to push without exposing tokens or adding polling', () => {
+  const guestSource = read('src/guest/GuestApp.tsx');
+  assert.match(guestSource, /new CustomEvent\('molo:guest-bookings-refreshed'/);
+  assert.match(guestSource, /activeBookingIds: activeBookings\.map\(\(item\) => item\.bookingId\)/);
+  assert.match(guestSource, /item\.bookingDate >= getKyivDateValue\(\)/);
+  const eventBlock = guestSource.match(/new CustomEvent\('molo:guest-bookings-refreshed',[\s\S]*?\}\)\);/);
+  assert.ok(eventBlock);
+  assert.doesNotMatch(eventBlock[0], /token|guestDeviceId/);
 });
 
 test('dismissal expires after 30 days without losing tab-only dismissal when storage is blocked', () => {
@@ -130,12 +152,17 @@ test('dismissal expires after 30 days without losing tab-only dismissal when sto
   assert.match(source, /dismissedInTabAt\.current = Date\.now\(\)/);
 });
 
-test('confirmed subscription survives launch without storing guest token or raw endpoint', () => {
+test('confirmed subscriptions survive launch, booking-set changes and blocked storage', () => {
   const source = read('src/guest/components/GuestPushOptIn.tsx');
   assert.match(source, /CONFIRMED_SUBSCRIPTION_KEY = 'molo:push:confirmed-subscription:v1'/);
   assert.match(source, /crypto\.subtle\.digest\('SHA-256', data\)/);
-  assert.match(source, /fingerprint === readConfirmedFingerprint\(\)/);
-  assert.match(source, /rememberConfirmedFingerprint\(fingerprint\)/);
+  assert.match(source, /let runtimeConfirmedFingerprints = new Set<string>\(\)/);
+  assert.match(source, /if \(CONFIRMED_FINGERPRINT\.test\(stored\)\) return \[stored\]/);
+  assert.match(source, /runtimeConfirmedFingerprints\.add\(fingerprint\)/);
+  assert.match(source, /return \[\.\.\.runtimeConfirmedFingerprints\]/);
+  assert.match(source, /JSON\.stringify\(\[\.\.\.runtimeConfirmedFingerprints\]\)/);
+  assert.match(source, /activeFingerprints\.every\(\(fingerprint\) =>\s*confirmedFingerprints\.has\(fingerprint\)/);
+  assert.match(source, /rememberConfirmedFingerprints\(fingerprints\)/);
   assert.match(source, /setCompleted\(alreadyConfirmed\)/);
   assert.match(source, /if \(!vapidKey \|\| !onGuestHome[\s\S]*\|\| dismissed \|\| completed\) return null;/);
   assert.doesNotMatch(source, /localStorage\.setItem\([^,]+,\s*booking\.token/);

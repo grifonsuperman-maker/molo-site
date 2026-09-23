@@ -997,15 +997,34 @@ export class BookingsService {
     return { message: 'Бронювання підтверджено' };
   }
 
-  async reject(id: string) {
-    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
-    if (!booking) throw new NotFoundException('Бронювання не знайдено');
+  private async updateBookingStatusWithLock(
+    id: string,
+    update: (booking: Booking) => void,
+  ) {
+    return this.bookings.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(Booking);
+      const booking = await repository
+        .createQueryBuilder('booking')
+        .leftJoinAndSelect('booking.table', 'table')
+        .leftJoinAndSelect('booking.client', 'client')
+        .where('booking.id = :id', { id })
+        .setLock('pessimistic_write', undefined, ['booking'])
+        .getOne();
+      if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
-    const previousData = this.bookingSnapshot(booking);
-    booking.status = 'rejected';
-    booking.rejectedAt = new Date();
-    booking.cancellationReason = 'admin_rejected';
-    await this.bookings.save(booking);
+      const previousData = this.bookingSnapshot(booking);
+      update(booking);
+      await repository.save(booking);
+      return { booking, previousData };
+    });
+  }
+
+  async reject(id: string) {
+    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
+      lockedBooking.status = 'rejected';
+      lockedBooking.rejectedAt = new Date();
+      lockedBooking.cancellationReason = 'admin_rejected';
+    });
     await this.saveHistory(booking, 'booking_rejected', 'admin', previousData, this.bookingSnapshot(booking));
     await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
     await this.safeLog('Відхилено бронювання', { bookingId: id });
@@ -1014,14 +1033,11 @@ export class BookingsService {
   }
 
   async cancel(id: string) {
-    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
-    if (!booking) throw new NotFoundException('Бронювання не знайдено');
-
-    const previousData = this.bookingSnapshot(booking);
-    booking.status = 'cancelled';
-    booking.cancelledAt = new Date();
-    booking.cancellationReason = 'admin_cancelled';
-    await this.bookings.save(booking);
+    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
+      lockedBooking.status = 'cancelled';
+      lockedBooking.cancelledAt = new Date();
+      lockedBooking.cancellationReason = 'admin_cancelled';
+    });
     await this.saveHistory(booking, 'booking_cancelled', 'admin', previousData, this.bookingSnapshot(booking));
     await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
     await this.safeLog('Скасовано бронювання', { bookingId: id });
@@ -1030,24 +1046,20 @@ export class BookingsService {
   }
 
   async noShow(id: string) {
-    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
-    if (!booking) throw new NotFoundException('Бронювання не знайдено');
-
-    if (booking.checkedInAt) {
-      throw new BadRequestException('Гість уже відмічений як присутній');
-    }
-
-    const previousData = this.bookingSnapshot(booking);
-    booking.status = 'cancelled';
-    booking.cancelledAt = new Date();
-    booking.cancellationReason = 'no_show';
-    booking.wishes = this.markNoShowInWishes(booking);
-    booking.guestNotification = {
-      type: 'no_show',
-      title: 'Бронювання завершено через неявку',
-      createdAt: new Date().toISOString(),
-    };
-    await this.bookings.save(booking);
+    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
+      if (lockedBooking.checkedInAt) {
+        throw new BadRequestException('Гість уже відмічений як присутній');
+      }
+      lockedBooking.status = 'cancelled';
+      lockedBooking.cancelledAt = new Date();
+      lockedBooking.cancellationReason = 'no_show';
+      lockedBooking.wishes = this.markNoShowInWishes(lockedBooking);
+      lockedBooking.guestNotification = {
+        type: 'no_show',
+        title: 'Бронювання завершено через неявку',
+        createdAt: new Date().toISOString(),
+      };
+    });
     await this.saveHistory(booking, 'booking_no_show', 'admin', previousData, this.bookingSnapshot(booking), 'no_show');
     await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
     await this.safeLog('No-show: гість не прийшов', { bookingId: id, tableNumber: booking.table?.tableNumber || null });
@@ -1083,13 +1095,10 @@ export class BookingsService {
   }
 
   async complete(id: string, actor?: AuthUser) {
-    const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
-    if (!booking) throw new NotFoundException('Бронювання не знайдено');
-
-    const previousData = this.bookingSnapshot(booking);
-    booking.status = 'completed';
-    booking.completedAt = new Date();
-    await this.bookings.save(booking);
+    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
+      lockedBooking.status = 'completed';
+      lockedBooking.completedAt = new Date();
+    });
     await this.saveHistory(
       booking,
       'booking_completed',
