@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 
+import { NotificationsService } from '../notifications/notifications.service';
 import { TableEntity } from '../tables/entities/table.entity';
 import { AvailabilityBlock } from './entities/availability-block.entity';
 import { BookingHistory } from './entities/booking-history.entity';
@@ -28,6 +29,7 @@ export class AdminAttentionService {
     @InjectRepository(GuestReview)
     private readonly reviews: Repository<GuestReview>,
     private readonly dataSource: DataSource,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async dashboard() {
@@ -120,7 +122,7 @@ export class AdminAttentionService {
     const normalizedTableId = String(tableId || '').trim();
     if (!normalizedTableId) throw new BadRequestException('Оберіть новий стіл');
 
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const requestRepository = manager.getRepository(BookingTableChangeRequest);
       const request = await this.findTableChangeForUpdate(manager, requestId);
       if (!request) throw new NotFoundException('Запит на зміну столу не знайдено');
@@ -180,14 +182,20 @@ export class AdminAttentionService {
       await this.applyBookingStatusToTable(manager, nextTable.id, booking.bookingDate, booking.status);
 
       return {
-        message: `Бронювання перенесено на стіл №${nextTable.tableNumber}`,
-        tableNumber: nextTable.tableNumber,
+        response: {
+          message: `Бронювання перенесено на стіл №${nextTable.tableNumber}`,
+          tableNumber: nextTable.tableNumber,
+        },
+        booking,
       };
     });
+
+    await this.notifyGuestBookingUpdated(result.booking);
+    return result.response;
   }
 
   async rejectTableChange(requestId: string, adminComment?: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(BookingTableChangeRequest);
       const request = await this.findTableChangeForUpdate(manager, requestId);
       if (!request) throw new NotFoundException('Запит на зміну столу не знайдено');
@@ -224,8 +232,25 @@ export class AdminAttentionService {
         }),
       );
 
-      return { message: 'Запит на зміну столу відхилено' };
+      return {
+        response: { message: 'Запит на зміну столу відхилено' },
+        booking,
+      };
     });
+
+    await this.notifyGuestBookingUpdated(result.booking);
+    return result.response;
+  }
+
+  private async notifyGuestBookingUpdated(booking: Booking) {
+    try {
+      await this.notifications.notifyGuestBookingUpdated(booking);
+    } catch (error) {
+      console.error(
+        'Guest table-change Push notification failed',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   private async findOwnedBooking(manager: EntityManager, bookingId: string, token: string) {
