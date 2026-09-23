@@ -127,7 +127,21 @@ test('resuming the same PWA screen rechecks the backend even when route does not
   assert.match(source, /window\.addEventListener\('pageshow', refreshOnResume\)/);
   assert.match(source, /document\.addEventListener\('visibilitychange', onVisibilityChange\)/);
   assert.match(source, /bookingAccessKey,/);
+  assert.match(source, /refreshedActiveBookingKey,/);
   assert.match(source, /dismissed,\s*configRefresh,/);
+  assert.match(source, /window\.addEventListener\('molo:guest-bookings-refreshed', refreshBookingState\)/);
+  assert.match(source, /setRefreshedActiveBookingIds\(\[\.\.\.new Set\(activeBookingIds\)\]\.sort\(\)\)/);
+  assert.doesNotMatch(source, /setInterval\(/);
+});
+
+test('guest booking refresh passes active ids to push without exposing tokens or adding polling', () => {
+  const guestSource = read('src/guest/GuestApp.tsx');
+  assert.match(guestSource, /new CustomEvent\('molo:guest-bookings-refreshed'/);
+  assert.match(guestSource, /activeBookingIds: activeBookings\.map\(\(item\) => item\.bookingId\)/);
+  assert.match(guestSource, /item\.bookingDate >= getKyivDateValue\(\)/);
+  const eventBlock = guestSource.match(/new CustomEvent\('molo:guest-bookings-refreshed',[\s\S]*?\}\)\);/);
+  assert.ok(eventBlock);
+  assert.doesNotMatch(eventBlock[0], /token|guestDeviceId/);
 });
 
 test('dismissal expires after 30 days without losing tab-only dismissal when storage is blocked', () => {
