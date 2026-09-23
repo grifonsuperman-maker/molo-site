@@ -211,6 +211,8 @@ test('registration refuses inactive bookings and malformed push endpoints', asyn
   const config = configService({
     GUEST_PUSH_ENABLED: 'true',
     GUEST_PUSH_VAPID_PUBLIC_KEY: PUBLIC_KEY,
+    GUEST_PUSH_VAPID_PRIVATE_KEY: PRIVATE_KEY,
+    GUEST_PUSH_VAPID_SUBJECT: VAPID_SUBJECT,
   });
 
   const inactive = guestPushService(
