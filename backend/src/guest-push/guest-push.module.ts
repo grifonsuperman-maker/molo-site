@@ -5,6 +5,7 @@ import { Booking } from '../bookings/entities/booking.entity';
 import { GuestPushSubscription } from './entities/guest-push-subscription.entity';
 import { GuestPushController } from './guest-push.controller';
 import { GuestPushService } from './guest-push.service';
+import { GuestPushTransport } from './guest-push.transport';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { GuestPushService } from './guest-push.service';
     ]),
   ],
   controllers: [GuestPushController],
-  providers: [GuestPushService],
+  providers: [GuestPushService, GuestPushTransport],
   exports: [GuestPushService],
 })
 export class GuestPushModule {}
