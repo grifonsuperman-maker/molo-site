@@ -23,6 +23,7 @@ function bookingRepository(booking) {
     addSelect() { return this; },
     where() { return this; },
     andWhere() { return this; },
+    setLock(mode) { this.lockMode = mode; return this; },
     async getOne() { return booking; },
   };
   return {
@@ -30,6 +31,19 @@ function bookingRepository(booking) {
       return query;
     },
   };
+}
+
+function guestPushService(subscriptionRepository, bookings, config) {
+  bookings.manager = {
+    async transaction(run) {
+      return run({
+        getRepository(entity) {
+          return entity?.name === 'Booking' ? bookings : subscriptionRepository;
+        },
+      });
+    },
+  };
+  return guestPushService(subscriptionRepository, bookings, config);
 }
 
 function registration(overrides = {}) {
@@ -69,7 +83,7 @@ test('guest push config stays disabled unless explicitly enabled with a VAPID pu
 test('registration proves booking token ownership and stores only hashes for guest identity', async () => {
   const dto = registration();
   const upserts = [];
-  const service = new GuestPushService(
+  const service = guestPushService(
     {
       async upsert(value, options) {
         upserts.push({ value, options });
@@ -95,10 +109,11 @@ test('registration proves booking token ownership and stores only hashes for gue
   assert.equal(Object.hasOwn(upserts[0].value, 'guestAccessToken'), false);
   assert.equal(Object.hasOwn(upserts[0].value, 'guestDeviceId'), false);
   assert.deepEqual(upserts[0].options.conflictPaths, ['bookingId', 'endpointHash']);
+  assert.equal(service.bookings.createQueryBuilder().lockMode, 'pessimistic_write');
 });
 
 test('registration rejects a token that does not resolve to the booking', async () => {
-  const service = new GuestPushService(
+  const service = guestPushService(
     { upsert: async () => { throw new Error('must not write'); } },
     bookingRepository(null),
     configService({
@@ -111,7 +126,7 @@ test('registration rejects a token that does not resolve to the booking', async 
 });
 
 test('registration rejects a mismatched device for bookings that already have a device hash', async () => {
-  const service = new GuestPushService(
+  const service = guestPushService(
     { upsert: async () => { throw new Error('must not write'); } },
     bookingRepository({
       status: 'pending',
@@ -128,7 +143,7 @@ test('registration rejects a mismatched device for bookings that already have a 
 
 test('legacy token booking without a stored device hash can register the current browser device', async () => {
   let stored;
-  const service = new GuestPushService(
+  const service = guestPushService(
     { async upsert(value) { stored = value; } },
     bookingRepository({ status: 'pending', guestDeviceIdHash: null }),
     configService({
@@ -142,7 +157,7 @@ test('legacy token booking without a stored device hash can register the current
 });
 
 test('registration rejects a historical pending booking', async () => {
-  const service = new GuestPushService(
+  const service = guestPushService(
     { upsert: async () => { throw new Error('must not write'); } },
     bookingRepository({
       status: 'pending',
@@ -164,14 +179,14 @@ test('registration refuses inactive bookings and malformed push endpoints', asyn
     GUEST_PUSH_VAPID_PUBLIC_KEY: PUBLIC_KEY,
   });
 
-  const inactive = new GuestPushService(
+  const inactive = guestPushService(
     { upsert: async () => { throw new Error('must not write'); } },
     bookingRepository({ status: 'completed', guestDeviceIdHash: null }),
     config,
   );
   await assert.rejects(() => inactive.register(registration()), /вже недоступні/);
 
-  const invalidEndpoint = new GuestPushService(
+  const invalidEndpoint = guestPushService(
     { upsert: async () => { throw new Error('must not write'); } },
     bookingRepository({ status: 'approved', guestDeviceIdHash: null }),
     config,
@@ -188,7 +203,7 @@ test('registration refuses inactive bookings and malformed push endpoints', asyn
 });
 
 test('registration endpoint cannot write while guest push is disabled', async () => {
-  const service = new GuestPushService(
+  const service = guestPushService(
     { upsert: async () => { throw new Error('must not write'); } },
     bookingRepository({ status: 'approved', guestDeviceIdHash: null }),
     configService({
@@ -212,4 +227,28 @@ test('migration-managed entity stays out of synchronize', () => {
     source,
     /@Entity\(\{\s*name:\s*'guest_push_subscriptions',\s*synchronize:\s*false\s*\}\)/,
   );
+});
+
+
+test('push registration and inactive admin transitions share the booking row lock', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const pushSource = fs.readFileSync(
+    path.resolve(__dirname, '../src/guest-push/guest-push.service.ts'),
+    'utf8',
+  );
+  const bookingSource = fs.readFileSync(
+    path.resolve(__dirname, '../src/bookings/bookings.service.ts'),
+    'utf8',
+  );
+
+  assert.match(pushSource, /setLock\('pessimistic_write'/);
+  assert.match(bookingSource, /updateBookingStatusWithLock/);
+  assert.match(bookingSource, /lock:\s*\{\s*mode:\s*'pessimistic_write'\s*\}/);
+  for (const method of ['reject', 'cancel', 'noShow', 'complete']) {
+    assert.match(
+      bookingSource,
+      new RegExp(`async ${method}\\([^]*?updateBookingStatusWithLock`),
+    );
+  }
 });
