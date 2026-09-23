@@ -115,31 +115,38 @@ async function resolveActiveBookingAccess(access: GuestBrowserAccess) {
   return access.bookings.filter((booking) => activeIds.has(booking.bookingId));
 }
 
-async function subscriptionFingerprint(bookingIds: string[], publicKey: string, endpoint: string) {
+async function subscriptionFingerprint(bookingId: string, publicKey: string, endpoint: string) {
   // Do not persist private guest booking tokens or the raw push endpoint.
-  const normalizedBookingIds = [...new Set(bookingIds)].sort().join('\n');
-  const data = new TextEncoder().encode(`${normalizedBookingIds}\n${publicKey}\n${endpoint}`);
+  const data = new TextEncoder().encode(`${bookingId}\n${publicKey}\n${endpoint}`);
   const digest = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function readConfirmedFingerprint() {
+function readConfirmedFingerprints() {
   try {
-    return window.localStorage.getItem(CONFIRMED_SUBSCRIPTION_KEY) || '';
+    const stored = window.localStorage.getItem(CONFIRMED_SUBSCRIPTION_KEY);
+    if (!stored) return [] as string[];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === 'string')
+      : [];
   } catch {
-    return '';
+    return [];
   }
 }
 
-function rememberConfirmedFingerprint(fingerprint: string) {
+function rememberConfirmedFingerprints(fingerprints: string[]) {
   try {
-    window.localStorage.setItem(CONFIRMED_SUBSCRIPTION_KEY, fingerprint);
+    window.localStorage.setItem(
+      CONFIRMED_SUBSCRIPTION_KEY,
+      JSON.stringify([...new Set(fingerprints)]),
+    );
   } catch {
     // The current session can still use the subscription without storage.
   }
 }
 
-function clearConfirmedFingerprint() {
+function clearConfirmedFingerprints() {
   try {
     window.localStorage.removeItem(CONFIRMED_SUBSCRIPTION_KEY);
   } catch {
@@ -234,12 +241,15 @@ export default function GuestPushOptIn() {
           const subscription = await worker?.pushManager.getSubscription();
           const decodedKey = decodeVapidPublicKey(key);
           if (subscription && decodedKey && subscriptionMatchesKey(subscription, decodedKey)) {
-            const fingerprint = await subscriptionFingerprint(
-              activeAccess.map((booking) => booking.bookingId),
-              key,
-              subscription.endpoint,
+            const confirmedFingerprints = new Set(readConfirmedFingerprints());
+            const activeFingerprints = await Promise.all(
+              activeAccess.map((booking) =>
+                subscriptionFingerprint(booking.bookingId, key, subscription.endpoint),
+              ),
             );
-            alreadyConfirmed = fingerprint === readConfirmedFingerprint();
+            alreadyConfirmed = activeFingerprints.every((fingerprint) =>
+              confirmedFingerprints.has(fingerprint),
+            );
           }
         } catch {
           // A failed status lookup must never claim successful registration.
@@ -314,15 +324,15 @@ export default function GuestPushOptIn() {
         });
         if (result?.enabled !== true) throw new Error('Push registration was not confirmed');
       }
-      const fingerprint = await subscriptionFingerprint(
-        activeAccess.map((booking) => booking.bookingId),
-        vapidKey,
-        subscription.endpoint,
+      const fingerprints = await Promise.all(
+        activeAccess.map((booking) =>
+          subscriptionFingerprint(booking.bookingId, vapidKey, subscription.endpoint),
+        ),
       );
-      rememberConfirmedFingerprint(fingerprint);
+      rememberConfirmedFingerprints(fingerprints);
       setCompleted(true);
     } catch {
-      clearConfirmedFingerprint();
+      clearConfirmedFingerprints();
       setError('Не вдалося підключити сповіщення. Спробуйте ще раз пізніше.');
     } finally {
       setWorking(false);
