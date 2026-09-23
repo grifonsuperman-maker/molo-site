@@ -174,13 +174,9 @@ function rememberConfirmedFingerprints(fingerprints: string[]) {
   }
 }
 
-function clearConfirmedFingerprints() {
-  runtimeConfirmedFingerprints.clear();
-  try {
-    window.localStorage.removeItem(CONFIRMED_SUBSCRIPTION_KEY);
-  } catch {
-    // Browser storage is optional.
-  }
+function selectActiveBookingAccess(access: GuestBrowserAccess, activeBookingIds: string[]) {
+  const activeIds = new Set(activeBookingIds);
+  return access.bookings.filter((booking) => activeIds.has(booking.bookingId));
 }
 
 export default function GuestPushOptIn() {
@@ -193,6 +189,11 @@ export default function GuestPushOptIn() {
   const [bookingAccessKey, setBookingAccessKey] = useState(
     () => guestBookingAccessKey(readGuestBrowserAccess()),
   );
+  const [refreshedActiveBookingIds, setRefreshedActiveBookingIds] =
+    useState<string[] | null>(null);
+  const refreshedActiveBookingKey = refreshedActiveBookingIds === null
+    ? null
+    : refreshedActiveBookingIds.join('|');
   const [dismissed, setDismissed] = useState(wasRecentlyDismissed);
   const dismissedInTabAt = useRef(0);
   const [vapidKey, setVapidKey] = useState('');
@@ -222,6 +223,15 @@ export default function GuestPushOptIn() {
       setDismissed(dismissedInTab || wasRecentlyDismissed());
       setConfigRefresh((current) => current + 1);
     };
+    const refreshBookingState = (event: Event) => {
+      refreshContext();
+      const detail = (event as CustomEvent<{ activeBookingIds?: unknown }>).detail;
+      if (!Array.isArray(detail?.activeBookingIds)) return;
+      const activeBookingIds = detail.activeBookingIds.filter(
+        (bookingId): bookingId is string => typeof bookingId === 'string' && bookingId.length > 0,
+      );
+      setRefreshedActiveBookingIds([...new Set(activeBookingIds)].sort());
+    };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') refreshOnResume();
     };
@@ -231,7 +241,7 @@ export default function GuestPushOptIn() {
     window.addEventListener('hashchange', refreshContext);
     window.addEventListener('appinstalled', refreshContext);
     window.addEventListener('pageshow', refreshOnResume);
-    window.addEventListener('molo:guest-bookings-refreshed', refreshOnResume);
+    window.addEventListener('molo:guest-bookings-refreshed', refreshBookingState);
     document.addEventListener('visibilitychange', onVisibilityChange);
     refreshContext();
     return () => {
@@ -239,7 +249,7 @@ export default function GuestPushOptIn() {
       window.removeEventListener('hashchange', refreshContext);
       window.removeEventListener('appinstalled', refreshContext);
       window.removeEventListener('pageshow', refreshOnResume);
-      window.removeEventListener('molo:guest-bookings-refreshed', refreshOnResume);
+      window.removeEventListener('molo:guest-bookings-refreshed', refreshBookingState);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
@@ -260,7 +270,9 @@ export default function GuestPushOptIn() {
       if (!key || !(await isValidVapidPublicKey(key)) || cancelled) return;
 
       const access = readGuestBrowserAccess();
-      const activeAccess = await resolveActiveBookingAccess(access);
+      const activeAccess = refreshedActiveBookingIds === null
+        ? await resolveActiveBookingAccess(access)
+        : selectActiveBookingAccess(access, refreshedActiveBookingIds);
       if (cancelled || activeAccess.length === 0) return;
 
       let alreadyConfirmed = false;
@@ -300,6 +312,7 @@ export default function GuestPushOptIn() {
     installed,
     hasBookingAccess,
     bookingAccessKey,
+    refreshedActiveBookingKey,
     dismissed,
     configRefresh,
   ]);
@@ -361,7 +374,8 @@ export default function GuestPushOptIn() {
       rememberConfirmedFingerprints(fingerprints);
       setCompleted(true);
     } catch {
-      clearConfirmedFingerprints();
+      // Preserve confirmations that were already valid; fingerprints are tied to
+      // the exact booking, VAPID key and endpoint, so stale values cannot match a replacement subscription.
       setError('Не вдалося підключити сповіщення. Спробуйте ще раз пізніше.');
     } finally {
       setWorking(false);
