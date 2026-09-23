@@ -174,3 +174,17 @@ test('registration endpoint cannot write while guest push is disabled', async ()
 
   await assert.rejects(() => service.register(registration()), /ще не увімкнені/);
 });
+
+
+test('migration-managed entity stays out of synchronize', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../src/guest-push/entities/guest-push-subscription.entity.ts'),
+    'utf8',
+  );
+  assert.match(
+    source,
+    /@Entity\(\{\s*name:\s*'guest_push_subscriptions',\s*synchronize:\s*false\s*\}\)/,
+  );
+});

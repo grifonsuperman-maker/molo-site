@@ -10,7 +10,7 @@ import {
 
 import { Booking } from '../../bookings/entities/booking.entity';
 
-@Entity('guest_push_subscriptions')
+@Entity({ name: 'guest_push_subscriptions', synchronize: false })
 export class GuestPushSubscription {
   @PrimaryColumn({
     name: 'booking_id',
