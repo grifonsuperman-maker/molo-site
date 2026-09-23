@@ -24,6 +24,7 @@ type WebPushClient = {
     payload: string,
     options?: {
       TTL?: number;
+      timeout?: number;
       vapidDetails?: GuestPushVapidCredentials;
     },
   ): Promise<WebPushResponse>;
@@ -40,6 +41,7 @@ export class GuestPushTransport {
   ) {
     return webPush.sendNotification(subscription, payload, {
       TTL: 60 * 60,
+      timeout: 5_000,
       vapidDetails: credentials,
     });
   }
