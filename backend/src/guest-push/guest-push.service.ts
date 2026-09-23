@@ -20,6 +20,26 @@ export function hashGuestPushValue(value: string) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+export function guestPushKyivDate(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || '';
+  const year = value('year');
+  const month = value('month');
+  const day = value('day');
+
+  if (!year || !month || !day) {
+    throw new Error('Could not determine the current Kyiv date');
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
 export function resolveGuestPushConfig(enabledValue?: string, publicKeyValue?: string) {
   const publicKey = String(publicKeyValue || '').trim();
   const enabled =
@@ -74,7 +94,10 @@ export class GuestPushService {
     if (!booking) {
       throw new UnauthorizedException('Недійсний доступ до бронювання');
     }
-    if (!ACTIVE_BOOKING_STATUSES.has(booking.status)) {
+    if (
+      !ACTIVE_BOOKING_STATUSES.has(booking.status) ||
+      booking.bookingDate < guestPushKyivDate()
+    ) {
       throw new BadRequestException('Сповіщення для цієї броні вже недоступні');
     }
     if (

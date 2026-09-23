@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   GuestPushService,
+  guestPushKyivDate,
   hashGuestPushValue,
   resolveGuestPushConfig,
 } = require('../dist/guest-push/guest-push.service.js');
@@ -47,6 +48,13 @@ function registration(overrides = {}) {
     ...overrides,
   };
 }
+
+test('guest push uses the Kyiv calendar date', () => {
+  assert.equal(
+    guestPushKyivDate(new Date('2026-01-01T22:30:00.000Z')),
+    '2026-01-02',
+  );
+});
 
 test('guest push config stays disabled unless explicitly enabled with a VAPID public key', () => {
   assert.deepEqual(resolveGuestPushConfig(undefined, undefined), { enabled: false });
@@ -131,6 +139,23 @@ test('legacy token booking without a stored device hash can register the current
 
   await service.register(registration());
   assert.equal(stored.guestDeviceIdHash, hashGuestPushValue('guest-device-123'));
+});
+
+test('registration rejects a historical pending booking', async () => {
+  const service = new GuestPushService(
+    { upsert: async () => { throw new Error('must not write'); } },
+    bookingRepository({
+      status: 'pending',
+      bookingDate: '2020-01-01',
+      guestDeviceIdHash: null,
+    }),
+    configService({
+      GUEST_PUSH_ENABLED: 'true',
+      GUEST_PUSH_VAPID_PUBLIC_KEY: PUBLIC_KEY,
+    }),
+  );
+
+  await assert.rejects(() => service.register(registration()), /вже недоступні/);
 });
 
 test('registration refuses inactive bookings and malformed push endpoints', async () => {

@@ -80,6 +80,18 @@ function subscriptionMatchesKey(subscription: PushSubscription | null, key: Uint
 
 type GuestBrowserAccess = ReturnType<typeof readGuestBrowserAccess>;
 
+function guestPushKyivDate(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
 function guestBookingAccessKey(access: GuestBrowserAccess) {
   return [...new Set(access.bookings.map((booking) => booking.bookingId))].sort().join('|');
 }
@@ -90,9 +102,14 @@ async function resolveActiveBookingAccess(access: GuestBrowserAccess) {
     access.guestDeviceId,
     access.bookings.map((booking) => booking.token),
   );
+  const today = guestPushKyivDate();
   const activeIds = new Set(
     bookings
-      .filter((booking) => booking.status === 'pending' || booking.status === 'approved')
+      .filter(
+        (booking) =>
+          (booking.status === 'pending' || booking.status === 'approved') &&
+          booking.bookingDate >= today,
+      )
       .map((booking) => booking.bookingId),
   );
   return access.bookings.filter((booking) => activeIds.has(booking.bookingId));

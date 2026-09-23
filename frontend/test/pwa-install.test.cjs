@@ -90,6 +90,8 @@ test('permission is requested only from the click action and registration proves
   assert.match(source, /applicationServerKey: key/);
   assert.match(source, /bookingsApi\.guestList\(/);
   assert.match(source, /booking\.status === 'pending' \|\| booking\.status === 'approved'/);
+  assert.match(source, /booking\.bookingDate >= today/);
+  assert.match(source, /timeZone: 'Europe\/Kyiv'/);
   assert.match(source, /for \(const booking of activeAccess\)/);
   assert.match(source, /guestDeviceId: access\.guestDeviceId/);
   assert.match(source, /bookingId: booking\.bookingId/);
