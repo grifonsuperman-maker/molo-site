@@ -62,7 +62,7 @@ function registration(overrides = {}) {
     guestAccessToken: 'guest-private-token',
     guestDeviceId: 'guest-device-123',
     subscription: {
-      endpoint: 'https://push.example/subscriptions/abc',
+      endpoint: 'https://fcm.googleapis.com/fcm/send/abc',
       expirationTime: null,
       keys: {
         p256dh: 'Abc_123-xyz',
