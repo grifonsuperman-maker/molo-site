@@ -74,6 +74,7 @@ test('transport keeps VAPID credentials request-scoped', () => {
   assert.doesNotMatch(source, /setVapidDetails/);
   assert.match(source, /vapidDetails:\s*credentials/);
   assert.match(source, /TTL:\s*60 \* 60/);
+  assert.match(source, /timeout:\s*5_000/);
 });
 
 test('booking Push sends every endpoint with only category and body', async () => {
