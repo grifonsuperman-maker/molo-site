@@ -166,6 +166,8 @@ export class GuestPushService {
               await this.subscriptions.delete({
                 bookingId: subscription.bookingId,
                 endpointHash: subscription.endpointHash,
+                p256dh: subscription.p256dh,
+                auth: subscription.auth,
               });
             } catch (cleanupError) {
               console.warn('Guest Push stale subscription cleanup failed', {
