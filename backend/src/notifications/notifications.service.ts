@@ -114,9 +114,14 @@ export class NotificationsService {
   private guestBookingPushText(
     booking: Booking,
     fallbackTitle: string,
+    useGuestNotification = false,
   ) {
-    const title = String(booking.guestNotification?.title || '').trim();
-    const message = String(booking.guestNotification?.message || '').trim();
+    const title = useGuestNotification
+      ? String(booking.guestNotification?.title || '').trim()
+      : '';
+    const message = useGuestNotification
+      ? String(booking.guestNotification?.message || '').trim()
+      : '';
 
     if (title || message) {
       return [title, message].filter(Boolean).join('\n');
@@ -306,7 +311,12 @@ export class NotificationsService {
       this.sendToRoles(['admin', 'waiter'], text),
       this.guestPush.sendBookingNotification(
         booking.id,
-        this.guestBookingPushText(booking, pushTitle),
+        this.guestBookingPushText(
+          booking,
+          pushTitle,
+          booking.cancellationReason === 'no_show' &&
+            booking.guestNotification?.type === 'no_show',
+        ),
       ),
     ]);
   }
@@ -315,6 +325,7 @@ export class NotificationsService {
     const body = this.guestBookingPushText(
       booking,
       'Бронювання оновлено',
+      true,
     );
     return this.guestPush.sendBookingNotification(booking.id, body);
   }
