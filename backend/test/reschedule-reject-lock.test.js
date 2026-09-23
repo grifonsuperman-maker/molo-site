@@ -119,11 +119,13 @@ test('reschedule rejection locks booking before request and publishes guest deci
   assert.match(booking.guestNotification.message, /Час уже зайнятий/);
   assert.deepEqual(observed.guestNotifications, [
     {
+      bookingId: 'booking-1',
       telegramId: 'guest-telegram-1',
       decision: 'rejected',
       bookingDate: '2026-08-29',
       bookingTime: '19:00:00',
       adminComment: 'Час уже зайнятий',
+      guestNotification: booking.guestNotification,
     },
   ]);
   assert.deepEqual(result, { message: 'Перенесення відхилено' });
