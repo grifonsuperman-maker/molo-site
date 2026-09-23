@@ -79,7 +79,7 @@ test('push opt-in is wired only to installed guest home and a ready backend', ()
   assert.match(source, /src="\/pwa-icon-192\.png"/);
 });
 
-test('permission is requested only from the click action and registration proves booking ownership', () => {
+test('permission is requested only from the click action and registration proves every active booking ownership', () => {
   const source = read('src/guest/components/GuestPushOptIn.tsx');
   const handler = source.indexOf('async function enableNotifications()');
   assert.ok(handler > 0);
@@ -88,11 +88,16 @@ test('permission is requested only from the click action and registration proves
   assert.match(source, /onClick=\{\(\) => \{ void enableNotifications\(\); \}\}/);
   assert.match(source, /userVisibleOnly: true/);
   assert.match(source, /applicationServerKey: key/);
+  assert.match(source, /bookingsApi\.guestList\(/);
+  assert.match(source, /booking\.status === 'pending' \|\| booking\.status === 'approved'/);
+  assert.match(source, /for \(const booking of activeAccess\)/);
   assert.match(source, /guestDeviceId: access\.guestDeviceId/);
   assert.match(source, /bookingId: booking\.bookingId/);
   assert.match(source, /guestAccessToken: booking\.token/);
   assert.match(source, /subscription: subscription\.toJSON\(\)/);
+  assert.match(source, /activeAccess\.map\(\(booking\) => booking\.bookingId\)/);
   assert.match(source, /result\?\.enabled !== true/);
+  assert.doesNotMatch(source, /access\.bookings\[0\]/);
   assert.doesNotMatch(read('public/sw.js'), /guestAccessToken|guestDeviceId/);
 });
 
@@ -119,7 +124,8 @@ test('resuming the same PWA screen rechecks the backend even when route does not
   assert.match(source, /setConfigRefresh\(\(current\) => current \+ 1\)/);
   assert.match(source, /window\.addEventListener\('pageshow', refreshOnResume\)/);
   assert.match(source, /document\.addEventListener\('visibilitychange', onVisibilityChange\)/);
-  assert.match(source, /dismissed, configRefresh\]\)/);
+  assert.match(source, /bookingAccessKey,/);
+  assert.match(source, /dismissed,\s*configRefresh,/);
 });
 
 test('dismissal expires after 30 days without losing tab-only dismissal when storage is blocked', () => {

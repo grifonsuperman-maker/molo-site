@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { bookingsApi } from '../../api/bookings';
 import { api } from '../../api/client';
 import { readGuestBrowserAccess } from '../../api/guestAccessRuntime';
 import { isDeveloperRoleSwitcherPath } from '../../developer/developerRoleSwitcher';
@@ -77,9 +78,30 @@ function subscriptionMatchesKey(subscription: PushSubscription | null, key: Uint
     previousKey.every((byte, index) => byte === key[index]);
 }
 
-async function subscriptionFingerprint(bookingId: string, publicKey: string, endpoint: string) {
-  // Do not persist the private guest booking token or raw push endpoint.
-  const data = new TextEncoder().encode(`${bookingId}\n${publicKey}\n${endpoint}`);
+type GuestBrowserAccess = ReturnType<typeof readGuestBrowserAccess>;
+
+function guestBookingAccessKey(access: GuestBrowserAccess) {
+  return [...new Set(access.bookings.map((booking) => booking.bookingId))].sort().join('|');
+}
+
+async function resolveActiveBookingAccess(access: GuestBrowserAccess) {
+  if (access.bookings.length === 0) return [];
+  const bookings = await bookingsApi.guestList(
+    access.guestDeviceId,
+    access.bookings.map((booking) => booking.token),
+  );
+  const activeIds = new Set(
+    bookings
+      .filter((booking) => booking.status === 'pending' || booking.status === 'approved')
+      .map((booking) => booking.bookingId),
+  );
+  return access.bookings.filter((booking) => activeIds.has(booking.bookingId));
+}
+
+async function subscriptionFingerprint(bookingIds: string[], publicKey: string, endpoint: string) {
+  // Do not persist private guest booking tokens or the raw push endpoint.
+  const normalizedBookingIds = [...new Set(bookingIds)].sort().join('\n');
+  const data = new TextEncoder().encode(`${normalizedBookingIds}\n${publicKey}\n${endpoint}`);
   const digest = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -115,6 +137,9 @@ export default function GuestPushOptIn() {
   const [hasBookingAccess, setHasBookingAccess] = useState(
     () => readGuestBrowserAccess().bookings.length > 0,
   );
+  const [bookingAccessKey, setBookingAccessKey] = useState(
+    () => guestBookingAccessKey(readGuestBrowserAccess()),
+  );
   const [dismissed, setDismissed] = useState(wasRecentlyDismissed);
   const dismissedInTabAt = useRef(0);
   const [vapidKey, setVapidKey] = useState('');
@@ -127,7 +152,9 @@ export default function GuestPushOptIn() {
     const refreshContext = () => {
       setOnGuestHome(isGuestHomeVisible());
       setInGuestContext(isGuestContext());
-      setHasBookingAccess(readGuestBrowserAccess().bookings.length > 0);
+      const access = readGuestBrowserAccess();
+      setHasBookingAccess(access.bookings.length > 0);
+      setBookingAccessKey(guestBookingAccessKey(access));
       setInstalled(isInstalled());
     };
     const refreshOnResume = () => {
@@ -177,15 +204,22 @@ export default function GuestPushOptIn() {
         ? config.vapidPublicKey : '';
       if (!key || !(await isValidVapidPublicKey(key)) || cancelled) return;
 
+      const access = readGuestBrowserAccess();
+      const activeAccess = await resolveActiveBookingAccess(access);
+      if (cancelled || activeAccess.length === 0) return;
+
       let alreadyConfirmed = false;
       if (Notification.permission === 'granted') {
         try {
           const worker = await navigator.serviceWorker.getRegistration('/');
           const subscription = await worker?.pushManager.getSubscription();
-          const booking = readGuestBrowserAccess().bookings[0];
           const decodedKey = decodeVapidPublicKey(key);
-          if (subscription && booking && decodedKey && subscriptionMatchesKey(subscription, decodedKey)) {
-            const fingerprint = await subscriptionFingerprint(booking.bookingId, key, subscription.endpoint);
+          if (subscription && decodedKey && subscriptionMatchesKey(subscription, decodedKey)) {
+            const fingerprint = await subscriptionFingerprint(
+              activeAccess.map((booking) => booking.bookingId),
+              key,
+              subscription.endpoint,
+            );
             alreadyConfirmed = fingerprint === readConfirmedFingerprint();
           }
         } catch {
@@ -202,7 +236,15 @@ export default function GuestPushOptIn() {
       }
     });
     return () => { cancelled = true; };
-  }, [onGuestHome, inGuestContext, installed, hasBookingAccess, dismissed, configRefresh]);
+  }, [
+    onGuestHome,
+    inGuestContext,
+    installed,
+    hasBookingAccess,
+    bookingAccessKey,
+    dismissed,
+    configRefresh,
+  ]);
 
   function dismiss() {
     dismissedInTabAt.current = Date.now();
@@ -218,8 +260,7 @@ export default function GuestPushOptIn() {
     if (!vapidKey || working || !isGuestContext() || !isInstalled() ||
       !isGuestHomeVisible() || !hasPushSupport()) return;
     const access = readGuestBrowserAccess();
-    const booking = access.bookings[0];
-    if (!booking) return;
+    if (access.bookings.length === 0) return;
 
     setWorking(true);
     setError('');
@@ -232,6 +273,8 @@ export default function GuestPushOptIn() {
       }
       const key = decodeVapidPublicKey(vapidKey);
       if (!key) throw new Error('Invalid push configuration');
+      const activeAccess = await resolveActiveBookingAccess(access);
+      if (activeAccess.length === 0) throw new Error('No active booking access');
       const worker = await navigator.serviceWorker.register('/sw.js');
       const existing = await worker.pushManager.getSubscription();
       const keyMatches = Boolean(existing && subscriptionMatchesKey(existing, key));
@@ -241,16 +284,22 @@ export default function GuestPushOptIn() {
         // Uint8Array.from above allocates an ArrayBuffer, never a SharedArrayBuffer.
         applicationServerKey: key as Uint8Array<ArrayBuffer>,
       });
-      // A booking access token proves ownership; the backend must validate it,
-      // hash guestDeviceId, and never include tokens in notification payloads.
-      const result = await api.post<{ enabled?: boolean }>('/push/guest/subscriptions', {
-        guestDeviceId: access.guestDeviceId,
-        bookingId: booking.bookingId,
-        guestAccessToken: booking.token,
-        subscription: subscription.toJSON(),
-      });
-      if (result?.enabled !== true) throw new Error('Push registration was not confirmed');
-      const fingerprint = await subscriptionFingerprint(booking.bookingId, vapidKey, subscription.endpoint);
+      // Every active booking keeps its own ownership token and booking-scoped subscription.
+      // The backend hashes guestDeviceId and never includes tokens in notification payloads.
+      for (const booking of activeAccess) {
+        const result = await api.post<{ enabled?: boolean }>('/push/guest/subscriptions', {
+          guestDeviceId: access.guestDeviceId,
+          bookingId: booking.bookingId,
+          guestAccessToken: booking.token,
+          subscription: subscription.toJSON(),
+        });
+        if (result?.enabled !== true) throw new Error('Push registration was not confirmed');
+      }
+      const fingerprint = await subscriptionFingerprint(
+        activeAccess.map((booking) => booking.bookingId),
+        vapidKey,
+        subscription.endpoint,
+      );
       rememberConfirmedFingerprint(fingerprint);
       setCompleted(true);
     } catch {
