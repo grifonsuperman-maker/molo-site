@@ -81,32 +81,6 @@ export class GuestPushService {
       throw new UnauthorizedException('Недійсний доступ до бронювання');
     }
 
-    const tokenHash = hashGuestPushValue(guestAccessToken);
-    const guestDeviceIdHash = hashGuestPushValue(guestDeviceId);
-
-    const booking = await this.bookings
-      .createQueryBuilder('booking')
-      .addSelect('booking.guestDeviceIdHash')
-      .where('booking.id = :bookingId', { bookingId })
-      .andWhere('booking.guestAccessTokenHash = :tokenHash', { tokenHash })
-      .getOne();
-
-    if (!booking) {
-      throw new UnauthorizedException('Недійсний доступ до бронювання');
-    }
-    if (
-      !ACTIVE_BOOKING_STATUSES.has(booking.status) ||
-      booking.bookingDate < guestPushKyivDate()
-    ) {
-      throw new BadRequestException('Сповіщення для цієї броні вже недоступні');
-    }
-    if (
-      booking.guestDeviceIdHash &&
-      booking.guestDeviceIdHash !== guestDeviceIdHash
-    ) {
-      throw new UnauthorizedException('Недійсний доступ до бронювання');
-    }
-
     const endpoint = String(dto.subscription?.endpoint || '').trim();
     const p256dh = String(dto.subscription?.keys?.p256dh || '').trim();
     const auth = String(dto.subscription?.keys?.auth || '').trim();
@@ -130,22 +104,51 @@ export class GuestPushService {
       throw new BadRequestException('Некоректна Push-підписка');
     }
 
+    const tokenHash = hashGuestPushValue(guestAccessToken);
+    const guestDeviceIdHash = hashGuestPushValue(guestDeviceId);
     const endpointHash = hashGuestPushValue(endpoint);
 
-    await this.subscriptions.upsert(
-      {
-        bookingId,
-        endpointHash,
-        guestDeviceIdHash,
-        endpoint,
-        p256dh,
-        auth,
-      },
-      {
-        conflictPaths: ['bookingId', 'endpointHash'],
-        skipUpdateIfNoValuesChanged: true,
-      },
-    );
+    await this.bookings.manager.transaction(async (manager) => {
+      const bookingRepository = manager.getRepository(Booking);
+      const booking = await bookingRepository
+        .createQueryBuilder('booking')
+        .addSelect('booking.guestDeviceIdHash')
+        .where('booking.id = :bookingId', { bookingId })
+        .andWhere('booking.guestAccessTokenHash = :tokenHash', { tokenHash })
+        .setLock('pessimistic_write', undefined, ['booking'])
+        .getOne();
+
+      if (!booking) {
+        throw new UnauthorizedException('Недійсний доступ до бронювання');
+      }
+      if (
+        !ACTIVE_BOOKING_STATUSES.has(booking.status) ||
+        booking.bookingDate < guestPushKyivDate()
+      ) {
+        throw new BadRequestException('Сповіщення для цієї броні вже недоступні');
+      }
+      if (
+        booking.guestDeviceIdHash &&
+        booking.guestDeviceIdHash !== guestDeviceIdHash
+      ) {
+        throw new UnauthorizedException('Недійсний доступ до бронювання');
+      }
+
+      await manager.getRepository(GuestPushSubscription).upsert(
+        {
+          bookingId,
+          endpointHash,
+          guestDeviceIdHash,
+          endpoint,
+          p256dh,
+          auth,
+        },
+        {
+          conflictPaths: ['bookingId', 'endpointHash'],
+          skipUpdateIfNoValuesChanged: true,
+        },
+      );
+    });
 
     return { enabled: true };
   }
