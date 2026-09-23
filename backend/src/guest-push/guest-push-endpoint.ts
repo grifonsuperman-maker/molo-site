@@ -39,7 +39,13 @@ function matchesHostname(hostname: string, suffix: string) {
 }
 
 export function isRecognizedGuestPushEndpoint(value: URL) {
-  if (value.protocol !== 'https:' || (value.port && value.port !== '443')) {
+  if (
+    value.protocol !== 'https:' ||
+    (value.port && value.port !== '443') ||
+    Boolean(value.username) ||
+    Boolean(value.password) ||
+    Boolean(value.hash)
+  ) {
     return false;
   }
 
@@ -65,16 +71,31 @@ export function isPublicGuestPushAddress(address: string) {
   return false;
 }
 
+async function lookupGuestPushAddresses(hostname: string) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      lookup(hostname, { all: true, verbatim: true }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('Web Push DNS lookup timed out')),
+          2_000,
+        );
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export async function assertSafeGuestPushDeliveryEndpoint(endpoint: string) {
   const parsed = new URL(endpoint);
   if (!isRecognizedGuestPushEndpoint(parsed)) {
     throw new Error('Unrecognized Web Push endpoint');
   }
 
-  const addresses = await lookup(parsed.hostname, {
-    all: true,
-    verbatim: true,
-  });
+  const addresses = await lookupGuestPushAddresses(parsed.hostname);
   if (
     addresses.length === 0 ||
     addresses.some((entry) => !isPublicGuestPushAddress(entry.address))
