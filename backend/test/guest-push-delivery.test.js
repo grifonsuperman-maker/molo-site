@@ -132,8 +132,12 @@ test('booking Push sends every endpoint with only category and body', async () =
   const sent = [];
   const repository = {
     async find(options) {
-      assert.deepEqual(options, { where: { bookingId: 'booking-1' } });
-      return rows;
+      assert.deepEqual(options, {
+        where: { bookingId: 'booking-1' },
+        order: { updatedAt: 'DESC', createdAt: 'DESC' },
+        take: 3,
+      });
+      return rows.slice(0, options.take);
     },
     async delete() {},
   };
@@ -165,6 +169,43 @@ test('booking Push sends every endpoint with only category and body', async () =
       subject: SUBJECT,
     });
   }
+});
+
+test('booking Push fan-out is capped even if storage contains more rows', async () => {
+  const rows = Array.from({ length: 8 }, (_, index) =>
+    subscription(
+      `https://push.example.test/sub/${index}`,
+      String(index).padStart(64, '0'),
+    ),
+  );
+  let requestedTake = null;
+  let sends = 0;
+  const service = new GuestPushService(
+    {
+      async find(options) {
+        requestedTake = options.take;
+        return rows.slice(0, options.take);
+      },
+      async delete() {},
+    },
+    {},
+    config(),
+    {
+      async send() {
+        sends += 1;
+        return { statusCode: 201 };
+      },
+    },
+  );
+
+  const result = await service.sendBookingNotification(
+    'booking-1',
+    'Бронювання оновлено',
+  );
+
+  assert.equal(requestedTake, 3);
+  assert.equal(sends, 3);
+  assert.deepEqual(result, { attempted: 3, delivered: 3, failed: 0 });
 });
 
 test('stale endpoints are removed and other delivery failures stay isolated', async () => {
