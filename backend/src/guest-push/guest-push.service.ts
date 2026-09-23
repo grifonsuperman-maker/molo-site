@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createHash } from 'crypto';
+import { createECDH, createHash } from 'crypto';
 import { Repository } from 'typeorm';
 
 import { Booking } from '../bookings/entities/booking.entity';
@@ -35,6 +35,16 @@ function isValidVapidSubject(value: string) {
       (parsed.protocol === 'https:' && Boolean(parsed.hostname)) ||
       (parsed.protocol === 'mailto:' && Boolean(parsed.pathname))
     );
+  } catch {
+    return false;
+  }
+}
+
+function isMatchingVapidKeyPair(publicKey: string, privateKey: string) {
+  try {
+    const ecdh = createECDH('prime256v1');
+    ecdh.setPrivateKey(Buffer.from(privateKey, 'base64url'));
+    return ecdh.getPublicKey().toString('base64url') === publicKey;
   } catch {
     return false;
   }
@@ -77,7 +87,8 @@ export function resolveGuestPushConfig(
     String(enabledValue || '').trim().toLowerCase() === 'true' &&
     VAPID_PUBLIC_KEY.test(publicKey) &&
     VAPID_PRIVATE_KEY.test(privateKey) &&
-    isValidVapidSubject(subject);
+    isValidVapidSubject(subject) &&
+    isMatchingVapidKeyPair(publicKey, privateKey);
 
   return enabled
     ? { enabled: true, vapidPublicKey: publicKey }
