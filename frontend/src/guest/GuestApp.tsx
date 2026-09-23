@@ -748,6 +748,7 @@ export default function GuestApp() {
           const bookings = await bookingsApi.guestList(guestDeviceId, tokens);
           if (stopped) return;
           setMyBookings(bookings);
+          window.dispatchEvent(new Event('molo:guest-bookings-refreshed'));
 
           const activeBookings = bookings.filter(
             (item) => item.status === 'pending' || item.status === 'approved',
