@@ -79,6 +79,7 @@ test('site guestNotification text is reused for no-show, reschedule and table de
     table: { tableNumber: '8' },
     client: null,
     guestNotification: {
+      type: 'no_show',
       title: 'Ваше бронювання анульовано',
       message: 'Бронювання анульовано через неявку протягом 30 хвилин.',
     },
