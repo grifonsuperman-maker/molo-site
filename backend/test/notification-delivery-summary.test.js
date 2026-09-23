@@ -21,7 +21,13 @@ function createService(chatIds, failedChatIds = []) {
     },
   };
 
-  return new NotificationsService(staffRepo, telegramService);
+  const guestPush = {
+    async sendBookingNotification() {
+      return { attempted: 0, delivered: 0, failed: 0 };
+    },
+  };
+
+  return new NotificationsService(staffRepo, telegramService, guestPush);
 }
 
 test("notification delivery summary reports a complete Telegram failure", async () => {

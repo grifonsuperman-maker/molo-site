@@ -134,10 +134,12 @@ test('approved reschedule updates booking and publishes guest decision after com
   assert.equal(observed.requestSaves, 1);
   assert.deepEqual(observed.guestNotifications, [
     {
+      bookingId: 'booking-1',
       telegramId: 'guest-telegram-1',
       decision: 'approved',
       bookingDate: '2026-08-29',
       bookingTime: '20:00:00',
+      guestNotification: booking.guestNotification,
     },
   ]);
 });
@@ -149,9 +151,15 @@ test('direct guest reschedule Telegram notification escapes reason and has no st
       sent.push({ chatId, text, replyMarkup });
     },
   };
-  const service = new NotificationsService({}, telegram);
+  const guestPush = {
+    async sendBookingNotification() {
+      return { attempted: 0, delivered: 0, failed: 0 };
+    },
+  };
+  const service = new NotificationsService({}, telegram, guestPush);
 
   const summary = await service.notifyGuestRescheduleDecision({
+    bookingId: 'booking-1',
     telegramId: 'guest-telegram-1',
     decision: 'rejected',
     bookingDate: '2026-08-29',

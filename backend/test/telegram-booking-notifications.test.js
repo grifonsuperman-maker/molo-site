@@ -21,9 +21,15 @@ function createNotificationsService() {
     },
   };
 
+  const guestPush = {
+    async sendBookingNotification() {
+      return { attempted: 0, delivered: 0, failed: 0 };
+    },
+  };
+
   return {
     sent,
-    service: new NotificationsService(staffRepo, telegram),
+    service: new NotificationsService(staffRepo, telegram, guestPush),
   };
 }
 
@@ -254,7 +260,12 @@ test('off-shift waiter is excluded from operational Telegram notifications', asy
       return { ok: true };
     },
   };
-  const service = new NotificationsService(staffRepo, telegram);
+  const guestPush = {
+    async sendBookingNotification() {
+      return { attempted: 0, delivered: 0, failed: 0 };
+    },
+  };
+  const service = new NotificationsService(staffRepo, telegram, guestPush);
 
   const result = await service.sendToRoles(['waiter'], 'Робоче повідомлення');
 
