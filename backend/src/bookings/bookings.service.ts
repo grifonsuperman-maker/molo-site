@@ -1291,11 +1291,13 @@ export class BookingsService {
 
     await this.safeNotify(() =>
       this.notifications.notifyGuestRescheduleDecision({
+        bookingId: result.booking.id,
         telegramId: result.booking.client?.telegramId || null,
         decision: 'rejected',
         bookingDate: result.booking.bookingDate,
         bookingTime: result.booking.bookingTime,
         adminComment: result.adminComment,
+        guestNotification: result.booking.guestNotification,
       }),
     );
 
