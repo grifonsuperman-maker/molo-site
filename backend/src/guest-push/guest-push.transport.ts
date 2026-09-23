@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
+import { assertSafeGuestPushDeliveryEndpoint } from './guest-push-endpoint';
+
 type WebPushSubscription = {
   endpoint: string;
   keys: {
@@ -39,6 +41,7 @@ export class GuestPushTransport {
     payload: string,
     credentials: GuestPushVapidCredentials,
   ) {
+    await assertSafeGuestPushDeliveryEndpoint(subscription.endpoint);
     return webPush.sendNotification(subscription, payload, {
       TTL: 60 * 60,
       timeout: 5_000,
