@@ -49,6 +49,19 @@ test('sender readiness requires complete VAPID configuration without exposing se
   );
 });
 
+test('transport keeps VAPID credentials request-scoped', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../src/guest-push/guest-push.transport.ts'),
+    'utf8',
+  );
+
+  assert.doesNotMatch(source, /setVapidDetails/);
+  assert.match(source, /vapidDetails:\s*credentials/);
+  assert.match(source, /TTL:\s*60 \* 60/);
+});
+
 test('booking Push sends every endpoint with only category and body', async () => {
   const rows = [
     subscription('https://push.example.test/sub/a', 'a'.repeat(64)),
