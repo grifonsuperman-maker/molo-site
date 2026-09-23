@@ -12,6 +12,7 @@ import { BookingsModule } from './bookings/bookings.module';
 import { BroadcastsModule } from './broadcasts/broadcasts.module';
 import { ClientsModule } from './clients/clients.module';
 import { resolveDatabaseSynchronize } from './database/database-synchronize';
+import { GuestPushModule } from './guest-push/guest-push.module';
 import { HookahCallsModule } from './hookah-calls/hookah-calls.module';
 import { LogsModule } from './logs/logs.module';
 import { MapModule } from './map/map.module';
@@ -124,6 +125,7 @@ const staffPinMigrationOptions = {
     ClientsModule,
     StaffModule,
     BookingsModule,
+    GuestPushModule,
     MapModule,
     AnalyticsModule,
     BroadcastsModule,
