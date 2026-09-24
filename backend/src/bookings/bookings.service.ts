@@ -23,6 +23,27 @@ const DEFAULT_CLEANUP_MINUTES = 15;
 const PENDING_REMINDER_MINUTES = 15;
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 
+type GuestBookingCreateResult = {
+  response: {
+    message: string;
+    bookingId: string;
+    guestAccessToken: string;
+    status: BookingStatus;
+    bookingTime: string;
+    departureTime: string;
+    availableFrom: string;
+    durationMinutes: number;
+    cleanupMinutes: number;
+  };
+  logDetails: {
+    bookingId: string;
+    tableNumber: string;
+    clientName: string;
+    time: string;
+    durationMinutes: number;
+  };
+};
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -636,7 +657,7 @@ export class BookingsService {
   private async createGuestBookingRecord(
     dto: CreateBookingDto,
     manager?: EntityManager,
-  ) {
+  ): Promise<GuestBookingCreateResult> {
     try {
       await this.validateRestaurant(manager);
 
@@ -767,9 +788,7 @@ export class BookingsService {
     return this.createGuestBookingRecord(dto, manager);
   }
 
-  async finishGuestCreate(
-    created: Awaited<ReturnType<BookingsService['createGuestBookingRecord']>>,
-  ) {
+  async finishGuestCreate(created: GuestBookingCreateResult) {
     await this.safeLog('Створено заявку на бронювання', created.logDetails);
 
     await this.safeNotify(async () => {
