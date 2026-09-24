@@ -66,6 +66,7 @@ export class BookingTableLockService {
         'SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))',
         [tableKey, dto.bookingDate],
       );
+      await runner.query("SET LOCAL lock_timeout = '0'");
 
       const result = await work(runner.manager);
       await runner.commitTransaction();
