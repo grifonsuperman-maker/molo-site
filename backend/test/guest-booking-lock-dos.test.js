@@ -92,9 +92,16 @@ test('public guest create lock and protected work use the same transaction conne
   );
   assert.deepEqual(advisoryCall?.[2], ['table-5', '2026-09-25']);
 
+  const resetTimeoutIndex = calls.findIndex(
+    (call) => call[0] === 'query' && String(call[1]).includes("lock_timeout = '0'"),
+  );
+  const workIndex = calls.findIndex((call) => call[0] === 'work');
+  assert.ok(resetTimeoutIndex > calls.indexOf(advisoryCall));
+  assert.ok(resetTimeoutIndex < workIndex);
+
   assert.ok(
     calls.findIndex((call) => call[0] === 'startTransaction') <
-      calls.findIndex((call) => call[0] === 'work'),
+      workIndex,
   );
   assert.ok(
     calls.findIndex((call) => call[0] === 'work') <
