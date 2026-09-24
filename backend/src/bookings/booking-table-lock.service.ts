@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, QueryRunner, Repository } from 'typeorm';
+import { DataSource, EntityManager, QueryRunner, Repository } from 'typeorm';
 
 import { Client } from '../clients/entities/client.entity';
 import { TableEntity } from '../tables/entities/table.entity';
@@ -12,6 +12,8 @@ import {
   normalizeLegacyUkrainePhone,
   ukrainePhoneDigitsVariants,
 } from './guest-contact-validation';
+
+const GUEST_CREATE_LOCK_TIMEOUT_MS = 3000;
 
 type AdvisoryLock = readonly [key: string, scope: string];
 type CreateLockDto = Pick<CreateBookingDto, 'tableId' | 'tableNumber' | 'bookingDate'> & {
@@ -39,6 +41,57 @@ export class BookingTableLockService {
     await this.alignPhoneWithLegacyIdentity(dto);
     const tableKey = await this.resolveTableKey(dto.tableId, dto.tableNumber);
     return this.withLocks([[tableKey, dto.bookingDate]], work);
+  }
+
+  async withGuestCreateTransaction<T>(
+    dto: CreateLockDto,
+    work: (manager: EntityManager) => Promise<T>,
+  ) {
+    await this.alignPhoneWithLegacyIdentity(dto);
+    const tableKey = await this.resolveTableKey(dto.tableId, dto.tableNumber);
+    const runner = this.dataSource.createQueryRunner();
+    let connected = false;
+    let transactionStarted = false;
+
+    try {
+      await runner.connect();
+      connected = true;
+      await runner.startTransaction();
+      transactionStarted = true;
+
+      await runner.query(
+        `SET LOCAL lock_timeout = '${GUEST_CREATE_LOCK_TIMEOUT_MS}ms'`,
+      );
+      await runner.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))',
+        [tableKey, dto.bookingDate],
+      );
+
+      const result = await work(runner.manager);
+      await runner.commitTransaction();
+      transactionStarted = false;
+      return result;
+    } catch (error: any) {
+      if (transactionStarted) {
+        try {
+          await runner.rollbackTransaction();
+        } catch (rollbackError) {
+          console.error('Guest booking transaction rollback failed:', rollbackError);
+        }
+      }
+
+      const code = error?.code || error?.driverError?.code;
+      if (code === '55P03') {
+        throw new ServiceUnavailableException(
+          'Система бронювання зайнята. Спробуйте ще раз.',
+        );
+      }
+      throw error;
+    } finally {
+      if (connected) {
+        await runner.release();
+      }
+    }
   }
 
   async withAvailabilityBlockLock<T>(
