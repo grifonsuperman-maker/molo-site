@@ -164,18 +164,28 @@ export class AvailabilityBlocksService {
       CreateBookingDto,
       'tableId' | 'tableNumber' | 'bookingDate' | 'bookingTime' | 'durationMinutes'
     >,
+    manager?: EntityManager,
   ) {
-    const table = await this.resolveTable(dto.tableId, dto.tableNumber);
+    const table = await this.resolveTable(dto.tableId, dto.tableNumber, manager);
     if (!table) return;
     const start = this.parseTime(dto.bookingTime);
     const end = start + this.normalizeDuration(dto.durationMinutes) + CLEANUP_MINUTES;
-    const block = await this.findBlockConflict(
-      dto.bookingDate,
-      table.id,
-      table.zone?.id || null,
-      start,
-      end,
-    );
+    const block = manager
+      ? await this.findBlockConflictWithManager(
+          manager,
+          this.normalizeDate(dto.bookingDate),
+          table.id,
+          table.zone?.id || null,
+          start,
+          end,
+        )
+      : await this.findBlockConflict(
+          dto.bookingDate,
+          table.id,
+          table.zone?.id || null,
+          start,
+          end,
+        );
     if (block) {
       throw new BadRequestException(
         block.zone
@@ -393,15 +403,20 @@ export class AvailabilityBlocksService {
     };
   }
 
-  private async resolveTable(tableId?: string, tableNumber?: string) {
+  private async resolveTable(
+    tableId?: string,
+    tableNumber?: string,
+    manager?: EntityManager,
+  ) {
     const id = String(tableId || '').trim();
     const number = String(tableNumber || '').trim();
+    const tables = manager?.getRepository(TableEntity) || this.tables;
     if (id && !id.startsWith('visual-')) {
-      const table = await this.tables.findOne({ where: { id }, relations: ['zone'] });
+      const table = await tables.findOne({ where: { id }, relations: ['zone'] });
       if (table) return table;
     }
     if (number) {
-      return this.tables.findOne({ where: { tableNumber: number }, relations: ['zone'] });
+      return tables.findOne({ where: { tableNumber: number }, relations: ['zone'] });
     }
     return null;
   }
