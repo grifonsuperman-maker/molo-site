@@ -41,6 +41,7 @@ test('install invitation is guest-home-only and excludes Telegram and staff invi
   const source = read('src/guest/components/GuestInstallPrompt.tsx');
   const home = read('src/guest/GuestApp.tsx');
   assert.match(source, /const INSTALL_INVITATION_ENABLED = true/);
+  assert.match(source, /molo:pwa:install-dismissed-at:v2/);
   assert.match(source, /isGuestHomeVisible\(\)/);
   assert.match(home, /className="molo-site-mode-badge /);
   assert.match(source, /document\.querySelector\('section\.molo-screen \.molo-site-mode-badge'\)/);
