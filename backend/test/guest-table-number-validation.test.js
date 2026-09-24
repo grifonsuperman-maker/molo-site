@@ -36,10 +36,17 @@ function controllerHarness(options = {}) {
   };
 
   const service = {
-    async create(dto) {
+    async createInTransaction(dto, manager) {
       observed.createCalls += 1;
       observed.createDto = dto;
-      return { message: 'created' };
+      observed.createManager = manager;
+      return {
+        response: { message: 'created' },
+        logDetails: {},
+      };
+    },
+    async finishGuestCreate(created) {
+      return created.response;
     },
   };
   const guestService = {
@@ -52,7 +59,13 @@ function controllerHarness(options = {}) {
     },
   };
   const guestTelegramLink = {};
+  const transactionManager = { id: 'guest-create-manager' };
   const tableLock = {
+    async withGuestCreateTransaction(dto, action) {
+      observed.lockCalls += 1;
+      observed.createDto = dto;
+      return action(transactionManager);
+    },
     async withCreateLock(dto, action) {
       observed.lockCalls += 1;
       observed.createDto = dto;
@@ -60,7 +73,9 @@ function controllerHarness(options = {}) {
     },
   };
   const availabilityBlocks = {
-    async assertBookable() {},
+    async assertBookable(_dto, manager) {
+      observed.availabilityManager = manager;
+    },
   };
   const adminAttention = {
     async requestTableChange(_id, _token, dto) {
@@ -140,6 +155,8 @@ test('public booking with existing table number keeps visual fallback compatible
   assert.equal(observed.createCalls, 1);
   assert.equal(observed.createDto.tableId, 'visual-8');
   assert.equal(observed.createDto.tableNumber, '8');
+  assert.equal(observed.createManager?.id, 'guest-create-manager');
+  assert.equal(observed.availabilityManager?.id, 'guest-create-manager');
 });
 
 test('guest table-change validates booking ownership before checking table number', async () => {
