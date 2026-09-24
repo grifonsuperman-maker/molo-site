@@ -8,8 +8,8 @@ type InstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 };
 
-// Keep PWA registration active, but do not advertise installation until guest Push is ready.
-const INSTALL_INVITATION_ENABLED = false;
+// Guest Push is live in production, so the install invitation can be shown on the guest home screen.
+const INSTALL_INVITATION_ENABLED = true;
 const DISMISSED_AT_KEY = 'molo:pwa:install-dismissed-at:v1';
 const DISMISS_FOR_MS = 30 * 24 * 60 * 60 * 1000;
 
