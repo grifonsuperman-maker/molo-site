@@ -57,10 +57,15 @@ export class BookingsController {
       ? { ...dto, tableNumber: existingTableNumber }
       : dto;
 
-    return this.tableLock.withCreateLock(bookingDto, async () => {
-      await this.availabilityBlocks.assertBookable(bookingDto);
-      return this.service.create(bookingDto);
-    });
+    const created = await this.tableLock.withGuestCreateTransaction(
+      bookingDto,
+      async (manager) => {
+        await this.availabilityBlocks.assertBookable(bookingDto, manager);
+        return this.service.createInTransaction(bookingDto, manager);
+      },
+    );
+
+    return this.service.finishGuestCreate(created);
   }
 
   @Post('admin/manual')
