@@ -235,7 +235,7 @@ export class NotificationsService {
       `🧽 Наступний гість з: <b>${this.availableFromLabel(booking)}</b>`,
       longBookingLine,
       `👥 Гостей: <b>${booking.guestsCount}</b>`,
-      `📝 Побажання: ${booking.wishes || '-'}`,
+      `📝 Побажання: ${this.escapeHtml(booking.wishes || '-')}`,
     ].filter(Boolean).join('\n');
 
     const replyMarkup = {
@@ -269,7 +269,7 @@ export class NotificationsService {
       `🧽 Наступний гість з: <b>${this.availableFromLabel(booking)}</b>`,
       longBookingLine,
       `👥 Гостей: <b>${booking.guestsCount}</b>`,
-      `📝 Побажання: ${booking.wishes || '-'}`,
+      `📝 Побажання: ${this.escapeHtml(booking.wishes || '-')}`,
     ].filter(Boolean).join('\n');
 
     await this.sendToRoles(['waiter'], text);
