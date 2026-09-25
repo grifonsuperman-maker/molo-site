@@ -880,7 +880,11 @@ export class BookingsService {
         bookingIds: bookings.map((booking) => booking.id),
       })
       .andWhere('history.action IN (:...actions)', {
-        actions: ['booking_checked_in', 'waiter_table_transfer'],
+        actions: [
+          'booking_checked_in',
+          'waiter_manual_visit_claimed',
+          'waiter_table_transfer',
+        ],
       })
       .orderBy('history.createdAt', 'DESC')
       .getMany();
@@ -895,7 +899,8 @@ export class BookingsService {
     return bookings.map((booking) => {
       const event = latestAssignmentEvent.get(booking.id);
       const hasAssignedWaiter =
-        event?.action === 'booking_checked_in' &&
+        (event?.action === 'booking_checked_in' ||
+          event?.action === 'waiter_manual_visit_claimed') &&
         event.actorRole === 'waiter' &&
         Boolean(event.actorStaffId);
       const displayBooking = this.withManualGuestDisplayClient(booking);
