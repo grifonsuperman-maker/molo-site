@@ -24,6 +24,7 @@ import { GuestNoShowNoticesService } from './guest-no-show-notices.service';
 import { GuestTableNumberValidationService } from './guest-table-number-validation.service';
 import { GuestTelegramLinkService } from './guest-telegram-link.service';
 import { GuestTimeChangeService } from './guest-time-change.service';
+import { waiterCanSeeBooking } from './waiter-booking-visibility';
 
 @Controller('bookings')
 export class BookingsController {
@@ -121,8 +122,13 @@ export class BookingsController {
 
   @Get('today')
   @Roles('waiter', 'admin', 'owner')
-  today() {
-    return this.service.getToday();
+  async today(@Req() request: { user: AuthUser }) {
+    const bookings = await this.service.getToday();
+    return request.user.role === 'waiter'
+      ? bookings.filter((booking) =>
+          waiterCanSeeBooking(booking, request.user.staffId),
+        )
+      : bookings;
   }
 
   @Get('by-date')
