@@ -50,6 +50,7 @@ async function claimOrAssertBookedTableWaiter(
   manager: EntityManager,
   tableId: string,
   actor: AuthUser,
+  allowClaim: boolean,
 ) {
   if (!actor.staffId) throw new ForbiddenException('Не вдалося визначити офіціанта');
 
@@ -76,6 +77,11 @@ async function claimOrAssertBookedTableWaiter(
 
     if (owner && owner !== actor.staffId) {
       throw new ForbiddenException('Цей стіл обслуговує інший офіціант');
+    }
+    if (!owner && !allowClaim) {
+      throw new BadRequestException(
+        'Цей стіл має активне ручне бронювання. Відкрийте бронювання, щоб почати обслуговування',
+      );
     }
     if (!owner) {
       await histories.save(
@@ -123,7 +129,7 @@ export function createProtectedTablesService(
       });
       if (!table) throw new NotFoundException('Стіл не знайдено');
 
-      await claimOrAssertBookedTableWaiter(manager, id, actor);
+      await claimOrAssertBookedTableWaiter(manager, id, actor, false);
 
       if (status === 'occupied') {
         if (table.status === 'closed') {
@@ -170,7 +176,7 @@ export function createProtectedTablesService(
       });
       if (!table) throw new NotFoundException('Стіл не знайдено');
 
-      await claimOrAssertBookedTableWaiter(manager, id, actor);
+      await claimOrAssertBookedTableWaiter(manager, id, actor, true);
 
       if (table.status !== 'occupied') {
         throw new BadRequestException(
