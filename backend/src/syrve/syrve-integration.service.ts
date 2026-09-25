@@ -9,6 +9,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypt
 import { Repository } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
+import { isProductionRuntime } from '../config/runtime-secrets';
 import { LogsService } from '../logs/logs.service';
 import {
   ConnectSyrveDto,
@@ -16,11 +17,7 @@ import {
   UpdateSyrveConnectionDto,
 } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
-
-type SyrveOrganization = {
-  id: string;
-  name: string;
-};
+import { SyrveClient, SyrveClientException } from './syrve-client';
 
 type EncryptedValue = {
   encrypted: string;
@@ -34,6 +31,7 @@ export class SyrveIntegrationService {
     @InjectRepository(SyrveIntegration)
     private readonly repo: Repository<SyrveIntegration>,
     private readonly logs: LogsService,
+    private readonly client: SyrveClient,
   ) {}
 
   private async findOrCreate() {
@@ -82,7 +80,8 @@ export class SyrveIntegrationService {
   }
 
   private encryptionKey() {
-    const secret = process.env.SYRVE_CREDENTIALS_SECRET || process.env.JWT_SECRET;
+    const secret = process.env.SYRVE_CREDENTIALS_SECRET ||
+      (!isProductionRuntime() ? process.env.JWT_SECRET : undefined);
     if (!secret || secret.length < 16) {
       throw new InternalServerErrorException(
         'На сервері не налаштовано SYRVE_CREDENTIALS_SECRET',
@@ -123,134 +122,23 @@ export class SyrveIntegrationService {
     }
   }
 
-  private normalizeBaseUrl(value: string) {
-    let url: URL;
-    try {
-      url = new URL(value.trim());
-    } catch {
-      throw new BadRequestException('Некоректна адреса Syrve API');
-    }
-
-    if (url.protocol !== 'https:') {
-      throw new BadRequestException('Syrve API має використовувати захищений HTTPS');
-    }
-
-    const host = url.hostname.toLowerCase();
-    const allowed =
-      host === 'syrve.live' ||
-      host.endsWith('.syrve.live') ||
-      host === 'iiko.cloud' ||
-      host.endsWith('.iiko.cloud');
-
-    if (!allowed) {
-      throw new BadRequestException(
-        'Дозволені лише офіційні адреси Syrve Cloud API',
-      );
-    }
-
-    url.pathname = url.pathname.replace(/\/+$/, '');
-    url.search = '';
-    url.hash = '';
-    return url.toString().replace(/\/$/, '');
-  }
-
-  private async postJson<T>(url: string, body: unknown, token?: string): Promise<T> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12_000);
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        redirect: 'error',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(body),
-      });
-
-      const text = await response.text();
-      let payload: any = null;
-      try {
-        payload = text ? JSON.parse(text) : null;
-      } catch {
-        payload = text;
-      }
-
-      if (!response.ok) {
-        const detail =
-          payload?.errorDescription ||
-          payload?.message ||
-          payload?.error ||
-          `HTTP ${response.status}`;
-        throw new BadGatewayException(`Syrve: ${String(detail).slice(0, 300)}`);
-      }
-
-      return payload as T;
-    } catch (error: any) {
-      if (error?.name === 'AbortError') {
-        throw new BadGatewayException('Syrve не відповів протягом 12 секунд');
-      }
-      if (error instanceof BadGatewayException) throw error;
-      throw new BadGatewayException('Не вдалося встановити захищене з’єднання із Syrve');
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  private async fetchOrganizations(apiBaseUrl: string, apiLogin: string) {
-    const baseUrl = this.normalizeBaseUrl(apiBaseUrl);
-    const auth = await this.postJson<{ token?: string } | string>(
-      `${baseUrl}/api/1/access_token`,
-      { apiLogin },
-    );
-    const token = typeof auth === 'string' ? auth : auth?.token;
-    if (!token) throw new BadGatewayException('Syrve не повернув токен доступу');
-
-    const payload = await this.postJson<any>(
-      `${baseUrl}/api/1/organizations`,
-      {
-        organizationIds: null,
-        returnAdditionalInfo: true,
-        includeDisabled: false,
-      },
-      token,
-    );
-
-    const source = Array.isArray(payload) ? payload : payload?.organizations;
-    if (!Array.isArray(source)) {
-      throw new BadGatewayException('Syrve не повернув список організацій');
-    }
-
-    const organizations: SyrveOrganization[] = source
-      .map((item: any) => ({
-        id: String(item?.id || item?.organizationId || ''),
-        name: String(item?.name || item?.organizationName || ''),
-      }))
-      .filter((item: SyrveOrganization) => item.id && item.name);
-
-    if (!organizations.length) {
-      throw new BadGatewayException('У доступі Syrve не знайдено активних організацій');
-    }
-
-    return { baseUrl, organizations };
-  }
-
   async test(dto: TestSyrveConnectionDto) {
-    const result = await this.fetchOrganizations(dto.apiBaseUrl, dto.apiLogin.trim());
+    this.encryptionKey();
+    const result = await this.client.checkOrganizations(dto.apiBaseUrl, dto.apiLogin.trim());
     return {
       message: 'Підключення до Syrve успішно перевірено',
       apiBaseUrl: result.baseUrl,
       organizations: result.organizations,
+      diagnostics: result.diagnostics,
     };
   }
 
   async connect(dto: ConnectSyrveDto, actor?: AuthUser) {
+    this.encryptionKey();
     const apiLogin = dto.apiLogin.trim();
-    const result = await this.fetchOrganizations(dto.apiBaseUrl, apiLogin);
+    const result = await this.client.checkOrganizations(dto.apiBaseUrl, apiLogin);
     const organization = result.organizations.find(
-      (item) => item.id === dto.organizationId,
+      (item) => item.id === dto.organizationId.trim().toLowerCase(),
     );
     if (!organization) {
       throw new BadRequestException('Обрана організація більше не доступна у Syrve');
@@ -291,9 +179,9 @@ export class SyrveIntegrationService {
     const apiLogin = this.decrypt(entity);
 
     try {
-      const result = await this.fetchOrganizations(entity.apiBaseUrl, apiLogin);
+      const result = await this.client.checkOrganizations(entity.apiBaseUrl, apiLogin);
       const organization = result.organizations.find(
-        (item) => item.id === entity.organizationId,
+        (item) => item.id === entity.organizationId?.toLowerCase(),
       );
       if (!organization) {
         throw new BadGatewayException('Обрана організація більше не доступна');
@@ -312,12 +200,15 @@ export class SyrveIntegrationService {
         message: 'Підключення Syrve працює',
         integration: this.response(entity),
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const safeError = error instanceof SyrveClientException || error instanceof BadGatewayException
+        ? error
+        : new InternalServerErrorException('Не вдалося перевірити підключення Syrve');
       entity.status = 'error';
       entity.lastCheckedAt = new Date();
-      entity.lastError = String(error?.message || 'Невідома помилка').slice(0, 500);
+      entity.lastError = safeError.message;
       await this.repo.save(entity);
-      throw error;
+      throw safeError;
     }
   }
 
@@ -325,7 +216,7 @@ export class SyrveIntegrationService {
     const entity = await this.findOrCreate();
     if (dto.displayName !== undefined) entity.displayName = dto.displayName.trim();
     if (dto.apiBaseUrl !== undefined) {
-      entity.apiBaseUrl = this.normalizeBaseUrl(dto.apiBaseUrl);
+      entity.apiBaseUrl = this.client.normalizeBaseUrl(dto.apiBaseUrl);
     }
     await this.repo.save(entity);
     return this.response(entity);
