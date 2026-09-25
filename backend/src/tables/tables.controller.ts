@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import type { AuthUser } from '../auth/types/auth-user.type';
 import { TablesService } from './tables.service';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
@@ -33,8 +34,9 @@ export class TablesController {
   waiterStatus(
     @Param('id') id: string,
     @Body('status') status: 'occupied' | 'free',
+    @Req() request: { user: AuthUser },
   ) {
-    return this.service.setWaiterStatus(id, status);
+    return this.service.setWaiterStatus(id, status, request.user);
   }
 
   @Patch(':id')
@@ -51,20 +53,20 @@ export class TablesController {
 
   @Patch(':id/occupied')
   @Roles('waiter', 'admin', 'owner')
-  occupied(@Param('id') id: string) {
-    return this.service.markOccupied(id);
+  occupied(@Param('id') id: string, @Req() request: { user: AuthUser }) {
+    return this.service.markOccupied(id, request.user);
   }
 
   @Patch(':id/cleaning')
   @Roles('waiter', 'admin', 'owner')
-  cleaning(@Param('id') id: string) {
-    return this.service.markCleaning(id);
+  cleaning(@Param('id') id: string, @Req() request: { user: AuthUser }) {
+    return this.service.markCleaning(id, request.user);
   }
 
   @Patch(':id/free')
   @Roles('waiter', 'admin', 'owner')
-  free(@Param('id') id: string) {
-    return this.service.markFree(id);
+  free(@Param('id') id: string, @Req() request: { user: AuthUser }) {
+    return this.service.markFree(id, request.user);
   }
 
   @Patch(':id/open')
