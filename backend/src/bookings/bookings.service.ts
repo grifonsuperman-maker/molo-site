@@ -887,6 +887,7 @@ export class BookingsService {
         ],
       })
       .orderBy('history.createdAt', 'DESC')
+      .addOrderBy('history.id', 'DESC')
       .getMany();
 
     const latestAssignmentEvent = new Map<string, BookingHistory>();
