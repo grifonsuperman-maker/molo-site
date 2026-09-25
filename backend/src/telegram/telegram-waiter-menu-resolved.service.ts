@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import type { Booking } from '../bookings/entities/booking.entity';
 import { BookingsService } from '../bookings/bookings.service';
+import { waiterCanSeeBooking } from '../bookings/waiter-booking-visibility';
 import { TelegramService } from '../notifications/telegram.service';
 import { TablesService } from '../tables/tables.service';
 import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
@@ -16,17 +17,23 @@ type TodayBooking = Booking & {
 
 const PAGE_SIZE = 10;
 const ACTIVE_BOOKING_STATUSES = new Set(['pending', 'approved']);
+const BOOKING_ACTIONS = new Set(['booking', 'booking_checkin', 'booking_cleaning', 'booking_complete']);
+const TABLE_ACTIONS = new Set(['table_occupied', 'table_free']);
+const TABLE_STATUS_LABELS: Record<string, string> = {
+  free: 'Вільний', pending: 'Очікує', reserved: 'Заброньований',
+  occupied: 'Зайнятий', cleaning: 'Готується', closed: 'Закритий',
+};
 
 @Injectable()
 export class TelegramWaiterMenuResolvedService extends TelegramWaiterMenuService {
   constructor(
     private readonly mineBookingsService: BookingsService,
     private readonly mineWaiterCalls: WaiterCallsService,
-    tables: TablesService,
+    private readonly guardedTables: TablesService,
     private readonly mineTelegram: TelegramService,
     private readonly mineAssignmentLookup: TelegramWaiterAssignmentLookupService,
   ) {
-    super(mineBookingsService, mineWaiterCalls, tables, mineTelegram);
+    super(mineBookingsService, mineWaiterCalls, guardedTables, mineTelegram);
   }
 
   async handle(
@@ -35,7 +42,8 @@ export class TelegramWaiterMenuResolvedService extends TelegramWaiterMenuService
     chatId: string | number,
     actor: AuthUser | null,
   ) {
-    if (action !== 'mine') {
+    if (action !== 'mine' && action !== 'bookings' && !BOOKING_ACTIONS.has(action) &&
+        !TABLE_ACTIONS.has(action)) {
       return super.handle(action, id, chatId, actor);
     }
 
@@ -43,8 +51,71 @@ export class TelegramWaiterMenuResolvedService extends TelegramWaiterMenuService
       throw new BadRequestException('Команда доступна лише Офіціанту на зміні');
     }
 
-    await this.sendMine(chatId, actor.staffId, this.parseMinePage(id));
-    return true;
+    if (action === 'mine') {
+      await this.sendMine(chatId, actor.staffId, this.parseMinePage(id));
+      return true;
+    }
+    if (action === 'bookings') {
+      await this.sendAvailable(chatId, actor.staffId, this.parseMinePage(id));
+      return true;
+    }
+    if (TABLE_ACTIONS.has(action)) {
+      if (!id) throw new BadRequestException('Стіл не вказано');
+      const updated = await this.guardedTables.setWaiterStatus(
+        id, action === 'table_occupied' ? 'occupied' : 'free', actor,
+      );
+      const number = String(updated.tableNumber).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      await this.mineTelegram.sendMessage(
+        chatId,
+        `🪑 Стіл №${number}: <b>${TABLE_STATUS_LABELS[updated.status] || updated.status}</b>`,
+      );
+      return super.handle('table', id, chatId, actor);
+    }
+
+    // An old Telegram callback must not reveal a booking hidden from this waiter.
+    const booking = ((await this.mineBookingsService.getToday()) as TodayBooking[])
+      .find((item) => item.id === id);
+    if (booking && ACTIVE_BOOKING_STATUSES.has(booking.status) &&
+        !waiterCanSeeBooking(booking, actor.staffId)) {
+      throw new NotFoundException('Бронювання не знайдено серед доступних бронювань');
+    }
+    if (action === 'booking_cleaning') {
+      if (!booking?.table || booking.status !== 'approved' || !booking.checkedInAt ||
+          booking.table.status !== 'occupied') {
+        throw new BadRequestException('Почати прибирання для цієї броні зараз не можна');
+      }
+      await this.guardedTables.markCleaning(booking.table.id, actor);
+      await this.mineTelegram.sendMessage(chatId, '🧹 Гості пішли, почато прибирання');
+      return super.handle('booking', id, chatId, actor);
+    }
+    return super.handle(action, id, chatId, actor);
+  }
+
+  private async sendAvailable(chatId: string | number, waiterId: string, requestedPage: number) {
+    const available = ((await this.mineBookingsService.getToday()) as TodayBooking[])
+      .filter((booking) => ACTIVE_BOOKING_STATUSES.has(booking.status) &&
+        waiterCanSeeBooking(booking, waiterId));
+    const page = this.paginateMine(available, requestedPage);
+    const keyboard: Array<Array<Record<string, unknown>>> = page.items.map((booking) => [{
+      text: this.mineBookingButtonLabel(booking),
+      callback_data: `waiter:booking:${booking.id}`,
+    }]);
+    const pageButtons: Array<Record<string, unknown>> = [];
+    if (page.pageIndex > 0) {
+      pageButtons.push({ text: '⬅️', callback_data: `waiter:bookings:${page.pageIndex - 1}` });
+    }
+    if (page.pageIndex + 1 < page.totalPages) {
+      pageButtons.push({ text: '➡️', callback_data: `waiter:bookings:${page.pageIndex + 1}` });
+    }
+    if (pageButtons.length) keyboard.push(pageButtons);
+    keyboard.push([{ text: '⬅️ Назад', callback_data: 'menu:waiter' }]);
+    await this.mineTelegram.sendMessage(
+      chatId,
+      available.length
+        ? `📋 <b>Усі бронювання на сьогодні</b> · ${available.length}\nСторінка ${page.pageIndex + 1}/${page.totalPages}`
+        : '📋 <b>Усі бронювання на сьогодні</b>\n\nБронювань немає.',
+      { inline_keyboard: keyboard },
+    );
   }
 
   private async sendMine(
