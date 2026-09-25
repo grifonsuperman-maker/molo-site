@@ -93,6 +93,7 @@ const staffPinMigrationOptions = {
                 rejectUnauthorized: false,
               },
               extra: {
+                connectionTimeoutMillis: 5000,
                 ssl: {
                   rejectUnauthorized: false,
                 },
@@ -109,6 +110,9 @@ const staffPinMigrationOptions = {
               password:
                 configService.get<string>('DB_PASSWORD') || 'postgres',
               database: dbName || 'molo_restaurant',
+              extra: {
+                connectionTimeoutMillis: 5000,
+              },
               autoLoadEntities: true,
               synchronize: databaseSynchronize,
               ...migrationOptions,
