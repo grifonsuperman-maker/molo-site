@@ -141,6 +141,25 @@ test('second waiter cannot manipulate claimed manual visit', async () => {
   assert.equal(fixture.table.status, 'occupied');
 });
 
+test('walk-in status button cannot claim an unassigned booked visit', async () => {
+  const fixture = harness();
+
+  await assert.rejects(
+    fixture.service.setWaiterStatus(
+      'table-8',
+      'free',
+      { role: 'waiter', staffId: 'serhii', name: 'Сергій' },
+    ),
+    /активне ручне бронювання/,
+  );
+
+  assert.equal(fixture.getAssignment().actorRole, 'admin');
+  assert.equal(
+    fixture.writes.some((item) => item[0] === 'history.save'),
+    false,
+  );
+});
+
 test('walk-in waiter status keeps existing raw behavior when there is no booking', async () => {
   const fixture = harness({ withManualVisit: false });
 
