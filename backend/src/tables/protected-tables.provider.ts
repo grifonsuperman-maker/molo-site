@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, EntityManager, In, IsNull, Not } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { BookingHistory } from '../bookings/entities/booking-history.entity';
