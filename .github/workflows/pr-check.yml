@@ -92,6 +92,8 @@ jobs:
         run: node backend/scripts/syrve-table-link-validation.mjs
       - name: Validate Syrve mapping confirmation and configuration fencing
         run: node backend/scripts/syrve-mapping-validation.mjs
+      - name: Validate physical map identity and immutable UUID bindings
+        run: node backend/scripts/table-map-identity-validation.mjs
       - name: Capture fresh schema audit
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline
@@ -123,3 +125,26 @@ jobs:
             roundtrip-schema-baseline.json
           if-no-files-found: error
           retention-days: 7
+
+  source-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Check current HEAD and whitespace
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
+          git diff --check
+          git diff --check "$BASE_SHA" HEAD
+          git show --check HEAD
+      - name: Verify protected map assets
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: git diff --exit-code "$BASE_SHA" HEAD -- frontend/public

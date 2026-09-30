@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post } from '@nestjs/common';
 import { TablesService } from './tables.service';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
@@ -14,6 +14,13 @@ export class TablesController {
   @Get()
   findAll() {
     return this.service.findAll();
+  }
+
+  @Get('map-identities')
+  @Roles('owner')
+  @Header('Cache-Control', 'no-store')
+  mapIdentityDiagnostics() {
+    return this.service.getMapIdentityDiagnostics();
   }
 
   @Post()

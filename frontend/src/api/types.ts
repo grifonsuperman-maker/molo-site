@@ -64,6 +64,9 @@ export type Zone = {
 export type TableItem = {
   id: string;
   tableNumber: string;
+  // Persisted physical identity; undefined means the legacy schema is in use.
+  mapKey?: string | null;
+  mapLocation?: string | null;
   seats: number;
   shape: string;
   photoUrl: string | null;
@@ -133,6 +136,7 @@ export type MapObject = {
 };
 
 export type FullMapResponse = {
+  mapIdentityPrepared?: boolean;
   restaurant: Restaurant;
   zones: Zone[];
   tables: TableItem[];

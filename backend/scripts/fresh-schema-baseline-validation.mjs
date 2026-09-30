@@ -54,6 +54,7 @@ function loadMigrations(require) {
   } = require('../dist/migrations/2026093000010-CreateSyrveTableLinks.js');
 
   const { FenceSyrveConfiguration2026093000020 } = require('../dist/migrations/2026093000020-FenceSyrveConfiguration.js');
+  const { CreateTableMapIdentities2026093000030 } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
 
   return [
     InitialSchemaBaseline2026081300000,
@@ -68,6 +69,7 @@ function loadMigrations(require) {
     CreateGuestPushSubscriptions2026092000010,
     CreateSyrveTableLinks2026093000010,
     FenceSyrveConfiguration2026093000020,
+    CreateTableMapIdentities2026093000030,
   ];
 }
 

@@ -6,6 +6,7 @@ import { RestaurantService } from '../restaurant/restaurant.service';
 import { TableEntity } from '../tables/entities/table.entity';
 import { Zone } from '../zones/entities/zone.entity';
 import { MapObject } from './entities/map-object.entity';
+import { TableMapIdentityService } from '../tables/table-map-identity.service';
 
 @Injectable()
 export class MapService {
@@ -17,6 +18,7 @@ export class MapService {
     private readonly restaurantService: RestaurantService,
     @InjectRepository(MapObject)
     private readonly objects: Repository<MapObject>,
+    private readonly mapIdentities: TableMapIdentityService,
   ) {}
 
   private restaurant() {
@@ -25,6 +27,9 @@ export class MapService {
 
   async getFullMap() {
     const restaurant = await this.restaurant();
+    const physical = await this.mapIdentities.project(await this.tables.find({
+      relations: ['zone'], order: { tableNumber: 'ASC' } as any,
+    }));
 
     return {
       restaurant,
@@ -32,10 +37,8 @@ export class MapService {
         relations: ['tables'],
         order: { createdAt: 'ASC' } as any,
       }),
-      tables: await this.tables.find({
-        relations: ['zone'],
-        order: { tableNumber: 'ASC' } as any,
-      }),
+      tables: physical.tables,
+      mapIdentityPrepared: physical.prepared,
       objects: await this.objects.find({
         relations: ['zone'],
         order: { createdAt: 'ASC' } as any,
@@ -65,6 +68,8 @@ export class MapService {
       );
     });
 
+    const physical = await this.mapIdentities.project(tables);
+
     const objects = (
       await this.objects.find({
         relations: ['zone'],
@@ -93,7 +98,8 @@ export class MapService {
         mapHeight: (restaurant as any).mapHeight,
       },
       zones,
-      tables,
+      tables: physical.tables,
+      mapIdentityPrepared: physical.prepared,
       objects,
     };
   }
