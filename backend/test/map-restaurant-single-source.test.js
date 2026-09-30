@@ -57,7 +57,9 @@ function createHarness() {
   return {
     calls,
     restaurant,
-    service: new MapService(tables, zones, restaurantService, objects),
+    service: new MapService(tables, zones, restaurantService, objects, {
+      project: async (tables) => ({ prepared: false, tables }),
+    }),
   };
 }
 

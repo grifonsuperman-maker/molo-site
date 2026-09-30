@@ -200,30 +200,42 @@ test('migration locks the source and inserts only unambiguous existing UUIDs', a
   const db = runner();
   await new Migration().up(db);
   const sql = db.queries.join('\n');
-  assert.match(sql, /LOCK TABLE "tables" IN SHARE MODE/);
+  assert.match(sql, /LOCK TABLE "public"\."tables" IN SHARE MODE/);
   assert.match(sql, /WHERE candidates.matches = 1/);
-  assert.match(sql, /FOREIGN KEY \("table_id"\)[\s\S]*REFERENCES "tables" \("id"\) ON DELETE CASCADE/);
+  assert.match(sql, /FOREIGN KEY \("table_id"\)[\s\S]*REFERENCES "public"\."tables" \("id"\) ON DELETE CASCADE/);
   assert.match(sql, /UNIQUE \("map_key"\)/);
   assert.match(sql, /Physical map identity cannot be reassigned/);
   assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM|ALTER TABLE) "tables"/);
   assert.doesNotMatch(sql, /syrve|bookings|map_objects/i);
 });
 
-test('rollback retains all bound UUIDs and never silently loses physical identity', async () => {
-  const db = runner([[{ present: true }], [], [], [{ hasIdentities: true }]]);
-  await assert.rejects(new Migration().down(db), /while binding records exist/);
-  assert.match(db.queries[2], /LOCK TABLE "table_map_identities" IN ACCESS EXCLUSIVE MODE/);
+test('rollback retains every association that cannot be reconstructed exactly', async () => {
+  const db = runner([[{ present: true }], [], [], [], [{ hasUnsafeIdentities: true }]]);
+  await assert.rejects(new Migration().down(db), /non-reconstructable binding records exist/);
+  assert.match(db.queries[2], /LOCK TABLE "public"\."tables" IN SHARE MODE/);
+  assert.match(db.queries[3], /LOCK TABLE "public"\."table_map_identities" IN ACCESS EXCLUSIVE MODE/);
+  assert.match(db.queries[4], /EXCEPT SELECT table_id, map_key FROM restorable/);
+  assert.match(db.queries[4], /SELECT table_id, map_key FROM restorable EXCEPT/);
   assert.doesNotMatch(db.queries.join('\n'), /DROP/);
 });
 
-test('empty rollback drops only the owned table and immutability function', async () => {
-  const db = runner([[{ present: true }], [], [], [{ hasIdentities: false }], [], []]);
+test('lossless rollback drops only reconstructable identities and the owned function', async () => {
+  const db = runner([[{ present: true }], [], [], [], [{ hasUnsafeIdentities: false }], [], []]);
   await new Migration().down(db);
-  assert.equal(db.queries[4], 'DROP TABLE "table_map_identities"');
-  assert.equal(db.queries[5], 'DROP FUNCTION "molo_keep_table_map_identity"()');
+  assert.equal(db.queries[5], 'DROP TABLE "public"."table_map_identities"');
+  assert.equal(db.queries[6], 'DROP FUNCTION "public"."molo_keep_table_map_identity"()');
   const absent = runner([[{ present: false }]]);
   await new Migration().down(absent);
   assert.equal(absent.queries.length, 1);
+});
+
+test('configured schema names are escaped and never become SQL instructions', async () => {
+  const tables = [physicalTable()];
+  const db = dataSource(tables);
+  db.options = { type: 'postgres', schema: 'physical"probe' };
+  await new TableMapIdentityService(db).project(tables);
+  assert.deepEqual(db.queries[0].parameters, ['"physical""probe"."table_map_identities"']);
+  assert.match(db.queries[1].sql, /FROM "physical""probe"\."table_map_identities"/);
 });
 
 test('PostgreSQL identity probe refuses unauthorized and remote targets before connecting', async () => {

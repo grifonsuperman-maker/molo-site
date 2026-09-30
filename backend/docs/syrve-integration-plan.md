@@ -41,6 +41,10 @@ Every later PR starts from freshly fetched main after the Director's manual merg
   maps plus booking statuses; the guest uses the public map plus booking statuses.
   Adding a source to just one response would produce inconsistent role views.
 - `GuestApp` and `AdminVisualTablePlanner` match static map slots by table NUMBER.
+- `ZonesService.onModuleInit` actually seeds 60 standard physical tables and also
+  reconciles existing zone assignments by number. Before renaming, PR 4b must make
+  this bootstrap respect persisted physical identity; otherwise a restart after
+  renumbering could recreate an old-number table or reassign its location.
   `WaiterTablesByLocation` and `AdminTablesByLocation` group by number ranges.
   A database-only rename would therefore change the physical association/location.
 - Booking statuses are `pending`, `approved`, `rejected`, `cancelled`, `completed`.
@@ -195,7 +199,7 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics and proposals by unambiguous numbers (merged #265); no mapping writes or migrations | Syrve client/catalog/service/controller/DTO/module and tests, `frontend/src/api/syrve.ts`, Director dock/preview panel/tests |
 | 3b | Explicit UUID mapping confirmation (merged #266); singleton/configuration revision and stale-preview fencing introduced with the first write transaction | integration entity + migration/registry, mapping DTO/service/controller, Director confirmation UI and PostgreSQL concurrency tests |
 | 4a | Independent immutable physical UUID ↔ map slot storage and read-only diagnostics (this PR); legacy-compatible API projection, no map consumer switch | new table-map entity/service/module/catalog + migration, tables/map API, migration registry/scripts and PostgreSQL tests; frontend API types only |
-| 4b | Switch connected map/location consumers to permanent identity before any rename; preserve missing/hidden-table behavior and frozen geometry/assets | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver and protected-map/booking tests |
+| 4b | Switch connected map/location consumers to permanent identity before any rename; preserve missing/hidden-table behavior and frozen geometry/assets | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver, `backend/src/zones/zones.service.ts` bootstrap identity guard and protected-map/booking/restart tests |
 | 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection | Syrve rename service, table-number uniqueness migration if needed, DTO diagnostics and concurrency tests |
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown | Syrve order client/observer and fixtures/tests; no status application |
 | 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority | isolated Syrve state reducer and regression tests; no enabled worker |
@@ -350,9 +354,11 @@ one slot per UUID, checks known slots, and rejects identity reassignment through
 UPDATE trigger. Later map additions require a new migration; changing the live slot
 catalog cannot rewrite historical migration backfill.
 
-Both migration directions require a transaction. Down locks the binding table and
-refuses any retained bindings instead of discarding the only persistent physical
-association after a rename. MOLO's existing explicit table deletion remains possible
+Both migration directions require a transaction. Down locks the source tables and
+bindings in the same order as up, then compares the complete binding set with the
+frozen, unambiguous backfill in both directions. Only exactly reconstructable
+associations may be rolled back. A rename, duplicate or any extra/missing association
+blocks rollback instead of discarding physical identity. MOLO's existing explicit table deletion remains possible
 and cascades only that table's identity; Syrve has no write path to this table.
 
 The new entity is synchronize:false. The existing TableEntity and its database
@@ -379,9 +385,11 @@ renaming and synchronization not ready/enabled.
 Full backend/frontend builds/tests and exact-HEAD git checks run in GitHub CI.
 Local execution is unavailable because the workspace exec service reports
 `409 Conflict, environment_offline: Environment is not connected`; no local check
-is claimed. The disposable PostgreSQL probe runs the actual compiled service/API
-read paths, legacy reads, backfill ambiguity, constraints, concurrent slot inserts,
-immutability, unchanged physical fields/schema and conservative up/down behavior.
+is claimed. The disposable PostgreSQL probe runs the actual compiled service/API read paths in
+its own temporary schema, cloned only from the guarded disposable database. All 60
+ZonesService-seeded public tables/bindings are compared before/after and stay untouched.
+It verifies legacy reads, backfill ambiguity, constraints, concurrent slot inserts,
+immutability, unchanged physical fields/schema and lossless/prohibited up/down cases.
 
 ## Required regression gates
 

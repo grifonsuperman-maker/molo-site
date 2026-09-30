@@ -12,13 +12,16 @@ export class TableMapIdentityService {
   constructor(private readonly dataSource: DataSource) {}
 
   private async identities(tableIds: string[]) {
+    const options = this.dataSource.options;
+    const schemaName = options?.type === 'postgres' ? options.schema || 'public' : 'public';
+    const relation = '"' + schemaName.replace(/"/g, '""') + '"."table_map_identities"';
     const [state] = await this.dataSource.query(
-      "SELECT to_regclass('public.table_map_identities') IS NOT NULL AS present",
+      'SELECT to_regclass($1) IS NOT NULL AS present', [relation],
     );
     if (!state.present) return { prepared: false, identities: [] as Identity[] };
     if (!tableIds.length) return { prepared: true, identities: [] as Identity[] };
     const identities: Identity[] = await this.dataSource.query(
-      'SELECT "table_id" AS "tableId", "map_key" AS "mapKey" FROM "table_map_identities" WHERE "table_id" = ANY($1::uuid[])',
+      'SELECT "table_id" AS "tableId", "map_key" AS "mapKey" FROM ' + relation + ' WHERE "table_id" = ANY($1::uuid[])',
       [tableIds],
     );
     return { prepared: true, identities };
