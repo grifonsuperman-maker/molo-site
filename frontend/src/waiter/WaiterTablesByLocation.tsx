@@ -3,6 +3,7 @@ import { ArrowLeft, MapPinned, RefreshCw, Table2, X } from 'lucide-react';
 
 import { tablesApi } from '../api/tables';
 import type { TableItem, TableStatus } from '../api/types';
+import { hasPreparedMapIdentity, tableMapLocation } from '../services/tableMapIdentity';
 
 const POLLING_MS = 15_000;
 
@@ -74,16 +75,17 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
     return () => window.clearInterval(timer);
   }, []);
 
+  const mapIdentityPrepared = hasPreparedMapIdentity(tables);
   const locationGroups = useMemo(() => LOCATIONS.map((location) => ({
     ...location,
     tables: tables
-      .filter((table) => table.isVisible !== false && location.accepts(Number(table.tableNumber)))
+      .filter((table) => table.isVisible !== false && tableMapLocation(table, mapIdentityPrepared) === location.key.replace(/-/g, '_'))
       .sort((left, right) => Number(left.tableNumber) - Number(right.tableNumber)),
-  })), [tables]);
+  })), [tables, mapIdentityPrepared]);
 
   const unassignedTables = useMemo(() => tables
-    .filter((table) => table.isVisible !== false && !LOCATIONS.some((location) => location.accepts(Number(table.tableNumber))))
-    .sort((left, right) => Number(left.tableNumber) - Number(right.tableNumber)), [tables]);
+    .filter((table) => table.isVisible !== false && !tableMapLocation(table, mapIdentityPrepared))
+    .sort((left, right) => Number(left.tableNumber) - Number(right.tableNumber)), [tables, mapIdentityPrepared]);
 
   const searchedTable = findExistingVisibleTable(tables, tableSearch);
   const searchedLocation = searchedTable
@@ -107,7 +109,7 @@ export default function WaiterTablesByLocation({ onClose }: { onClose: () => voi
 
     try {
       const updated = await tablesApi.waiterStatus(table.id, status);
-      setTables((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setTables((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
       setNotice(`Стіл №${table.tableNumber}: ${STATUS_LABELS[updated.status]}`);
       await load(true);
     } catch (actionError: any) {

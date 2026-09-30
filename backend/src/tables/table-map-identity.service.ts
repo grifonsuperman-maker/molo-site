@@ -76,7 +76,7 @@ export class TableMapIdentityService {
       summary: { physicalTables: tables.length, bound: bound.length,
         unbound: unbound.length, numberConflicts: numberConflicts.length },
       bound, unbound, numberConflicts,
-      mapConsumersReady: false,
+      mapConsumersReady: snapshot.prepared,
       renamingEnabled: false,
       syncEnabled: false,
     };

@@ -134,7 +134,7 @@ test('Director diagnostics explain duplicate, unsupported and unbound table numb
   assert.deepEqual(result.numberConflicts, [{ number: '12', tableIds: ['a', 'b'] }]);
   assert.deepEqual(result.unbound.map((item) => item.reason),
     ['number_conflict', 'number_conflict', 'unsupported_number', 'not_bound']);
-  assert.equal(result.mapConsumersReady, false);
+  assert.equal(result.mapConsumersReady, true);
   assert.equal(result.renamingEnabled, false);
   assert.equal(result.syncEnabled, false);
   assert.ok(db.queries.every(({ sql }) => sql.startsWith('SELECT')));

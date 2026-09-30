@@ -1,8 +1,8 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 4a starts from fresh main `493563a1389f3e0aeef7486cad7e69397c3e61ea` (2026-09-30),
-after manual merges of PRs #261, #264, #265 and #266. Client diagnostics, link schema preparation,
+PR 4b starts from fresh main `898ad0d361aeaea14977b032a30897e336d58b35` (2026-09-30),
+after manual merges of PRs #261, #264, #265, #266 and #267. Client diagnostics, link schema preparation,
 read-only catalog preview and explicit UUID confirmation are implemented. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
@@ -40,13 +40,14 @@ Every later PR starts from freshly fetched main after the Director's manual merg
   combines physical and booking state. The waiter reads `/tables`; the admin uses
   maps plus booking statuses; the guest uses the public map plus booking statuses.
   Adding a source to just one response would produce inconsistent role views.
-- `GuestApp` and `AdminVisualTablePlanner` match static map slots by table NUMBER.
+- `GuestApp` and `AdminVisualTablePlanner` now match prepared static slots by permanent
+  physical identity, with number lookup retained only for an unprepared legacy response.
 - `ZonesService.onModuleInit` actually seeds 60 standard physical tables and also
-  reconciles existing zone assignments by number. Before renaming, PR 4b must make
-  this bootstrap respect persisted physical identity; otherwise a restart after
-  renumbering could recreate an old-number table or reassign its location.
-  `WaiterTablesByLocation` and `AdminTablesByLocation` group by number ranges.
-  A database-only rename would therefore change the physical association/location.
+  reconciles existing zone assignments by number in a legacy database. PR 4b skips
+  the whole default bootstrap once the independent physical-identity schema exists;
+  repeated restarts neither recreate an old-number table nor reassign its location.
+  `WaiterTablesByLocation` and `AdminTablesByLocation` use permanent key prefixes for
+  prepared grouping. Number-range grouping is retained only before schema adoption.
 - Booking statuses are `pending`, `approved`, `rejected`, `cancelled`, `completed`.
   No-show uses the existing cancelled/reason/notification flow, not a new enum.
   Active duplicate prevention uses pending/approved. Syrve must not modify it.
@@ -198,8 +199,8 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 2 | Link/sync storage and uniqueness; reversible migration with explicit registration/application path; no mapping writes or status changes | new Syrve link entity/migration, module, migration registry and PostgreSQL schema tests |
 | 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics and proposals by unambiguous numbers (merged #265); no mapping writes or migrations | Syrve client/catalog/service/controller/DTO/module and tests, `frontend/src/api/syrve.ts`, Director dock/preview panel/tests |
 | 3b | Explicit UUID mapping confirmation (merged #266); singleton/configuration revision and stale-preview fencing introduced with the first write transaction | integration entity + migration/registry, mapping DTO/service/controller, Director confirmation UI and PostgreSQL concurrency tests |
-| 4a | Independent immutable physical UUID ↔ map slot storage and read-only diagnostics (this PR); legacy-compatible API projection, no map consumer switch | new table-map entity/service/module/catalog + migration, tables/map API, migration registry/scripts and PostgreSQL tests; frontend API types only |
-| 4b | Switch connected map/location consumers to permanent identity before any rename; preserve missing/hidden-table behavior and frozen geometry/assets | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver, `backend/src/zones/zones.service.ts` bootstrap identity guard and protected-map/booking/restart tests |
+| 4a | Independent immutable physical UUID ↔ map slot storage and read-only diagnostics (merged #267); legacy-compatible API projection, no map consumer switch | new table-map entity/service/module/catalog + migration, tables/map API, migration registry/scripts and PostgreSQL tests; frontend API types only |
+| 4b | Connected map/location consumers use permanent identity before any rename (this PR); missing/hidden slots remain unavailable in prepared guest maps, legacy behavior and frozen geometry/assets preserved | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver, `backend/src/zones/zones.service.ts` bootstrap identity guard and protected-map/booking/restart tests |
 | 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection | Syrve rename service, table-number uniqueness migration if needed, DTO diagnostics and concurrency tests |
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown | Syrve order client/observer and fixtures/tests; no status application |
 | 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority | isolated Syrve state reducer and regression tests; no enabled worker |
@@ -390,6 +391,60 @@ its own temporary schema, cloned only from the guarded disposable database. All 
 ZonesService-seeded public tables/bindings are compared before/after and stay untouched.
 It verifies legacy reads, backfill ambiguity, constraints, concurrent slot inserts,
 immutability, unchanged physical fields/schema and lossless/prohibited up/down cases.
+
+### PR 4b physical identity consumer boundary
+
+The shared frontend resolver recognizes the same frozen 60 slots as the existing
+backend catalog and both connected visual maps. Prepared responses resolve geometry
+only through `mapKey`, never through the current number or `mapLocation` alone. A
+missing, unbound, invalid or duplicate slot cannot borrow another UUID by number.
+The map preparation flag also protects an empty/partial prepared map response.
+Legacy responses preserve their old number lookup and guest fallback selection.
+
+Guest status reads use the resolved table's current number, while the active contour
+continues to use its frozen slot. Prepared missing/hidden tables do not render a
+guest click target and cannot create a synthetic booking target. Admin map selection
+uses the resolved physical UUID for existing manual bookings, status actions and
+availability blocks; current numbers are used for status lookup and accessible labels.
+All coordinates, photographs, SVG shapes and click-zone geometry stay frozen.
+
+Guest pre-submit revalidation follows the chosen UUID in a prepared map, rejecting
+deleted, hidden or unbound results instead of choosing a different table with the
+old number. If the same UUID acquired a new number while the form was open, the
+displayed selection is refreshed and a second explicit submit is required. This
+prevents a stale form closure from sending the old number. Existing API payloads,
+contact validation, duration and token/device booking flows stay unchanged.
+
+Both location panels group prepared tables by their permanent physical prefix,
+including the existing hyphenated staff location keys. Unbound/invalid tables stay
+in the existing unassigned list, and hidden filtering, number search, sorting,
+selected UUIDs and 15-second polling are preserved. The waiter response merge retains
+optional identity fields when the existing manual-status endpoint returns the legacy
+physical entity; the sent UUID/status and occupied/free business rules stay unchanged.
+
+`ZonesModule` injects the existing read-only identity service. When the independent
+schema is prepared, `ensureDefaultLocations` returns existing zones without creating
+a restaurant, zones or tables or changing zone assignments. This guard applies even
+when all bindings/slots were intentionally removed; absence cannot trigger reseeding.
+An identity read failure rejects startup before any default-bootstrap write. Before
+schema adoption the original default bootstrap remains intact and idempotent; its
+module-init hook still precedes the guarded migration bootstrap's application hook.
+Director diagnostics report consumer readiness only when the identity schema exists.
+Renaming and synchronization remain disabled.
+
+New regression tests exercise actual connected handlers, map render callbacks,
+current-number status lookups, UUID selection, legacy fallbacks, unbound/hidden/deleted
+slots, a reused old number, prepared partial responses, repeated startup and retained
+waiter identity. Both full map catalogs have frozen source checksums covering their
+geometry, slot labels and image paths. The existing disposable-only PostgreSQL probe
+also invokes the actual compiled ZonesService twice after a synthetic rename and
+again after deleting all physical fixtures; it compares complete tables, zones and
+bindings and leaves all 60 seeded public slots untouched.
+
+No migration, production schema adoption, external Syrve request, status integration,
+worker, environment change or deployment is part of PR 4b. Photographs and section
+range captions still describe the original physical layout; the later rename stage
+must report original/current-number conflicts without rewriting those assets.
 
 ## Required regression gates
 

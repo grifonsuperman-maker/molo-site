@@ -5,6 +5,7 @@ import { bookingsApi, type TableStatusesResponse } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { tablesApi } from '../api/tables';
 import type { FullMapResponse, TableItem, TableStatus } from '../api/types';
+import { hasPreparedMapIdentity, tableMapLocation } from '../services/tableMapIdentity';
 
 const POLLING_MS = 15_000;
 
@@ -122,16 +123,17 @@ export default function AdminTablesByLocation({ onClose }: { onClose: () => void
     };
   }, []);
 
+  const mapIdentityPrepared = hasPreparedMapIdentity(fullMap?.tables || [], fullMap?.mapIdentityPrepared);
   const locationGroups = useMemo(() => LOCATIONS.map((location) => ({
     ...location,
     tables: (fullMap?.tables || [])
-      .filter((table) => table.isVisible !== false && location.accepts(Number(table.tableNumber)))
+      .filter((table) => table.isVisible !== false && tableMapLocation(table, mapIdentityPrepared) === location.key.replace(/-/g, '_'))
       .sort((left, right) => Number(left.tableNumber) - Number(right.tableNumber)),
-  })), [fullMap]);
+  })), [fullMap, mapIdentityPrepared]);
 
   const unassignedTables = useMemo(() => (fullMap?.tables || [])
-    .filter((table) => table.isVisible !== false && !LOCATIONS.some((location) => location.accepts(Number(table.tableNumber))))
-    .sort((left, right) => Number(left.tableNumber) - Number(right.tableNumber)), [fullMap]);
+    .filter((table) => table.isVisible !== false && !tableMapLocation(table, mapIdentityPrepared))
+    .sort((left, right) => Number(left.tableNumber) - Number(right.tableNumber)), [fullMap, mapIdentityPrepared]);
 
   const selectedTable = (fullMap?.tables || []).find((table) => table.id === selectedTableId) || null;
 

@@ -205,7 +205,8 @@ function runSelectVisualTableScenario(callableSource, { visualTable, realTable, 
   };
 
   const selectVisualTable = compileCallable('selectVisualTable', callableSource, {
-    findRealTableByNumber(tableNumber) {
+    mapIdentityPrepared: false,
+    findRealTableForSlot(tableNumber) {
       calls.lookupNumber = tableNumber;
       return realTable;
     },
