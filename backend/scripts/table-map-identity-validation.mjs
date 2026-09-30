@@ -13,6 +13,8 @@ export async function runTableMapIdentityValidation(env = process.env) {
   const { TableMapIdentityService } = require('../dist/tables/table-map-identity.service.js');
   const { TablesService } = require('../dist/tables/tables.service.js');
   const { MapService } = require('../dist/map/map.service.js');
+  const { ZonesService } = require('../dist/zones/zones.service.js');
+  const { Restaurant } = require('../dist/restaurant/entities/restaurant.entity.js');
   const { TableEntity } = require('../dist/tables/entities/table.entity.js');
   const { Zone } = require('../dist/zones/entities/zone.entity.js');
   const { Booking } = require('../dist/bookings/entities/booking.entity.js');
@@ -50,7 +52,7 @@ export async function runTableMapIdentityValidation(env = process.env) {
     // A separate namespace keeps every seeded public table/binding untouched.
     await db.query('CREATE SCHEMA ' + schema);
     schemaCreated = true;
-    for (const table of ['tables', 'zones', 'map_objects']) {
+    for (const table of ['restaurant', 'tables', 'zones', 'map_objects']) {
       await db.query('CREATE TABLE ' + schema + '."' + table + '" (LIKE public."' + table + '" INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)');
     }
     const columnsBefore = await columns();
@@ -70,7 +72,7 @@ export async function runTableMapIdentityValidation(env = process.env) {
     assert.ok(!saved.some((row) => [ids[0], ids[2], ids[3]].includes(row.table_id)));
     const diagnostic = await identities.diagnostics();
     assert.deepEqual(diagnostic.summary, { physicalTables: 6, bound: 3, unbound: 3, numberConflicts: 1 });
-    assert.equal(diagnostic.mapConsumersReady, false);
+    assert.equal(diagnostic.mapConsumersReady, true);
     assert.equal(diagnostic.syncEnabled, false);
 
     const tablesService = new TablesService(db.getRepository(TableEntity), db.getRepository(Zone),
@@ -111,6 +113,18 @@ export async function runTableMapIdentityValidation(env = process.env) {
     assert.equal(renamed.mapKey, 'hall:14');
     assert.equal(renamed.mapLocation, 'hall');
     assert.equal(renamed.status, 'cleaning');
+    const bootstrap = new ZonesService(db.getRepository(Zone), db.getRepository(Restaurant),
+      db.getRepository(TableEntity), identities);
+    const restartSnapshot = async () => ({
+      tables: await db.query('SELECT * FROM ' + schema + '."tables" ORDER BY "id"'),
+      zones: await db.query('SELECT * FROM ' + schema + '."zones" ORDER BY "id"'),
+      bindings: await db.query('SELECT * FROM ' + bindingTable + ' ORDER BY "table_id"'),
+    });
+    const beforeRestart = await restartSnapshot();
+    await bootstrap.onModuleInit();
+    await bootstrap.onModuleInit();
+    assert.deepEqual(await restartSnapshot(), beforeRestart,
+      'Real repeated startup must neither recreate the old number nor move any renamed/unbound UUID.');
     await assert.rejects(inMigration('down'), /non-reconstructable binding records exist/);
 
     const outcomes = await Promise.allSettled([ids[0], ids[3]].map((id) =>
@@ -128,6 +142,9 @@ export async function runTableMapIdentityValidation(env = process.env) {
     await inMigration('up');
     assert.deepEqual(await columns(), columnsBefore);
     assert.equal((await db.query('SELECT count(*)::int AS count FROM ' + bindingTable))[0].count, 0);
+    await bootstrap.onModuleInit();
+    assert.equal((await db.query('SELECT count(*)::int AS count FROM ' + schema + '."tables"'))[0].count, 0,
+      'Prepared empty slots must not be recreated after intentional physical deletion.');
     assert.deepEqual(await publicSnapshot(), baseline, 'All real seeded physical tables/bindings must remain untouched.');
   } finally {
     try {

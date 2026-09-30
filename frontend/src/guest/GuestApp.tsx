@@ -30,6 +30,7 @@ import GuestBookingServiceActions from './GuestBookingServiceActions';
 import GuestHookahCallPanel from './GuestHookahCallPanel';
 import { formatDuration } from './services/durationFormat';
 import { addMinutesToTime } from './services/timeMath';
+import { findTableForMapSlot, hasPreparedMapIdentity, physicalMapSlot } from '../services/tableMapIdentity';
 const FALLBACK_MENU =
   'https://expz.menu/8ec3f3d4-0e9f-4ed7-a03f-5f4deaba843e?utm_source=ig&utm_medium=social&utm_content=link_in_bio';
 
@@ -576,7 +577,7 @@ function VisibleContour({ shape, color }: { shape: VisualTableShape; color: stri
   );
 }
 
-function ClickZone({ table, onPick }: { table: VisualTable; onPick: (table: VisualTable) => void }) {
+function ClickZone({ table, tableNumber, onPick }: { table: VisualTable; tableNumber?: string; onPick: (table: VisualTable) => void }) {
   const data = shapeRenderData(table.shape);
   const commonProps = {
     className: 'molo-svg-hit',
@@ -587,7 +588,7 @@ function ClickZone({ table, onPick }: { table: VisualTable; onPick: (table: Visu
     pointerEvents: 'all' as const,
     role: 'button',
     tabIndex: 0,
-    'aria-label': `Стіл ${table.number}`,
+    'aria-label': `Стіл ${tableNumber ?? table.number}`,
     onClick: () => onPick(table),
     onKeyDown: (event: KeyboardEvent<SVGElement>) => {
       if (event.key === 'Enter' || event.key === ' ') {
@@ -808,6 +809,8 @@ export default function GuestApp() {
     return (map?.tables || []).filter((table) => table.isVisible !== false);
   }, [map]);
 
+  const mapIdentityPrepared = hasPreparedMapIdentity(map?.tables || [], map?.mapIdentityPrepared);
+
   const currentLocation = useMemo(() => {
     return LOCATIONS.find((location) => location.key === selectedLocationKey) ?? LOCATIONS[0];
   }, [selectedLocationKey]);
@@ -875,10 +878,8 @@ export default function GuestApp() {
     return findLocationZone(map?.zones || [], locationKey)?.isClosed === true;
   }
 
-  function findRealTableByNumber(tableNumber: number) {
-    return visibleTables.find(
-      (table) => Number(table.tableNumber) === Number(tableNumber),
-    );
+  function findRealTableForSlot(originalNumber: number) {
+    return findTableForMapSlot(visibleTables, currentLocation.key, originalNumber, mapIdentityPrepared);
   }
 
   function getRuntimeStatus(tableNumber: number | string): TableRuntimeStatus | null {
@@ -886,8 +887,9 @@ export default function GuestApp() {
   }
 
   function getVisualTableStatus(tableNumber: number): TableStatus {
-    const realTable = findRealTableByNumber(tableNumber);
-    const runtime = getRuntimeStatus(tableNumber);
+    const realTable = findRealTableForSlot(tableNumber);
+    if (mapIdentityPrepared && !realTable) return 'closed';
+    const runtime = getRuntimeStatus(realTable?.tableNumber ?? tableNumber);
 
     if (isLocationClosed(selectedLocationKey)) return 'closed';
     if (realTable?.zone?.isClosed) return 'closed';
@@ -1120,7 +1122,8 @@ export default function GuestApp() {
   }
 
   function selectVisualTable(visualTable: VisualTable) {
-    const realTable = findRealTableByNumber(visualTable.number);
+    const realTable = findRealTableForSlot(visualTable.number);
+    if (mapIdentityPrepared && !realTable) return;
     const table = realTable ?? createFallbackTable(visualTable.number, visualTable.seats);
     const status = getSelectableTableStatus(table);
 
@@ -1158,11 +1161,12 @@ export default function GuestApp() {
       const freshStatuses = statusesPayload?.statuses || {};
       const freshMap = getMapFromResponse(mapResponse);
       const freshRestaurant = getRestaurantFromResponse(restaurantResponse);
-      const tableNumber = String(selectedTable.tableNumber);
+      const freshIdentityPrepared = hasPreparedMapIdentity(freshMap?.tables || [], freshMap?.mapIdentityPrepared);
+      const freshTable = (freshMap?.tables || []).find((table) => freshIdentityPrepared
+        ? table.id === selectedTable.id
+        : String(table.tableNumber) === String(selectedTable.tableNumber));
+      const tableNumber = String(freshTable?.tableNumber ?? selectedTable.tableNumber);
       const runtime = freshStatuses[tableNumber] as TableRuntimeStatus | undefined;
-      const freshTable = (freshMap?.tables || []).find(
-        (table) => String(table.tableNumber) === tableNumber,
-      );
       const locationClosed =
         findLocationZone(freshMap?.zones || [], selectedLocationKey)?.isClosed === true;
 
@@ -1173,6 +1177,8 @@ export default function GuestApp() {
       let freshStatus: TableStatus = 'free';
 
       if (
+        (freshIdentityPrepared && (!freshTable || !physicalMapSlot(freshTable.mapKey) ||
+          freshTable.isVisible === false || freshTable.zone?.isVisible === false)) ||
         freshRestaurant?.status === 'closed' ||
         freshRestaurant?.status === 'booking_closed' ||
         locationClosed ||
@@ -1203,9 +1209,15 @@ export default function GuestApp() {
           bookedTo: conflict?.bookedToLabel || bookingEndTime,
           availableFrom: conflict?.availableFromLabel || availableAfterCleanup,
         });
-        setActiveTableNumber(Number(tableNumber));
+        setActiveTableNumber(physicalMapSlot(freshTable?.mapKey)?.number ?? Number(tableNumber));
         setStep('map');
         alert(`Стіл №${tableNumber} вже недоступний. Оберіть інший стіл або час.`);
+        return false;
+      }
+
+      if (freshIdentityPrepared && freshTable && freshTable.tableNumber !== selectedTable.tableNumber) {
+        setSelectedTable(freshTable);
+        alert('Номер обраного столу змінився. Перевірте стіл і підтвердьте бронювання ще раз.');
         return false;
       }
 
@@ -1837,6 +1849,8 @@ export default function GuestApp() {
                 >
 
                   {currentLocation.tables.map((visualTable) => {
+                    const realTable = findRealTableForSlot(visualTable.number);
+                    if (mapIdentityPrepared && !realTable) return null;
                     const status = getVisualTableStatus(visualTable.number);
                     const isActive = activeTableNumber === visualTable.number;
                     const color = getTableNeonColor(status, isActive);
@@ -1851,7 +1865,7 @@ export default function GuestApp() {
                           />
                         )}
 
-                        <ClickZone table={visualTable} onPick={selectVisualTable} />
+                        <ClickZone table={visualTable} tableNumber={realTable?.tableNumber} onPick={selectVisualTable} />
                       </g>
                     );
                   })}

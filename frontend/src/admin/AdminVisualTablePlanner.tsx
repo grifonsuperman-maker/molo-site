@@ -18,6 +18,7 @@ import { bookingsApi, type TableRuntimeStatus } from '../api/bookings';
 import { mapApi } from '../api/map';
 import { tablesApi } from '../api/tables';
 import type { Booking, FullMapResponse, TableItem, Zone } from '../api/types';
+import { findTableForMapSlot } from '../services/tableMapIdentity';
 import {
   formatUkrainePhoneInput,
   isValidGuestName,
@@ -286,11 +287,11 @@ export default function AdminVisualTablePlanner({
   useEffect(() => { setTarget(null); void load(); }, [date, time]);
   useEffect(() => { setManualBookingOpen(false); }, [target?.type, target?.id]);
 
-  function realTable(number: number) { return map?.tables.find((table) => Number(table.tableNumber) === number) || null; }
+  function realTable(number: number) { return findTableForMapSlot(map?.tables || [], location.key, number, map?.mapIdentityPrepared); }
   function tableColor(number: number) {
     const table = realTable(number);
     if (target?.type === 'table' && target.id === table?.id) return '#facc15';
-    const status = statuses[String(number)]?.status || table?.status || 'free';
+    const status = statuses[String(table?.tableNumber ?? number)]?.status || table?.status || 'free';
     if (status === 'closed') return '#bdbdbd';
     if (status === 'occupied') return '#ff3b4f';
     if (status === 'cleaning') return '#67e8f9';
@@ -446,7 +447,7 @@ export default function AdminVisualTablePlanner({
             <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${location.width} ${location.height}`} preserveAspectRatio="none">
               {location.tables.map((visual) => {
                 const table = realTable(visual.number); if (!table) return null;
-                return <Shape key={visual.number} shape={visual.shape} color={tableColor(visual.number)} active={target?.type === 'table' && target.id === table.id} onClick={() => canManage && setTarget({ type: 'table', id: table.id })} label={`Стіл ${visual.number}`} />;
+                return <Shape key={visual.number} shape={visual.shape} color={tableColor(visual.number)} active={target?.type === 'table' && target.id === table.id} onClick={() => canManage && setTarget({ type: 'table', id: table.id })} label={`Стіл ${table.tableNumber}`} />;
               })}
             </svg>
           </div>

@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { Zone } from './entities/zone.entity';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { TableEntity } from '../tables/entities/table.entity';
+import { TableMapIdentityService } from '../tables/table-map-identity.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
 
@@ -101,6 +102,7 @@ export class ZonesService implements OnModuleInit {
 
     @InjectRepository(TableEntity)
     private readonly tables: Repository<TableEntity>,
+    private readonly mapIdentities: TableMapIdentityService,
   ) {}
 
   async onModuleInit() {
@@ -155,6 +157,10 @@ export class ZonesService implements OnModuleInit {
   }
 
   async ensureDefaultLocations() {
+    // Once physical identities exist, absence is intentional. Never recreate a
+    // missing slot or move a renamed UUID by its current number on restart.
+    if ((await this.mapIdentities.project([])).prepared) return this.findAll();
+
     const restaurant = await this.restaurant();
 
     const existingZones = await this.zones.find({
