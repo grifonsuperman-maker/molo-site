@@ -19,6 +19,7 @@ function kyivToday() {
 
 function harness({ withManualVisit = true, owner = null } = {}) {
   const writes = [];
+  const events = [];
   const table = { id: 'table-8', status: withManualVisit ? 'occupied' : 'free' };
   const visit = {
     id: 'booking-8',
@@ -42,14 +43,26 @@ function harness({ withManualVisit = true, owner = null } = {}) {
 
   const bookingRepo = {
     async find(options) {
+      events.push('booking.find');
       if (options?.where?.source === 'admin_manual') {
         return withManualVisit ? [visit] : [];
       }
       return withManualVisit ? [visit] : [];
     },
+    async findOne(options) {
+      events.push(
+        options?.lock?.mode === 'pessimistic_write'
+          ? 'booking.lock'
+          : 'booking.read',
+      );
+      return withManualVisit ? visit : null;
+    },
   };
   const historyRepo = {
-    async findOne() { return assignment; },
+    async findOne() {
+      events.push('history.read');
+      return assignment;
+    },
     create(value) { return value; },
     async save(value) {
       writes.push(['history.save', value.action, value.actorStaffId]);
@@ -59,6 +72,11 @@ function harness({ withManualVisit = true, owner = null } = {}) {
   };
   const tableRepo = {
     async findOne(options) {
+      events.push(
+        options?.lock?.mode === 'pessimistic_write'
+          ? 'table.lock'
+          : 'table.read',
+      );
       if (options?.relations) return table;
       return table;
     },
@@ -108,6 +126,7 @@ function harness({ withManualVisit = true, owner = null } = {}) {
     service: createProtectedTablesService(raw, dataSource),
     table,
     writes,
+    events,
     getAssignment: () => assignment,
   };
 }
@@ -124,6 +143,26 @@ test('first waiter table action claims administrator-checked-in manual visit', a
   assert.equal(fixture.table.status, 'cleaning');
   assert.equal(fixture.getAssignment().action, 'waiter_manual_visit_claimed');
   assert.equal(fixture.getAssignment().actorStaffId, 'serhii');
+});
+
+test('manual visit claim locks booking before table and assignment history', async () => {
+  const fixture = harness();
+
+  await fixture.service.markCleaning('table-8', {
+    role: 'waiter',
+    staffId: 'serhii',
+    name: 'Сергій',
+  });
+
+  const bookingLock = fixture.events.indexOf('booking.lock');
+  const tableLock = fixture.events.indexOf('table.lock');
+  const historyRead = fixture.events.indexOf('history.read');
+
+  assert.notEqual(bookingLock, -1);
+  assert.notEqual(tableLock, -1);
+  assert.notEqual(historyRead, -1);
+  assert.ok(bookingLock < tableLock, 'booking row must lock before table row');
+  assert.ok(bookingLock < historyRead, 'assignment must be read only after booking lock');
 });
 
 test('second waiter cannot manipulate claimed manual visit', async () => {
