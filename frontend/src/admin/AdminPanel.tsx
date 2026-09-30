@@ -7,6 +7,7 @@ import { restaurantApi } from '../api/restaurant';
 import { tablesApi } from '../api/tables';
 import { zonesApi } from '../api/zones';
 import type { Booking, FullMapResponse, HolidayKey, Restaurant, SiteMode, TableItem, TableStatus, Zone } from '../api/types';
+import { hasPreparedMapIdentity, tableMapLocation } from '../services/tableMapIdentity';
 
 type Tab = 'dashboard' | 'bookings' | 'tables' | 'clients' | 'settings';
 type BookingAction = 'approve' | 'reject' | 'cancel' | 'checkIn' | 'complete' | 'noShow' | 'prepareTable';
@@ -269,12 +270,16 @@ function getLocationKeyByTableNumber(value: number): LocationKey {
   return 'other';
 }
 
-function getBookingLocationKey(booking: Booking): LocationKey {
+function getBookingLocationKey(booking: Booking, tables: TableItem[] = [], prepared = false): LocationKey {
+  if (prepared) {
+    const table = tables.find((row) => row.id === booking.table?.id);
+    return table ? getTableLocationKey(table, true) : 'other';
+  }
   return getLocationKeyByTableNumber(tableNumberValue(booking));
 }
 
-function getTableLocationKey(table: TableItem): LocationKey {
-  return getLocationKeyByTableNumber(Number(table.tableNumber || 0));
+function getTableLocationKey(table: TableItem, prepared = false): LocationKey {
+  return tableMapLocation(table, prepared) || 'other';
 }
 
 const LOCATION_ZONE_ALIASES: Record<LocationKey, string[]> = {
@@ -307,11 +312,11 @@ function namedZoneForLocation(zones: Zone[], key: LocationKey) {
   );
 }
 
-function linkedZoneForLocation(tables: TableItem[], zones: Zone[], key: LocationKey) {
+function linkedZoneForLocation(tables: TableItem[], zones: Zone[], key: LocationKey, prepared = false) {
   const counts = new Map<string, number>();
 
   tables
-    .filter((table) => getTableLocationKey(table) === key)
+    .filter((table) => getTableLocationKey(table, prepared) === key)
     .forEach((table) => {
       const zoneId = table.zone?.id;
       if (!zoneId) return;
@@ -421,6 +426,7 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
   const activeBookings = useMemo(() => todayBookings.filter(isActiveBooking), [todayBookings]);
 
   const pendingReminders = useMemo(() => todayBookings.filter(isPendingTooLong), [todayBookings]);
+  const mapIdentityPrepared = hasPreparedMapIdentity(fullMap?.tables || [], fullMap?.mapIdentityPrepared);
 
   const stats = useMemo(() => {
     const pending = todayBookings.filter((booking) => booking.status === 'pending').length;
@@ -451,22 +457,23 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
       byNumber.set(String(table.tableNumber), table as AdminTable);
     });
 
-    ALL_TABLE_NUMBERS.forEach((tableNumber) => {
+    if (!mapIdentityPrepared) ALL_TABLE_NUMBERS.forEach((tableNumber) => {
       const key = String(tableNumber);
       if (!byNumber.has(key)) {
         byNumber.set(key, createVirtualAdminTable(tableNumber));
       }
     });
 
-    return Array.from(byNumber.values()).sort((a, b) => {
+    const rows = mapIdentityPrepared ? [...(fullMap?.tables || [])] as AdminTable[] : Array.from(byNumber.values());
+    return rows.sort((a, b) => {
       const locationDiff =
-        LOCATIONS.findIndex((location) => location.key === getTableLocationKey(a)) -
-        LOCATIONS.findIndex((location) => location.key === getTableLocationKey(b));
+        LOCATIONS.findIndex((location) => location.key === getTableLocationKey(a, mapIdentityPrepared)) -
+        LOCATIONS.findIndex((location) => location.key === getTableLocationKey(b, mapIdentityPrepared));
 
       if (locationDiff !== 0) return locationDiff;
       return Number(a.tableNumber) - Number(b.tableNumber);
     });
-  }, [fullMap]);
+  }, [fullMap, mapIdentityPrepared]);
 
   const tableStats = useMemo(() => {
     const initial: Record<TableStatus, number> = { free: 0, pending: 0, reserved: 0, occupied: 0, cleaning: 0, closed: 0 };
@@ -485,7 +492,7 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
     ) as Record<LocationKey, { total: number; occupied: number; cleaning: number; closed: number; reserved: number; pending: number }>;
 
     tables.forEach((table) => {
-      const key = getTableLocationKey(table);
+      const key = getTableLocationKey(table, mapIdentityPrepared);
       initial[key].total += 1;
       if (table.status === 'occupied') initial[key].occupied += 1;
       if (table.status === 'cleaning') initial[key].cleaning += 1;
@@ -495,14 +502,14 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
     });
 
     return initial;
-  }, [tables]);
+  }, [tables, mapIdentityPrepared]);
 
   const locationZones = useMemo(() => {
     const zones = fullMap?.zones || [];
     const result = Object.fromEntries(
       LOCATIONS.map((location) => {
         const zone =
-          linkedZoneForLocation(tables, zones, location.key) ||
+          linkedZoneForLocation(tables, zones, location.key, mapIdentityPrepared) ||
           namedZoneForLocation(zones, location.key);
 
         return [location.key, zone];
@@ -510,7 +517,7 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
     ) as Record<LocationKey, Zone | null>;
 
     return result;
-  }, [fullMap, tables]);
+  }, [fullMap, tables, mapIdentityPrepared]);
 
   const selectedTableLocation = useMemo(
     () => LOCATIONS.find((location) => location.key === tableView) || null,
@@ -520,8 +527,8 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
   const visibleTables = useMemo(() => {
     if (tableView === 'locations') return [] as AdminTable[];
     if (tableView === 'all') return tables;
-    return tables.filter((table) => getTableLocationKey(table) === tableView);
-  }, [tableView, tables]);
+    return tables.filter((table) => getTableLocationKey(table, mapIdentityPrepared) === tableView);
+  }, [tableView, tables, mapIdentityPrepared]);
 
   const clients = useMemo(() => {
     const map = new Map<string, { name: string; phone: string; bookings: number; guests: number; lastDate: string }>();
@@ -549,12 +556,12 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
     const counts = Object.fromEntries(LOCATIONS.map((location) => [location.key, 0])) as Record<LocationKey, number>;
 
     activeBookings.forEach((booking) => {
-      const key = getBookingLocationKey(booking);
+      const key = getBookingLocationKey(booking, tables, mapIdentityPrepared);
       counts[key] += 1;
     });
 
     return counts;
-  }, [activeBookings]);
+  }, [activeBookings, tables, mapIdentityPrepared]);
 
   const selectedLocation = useMemo(
     () => LOCATIONS.find((location) => location.key === bookingsView) || null,
@@ -566,8 +573,8 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
     if (bookingsView === 'all') return todayBookings;
     if (bookingsView === 'pending') return todayBookings.filter((booking) => booking.status === 'pending');
     if (bookingsView === 'long_pending') return pendingReminders;
-    return todayBookings.filter((booking) => getBookingLocationKey(booking) === bookingsView);
-  }, [bookingsView, todayBookings, pendingReminders]);
+    return todayBookings.filter((booking) => getBookingLocationKey(booking, tables, mapIdentityPrepared) === bookingsView);
+  }, [bookingsView, todayBookings, pendingReminders, tables, mapIdentityPrepared]);
 
   const visibleBookings = useMemo(() => {
     const searchValue = search.trim().toLowerCase();
@@ -735,6 +742,7 @@ export default function AdminPanel({ settingsOnly = false }: { settingsOnly?: bo
 
     try {
       if (table.isVirtual) {
+        if (mapIdentityPrepared) throw new Error('Стіл більше недоступний. Оновіть список столів.');
         const nextStatus: TableStatus = action === 'open' ? 'free' : action === 'close' ? 'closed' : action;
         await tablesApi.setStatusByNumber(String(table.tableNumber), nextStatus);
       } else {

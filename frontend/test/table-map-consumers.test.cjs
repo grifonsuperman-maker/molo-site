@@ -41,6 +41,39 @@ const renamed = table('original-12', 77, 'hall:12');
 const reusedNumber = table('original-15', 12, 'canopy:15');
 const unbound = table('unbound', 14, null);
 
+test('advanced admin panel uses prepared physical rows without synthesizing old number targets', async () => {
+  const file = 'admin/AdminPanel.tsx';
+  const rows = [renamed, reusedNumber, unbound];
+  const getTableLocationKey = callable(file, 'getTableLocationKey', helpers);
+  const getBookingLocationKey = callable(file, 'getBookingLocationKey', {
+    getTableLocationKey, tableNumberValue: callable(file, 'tableNumberValue'),
+    getLocationKeyByTableNumber: callable(file, 'getLocationKeyByTableNumber'),
+  });
+  const deps = { fullMap: { tables: rows, mapIdentityPrepared: true }, mapIdentityPrepared: true,
+    useMemo: (read) => read(), ALL_TABLE_NUMBERS: value(file, 'ALL_TABLE_NUMBERS'),
+    LOCATIONS: value(file, 'LOCATIONS'), createVirtualAdminTable: callable(file, 'createVirtualAdminTable'), getTableLocationKey };
+  const physicalRows = value(file, 'tables', deps);
+  assert.deepEqual(physicalRows.map((row) => row.id), ['original-12', 'original-15', 'unbound']);
+  assert.equal(physicalRows.some((row) => row.isVirtual), false);
+  assert.equal(getTableLocationKey(renamed, true), 'hall');
+  assert.equal(getBookingLocationKey({ table: { id: renamed.id, tableNumber: '12' } }, rows, true), 'hall');
+  assert.equal(getBookingLocationKey({ table: { id: 'deleted', tableNumber: '12' } }, rows, true), 'other');
+  assert.equal(value(file, 'tables', { ...deps, fullMap: { tables: [], mapIdentityPrepared: true } }).length, 0);
+  const legacy = value(file, 'tables', { ...deps, fullMap: { tables: [] }, mapIdentityPrepared: false });
+  assert.equal(legacy.length, 60); assert.ok(legacy.every((row) => row.isVirtual));
+  const calls = [], errors = [];
+  const actions = { mapIdentityPrepared: true, setBusyAction() {}, setNotice() {}, setError: (error) => errors.push(error),
+    tableStatusLabel: (status) => status, load: async () => {}, tablesApi: {
+      occupied: async (id) => calls.push(['occupied', id]), setStatusByNumber: async (number) => calls.push(['number', number]),
+    } };
+  const action = callable(file, 'runTableAction', actions);
+  await action(renamed, 'occupied');
+  assert.deepEqual(calls, [['occupied', 'original-12']]);
+  await action(legacy.find((row) => row.tableNumber === '12'), 'occupied');
+  assert.deepEqual(calls, [['occupied', 'original-12']]);
+  assert.ok(errors.some((message) => message?.includes('Оновіть список')));
+});
+
 test('all 60 frozen slots still match both maps; geometry and image paths match merged PR4a', () => {
   const hashes = {
     [guest]: '0fa112eabf80af7b4857e5b0a5ffcdf9f6b24ab27f3bfea45286338594a5ceae',

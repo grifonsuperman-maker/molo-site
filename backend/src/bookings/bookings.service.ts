@@ -7,6 +7,7 @@ import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { Client } from '../clients/entities/client.entity';
 import { TableEntity } from '../tables/entities/table.entity';
+import { rethrowTableNumberConflict } from '../tables/table-number-conflict';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
 import { CreateAdminManualBookingDto } from './dto/create-admin-manual-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
@@ -274,7 +275,7 @@ export class BookingsService {
           status: 'free',
           isVisible: true,
         }),
-      );
+      ).catch(rethrowTableNumberConflict);
 
       table = await this.tables.findOne({ where: { id: table.id }, relations: ['zone'] });
     }
@@ -307,7 +308,7 @@ export class BookingsService {
   private async setTableStatus(table: TableEntity | null, status: TableEntity['status']) {
     if (!table) return;
     table.status = status;
-    await this.tables.save(table);
+    await this.tables.save({ id: table.id, status: table.status });
   }
 
   private restaurantDateToday() {

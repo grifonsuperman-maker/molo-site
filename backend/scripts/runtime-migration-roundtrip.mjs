@@ -16,9 +16,11 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'CreateSyrveTableLinks2026093000010',
   'FenceSyrveConfiguration2026093000020',
   'CreateTableMapIdentities2026093000030',
+  'ProtectCanonicalTableNumbers2026093000040',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  12: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   11: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   10: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   9: {
@@ -146,6 +148,7 @@ function loadRuntimeMigrations(require) {
 
   const { FenceSyrveConfiguration2026093000020 } = require('../dist/migrations/2026093000020-FenceSyrveConfiguration.js');
   const { CreateTableMapIdentities2026093000030 } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
+  const { ProtectCanonicalTableNumbers2026093000040 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -160,6 +163,7 @@ function loadRuntimeMigrations(require) {
     CreateSyrveTableLinks2026093000010,
     FenceSyrveConfiguration2026093000020,
     CreateTableMapIdentities2026093000030,
+    ProtectCanonicalTableNumbers2026093000040,
   ];
 }
 
@@ -180,6 +184,8 @@ async function readRewindState(dataSource) {
       to_regclass('public.guest_push_subscriptions') IS NOT NULL AS "guestPushSubscriptionsTable",
       to_regclass('public.syrve_table_links') IS NOT NULL AS "syrveTableLinksTable",
       to_regclass('public.table_map_identities') IS NOT NULL AS "tableMapIdentitiesTable",
+      to_regclass('public."UQ_tables_canonical_number"') IS NOT NULL AS "tableNumberUniqueIndex",
+      to_regprocedure('public.molo_canonical_table_number(text)') IS NOT NULL AS "tableNumberFunction",
       EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'TRG_table_map_identities_immutable' AND NOT tgisinternal) AS "tableMapIdentityTrigger",
       EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'molo_keep_table_map_identity' AND pronamespace = 'public'::regnamespace) AS "tableMapIdentityFunction",
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'syrve_integrations' AND column_name = 'configuration_revision') AS "syrveConfigurationRevision",
@@ -278,6 +284,8 @@ async function assertRewindCheckpoint(dataSource, remainingMigrationCount) {
       tableMapIdentitiesTable: remainingMigrationCount >= 12,
       tableMapIdentityTrigger: remainingMigrationCount >= 12,
       tableMapIdentityFunction: remainingMigrationCount >= 12,
+      tableNumberUniqueIndex: remainingMigrationCount >= 13,
+      tableNumberFunction: remainingMigrationCount >= 13,
     },
     `after ${EXPECTED_RUNTIME_MIGRATIONS.length - remainingMigrationCount} undo(s)`,
   );

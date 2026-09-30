@@ -28,6 +28,7 @@ import { CreateGuestPushSubscriptions2026092000010 } from './migrations/20260920
 import { CreateSyrveTableLinks2026093000010 } from './migrations/2026093000010-CreateSyrveTableLinks';
 import { FenceSyrveConfiguration2026093000020 } from './migrations/2026093000020-FenceSyrveConfiguration';
 import { CreateTableMapIdentities2026093000030 } from './migrations/2026093000030-CreateTableMapIdentities';
+import { ProtectCanonicalTableNumbers2026093000040 } from './migrations/2026093000040-ProtectCanonicalTableNumbers';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -87,6 +88,7 @@ const staffPinMigrationOptions = {
                 CreateSyrveTableLinks2026093000010,
                 FenceSyrveConfiguration2026093000020,
                 CreateTableMapIdentities2026093000030,
+                ProtectCanonicalTableNumbers2026093000040,
               ]
             : staffPinMigrationOptions.migrations,
         };

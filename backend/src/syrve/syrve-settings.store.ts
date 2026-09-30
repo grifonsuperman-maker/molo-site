@@ -22,16 +22,20 @@ export class SyrveSettingsStore {
   constructor(private readonly dataSource: DataSource) {}
 
   async read(manager = this.dataSource.manager, lock = false): Promise<SyrveSettingsSnapshot> {
+    const options = this.dataSource.options;
+    const schemaName = options?.type === 'postgres' ? options.schema || 'public' : 'public';
+    const quotedSchema = '"' + schemaName.replace(/"/g, '""') + '"';
     const [schema] = await manager.query(`SELECT
-      to_regclass('public.syrve_integrations') IS NOT NULL AS present,
-      to_regclass('public.syrve_table_links') IS NOT NULL
+      to_regclass($1) IS NOT NULL AS present,
+      to_regclass($2) IS NOT NULL
       AND EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
-        JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'
+        JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $3
         AND c.relname = 'UQ_syrve_integrations_singleton' AND i.indisunique AND i.indisvalid
         AND i.indpred IS NULL AND pg_get_expr(i.indexprs, i.indrelid) = '1')
-      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = $3
         AND table_name = 'syrve_integrations' AND column_name = 'configuration_revision'
-        AND udt_name = 'uuid' AND is_nullable = 'NO') AS prepared`);
+        AND udt_name = 'uuid' AND is_nullable = 'NO') AS prepared`,
+    [quotedSchema + '."syrve_integrations"', quotedSchema + '."syrve_table_links"', schemaName]);
     if (!schema.present) return { prepared: false, entity: null, links: [] };
     const query = manager.getRepository(SyrveIntegration).createQueryBuilder('settings')
       .select(LEGACY_COLUMNS.map((column) => `settings.${column}`)).orderBy('settings.createdAt', 'ASC').take(2);

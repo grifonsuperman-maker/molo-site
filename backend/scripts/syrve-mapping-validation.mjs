@@ -86,7 +86,10 @@ export async function runSyrveMappingValidation(env = process.env) {
     await source.query('UPDATE "tables" SET table_number = $2 WHERE id = $1', [tableIds[0], String(number)]);
 
     const beforeDuplicate = await preview();
-    await source.query('INSERT INTO "tables" (id, table_number) VALUES ($1, $2)', [tableIds[2], String(number)]);
+    await assert.rejects(source.query('INSERT INTO "tables" (id, table_number) VALUES ($1, $2)', [tableIds[2], String(number)]),
+      (error) => error.code === '23505' && error.constraint === 'UQ_tables_canonical_number');
+    // A rejected duplicate changes nothing; a new valid table still fences the preview.
+    await source.query('INSERT INTO "tables" (id, table_number) VALUES ($1, $2)', [tableIds[2], String(number + 20)]);
     await assert.rejects(service.connect(dto(input, beforeDuplicate)), (error) => error.getStatus() === 409);
     await source.query('DELETE FROM "tables" WHERE id = $1', [tableIds[2]]);
     const offline = await preview();

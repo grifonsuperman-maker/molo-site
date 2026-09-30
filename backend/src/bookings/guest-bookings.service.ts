@@ -470,7 +470,7 @@ export class GuestBookingsService {
     if (!table || ['closed', 'cleaning', 'occupied'].includes(table.status)) return;
 
     table.status = bookingStatus === 'approved' ? 'reserved' : 'pending';
-    await tableRepository.save(table);
+    await tableRepository.save({ id: table.id, status: table.status });
   }
 
   private async saveHistory(

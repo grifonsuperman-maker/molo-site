@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
@@ -8,6 +8,7 @@ import { UpdateTableDto } from './dto/update-table.dto';
 import { TableEntity, TableStatus } from './entities/table.entity';
 import { Zone } from '../zones/entities/zone.entity';
 import { TableMapIdentityService } from './table-map-identity.service';
+import { rethrowTableNumberConflict } from './table-number-conflict';
 
 const ACTIVE_BOOKING_STATUSES = ['pending', 'approved'] as const;
 
@@ -55,10 +56,15 @@ export class TablesService {
         status: 'free',
         isVisible: true,
       }),
-    );
+    ).catch(rethrowTableNumberConflict);
   }
 
   async findOrCreateByNumber(tableNumber: string) {
+    if ((await this.mapIdentities.project([])).prepared) {
+      // A stale number may now belong to another UUID or an intentionally empty
+      // physical slot. Prepared clients must send the selected table UUID.
+      throw new ConflictException('Номер столу міг змінитися. Оновіть список та оберіть стіл знову.');
+    }
     const normalized = String(tableNumber || '').trim();
     let table = await this.tables.findOne({ where: { tableNumber: normalized }, relations: ['zone'] });
 
@@ -78,7 +84,7 @@ export class TablesService {
         status: 'free',
         isVisible: true,
       }),
-    );
+    ).catch(rethrowTableNumberConflict);
 
     return this.tables.findOne({ where: { id: table.id }, relations: ['zone'] });
   }
@@ -93,12 +99,17 @@ export class TablesService {
       table.zone = zone;
     }
 
-    Object.assign(
-      table,
-      Object.fromEntries(Object.entries(dto).filter(([key]) => key !== 'zoneId')),
-    );
+    // Save only explicitly requested fields, never a stale copy of its number.
+    await this.tables.save({ id: table.id,
+      ...Object.fromEntries(Object.entries(dto).filter(([key]) => key !== 'zoneId')),
+      ...(dto.zoneId ? { zone: table.zone } : {}),
+    }).catch(rethrowTableNumberConflict);
+    return this.tables.findOne({ where: { id }, relations: ['zone'] });
+  }
 
-    return this.tables.save(table);
+  private async saveStatus(table: TableEntity) {
+    await this.tables.save({ id: table.id, status: table.status });
+    return this.tables.findOne({ where: { id: table.id }, relations: ['zone'] });
   }
 
   async setStatus(id: string, status: TableStatus) {
@@ -106,7 +117,7 @@ export class TablesService {
     if (!table) throw new NotFoundException('Стіл не знайдено');
 
     table.status = status;
-    return this.tables.save(table);
+    return this.saveStatus(table);
   }
 
   async setStatusByNumber(tableNumber: string, status: TableStatus) {
@@ -114,7 +125,7 @@ export class TablesService {
     if (!table) throw new NotFoundException('Стіл не знайдено');
 
     table.status = status;
-    return this.tables.save(table);
+    return this.saveStatus(table);
   }
 
   async setWaiterStatus(id: string, status: 'occupied' | 'free') {
@@ -134,7 +145,7 @@ export class TablesService {
       }
 
       table.status = 'occupied';
-      return this.tables.save(table);
+      return this.saveStatus(table);
     }
 
     const activeBookings = await this.bookings.find({
@@ -156,7 +167,7 @@ export class TablesService {
       table.status = 'free';
     }
 
-    return this.tables.save(table);
+    return this.saveStatus(table);
   }
 
   markOccupied(id: string) {
