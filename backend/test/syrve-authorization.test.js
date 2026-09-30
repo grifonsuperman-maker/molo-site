@@ -11,7 +11,7 @@ const { SyrveIntegrationService } = require('../dist/syrve/syrve-integration.ser
 
 test('real JWT and role guards protect every Syrve route from non-Directors', async (t) => {
   let serviceCalls = 0;
-  const service = Object.fromEntries(['getStatus', 'test', 'connect', 'recheck', 'updateMetadata', 'disconnect']
+  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'connect', 'recheck', 'updateMetadata', 'disconnect']
     .map((method) => [method, async () => { serviceCalls++; return { syncEnabled: false }; }]));
   const module = await Test.createTestingModule({
     controllers: [SyrveIntegrationController],
@@ -30,9 +30,11 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
   t.after(() => app.close());
   const base = await app.getUrl();
   const input = { displayName: 'MOLO', apiBaseUrl: 'https://api-eu.syrve.live', apiLogin: 'test-only-login',
-    organizationId: '11111111-2222-3333-4444-555555555555', organizationName: 'MOLO' };
+    organizationId: '11111111-2222-4333-8444-555555555555', organizationName: 'MOLO' };
   const routes = [['GET', '', null], ['POST', '/test', { displayName: input.displayName,
     apiBaseUrl: input.apiBaseUrl, apiLogin: input.apiLogin }], ['POST', '/connect', input],
+    ['POST', '/tables-preview', { displayName: input.displayName, apiBaseUrl: input.apiBaseUrl,
+      apiLogin: input.apiLogin, organizationId: input.organizationId }],
     ['POST', '/recheck', {}], ['PATCH', '', { displayName: 'MOLO' }], ['POST', '/disconnect', {}]];
   for (const [method, path, body] of routes) {
     for (const [role, expected] of [[null, 401], ['invalid', 401], ['guest', 403],
@@ -45,6 +47,15 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
       await response.text();
       assert.equal(response.status, expected, `${method} ${path} for ${role}`);
       assert.equal(serviceCalls - before, role === 'owner' ? 1 : 0);
+      if (path === '/tables-preview' && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
     }
   }
+  const before = serviceCalls;
+  const invalid = await fetch(`${base}/syrve-integration/tables-preview`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({ displayName: input.displayName, apiBaseUrl: input.apiBaseUrl,
+      apiLogin: input.apiLogin, organizationId: 'invalid' }),
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal(serviceCalls, before);
 });

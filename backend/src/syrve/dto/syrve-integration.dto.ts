@@ -2,6 +2,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -32,6 +33,11 @@ export class ConnectSyrveDto extends TestSyrveConnectionDto {
   @MinLength(1)
   @MaxLength(240)
   organizationName: string;
+}
+
+export class PreviewSyrveTablesDto extends TestSyrveConnectionDto {
+  @IsUUID('all')
+  organizationId: string;
 }
 
 export class UpdateSyrveConnectionDto {

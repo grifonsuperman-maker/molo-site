@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Header, Patch, Post, Req } from '@nestjs/common';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
   ConnectSyrveDto,
+  PreviewSyrveTablesDto,
   TestSyrveConnectionDto,
   UpdateSyrveConnectionDto,
 } from './dto/syrve-integration.dto';
@@ -30,6 +31,12 @@ export class SyrveIntegrationController {
     @Req() request: { user?: AuthUser },
   ) {
     return this.service.connect(dto, request.user);
+  }
+
+  @Post('tables-preview')
+  @Header('Cache-Control', 'no-store')
+  previewTables(@Body() dto: PreviewSyrveTablesDto) {
+    return this.service.previewTables(dto);
   }
 
   @Post('recheck')

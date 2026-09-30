@@ -1,7 +1,9 @@
 # Syrve: audit, safety boundaries and staged implementation
 
-Audited main: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-Only PR 1 is implemented with this document. Real Syrve is not connected or
+Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
+PR 3 starts from fresh main `4740f75ac3e941a048d2bc7fe07ce51ef568bb65` (2026-09-30),
+after manual merges of PRs #261 and #264. Client diagnostics, link schema preparation
+and read-only catalog preview are implemented. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
@@ -18,8 +20,9 @@ Every later PR starts from freshly fetched main after the Director's manual merg
 - `SyrveIntegrationService` stores the API login with AES-256-GCM, a random
   12-byte IV and authentication tag. Responses are explicit projections, including
   a masked login, never ciphertext or the upstream access token.
-- `syncEnabled` is hard-coded to false. No Syrve scheduler, table links, orders,
-  manual order overrides or status integration currently exist.
+- `syncEnabled` is hard-coded to false. The link/sync schema is prepared by PR 2;
+  no actual mapping writes, scheduler, order observations, manual-action hooks or
+  status integration are enabled.
 - The existing `1785362400000-CreateSyrveIntegration.ts` has up/down, and the fresh
   schema baseline contains `syrve_integrations`. This legacy migration is NOT in
   `AppModule`'s runtime migration list. A file's existence does not establish its
@@ -55,6 +58,16 @@ Sources retrieved directly on 2026-09-25:
 - https://api-eu.syrve.live/api-docs/docs (official OpenAPI; downloaded SHA-256:
   `35bef7ee322929566fcd481b8892553f6d57903c0df586c77b1631083dfdb87f`).
 - The specification directs application registration to https://developers.syrve.com/portal.
+
+Catalog contract rechecked from the same official OpenAPI on 2026-09-30; SHA-256:
+`344c44240dee9724129b9d0821295da411c4ab4fde2dcbc5ff9b8d17ab2bd2d9`.
+Terminal responses contain organization-scoped `items` wrappers in both
+`terminalGroups` and `terminalGroupsInSleep`; each group's organization must match.
+Sections are scoped by `terminalGroupId`, with tables containing cloud `id`, integer
+`number` and mandatory `isDeleted`. `posId` is not the cloud table identity. This
+endpoint covers sections available for banquet/reserve booking, not a guaranteed
+complete inventory of every physical restaurant table. PR 3 labels that limitation
+and sleeping groups explicitly; no missing entry establishes closure or deletion.
 
 | Purpose | Documented POST endpoint | Relevant fields / restriction |
 | --- | --- | --- |
@@ -172,9 +185,10 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 
 | PR | Scope and acceptance gate | Expected files |
 | --- | --- | --- |
-| 1 | Safe auth/organization client and diagnostics (this PR) | `src/syrve/syrve-client.ts`, service/module, `test/syrve-*.test.js`, `.env*example`, this document |
+| 1 | Safe auth/organization client and diagnostics (merged #261) | `src/syrve/syrve-client.ts`, service/module, `test/syrve-*.test.js`, `.env*example`, this document |
 | 2 | Link/sync storage and uniqueness; reversible migration with explicit registration/application path; no mapping writes or status changes | new Syrve link entity/migration, module, migration registry and PostgreSQL schema tests |
-| 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics, proposals by unambiguous numbers; explicit UUID mapping confirmation, singleton/configuration revision fencing | Syrve client/service/controller/DTOs, integration entity + migration and tests, `frontend/src/api/syrve.ts`, `SyrveIntegrationDock.tsx` |
+| 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics and proposals by unambiguous numbers (this PR); no mapping writes or migrations | Syrve client/catalog/service/controller/DTO/module and tests, `frontend/src/api/syrve.ts`, Director dock/preview panel/tests |
+| 3b | Explicit UUID mapping confirmation; singleton/configuration revision and stale-preview fencing introduced with the first write transaction | integration entity + migration/registry, mapping DTO/service/controller, Director confirmation UI and PostgreSQL concurrency tests |
 | 4 | Stable physical map identity and location before any rename; frozen geometry/asset comparison | table entity + migration, map/table API DTOs, `GuestApp.tsx`, `AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, protected-map tests |
 | 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection | Syrve rename service, table-number uniqueness migration if needed, DTO diagnostics and concurrency tests |
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown | Syrve order client/observer and fixtures/tests; no status application |
@@ -217,9 +231,37 @@ covered by existing schema roundtrip/fresh-baseline CI. The additional disposabl
 PostgreSQL probe checks real FK/unique/check constraints, concurrent mapping inserts,
 last-valid-state preservation and unchanged physical fields.
 
-Singleton connection enforcement and configuration revision move to PR 3 so they are
+Singleton connection enforcement and configuration revision move to PR 3b so they are
 introduced together with the first actual mapping write transaction. PR 2 adds no
 HTTP routes, mapping service, polling, worker or activation; `syncEnabled` stays false.
+
+### PR 3 read-only preview boundary
+
+`POST /syrve-integration/tables-preview` is Director-only under the existing JWT/role
+guards, validates the selected organization UUID and returns `Cache-Control: no-store`.
+One request-local token session checks organization access, reads terminal groups and
+reads sections for active groups with `returnSchema: false`. Sleeping groups are only
+reported: no awake/init/order/webhook command is sent. The existing 12-second per-request
+deadline, 1 MiB body limit, fixed HTTPS origin and safe errors also apply to the catalog.
+Foreign-scope responses or malformed/missing fields needed for catalog identity,
+number and deletion checks reject the entire preview; undeclared fields are not exposed.
+
+MOLO reads only existing table UUIDs/numbers. Preview never calls `TablesService`,
+creates a table, reads/writes prepared links, saves integration state or writes logs.
+Cloud table IDs and number comparisons generate suggestions only. Duplicate IDs,
+duplicate canonical numbers, deleted tables and unsupported numbers never generate an
+ambiguous pair. Missing provider/MOLO entries and conflicts are separate diagnostics.
+Errors leave all MOLO/manual/booking state unchanged. Every preview reports mapping
+confirmation unavailable, orders not checked and sync disabled; it is not an activation
+or proof that the catalog covers all restaurant tables.
+
+The Ukrainian Director panel adds an explicit table check before its existing credential
+save. It shows counts, suggested table-number pairs backed by UUIDs, missing entries, conflicts, deleted entries
+and coverage warnings. Changing organization/rechecking/closing clears the preview;
+request versions reject late success/error responses. Closing also clears the typed key.
+No key or upstream token is returned to the browser or stored in browser persistence.
+Connection saving still only saves the existing encrypted settings; no mapping/worker
+is enabled. PR 3b remains a separate, newly authorized PR after merge and fresh main.
 
 ## Required regression gates
 

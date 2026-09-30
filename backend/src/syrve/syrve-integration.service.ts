@@ -11,13 +11,16 @@ import { Repository } from 'typeorm';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { isProductionRuntime } from '../config/runtime-secrets';
 import { LogsService } from '../logs/logs.service';
+import { TableEntity } from '../tables/entities/table.entity';
 import {
   ConnectSyrveDto,
+  PreviewSyrveTablesDto,
   TestSyrveConnectionDto,
   UpdateSyrveConnectionDto,
 } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
 import { SyrveClient, SyrveClientException } from './syrve-client';
+import { buildSyrveCatalogPreview } from './syrve-catalog';
 
 type EncryptedValue = {
   encrypted: string;
@@ -32,6 +35,8 @@ export class SyrveIntegrationService {
     private readonly repo: Repository<SyrveIntegration>,
     private readonly logs: LogsService,
     private readonly client: SyrveClient,
+    @InjectRepository(TableEntity)
+    private readonly tablesRepo: Repository<TableEntity>,
   ) {}
 
   private async findOrCreate() {
@@ -131,6 +136,14 @@ export class SyrveIntegrationService {
       organizations: result.organizations,
       diagnostics: result.diagnostics,
     };
+  }
+
+  async previewTables(dto: PreviewSyrveTablesDto) {
+    this.encryptionKey();
+    const catalog = await this.client.getCatalog(dto.apiBaseUrl, dto.apiLogin.trim(), dto.organizationId);
+    const tables = await this.tablesRepo.find({ select: { id: true, tableNumber: true }, order: { tableNumber: 'ASC' } });
+    // No findOrCreate, integration/link access, logging or physical-table writes.
+    return buildSyrveCatalogPreview(catalog, tables);
   }
 
   async connect(dto: ConnectSyrveDto, actor?: AuthUser) {
