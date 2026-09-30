@@ -61,8 +61,11 @@ export class TelegramWaiterMenuResolvedService extends TelegramWaiterMenuService
     }
     if (TABLE_ACTIONS.has(action)) {
       if (!id) throw new BadRequestException('Стіл не вказано');
+      const visibleTable = (await this.guardedTables.findAll())
+        .find((table) => table.id === id && table.isVisible !== false);
+      if (!visibleTable) throw new NotFoundException('Стіл не знайдено');
       const updated = await this.guardedTables.setWaiterStatus(
-        id, action === 'table_occupied' ? 'occupied' : 'free', actor,
+        visibleTable.id, action === 'table_occupied' ? 'occupied' : 'free', actor,
       );
       const number = String(updated.tableNumber).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       await this.mineTelegram.sendMessage(
