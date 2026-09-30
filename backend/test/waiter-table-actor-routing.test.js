@@ -86,6 +86,24 @@ test('Telegram booking cleaning passes accepting waiter identity', async () => {
   assert.deepEqual(calls, [['cleaning', 'table-8', actor]]);
 });
 
+test('stale Telegram callback cannot mutate a hidden table', async () => {
+  const { menu, calls } = menuHarness();
+  menu.guardedTables.findAll = async () => [{
+    id: 'table-8',
+    tableNumber: '8',
+    status: 'occupied',
+    isVisible: false,
+    seats: 4,
+  }];
+
+  await assert.rejects(
+    menu.handle('table_free', 'table-8', 'chat', actor),
+    /Стіл не знайдено/,
+  );
+
+  assert.deepEqual(calls, []);
+});
+
 test('Telegram walk-in occupied/free still routes through same table actions with actor', async () => {
   const { menu, calls } = menuHarness();
 
