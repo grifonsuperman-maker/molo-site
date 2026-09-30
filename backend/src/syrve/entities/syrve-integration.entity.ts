@@ -8,10 +8,14 @@ import {
 
 export type SyrveIntegrationStatus = 'not_connected' | 'connected' | 'error';
 
-@Entity('syrve_integrations')
+// Schema, including the revision fence, is owned only by migrations.
+@Entity({ name: 'syrve_integrations', synchronize: false })
 export class SyrveIntegration {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @Column({ name: 'configuration_revision', type: 'uuid', default: () => 'gen_random_uuid()' })
+  configurationRevision: string;
 
   @Column({ name: 'display_name', type: 'varchar', length: 120, default: 'MOLO · Syrve' })
   displayName: string;

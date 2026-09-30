@@ -4,6 +4,8 @@ import type { AuthUser } from '../auth/types/auth-user.type';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
   ConnectSyrveDto,
+  DisconnectSyrveDto,
+  SyrveRevisionDto,
   PreviewSyrveTablesDto,
   TestSyrveConnectionDto,
   UpdateSyrveConnectionDto,
@@ -16,6 +18,7 @@ export class SyrveIntegrationController {
   constructor(private readonly service: SyrveIntegrationService) {}
 
   @Get()
+  @Header('Cache-Control', 'no-store')
   getStatus() {
     return this.service.getStatus();
   }
@@ -40,8 +43,8 @@ export class SyrveIntegrationController {
   }
 
   @Post('recheck')
-  recheck(@Req() request: { user?: AuthUser }) {
-    return this.service.recheck(request.user);
+  recheck(@Body() dto: SyrveRevisionDto, @Req() request: { user?: AuthUser }) {
+    return this.service.recheck(dto, request.user);
   }
 
   @Patch()
@@ -51,9 +54,9 @@ export class SyrveIntegrationController {
 
   @Post('disconnect')
   disconnect(
-    @Body() body: { reason?: string },
+    @Body() body: DisconnectSyrveDto,
     @Req() request: { user?: AuthUser },
   ) {
-    return this.service.disconnect(body?.reason, request.user);
+    return this.service.disconnect(body, request.user);
   }
 }

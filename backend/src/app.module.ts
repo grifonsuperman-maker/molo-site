@@ -26,6 +26,7 @@ import { AddLogArchive2026082400010 } from './migrations/2026082400010-AddLogArc
 import { AddManualBookingGuestName2026082400020 } from './migrations/2026082400020-AddManualBookingGuestName';
 import { CreateGuestPushSubscriptions2026092000010 } from './migrations/2026092000010-CreateGuestPushSubscriptions';
 import { CreateSyrveTableLinks2026093000010 } from './migrations/2026093000010-CreateSyrveTableLinks';
+import { FenceSyrveConfiguration2026093000020 } from './migrations/2026093000020-FenceSyrveConfiguration';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -83,6 +84,7 @@ const staffPinMigrationOptions = {
                 ...staffPinMigrationOptions.migrations,
                 CreateGuestPushSubscriptions2026092000010,
                 CreateSyrveTableLinks2026093000010,
+                FenceSyrveConfiguration2026093000020,
               ]
             : staffPinMigrationOptions.migrations,
         };

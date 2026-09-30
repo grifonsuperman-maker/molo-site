@@ -187,7 +187,7 @@ test('Director preview reads only table ID/number and never creates tables, logs
   const h = setup(t, [groups(), sections([table(10, 12), table(11, 77)])]);
   let reads = 0;
   const forbidden = new Proxy({}, { get: (_target, method) => () => assert.fail(`forbidden ${String(method)} write/access`) });
-  const service = new SyrveIntegrationService(forbidden, forbidden, h.client, {
+  const service = new SyrveIntegrationService({ read: async () => ({ prepared: false, entity: null, links: [] }) }, forbidden, h.client, {
     find: async (options) => {
       reads++;
       assert.deepEqual(options.select, { id: true, tableNumber: true });
@@ -205,6 +205,6 @@ test('Director preview reads only table ID/number and never creates tables, logs
 test('failed preview leaves all existing MOLO and integration state untouched', async (t) => {
   const h = setup(t, [groups(), Response.json({}, { status: 500 })]);
   const forbidden = new Proxy({}, { get: (_target, method) => () => assert.fail(`unexpected local access ${String(method)}`) });
-  const service = new SyrveIntegrationService(forbidden, forbidden, h.client, forbidden);
+  const service = new SyrveIntegrationService({ read: async () => ({ prepared: false, entity: null, links: [] }) }, forbidden, h.client, forbidden);
   await assert.rejects(service.previewTables(INPUT), safeError('SYRVE_UNAVAILABLE'));
 });

@@ -30,12 +30,13 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
   t.after(() => app.close());
   const base = await app.getUrl();
   const input = { displayName: 'MOLO', apiBaseUrl: 'https://api-eu.syrve.live', apiLogin: 'test-only-login',
-    organizationId: '11111111-2222-4333-8444-555555555555', organizationName: 'MOLO' };
+    organizationId: '11111111-2222-4333-8444-555555555555', organizationName: 'MOLO', confirmationProof: 'test-confirmation-proof'.repeat(3), pairs: [] };
+  const revision = { configurationRevision: '11111111-2222-4333-8444-555555555555' };
   const routes = [['GET', '', null], ['POST', '/test', { displayName: input.displayName,
     apiBaseUrl: input.apiBaseUrl, apiLogin: input.apiLogin }], ['POST', '/connect', input],
     ['POST', '/tables-preview', { displayName: input.displayName, apiBaseUrl: input.apiBaseUrl,
       apiLogin: input.apiLogin, organizationId: input.organizationId }],
-    ['POST', '/recheck', {}], ['PATCH', '', { displayName: 'MOLO' }], ['POST', '/disconnect', {}]];
+    ['POST', '/recheck', revision], ['PATCH', '', { displayName: 'MOLO', ...revision }], ['POST', '/disconnect', revision]];
   for (const [method, path, body] of routes) {
     for (const [role, expected] of [[null, 401], ['invalid', 401], ['guest', 403],
       ['waiter', 403], ['hookah', 403], ['admin', 403], ['owner', method === 'POST' ? 201 : 200]]) {
@@ -58,4 +59,17 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
   });
   assert.equal(invalid.status, 400);
   assert.equal(serviceCalls, before);
+  for (const [path, body] of [
+    ['/connect', { ...input, confirmationProof: undefined }],
+    ['/connect', { ...input, pairs: [{ moloTableId: 'invalid', syrveTableId: input.organizationId }] }],
+    ['/connect', { ...input, pairs: [{ moloTableId: input.organizationId, syrveTableId: input.organizationId, tableNumber: '77' }] }],
+    ['/recheck', {}], ['/disconnect', {}],
+  ]) {
+    const response = await fetch(`${base}/syrve-integration${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 400, path);
+    assert.equal(serviceCalls, before);
+  }
 });

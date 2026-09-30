@@ -25,7 +25,7 @@ export async function runSyrveTableLinkValidation(env = process.env) {
     statement_timeout: 10000,
   });
   const client = await pool.connect();
-  const integrationIds = [randomUUID(), randomUUID()];
+  const integrationIds = [randomUUID()];
   const tableIds = [randomUUID(), randomUUID()];
   const organizationId = randomUUID();
   const syrveTableId = randomUUID();
@@ -67,7 +67,7 @@ export async function runSyrveTableLinkValidation(env = process.env) {
     assert.equal(link.last_seen_at, null);
     assert.equal(link.last_synced_at, null);
     await rejectsConstraint(insert, [...values.slice(0, 3), randomUUID()], '23505', 'UQ_syrve_table_links_molo_table');
-    await rejectsConstraint(insert, [integrationIds[1], organizationId, tableIds[1], syrveTableId], '23505', 'UQ_syrve_table_links_provider_table');
+    await rejectsConstraint(insert, [integrationIds[0], organizationId, tableIds[1], syrveTableId], '23505', 'UQ_syrve_table_links_provider_table');
     await rejectsConstraint(insert, [integrationIds[0], organizationId, randomUUID(), randomUUID()], '23503', 'FK_syrve_table_links_molo_table');
     await rejectsConstraint(insert, [randomUUID(), organizationId, tableIds[1], randomUUID()], '23503', 'FK_syrve_table_links_integration');
 

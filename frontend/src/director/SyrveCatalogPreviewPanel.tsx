@@ -1,6 +1,7 @@
 import type { SyrveCatalogPreview } from '../api/syrve';
 
 const CONFLICT_LABELS: Record<SyrveCatalogPreview['conflicts'][number]['code'], string> = {
+  already_linked: 'Стіл уже має інший підтверджений зв’язок',
   duplicate_syrve_id: 'Syrve повернув той самий стіл кілька разів',
   duplicate_syrve_number: 'Кілька столів Syrve мають однаковий номер',
   duplicate_molo_number: 'Кілька столів MOLO мають однаковий номер',
@@ -14,17 +15,24 @@ export default function SyrveCatalogPreviewPanel({ preview }: { preview: SyrveCa
     ['Столів Syrve', summary.syrveTables], ['Запропоновано пар', summary.proposals],
     ['Не знайдено в MOLO', summary.missingInMolo], ['Не знайдено в доступних секціях Syrve', summary.missingInSyrve],
     ['Конфліктів', summary.conflicts], ['Видалених у Syrve', summary.deletedTables],
+    ['Збережених зв’язків', summary.confirmedLinks || 0],
   ];
   return (
     <div className="mt-4 rounded-2xl border border-cyan-200/25 bg-black/30 p-4">
       <h3 className="text-lg font-black">Перевірка столів · {preview.organization.name}</h3>
-      <p className="mt-2 text-sm text-white/55">Це пропозиції. Зв’язки ще не збережені, карту не змінено.</p>
+      <p className="mt-2 text-sm text-white/55">Це пропозиції. Нові зв’язки ще не збережені, карту не змінено.</p>
       <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
         {counts.map(([label, count]) => <div key={label} className="rounded-xl border border-white/10 p-3"><dt className="text-xs text-white/50">{label}</dt><dd className="mt-1 text-2xl font-black">{count}</dd></div>)}
       </dl>
       <ul className="mt-3 space-y-2 text-sm text-amber-100/80">
         {preview.diagnostics.warnings.map((warning) => <li key={warning}>{warning}</li>)}
       </ul>
+      {!!preview.confirmedLinks?.length && <details className="mt-3 text-sm" open>
+        <summary className="cursor-pointer font-bold">Підтверджені зв’язки ({preview.confirmedLinks.length})</summary>
+        <ul className="mt-2 max-h-60 space-y-2 overflow-y-auto text-white/65">
+          {preview.confirmedLinks.map((link) => <li key={link.moloTableId}>MOLO №{link.moloTableNumber || 'невідомий'} ↔ Syrve · останній номер №{link.lastKnownNumber}</li>)}
+        </ul>
+      </details>}
       <details className="mt-4 text-sm" open>
         <summary className="cursor-pointer font-bold">Пропозиції зіставлення ({summary.proposals})</summary>
         <ul className="mt-2 max-h-60 space-y-2 overflow-y-auto text-white/65">
