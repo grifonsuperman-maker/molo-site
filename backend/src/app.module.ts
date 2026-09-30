@@ -27,6 +27,7 @@ import { AddManualBookingGuestName2026082400020 } from './migrations/20260824000
 import { CreateGuestPushSubscriptions2026092000010 } from './migrations/2026092000010-CreateGuestPushSubscriptions';
 import { CreateSyrveTableLinks2026093000010 } from './migrations/2026093000010-CreateSyrveTableLinks';
 import { FenceSyrveConfiguration2026093000020 } from './migrations/2026093000020-FenceSyrveConfiguration';
+import { CreateTableMapIdentities2026093000030 } from './migrations/2026093000030-CreateTableMapIdentities';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -85,6 +86,7 @@ const staffPinMigrationOptions = {
                 CreateGuestPushSubscriptions2026092000010,
                 CreateSyrveTableLinks2026093000010,
                 FenceSyrveConfiguration2026093000020,
+                CreateTableMapIdentities2026093000030,
               ]
             : staffPinMigrationOptions.migrations,
         };

@@ -59,6 +59,7 @@ function loadRuntimeMigrations(require) {
   } = require('../dist/migrations/2026093000010-CreateSyrveTableLinks.js');
 
   const { FenceSyrveConfiguration2026093000020 } = require('../dist/migrations/2026093000020-FenceSyrveConfiguration.js');
+  const { CreateTableMapIdentities2026093000030 } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -72,6 +73,7 @@ function loadRuntimeMigrations(require) {
     CreateGuestPushSubscriptions2026092000010,
     CreateSyrveTableLinks2026093000010,
     FenceSyrveConfiguration2026093000020,
+    CreateTableMapIdentities2026093000030,
   ];
 }
 

@@ -15,9 +15,11 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'CreateGuestPushSubscriptions2026092000010',
   'CreateSyrveTableLinks2026093000010',
   'FenceSyrveConfiguration2026093000020',
+  'CreateTableMapIdentities2026093000030',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  11: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   10: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   9: {
     guestNameColumn: true,
@@ -143,6 +145,7 @@ function loadRuntimeMigrations(require) {
   } = require('../dist/migrations/2026093000010-CreateSyrveTableLinks.js');
 
   const { FenceSyrveConfiguration2026093000020 } = require('../dist/migrations/2026093000020-FenceSyrveConfiguration.js');
+  const { CreateTableMapIdentities2026093000030 } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -156,6 +159,7 @@ function loadRuntimeMigrations(require) {
     CreateGuestPushSubscriptions2026092000010,
     CreateSyrveTableLinks2026093000010,
     FenceSyrveConfiguration2026093000020,
+    CreateTableMapIdentities2026093000030,
   ];
 }
 
@@ -175,6 +179,9 @@ async function readRewindState(dataSource) {
       to_regclass('public.log_archives') IS NOT NULL AS "logArchiveTable",
       to_regclass('public.guest_push_subscriptions') IS NOT NULL AS "guestPushSubscriptionsTable",
       to_regclass('public.syrve_table_links') IS NOT NULL AS "syrveTableLinksTable",
+      to_regclass('public.table_map_identities') IS NOT NULL AS "tableMapIdentitiesTable",
+      EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'TRG_table_map_identities_immutable' AND NOT tgisinternal) AS "tableMapIdentityTrigger",
+      EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'molo_keep_table_map_identity' AND pronamespace = 'public'::regnamespace) AS "tableMapIdentityFunction",
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'syrve_integrations' AND column_name = 'configuration_revision') AS "syrveConfigurationRevision",
       EXISTS (
         SELECT 1
@@ -267,7 +274,10 @@ async function assertRewindCheckpoint(dataSource, remainingMigrationCount) {
       ...EXPECTED_REWIND_STATE[remainingMigrationCount],
       guestPushSubscriptionsTable: remainingMigrationCount >= 9,
       syrveTableLinksTable: remainingMigrationCount >= 10,
-      syrveConfigurationRevision: false,
+      syrveConfigurationRevision: remainingMigrationCount >= 11,
+      tableMapIdentitiesTable: remainingMigrationCount >= 12,
+      tableMapIdentityTrigger: remainingMigrationCount >= 12,
+      tableMapIdentityFunction: remainingMigrationCount >= 12,
     },
     `after ${EXPECTED_RUNTIME_MIGRATIONS.length - remainingMigrationCount} undo(s)`,
   );
@@ -313,6 +323,9 @@ export async function runRuntimeMigrationRoundtripStep(
         guestPushSubscriptionsTable: true,
         syrveTableLinksTable: true,
         syrveConfigurationRevision: true,
+        tableMapIdentitiesTable: true,
+        tableMapIdentityTrigger: true,
+        tableMapIdentityFunction: true,
       }, 'before undo');
 
       for (
@@ -339,6 +352,9 @@ export async function runRuntimeMigrationRoundtripStep(
       guestPushSubscriptionsTable: true,
       syrveTableLinksTable: true,
       syrveConfigurationRevision: true,
+      tableMapIdentitiesTable: true,
+      tableMapIdentityTrigger: true,
+      tableMapIdentityFunction: true,
     }, 'after forward');
   } finally {
     await dataSource.destroy();

@@ -1,8 +1,8 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 3b starts from fresh main `50d3e64588714553b2de16d41a6355ff1da1f750` (2026-09-30),
-after manual merges of PRs #261, #264 and #265. Client diagnostics, link schema preparation,
+PR 4a starts from fresh main `493563a1389f3e0aeef7486cad7e69397c3e61ea` (2026-09-30),
+after manual merges of PRs #261, #264, #265 and #266. Client diagnostics, link schema preparation,
 read-only catalog preview and explicit UUID confirmation are implemented. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
@@ -41,6 +41,10 @@ Every later PR starts from freshly fetched main after the Director's manual merg
   maps plus booking statuses; the guest uses the public map plus booking statuses.
   Adding a source to just one response would produce inconsistent role views.
 - `GuestApp` and `AdminVisualTablePlanner` match static map slots by table NUMBER.
+- `ZonesService.onModuleInit` actually seeds 60 standard physical tables and also
+  reconciles existing zone assignments by number. Before renaming, PR 4b must make
+  this bootstrap respect persisted physical identity; otherwise a restart after
+  renumbering could recreate an old-number table or reassign its location.
   `WaiterTablesByLocation` and `AdminTablesByLocation` group by number ranges.
   A database-only rename would therefore change the physical association/location.
 - Booking statuses are `pending`, `approved`, `rejected`, `cancelled`, `completed`.
@@ -150,8 +154,13 @@ Prefer one new `syrve_table_links` table; embed per-table sync state in the link
   revision and last successful sync/error metadata. Enforce the single configuration
   invariant before relying on it; never silently discard duplicate configurations.
 
-Separately add an immutable physical `mapKey` to existing tables before renaming:
-backfill from the current verified map slot, use UUID for actions and current
+Separately persist an immutable physical `mapKey` for each existing table before renaming:
+PR 4a uses a two-column `table_map_identities` relation, owned by MOLO and independent
+of Syrve. A new mapped column on the synchronized legacy TableEntity would either
+be implicitly created by synchronize or break legacy inserts/reads before the final
+schema-adoption step. The separate migration-owned relation avoids that problem
+without changing the existing physical schema. Backfill from the current verified map slot,
+use UUID for actions and current
 `tableNumber` for labels. A map slot/location must stay bound when a number changes,
 the integration is disabled or links are removed. This is why putting the physical
 map identity only into a removable Syrve link is insufficient. Verify number labels
@@ -188,8 +197,9 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 1 | Safe auth/organization client and diagnostics (merged #261) | `src/syrve/syrve-client.ts`, service/module, `test/syrve-*.test.js`, `.env*example`, this document |
 | 2 | Link/sync storage and uniqueness; reversible migration with explicit registration/application path; no mapping writes or status changes | new Syrve link entity/migration, module, migration registry and PostgreSQL schema tests |
 | 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics and proposals by unambiguous numbers (merged #265); no mapping writes or migrations | Syrve client/catalog/service/controller/DTO/module and tests, `frontend/src/api/syrve.ts`, Director dock/preview panel/tests |
-| 3b | Explicit UUID mapping confirmation (this PR); singleton/configuration revision and stale-preview fencing introduced with the first write transaction | integration entity + migration/registry, mapping DTO/service/controller, Director confirmation UI and PostgreSQL concurrency tests |
-| 4 | Stable physical map identity and location before any rename; frozen geometry/asset comparison | table entity + migration, map/table API DTOs, `GuestApp.tsx`, `AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, protected-map tests |
+| 3b | Explicit UUID mapping confirmation (merged #266); singleton/configuration revision and stale-preview fencing introduced with the first write transaction | integration entity + migration/registry, mapping DTO/service/controller, Director confirmation UI and PostgreSQL concurrency tests |
+| 4a | Independent immutable physical UUID ↔ map slot storage and read-only diagnostics (this PR); legacy-compatible API projection, no map consumer switch | new table-map entity/service/module/catalog + migration, tables/map API, migration registry/scripts and PostgreSQL tests; frontend API types only |
+| 4b | Switch connected map/location consumers to permanent identity before any rename; preserve missing/hidden-table behavior and frozen geometry/assets | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver, `backend/src/zones/zones.service.ts` bootstrap identity guard and protected-map/booking/restart tests |
 | 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection | Syrve rename service, table-number uniqueness migration if needed, DTO diagnostics and concurrency tests |
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown | Syrve order client/observer and fixtures/tests; no status application |
 | 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority | isolated Syrve state reducer and regression tests; no enabled worker |
@@ -199,7 +209,7 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 
 All paths above are under `backend/` unless prefixed `frontend/`. Boundaries may
 be narrowed after each fresh-main review, never expanded to include unrelated fixes.
-PR 4 is a prerequisite imposed by the existing implementation, not a redesign of
+Both PR 4a and PR 4b are prerequisites imposed by the existing implementation, not a redesign of
 coordinates, photographs, click zones or colors. Do not combine occupied application
 with a live worker before closure and manual override rules exist.
 
@@ -320,6 +330,66 @@ PostgreSQL probe executes the actual compiled service/store, verifies singleton/
 constraints and transaction rollback, compares every physical table field, and checks
 legacy reads and migration down/up credential preservation. Full role/DTO guards and
 frontend handler/SSR suites also run, including polling remaining exactly 15 seconds.
+
+
+### PR 4a physical identity preparation boundary
+
+This stage prepares the stable physical relationship without switching any map or
+staff UI away from its current number-based lookup. PR 4b must follow a fresh-main
+audit after the Director's manual merge; renaming stays blocked until both stages
+and their regression gates are complete.
+
+The independent `table_map_identities` table contains only `table_id` (existing MOLO
+UUID, primary key/FK with cascade on MOLO deletion) and `map_key` (unique immutable
+physical slot). A slot such as `hall:12` is a frozen physical identifier, not the
+current table number. Its prefix provides the permanent location without a second
+redundant column. It does not reference Syrve configuration or removable Syrve links.
+
+`CreateTableMapIdentities2026093000030` freezes the verified 60 slots in both active
+guest/admin visual maps. Under a short transaction and source-table lock it inserts
+only unique canonical existing numbers. Leading zeros/outer spaces are normalized;
+duplicates, unsupported or malformed numbers remain unbound. It never writes physical
+table fields or creates a physical table. PostgreSQL protects one UUID per slot and
+one slot per UUID, checks known slots, and rejects identity reassignment through an
+UPDATE trigger. Later map additions require a new migration; changing the live slot
+catalog cannot rewrite historical migration backfill.
+
+Both migration directions require a transaction. Down locks the source tables and
+bindings in the same order as up, then compares the complete binding set with the
+frozen, unambiguous backfill in both directions. Only exactly reconstructable
+associations may be rolled back. A rename, duplicate or any extra/missing association
+blocks rollback instead of discarding physical identity. MOLO's existing explicit table deletion remains possible
+and cascades only that table's identity; Syrve has no write path to this table.
+
+The new entity is synchronize:false. The existing TableEntity and its database
+columns stay unchanged. AppModule registers the new migration only for the already
+guarded disposable CI database; production's eight bootstrap migrations and all
+historical baseline definitions stay unchanged. Production deployment/adoption is
+still deferred to the separately reviewed final schema/history audit.
+
+A shared read-only service adds `mapKey` and `mapLocation` to `/tables` and the main
+`tables` collection of `/map`, with `mapIdentityPrepared` on map responses.
+The absent legacy binding table returns original table objects without querying
+unknown columns. Prepared but unbound tables expose null identity; reads never
+derive/save a new association from a changed number. Other physical properties,
+status computation and public visibility filtering remain unchanged. The frontend
+only gains optional API types; all map, location grouping, manual button and booking
+handlers are untouched at this stage.
+
+`GET /tables/map-identities` is Director-only under the existing real JWT/role
+guards and returns Cache-Control:no-store. It reports bound/unbound UUIDs, physical
+locations, current vs original numbers and duplicate-number conflicts without
+credentials or any external Syrve request. It explicitly reports map consumers,
+renaming and synchronization not ready/enabled.
+
+Full backend/frontend builds/tests and exact-HEAD git checks run in GitHub CI.
+Local execution is unavailable because the workspace exec service reports
+`409 Conflict, environment_offline: Environment is not connected`; no local check
+is claimed. The disposable PostgreSQL probe runs the actual compiled service/API read paths in
+its own temporary schema, cloned only from the guarded disposable database. All 60
+ZonesService-seeded public tables/bindings are compared before/after and stay untouched.
+It verifies legacy reads, backfill ambiguity, constraints, concurrent slot inserts,
+immutability, unchanged physical fields/schema and lossless/prohibited up/down cases.
 
 ## Required regression gates
 

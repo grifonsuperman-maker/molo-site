@@ -7,6 +7,7 @@ import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
 import { TableEntity, TableStatus } from './entities/table.entity';
 import { Zone } from '../zones/entities/zone.entity';
+import { TableMapIdentityService } from './table-map-identity.service';
 
 const ACTIVE_BOOKING_STATUSES = ['pending', 'approved'] as const;
 
@@ -16,10 +17,16 @@ export class TablesService {
     @InjectRepository(TableEntity) private readonly tables: Repository<TableEntity>,
     @InjectRepository(Zone) private readonly zones: Repository<Zone>,
     @InjectRepository(Booking) private readonly bookings: Repository<Booking>,
+    private readonly mapIdentities: TableMapIdentityService,
   ) {}
 
-  findAll() {
-    return this.tables.find({ relations: ['zone'], order: { tableNumber: 'ASC' } });
+  async findAll() {
+    const tables = await this.tables.find({ relations: ['zone'], order: { tableNumber: 'ASC' } });
+    return (await this.mapIdentities.project(tables)).tables;
+  }
+
+  getMapIdentityDiagnostics() {
+    return this.mapIdentities.diagnostics();
   }
 
   async create(dto: CreateTableDto) {
