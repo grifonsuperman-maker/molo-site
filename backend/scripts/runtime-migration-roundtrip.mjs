@@ -13,9 +13,15 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'AddLogArchive2026082400010',
   'AddManualBookingGuestName2026082400020',
   'CreateGuestPushSubscriptions2026092000010',
+  'CreateSyrveTableLinks2026093000010',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  9: {
+    guestNameColumn: true,
+    logArchiveTable: true,
+    reviewArchiveTable: true,
+  },
   8: {
     guestNameColumn: true,
     logArchiveTable: true,
@@ -130,6 +136,9 @@ function loadRuntimeMigrations(require) {
   const {
     CreateGuestPushSubscriptions2026092000010,
   } = require('../dist/migrations/2026092000010-CreateGuestPushSubscriptions.js');
+  const {
+    CreateSyrveTableLinks2026093000010,
+  } = require('../dist/migrations/2026093000010-CreateSyrveTableLinks.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -141,6 +150,7 @@ function loadRuntimeMigrations(require) {
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
     CreateGuestPushSubscriptions2026092000010,
+    CreateSyrveTableLinks2026093000010,
   ];
 }
 
@@ -159,6 +169,7 @@ async function readRewindState(dataSource) {
       to_regclass('public.guest_review_archives') IS NOT NULL AS "reviewArchiveTable",
       to_regclass('public.log_archives') IS NOT NULL AS "logArchiveTable",
       to_regclass('public.guest_push_subscriptions') IS NOT NULL AS "guestPushSubscriptionsTable",
+      to_regclass('public.syrve_table_links') IS NOT NULL AS "syrveTableLinksTable",
       EXISTS (
         SELECT 1
         FROM information_schema.columns
@@ -246,7 +257,11 @@ async function assertRewindCheckpoint(dataSource, remainingMigrationCount) {
   const state = await readRewindState(dataSource);
   assertRewindState(
     state,
-    { ...EXPECTED_REWIND_STATE[remainingMigrationCount], guestPushSubscriptionsTable: false },
+    {
+      ...EXPECTED_REWIND_STATE[remainingMigrationCount],
+      guestPushSubscriptionsTable: remainingMigrationCount >= 9,
+      syrveTableLinksTable: false,
+    },
     `after ${EXPECTED_RUNTIME_MIGRATIONS.length - remainingMigrationCount} undo(s)`,
   );
 }
@@ -289,6 +304,7 @@ export async function runRuntimeMigrationRoundtripStep(
       assertMigrationHistory(before, EXPECTED_RUNTIME_MIGRATIONS);
       assertRewindState(await readRewindState(dataSource), {
         guestPushSubscriptionsTable: true,
+        syrveTableLinksTable: true,
       }, 'before undo');
 
       for (
@@ -313,6 +329,7 @@ export async function runRuntimeMigrationRoundtripStep(
     assertMigrationHistory(after, EXPECTED_RUNTIME_MIGRATIONS);
     assertRewindState(await readRewindState(dataSource), {
       guestPushSubscriptionsTable: true,
+      syrveTableLinksTable: true,
     }, 'after forward');
   } finally {
     await dataSource.destroy();

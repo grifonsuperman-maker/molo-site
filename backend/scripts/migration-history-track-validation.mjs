@@ -8,7 +8,7 @@ import {
 } from './fresh-schema-baseline-validation.mjs';
 import { EXPECTED_RUNTIME_MIGRATIONS } from './runtime-migration-roundtrip.mjs';
 
-export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe2026092100010';
+export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe2026100100010';
 export const EXPECTED_EXISTING_TRACK_AFTER_PROBE = [
   ...EXPECTED_RUNTIME_MIGRATIONS,
   FUTURE_MIGRATION_PROBE,
@@ -54,6 +54,9 @@ function loadRuntimeMigrations(require) {
   const {
     CreateGuestPushSubscriptions2026092000010,
   } = require('../dist/migrations/2026092000010-CreateGuestPushSubscriptions.js');
+  const {
+    CreateSyrveTableLinks2026093000010,
+  } = require('../dist/migrations/2026093000010-CreateSyrveTableLinks.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -65,6 +68,7 @@ function loadRuntimeMigrations(require) {
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
     CreateGuestPushSubscriptions2026092000010,
+    CreateSyrveTableLinks2026093000010,
   ];
 }
 
@@ -75,7 +79,7 @@ function loadInitialBaseline(require) {
   return InitialSchemaBaseline2026081300000;
 }
 
-class MigrationHistoryProbe2026092100010 {
+class MigrationHistoryProbe2026100100010 {
   name = FUTURE_MIGRATION_PROBE;
 
   async up(queryRunner) {
@@ -135,11 +139,11 @@ export async function runMigrationHistoryTrackValidation(mode, env = process.env
   const runtimeMigrations = loadRuntimeMigrations(require);
   const migrations =
     mode === 'existing'
-      ? [...runtimeMigrations, MigrationHistoryProbe2026092100010]
+      ? [...runtimeMigrations, MigrationHistoryProbe2026100100010]
       : [
           loadInitialBaseline(require),
           ...runtimeMigrations,
-          MigrationHistoryProbe2026092100010,
+          MigrationHistoryProbe2026100100010,
         ];
 
   const expectedAfter =
