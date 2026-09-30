@@ -19,6 +19,7 @@ test('MOLO install manifest uses approved icon assets and guest start page', () 
   assert.equal(manifest.start_url, '/');
   assert.equal(manifest.scope, '/');
   assert.equal(manifest.display, 'standalone');
+  assert.equal(manifest.background_color, '#10100f');
   assert.equal(manifest.lang, 'uk');
   for (const size of [192, 512]) {
     const icon = manifest.icons.find((entry) => entry.sizes === `${size}x${size}`);
