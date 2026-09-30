@@ -12,6 +12,7 @@ const runtimeHistory = [
   'AddManualBookingGuestName2026082400020',
   'CreateGuestPushSubscriptions2026092000010',
   'CreateSyrveTableLinks2026093000010',
+  'FenceSyrveConfiguration2026093000020',
 ];
 const baseline = 'InitialSchemaBaseline2026081300000';
 const probe = 'MigrationHistoryProbe2026100100010';

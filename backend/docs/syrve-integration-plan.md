@@ -1,9 +1,9 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 3 starts from fresh main `4740f75ac3e941a048d2bc7fe07ce51ef568bb65` (2026-09-30),
-after manual merges of PRs #261 and #264. Client diagnostics, link schema preparation
-and read-only catalog preview are implemented. Real Syrve is not connected or
+PR 3b starts from fresh main `50d3e64588714553b2de16d41a6355ff1da1f750` (2026-09-30),
+after manual merges of PRs #261, #264 and #265. Client diagnostics, link schema preparation,
+read-only catalog preview and explicit UUID confirmation are implemented. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
@@ -21,8 +21,8 @@ Every later PR starts from freshly fetched main after the Director's manual merg
   12-byte IV and authentication tag. Responses are explicit projections, including
   a masked login, never ciphertext or the upstream access token.
 - `syncEnabled` is hard-coded to false. The link/sync schema is prepared by PR 2;
-  no actual mapping writes, scheduler, order observations, manual-action hooks or
-  status integration are enabled.
+  explicit mapping writes are available only after the prepared schema is applied.
+  No scheduler, order observations, manual-action hooks or status integration are enabled.
 - The existing `1785362400000-CreateSyrveIntegration.ts` has up/down, and the fresh
   schema baseline contains `syrve_integrations`. This legacy migration is NOT in
   `AppModule`'s runtime migration list. A file's existence does not establish its
@@ -187,8 +187,8 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | --- | --- | --- |
 | 1 | Safe auth/organization client and diagnostics (merged #261) | `src/syrve/syrve-client.ts`, service/module, `test/syrve-*.test.js`, `.env*example`, this document |
 | 2 | Link/sync storage and uniqueness; reversible migration with explicit registration/application path; no mapping writes or status changes | new Syrve link entity/migration, module, migration registry and PostgreSQL schema tests |
-| 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics and proposals by unambiguous numbers (this PR); no mapping writes or migrations | Syrve client/catalog/service/controller/DTO/module and tests, `frontend/src/api/syrve.ts`, Director dock/preview panel/tests |
-| 3b | Explicit UUID mapping confirmation; singleton/configuration revision and stale-preview fencing introduced with the first write transaction | integration entity + migration/registry, mapping DTO/service/controller, Director confirmation UI and PostgreSQL concurrency tests |
+| 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics and proposals by unambiguous numbers (merged #265); no mapping writes or migrations | Syrve client/catalog/service/controller/DTO/module and tests, `frontend/src/api/syrve.ts`, Director dock/preview panel/tests |
+| 3b | Explicit UUID mapping confirmation (this PR); singleton/configuration revision and stale-preview fencing introduced with the first write transaction | integration entity + migration/registry, mapping DTO/service/controller, Director confirmation UI and PostgreSQL concurrency tests |
 | 4 | Stable physical map identity and location before any rename; frozen geometry/asset comparison | table entity + migration, map/table API DTOs, `GuestApp.tsx`, `AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, protected-map tests |
 | 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection | Syrve rename service, table-number uniqueness migration if needed, DTO diagnostics and concurrency tests |
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown | Syrve order client/observer and fixtures/tests; no status application |
@@ -260,8 +260,66 @@ save. It shows counts, suggested table-number pairs backed by UUIDs, missing ent
 and coverage warnings. Changing organization/rechecking/closing clears the preview;
 request versions reject late success/error responses. Closing also clears the typed key.
 No key or upstream token is returned to the browser or stored in browser persistence.
-Connection saving still only saves the existing encrypted settings; no mapping/worker
-is enabled. PR 3b remains a separate, newly authorized PR after merge and fresh main.
+At PR 3, connection saving only saved encrypted settings. PR 3b adds the separate
+confirmation boundary below; no worker or activation is enabled.
+
+### PR 3b explicit confirmation boundary
+
+The Director must explicitly acknowledge the proposed pairs before saving credentials
+and links together through `POST /syrve-integration/connect`. A server-signed, five-minute
+`confirmationProof` binds the restaurant, normalized API origin, an HMAC credential
+fingerprint, configuration ID/revision, the validated provider catalog, every existing
+MOLO UUID/number and persisted UUID links. It contains no API login, encrypted secret
+or upstream access token and cannot authenticate to Syrve. No new receipt table or
+browser persistence is introduced.
+
+Confirmation re-reads the same documented catalog outside the database transaction.
+Inside a short transaction, a settings advisory lock serializes all configuration writes,
+the persisted UUID revision must still match, and a `SHARE` lock on `tables` prevents a
+concurrent insert/rename from invalidating number uniqueness. Lock waits are limited to
+750 ms, each statement to five seconds; no Syrve call or audit-log call holds these locks.
+The fingerprint and selected UUID pairs are revalidated before any write. Only unique
+currently proposed pairs may be inserted, including an explicitly chosen subset. Unknown,
+deleted, duplicate or already-linked tables cannot be imported or rebound. An empty
+selection saves only settings. The UI confirms all displayed eligible proposals in one
+explicit action. Other conflicts remain visible and never imply complete coverage.
+
+The transaction saves settings and new links atomically. Existing links, observation
+state, active order sets and manual overrides are never overwritten. Existing UUID links
+remain visible if Syrve changes a number; this stage does not rename MOLO tables.
+A different restaurant is rejected while any confirmed link belongs to the old one.
+Disconnect clears credentials but retains the connection row, links and sync state.
+Recheck, disconnect and metadata writes require the current revision; late successful or
+failed checks cannot restore credentials or overwrite a newer configuration. Every settings
+write replaces the revision UUID. Failed post-commit audit logging reports a fixed server
+warning rather than falsely reporting that a committed confirmation failed.
+
+`FenceSyrveConfiguration2026093000020` adds only a UUID revision column and a unique
+constant-expression singleton index to `syrve_integrations`. Duplicate existing settings
+cause `up` to stop for an audited reconciliation; no row is discarded. Both directions
+require an active transaction. `down` locks settings and links, refuses confirmed links,
+and removes only the owned column/index. Credentials and all other settings survive;
+a later `up` generates new UUID revisions, invalidating pre-rollback receipts.
+`SyrveIntegration` is now `synchronize: false`, matching the link entity. The guarded
+CI reference provisions its legacy table/PK using the frozen initial migration baseline
+before runtime migrations; it never adopts production history or uses the legacy
+unregistered Syrve migration to infer live schema state.
+
+The new migration is registered only in the guarded disposable CI registry. The eight
+production bootstrap migrations and Guest Push operator gate stay unchanged. Status
+reads select legacy columns explicitly when the prepared schema is unavailable and never
+create a settings row. Catalog diagnostics still work, while confirmation/mutation is
+blocked with a controlled Director message. Prepared schema deployment remains a separately
+reviewed final adoption step after a fresh production schema/history audit; no production
+migration, SQL, environment change or real Syrve connection is performed in PR 3b.
+
+Tests cover tampering/expiry, credential/catalog/MOLO changes, arbitrary or duplicate pairs,
+concurrent first confirmations, replay, provider failure, stable UUIDs, retained overrides,
+restaurant-change protection and late recheck responses after disconnect. The disposable
+PostgreSQL probe executes the actual compiled service/store, verifies singleton/link
+constraints and transaction rollback, compares every physical table field, and checks
+legacy reads and migration down/up credential preservation. Full role/DTO guards and
+frontend handler/SSR suites also run, including polling remaining exactly 15 seconds.
 
 ## Required regression gates
 

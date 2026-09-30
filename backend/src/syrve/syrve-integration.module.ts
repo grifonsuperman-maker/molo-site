@@ -8,11 +8,12 @@ import { SyrveTableLink } from './entities/syrve-table-link.entity';
 import { SyrveIntegrationController } from './syrve-integration.controller';
 import { SyrveIntegrationService } from './syrve-integration.service';
 import { SyrveClient } from './syrve-client';
+import { SyrveSettingsStore } from './syrve-settings.store';
 
 @Module({
   imports: [TypeOrmModule.forFeature([SyrveIntegration, SyrveTableLink, TableEntity]), LogsModule],
   controllers: [SyrveIntegrationController],
-  providers: [SyrveIntegrationService, SyrveClient],
+  providers: [SyrveIntegrationService, SyrveClient, SyrveSettingsStore],
   exports: [SyrveIntegrationService],
 })
 export class SyrveIntegrationModule {}

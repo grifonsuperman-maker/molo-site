@@ -90,6 +90,8 @@ jobs:
         run: node backend/scripts/fresh-schema-reference.mjs
       - name: Validate Syrve link constraints and concurrent writes
         run: node backend/scripts/syrve-table-link-validation.mjs
+      - name: Validate Syrve mapping confirmation and configuration fencing
+        run: node backend/scripts/syrve-mapping-validation.mjs
       - name: Capture fresh schema audit
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline

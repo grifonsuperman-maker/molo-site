@@ -58,6 +58,8 @@ function loadRuntimeMigrations(require) {
     CreateSyrveTableLinks2026093000010,
   } = require('../dist/migrations/2026093000010-CreateSyrveTableLinks.js');
 
+  const { FenceSyrveConfiguration2026093000020 } = require('../dist/migrations/2026093000020-FenceSyrveConfiguration.js');
+
   return [
     CreateStaffPinAttempts2026081400010,
     UpgradeStaffPinAttemptsPerAttempt2026081400020,
@@ -69,6 +71,7 @@ function loadRuntimeMigrations(require) {
     AddManualBookingGuestName2026082400020,
     CreateGuestPushSubscriptions2026092000010,
     CreateSyrveTableLinks2026093000010,
+    FenceSyrveConfiguration2026093000020,
   ];
 }
 

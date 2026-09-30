@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { settingsHarness } = require('./helpers/syrve-settings-harness.js');
 const { SyrveClient } = require('../dist/syrve/syrve-client.js');
 const { SyrveIntegrationService } = require('../dist/syrve/syrve-integration.service.js');
 
@@ -24,22 +25,27 @@ function setup(t) {
   process.env.JWT_SECRET = 'separate-long-jwt-secret';
   process.env.SYRVE_APP_ID = '';
   process.env.SYRVE_APP_CLIENT_SECRET = '';
-  let row;
-  const writes = [];
+  const h = settingsHarness();
   const logs = [];
-  const repo = {
-    find: async () => row ? [{ ...row }] : [],
-    create: (value) => ({ id: 'integration', ...value }),
-    save: async (value) => { row = { ...value }; writes.push({ ...value }); return value; },
+  const service = new SyrveIntegrationService(h.store, { create: async (...args) => logs.push(args) },
+    new SyrveClient(), { find: async () => [] });
+  const nativeConnect = service.connect.bind(service);
+  service.connect = async (input, actor) => {
+    const preview = await service.previewTables(input);
+    return nativeConnect({ ...input, pairs: [], confirmationProof: preview.confirmation.proof }, actor);
   };
-  const service = new SyrveIntegrationService(repo, { create: async (...args) => logs.push(args) }, new SyrveClient());
+  const nativeRecheck = service.recheck.bind(service);
+  service.recheck = () => nativeRecheck({ configurationRevision: h.entity()?.configurationRevision });
+  const nativeDisconnect = service.disconnect.bind(service);
+  service.disconnect = (reason) => nativeDisconnect({ configurationRevision: h.entity()?.configurationRevision, reason });
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     calls.push({ url, options });
-    return url.endsWith('access_token') ? Response.json({ token: 'backend-token' })
-      : Response.json({ organizations: [{ id: ORG, name: 'Verified restaurant' }] });
+    if (url.endsWith('access_token')) return Response.json({ token: 'backend-token' });
+    if (url.endsWith('terminal_groups')) return Response.json({ terminalGroups: [], terminalGroupsInSleep: [] });
+    return Response.json({ organizations: [{ id: ORG, name: 'Verified restaurant' }] });
   });
-  return { service, writes, logs, calls, row: () => row };
+  return { service, writes: h.writes, logs, calls, row: h.entity };
 }
 
 test('connection test reads upstream without creating a local integration or writing logs', async (t) => {
@@ -69,7 +75,7 @@ test('connect preserves AES-GCM storage and recheck decrypts only on the backend
       assert.ok(!json.includes(forbidden));
     }
   }
-  assert.equal(JSON.parse(h.calls[2].options.body).apiLogin, LOGIN);
+  assert.ok(h.calls.some((call) => call.url.endsWith('access_token') && JSON.parse(call.options.body).apiLogin === LOGIN));
   assert.ok(!JSON.stringify(h.logs).includes(LOGIN));
   process.env.JWT_SECRET = 'rotated-jwt-secret';
   assert.equal((await h.service.recheck()).integration.status, 'connected');

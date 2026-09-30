@@ -23,19 +23,20 @@ function handler(name, dependencies) {
   return new Function(...Object.keys(dependencies), `${js}\nreturn ${name};`)(...Object.values(dependencies));
 }
 function harness(api = {}) {
-  const state = { preview: null, busy: false, error: null, notice: null, login: 'test-api-secret', organization: ORG, step: 2, open: true };
+  const state = { preview: null, busy: false, error: null, notice: null, login: 'test-api-secret', organization: ORG, step: 2, open: true, acknowledged: false, status: null };
   const deps = { displayName: 'MOLO', apiBaseUrl: 'https://api-eu.syrve.live', apiLogin: state.login,
     organizationId: ORG, organizations: [{ id: ORG, name: 'MOLO' }], catalogPreview: null,
+    mappingAcknowledged: false, setMappingAcknowledged: (value) => state.acknowledged = value, status: { configurationRevision: ORG },
     requestVersion: { current: 0 }, syrveApi: api,
     setCatalogPreview: (value) => state.preview = value, setBusy: (value) => state.busy = value,
     setError: (value) => state.error = value, setNotice: (value) => state.notice = value,
     setApiLogin: (value) => state.login = value, setOrganizationId: (value) => state.organization = value,
     setOpen: (value) => state.open = value, setStep: (value) => state.step = value,
-    setShowLogin() {}, setStatus() {} };
+    setShowLogin() {}, setStatus: (value) => state.status = value, setDisplayName() {}, setApiBaseUrl() {} };
   return { state, deps, run: (name) => handler(name, deps) };
 }
 const result = (organizationId = ORG) => ({ organization: { id: organizationId, name: 'MOLO' }, syncEnabled: false,
-  mappingConfirmationAvailable: false });
+  proposals: [], confirmation: null, confirmedLinks: [], mappingConfirmationAvailable: false });
 function deferred() {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -133,4 +134,75 @@ test('Director panel renders counts, unmatched tables/conflicts and escapes upst
   assert.ok(html.includes('&lt;script&gt;'));
   assert.ok(!html.includes('<script>'));
   assert.ok(!html.includes('Увімкнути синхронізацію'));
+});
+
+test('confirmation needs both a server receipt and an explicit Director acknowledgement', async () => {
+  const h = harness({ connect: () => assert.fail('must not save without review') });
+  h.deps.catalogPreview = { ...result(), proposals: [{ moloTableId: ORG, syrveTableId: OTHER }] };
+  await h.run('connect')();
+  assert.match(h.state.error, /поки недоступне/);
+  h.deps.catalogPreview.confirmation = { proof: 'synthetic-preview-receipt' };
+  await h.run('connect')();
+  assert.match(h.state.error, /Підтвердьте запропоновані/);
+});
+
+test('confirmed save sends only selected UUID pairs and the receipt to MOLO', async () => {
+  let payload;
+  const h = harness({ connect: async (value) => { payload = value; return { integration: { confirmedLinks: 1, syncEnabled: false } }; } });
+  h.deps.mappingAcknowledged = true;
+  h.deps.catalogPreview = { ...result(), confirmation: { proof: 'synthetic-preview-receipt' },
+    proposals: [{ moloTableId: ORG, syrveTableId: OTHER, moloTableNumber: '12', syrveTableNumber: 12 }] };
+  await h.run('connect')();
+  assert.deepEqual(payload.pairs, [{ moloTableId: ORG, syrveTableId: OTHER }]);
+  assert.equal(payload.confirmationProof, 'synthetic-preview-receipt');
+  assert.equal(h.state.login, '');
+  assert.equal(h.state.status.confirmedLinks, 1);
+  assert.equal(h.state.status.syncEnabled, false);
+});
+
+test('a rejected confirmation invalidates the preview and requires a fresh acknowledgement', async () => {
+  const h = harness({ connect: async () => { throw new Error('Налаштування або столи змінилися'); } });
+  h.deps.mappingAcknowledged = true;
+  h.deps.catalogPreview = { ...result(), confirmation: { proof: 'synthetic-preview-receipt' } };
+  h.state.preview = h.deps.catalogPreview;
+  h.state.acknowledged = true;
+  await h.run('connect')();
+  assert.equal(h.state.preview, null);
+  assert.equal(h.state.acknowledged, false);
+  assert.match(h.state.error, /змінилися/);
+});
+
+test('closing during confirmation discards the late saved-status response', async () => {
+  const request = deferred();
+  const h = harness({ connect: () => request.promise });
+  h.deps.catalogPreview = { ...result(), confirmation: { proof: 'synthetic-preview-receipt' } };
+  const pending = h.run('connect')();
+  h.run('close')();
+  request.resolve({ integration: { confirmedLinks: 1 } });
+  await pending;
+  assert.equal(h.state.status, null);
+  assert.equal(h.state.open, false);
+  assert.equal(h.state.step, 1);
+});
+
+test('a late initial status load cannot overwrite a new connection dialog', async () => {
+  const request = deferred();
+  const h = harness({ getStatus: () => request.promise });
+  const pending = h.run('load')();
+  h.run('chooseOrganization')(OTHER);
+  request.resolve({ displayName: 'Old settings', organizationId: ORG });
+  await pending;
+  assert.equal(h.state.status, null);
+});
+
+test('frontend recheck sends the saved configuration revision and discards stale replies', async () => {
+  const request = deferred();
+  let version;
+  const h = harness({ recheck: (value) => { version = value; return request.promise; } });
+  const pending = h.run('recheck')();
+  h.run('close')();
+  request.resolve({ integration: { configurationRevision: OTHER } });
+  await pending;
+  assert.equal(version, ORG);
+  assert.equal(h.state.status, null);
 });

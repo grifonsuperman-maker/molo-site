@@ -62,6 +62,26 @@ export async function createFreshSchemaReference(env = process.env) {
   lockFreshSchemaReferenceEnvironment(process.env);
 
   const require = createRequire(import.meta.url);
+  // The legacy integration entity is now migration-owned. Provision only its
+  // frozen pre-runtime baseline in this guarded disposable reference, before
+  // the application runs registered feature migrations. Never adopt live history.
+  const { DataSource } = require('typeorm');
+  const { INITIAL_SCHEMA_BASELINE_CREATE_STATEMENTS } = require('../dist/database/initial-schema-baseline-definition.js');
+  const { INITIAL_SCHEMA_BASELINE_RELATION_STATEMENTS } = require('../dist/database/initial-schema-baseline-relations.js');
+  const legacy = new DataSource({ type: 'postgres', host: env.DB_HOST, port: Number(env.DB_PORT || 5432),
+    username: env.DB_USER || 'postgres', password: env.DB_PASSWORD || 'postgres', database: env.DB_NAME });
+  await legacy.initialize();
+  try {
+    await legacy.transaction(async (manager) => {
+      const [state] = await manager.query("SELECT to_regclass('public.syrve_integrations') IS NOT NULL AS present");
+      if (!state.present) {
+        await manager.query(INITIAL_SCHEMA_BASELINE_CREATE_STATEMENTS[0]);
+        await manager.query(INITIAL_SCHEMA_BASELINE_CREATE_STATEMENTS.find((sql) => sql.startsWith('CREATE TABLE "syrve_integrations"')));
+        await manager.query(INITIAL_SCHEMA_BASELINE_RELATION_STATEMENTS.find((sql) => sql.startsWith('ALTER TABLE "syrve_integrations"') && sql.includes('PRIMARY KEY')));
+      }
+    });
+  } finally { await legacy.destroy(); }
+
   const { NestFactory } = require('@nestjs/core');
   const { AppModule } = require('../dist/app.module.js');
 

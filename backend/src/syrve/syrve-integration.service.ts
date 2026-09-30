@@ -1,8 +1,6 @@
 import {
-  BadGatewayException,
-  BadRequestException,
-  Injectable,
-  InternalServerErrorException,
+  BadGatewayException, BadRequestException, ConflictException, Injectable,
+  InternalServerErrorException, Logger, ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
@@ -12,78 +10,60 @@ import type { AuthUser } from '../auth/types/auth-user.type';
 import { isProductionRuntime } from '../config/runtime-secrets';
 import { LogsService } from '../logs/logs.service';
 import { TableEntity } from '../tables/entities/table.entity';
-import {
-  ConnectSyrveDto,
-  PreviewSyrveTablesDto,
-  TestSyrveConnectionDto,
-  UpdateSyrveConnectionDto,
-} from './dto/syrve-integration.dto';
+import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisionDto,
+  TestSyrveConnectionDto, UpdateSyrveConnectionDto } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
+import { SyrveTableLink } from './entities/syrve-table-link.entity';
 import { SyrveClient, SyrveClientException } from './syrve-client';
-import { buildSyrveCatalogPreview } from './syrve-catalog';
+import { buildSyrveMappingPreview } from './syrve-mapping-preview';
+import { credentialFingerprint, issuePreviewProof, previewFingerprint, verifyPreviewProof } from './syrve-preview-proof';
+import { settingsVersion, staleSyrveSettings, SyrveSettingsSnapshot, SyrveSettingsStore } from './syrve-settings.store';
 
-type EncryptedValue = {
-  encrypted: string;
-  iv: string;
-  authTag: string;
-};
+type EncryptedValue = { encrypted: string; iv: string; authTag: string };
 
 @Injectable()
 export class SyrveIntegrationService {
+  private readonly logger = new Logger(SyrveIntegrationService.name);
   constructor(
-    @InjectRepository(SyrveIntegration)
-    private readonly repo: Repository<SyrveIntegration>,
+    private readonly settings: SyrveSettingsStore,
     private readonly logs: LogsService,
     private readonly client: SyrveClient,
-    @InjectRepository(TableEntity)
-    private readonly tablesRepo: Repository<TableEntity>,
+    @InjectRepository(TableEntity) private readonly tablesRepo: Repository<TableEntity>,
   ) {}
 
-  private async findOrCreate() {
-    const existing = await this.repo.find({ order: { createdAt: 'ASC' }, take: 1 });
-    if (existing[0]) return existing[0];
-
-    return this.repo.save(
-      this.repo.create({
-        displayName: 'MOLO · Syrve',
-        apiBaseUrl: 'https://api-eu.syrve.live',
-        apiLoginEncrypted: null,
-        apiLoginIv: null,
-        apiLoginAuthTag: null,
-        apiLoginMasked: null,
-        organizationId: null,
-        organizationName: null,
-        status: 'not_connected',
-        lastCheckedAt: null,
-        connectedAt: null,
-        lastError: null,
-      }),
-    );
-  }
-
-  private response(entity: SyrveIntegration) {
+  private response(snapshot: SyrveSettingsSnapshot) {
+    const entity = snapshot.entity;
     return {
-      id: entity.id,
-      displayName: entity.displayName,
-      apiBaseUrl: entity.apiBaseUrl,
-      apiLoginMasked: entity.apiLoginMasked,
-      hasCredentials: Boolean(
-        entity.apiLoginEncrypted && entity.apiLoginIv && entity.apiLoginAuthTag,
-      ),
-      organizationId: entity.organizationId,
-      organizationName: entity.organizationName,
-      status: entity.status,
-      lastCheckedAt: entity.lastCheckedAt,
-      connectedAt: entity.connectedAt,
-      lastError: entity.lastError,
-      syncEnabled: false,
+      id: entity?.id || '', displayName: entity?.displayName || 'MOLO · Syrve',
+      apiBaseUrl: entity?.apiBaseUrl || 'https://api-eu.syrve.live',
+      apiLoginMasked: entity?.apiLoginMasked || null,
+      hasCredentials: Boolean(entity?.apiLoginEncrypted && entity.apiLoginIv && entity.apiLoginAuthTag),
+      organizationId: entity?.organizationId || null, organizationName: entity?.organizationName || null,
+      status: entity?.status || 'not_connected', lastCheckedAt: entity?.lastCheckedAt || null,
+      connectedAt: entity?.connectedAt || null, lastError: entity?.lastError || null,
+      configurationRevision: entity?.configurationRevision || null,
+      settingsPrepared: snapshot.prepared, confirmedLinks: snapshot.links.length, syncEnabled: false,
     };
   }
 
-  async getStatus() {
-    return this.response(await this.findOrCreate());
+  async getStatus() { return this.response(await this.settings.read()); }
+
+  private requirePrepared(snapshot: SyrveSettingsSnapshot) {
+    if (!snapshot.prepared) throw new ServiceUnavailableException('Серверна підготовка інтеграції ще не завершена. Збереження зв’язків поки недоступне.');
   }
 
+  private async checkedRevision(dto: SyrveRevisionDto) {
+    const snapshot = await this.settings.read();
+    this.requirePrepared(snapshot);
+    if (!snapshot.entity || snapshot.entity.configurationRevision !== dto.configurationRevision) throw staleSyrveSettings();
+    return snapshot;
+  }
+
+  private async audit(message: string, metadata: Record<string, unknown>) {
+    // A logging outage must not turn an already committed operation into a failure.
+    try { await this.logs.create(message, null, metadata); }
+    catch { this.logger.warn('Не вдалося записати журнал дії Syrve'); }
+  }
   private encryptionKey() {
     const secret = process.env.SYRVE_CREDENTIALS_SECRET ||
       (!isProductionRuntime() ? process.env.JWT_SECRET : undefined);
@@ -130,135 +110,135 @@ export class SyrveIntegrationService {
   async test(dto: TestSyrveConnectionDto) {
     this.encryptionKey();
     const result = await this.client.checkOrganizations(dto.apiBaseUrl, dto.apiLogin.trim());
-    return {
-      message: 'Підключення до Syrve успішно перевірено',
-      apiBaseUrl: result.baseUrl,
-      organizations: result.organizations,
-      diagnostics: result.diagnostics,
-    };
+    return { message: 'Підключення до Syrve успішно перевірено', apiBaseUrl: result.baseUrl,
+      organizations: result.organizations, diagnostics: result.diagnostics };
   }
 
   async previewTables(dto: PreviewSyrveTablesDto) {
-    this.encryptionKey();
+    const key = this.encryptionKey();
+    const before = await this.settings.read();
     const catalog = await this.client.getCatalog(dto.apiBaseUrl, dto.apiLogin.trim(), dto.organizationId);
     const tables = await this.tablesRepo.find({ select: { id: true, tableNumber: true }, order: { tableNumber: 'ASC' } });
-    // No findOrCreate, integration/link access, logging or physical-table writes.
-    return buildSyrveCatalogPreview(catalog, tables);
+    const current = await this.settings.read();
+    if (JSON.stringify(settingsVersion(before)) !== JSON.stringify(settingsVersion(current))) throw staleSyrveSettings();
+    const preview = buildSyrveMappingPreview(catalog, tables, current.links);
+    const confirmation = current.prepared ? issuePreviewProof(key, {
+      organizationId: catalog.organization.id, version: settingsVersion(current),
+      credentials: credentialFingerprint(key, this.client.normalizeBaseUrl(dto.apiBaseUrl), dto.apiLogin.trim()),
+      fingerprint: previewFingerprint(catalog, tables, current.links),
+    }) : null;
+    return { ...preview, confirmation, mappingConfirmationAvailable: Boolean(confirmation && preview.proposals.length),
+      diagnostics: { ...preview.diagnostics, warnings: [...preview.diagnostics.warnings,
+        ...(!current.prepared ? ['Підтвердження зв’язків поки недоступне: серверна підготовка інтеграції ще не завершена.'] : [])] } };
   }
 
   async connect(dto: ConnectSyrveDto, actor?: AuthUser) {
-    this.encryptionKey();
+    const key = this.encryptionKey();
+    const proof = verifyPreviewProof(key, dto.confirmationProof);
     const apiLogin = dto.apiLogin.trim();
-    const result = await this.client.checkOrganizations(dto.apiBaseUrl, apiLogin);
-    const organization = result.organizations.find(
-      (item) => item.id === dto.organizationId.trim().toLowerCase(),
-    );
-    if (!organization) {
-      throw new BadRequestException('Обрана організація більше не доступна у Syrve');
-    }
-
+    const baseUrl = this.client.normalizeBaseUrl(dto.apiBaseUrl);
+    if (proof.organizationId !== dto.organizationId.toLowerCase() ||
+        proof.credentials !== credentialFingerprint(key, baseUrl, apiLogin)) throw staleSyrveSettings();
+    // Re-read the documented catalog outside the database transaction.
+    const catalog = await this.client.getCatalog(baseUrl, apiLogin, dto.organizationId);
     const encrypted = this.encrypt(apiLogin);
-    const entity = await this.findOrCreate();
-    entity.displayName = dto.displayName.trim();
-    entity.apiBaseUrl = result.baseUrl;
-    entity.apiLoginEncrypted = encrypted.encrypted;
-    entity.apiLoginIv = encrypted.iv;
-    entity.apiLoginAuthTag = encrypted.authTag;
-    entity.apiLoginMasked = this.maskLogin(apiLogin);
-    entity.organizationId = organization.id;
-    entity.organizationName = organization.name;
-    entity.status = 'connected';
-    entity.lastCheckedAt = new Date();
-    entity.connectedAt = new Date();
-    entity.lastError = null;
-
-    await this.repo.save(entity);
-    await this.logs.create('Директор підключив Syrve Cloud API', null, {
-      organizationId: organization.id,
-      organizationName: organization.name,
-      apiBaseUrl: result.baseUrl,
-      actorName: actor?.name || null,
-      actorRole: actor?.role || null,
+    const result = await this.settings.transaction(proof.version, async (manager, current) => {
+      if (proof.expires <= Date.now()) throw staleSyrveSettings();
+      if (current.links.some((link) => link.organizationId !== catalog.organization.id)) {
+        throw new ConflictException('Збережені зв’язки належать іншому ресторану. Автоматична заміна зв’язків заборонена.');
+      }
+      // Protect number uniqueness including concurrent insert/rename. The lock is
+      // held only for local validation and link writes, never during Syrve calls.
+      await manager.query('LOCK TABLE "tables" IN SHARE MODE');
+      const tables = await manager.getRepository(TableEntity).find({ select: { id: true, tableNumber: true } });
+      if (proof.fingerprint !== previewFingerprint(catalog, tables, current.links)) throw staleSyrveSettings();
+      const preview = buildSyrveMappingPreview(catalog, tables, current.links);
+      const pairs = dto.pairs || [];
+      const proposed = new Map(preview.proposals.map((pair) => [pair.moloTableId, pair]));
+      const seen = new Set<string>();
+      for (const pair of pairs) {
+        const candidate = proposed.get(pair.moloTableId.toLowerCase());
+        if (!candidate || candidate.syrveTableId !== pair.syrveTableId.toLowerCase() || seen.has(candidate.moloTableId)) {
+          throw new BadRequestException('Підтверджувати можна лише унікальні запропоновані пари. Повторіть перевірку.');
+        }
+        seen.add(candidate.moloTableId);
+      }
+      const entity = await this.settings.save(manager, { ...current.entity,
+        displayName: dto.displayName.trim(), apiBaseUrl: baseUrl,
+        apiLoginEncrypted: encrypted.encrypted, apiLoginIv: encrypted.iv,
+        apiLoginAuthTag: encrypted.authTag, apiLoginMasked: this.maskLogin(apiLogin),
+        organizationId: catalog.organization.id, organizationName: catalog.organization.name,
+        status: 'connected', lastCheckedAt: new Date(), connectedAt: new Date(), lastError: null,
+      });
+      if (pairs.length) {
+        await manager.getRepository(SyrveTableLink).insert(pairs.map((pair) => {
+          const candidate = proposed.get(pair.moloTableId.toLowerCase())!;
+          return { integrationId: entity.id, organizationId: catalog.organization.id,
+            moloTableId: candidate.moloTableId, syrveTableId: candidate.syrveTableId,
+            lastKnownNumber: candidate.syrveTableNumber, lastSeenAt: new Date(),
+            lastSyrveState: 'unknown' as const, activeSyrveOrderIds: [], manuallyFreedSyrveOrderIds: [] };
+        }));
+      }
+      return { entity, prepared: true, links: await manager.getRepository(SyrveTableLink).find() };
     });
-
-    return {
-      message: 'Syrve підключено',
-      integration: this.response(entity),
-    };
+    await this.audit('Директор підтвердив налаштування і зв’язки Syrve', {
+      organizationId: catalog.organization.id, confirmedPairs: dto.pairs.length,
+      actorName: actor?.name || null, actorRole: actor?.role || null,
+    });
+    return { message: 'Підключення та підтверджені зв’язки збережено',
+      confirmedPairs: dto.pairs.length, integration: this.response(result) };
   }
 
-  async recheck(actor?: AuthUser) {
-    const entity = await this.findOrCreate();
+  async recheck(dto: SyrveRevisionDto, actor?: AuthUser) {
+    const snapshot = await this.checkedRevision(dto);
+    const entity = snapshot.entity!;
     const apiLogin = this.decrypt(entity);
-
+    let result: Awaited<ReturnType<SyrveClient['checkOrganizations']>>;
     try {
-      const result = await this.client.checkOrganizations(entity.apiBaseUrl, apiLogin);
-      const organization = result.organizations.find(
-        (item) => item.id === entity.organizationId?.toLowerCase(),
-      );
-      if (!organization) {
+      result = await this.client.checkOrganizations(entity.apiBaseUrl, apiLogin);
+      if (!result.organizations.some((item) => item.id === entity.organizationId?.toLowerCase())) {
         throw new BadGatewayException('Обрана організація більше не доступна');
       }
-
-      entity.status = 'connected';
-      entity.lastCheckedAt = new Date();
-      entity.lastError = null;
-      entity.organizationName = organization.name;
-      await this.repo.save(entity);
-      await this.logs.create('Директор перевірив підключення Syrve', null, {
-        organizationId: entity.organizationId,
-        actorName: actor?.name || null,
-      });
-      return {
-        message: 'Підключення Syrve працює',
-        integration: this.response(entity),
-      };
     } catch (error: unknown) {
       const safeError = error instanceof SyrveClientException || error instanceof BadGatewayException
-        ? error
-        : new InternalServerErrorException('Не вдалося перевірити підключення Syrve');
-      entity.status = 'error';
-      entity.lastCheckedAt = new Date();
-      entity.lastError = safeError.message;
-      await this.repo.save(entity);
+        ? error : new InternalServerErrorException('Не вдалося перевірити підключення Syrve');
+      await this.settings.transaction(settingsVersion(snapshot), async (manager, current) => {
+        await this.settings.save(manager, { ...current.entity, status: 'error', lastCheckedAt: new Date(), lastError: safeError.message });
+      });
       throw safeError;
     }
+    const updated = await this.settings.transaction(settingsVersion(snapshot), async (manager, current) => ({
+      ...current, entity: await this.settings.save(manager, { ...current.entity, status: 'connected',
+        lastCheckedAt: new Date(), lastError: null,
+        organizationName: result.organizations.find((item) => item.id === entity.organizationId?.toLowerCase())!.name }),
+    }));
+    await this.audit('Директор перевірив підключення Syrve', { organizationId: entity.organizationId, actorName: actor?.name || null });
+    return { message: 'Підключення Syrve працює', integration: this.response(updated) };
   }
 
   async updateMetadata(dto: UpdateSyrveConnectionDto) {
-    const entity = await this.findOrCreate();
-    if (dto.displayName !== undefined) entity.displayName = dto.displayName.trim();
-    if (dto.apiBaseUrl !== undefined) {
-      entity.apiBaseUrl = this.client.normalizeBaseUrl(dto.apiBaseUrl);
-    }
-    await this.repo.save(entity);
-    return this.response(entity);
+    const snapshot = await this.checkedRevision(dto);
+    const baseUrl = dto.apiBaseUrl === undefined ? undefined : this.client.normalizeBaseUrl(dto.apiBaseUrl);
+    const updated = await this.settings.transaction(settingsVersion(snapshot), async (manager, current) => ({
+      ...current, entity: await this.settings.save(manager, { ...current.entity,
+        ...(dto.displayName !== undefined ? { displayName: dto.displayName.trim() } : {}),
+        ...(baseUrl !== undefined ? { apiBaseUrl: baseUrl } : {}),
+      }),
+    }));
+    return this.response(updated);
   }
 
-  async disconnect(reason: string | undefined, actor?: AuthUser) {
-    const entity = await this.findOrCreate();
-    entity.apiLoginEncrypted = null;
-    entity.apiLoginIv = null;
-    entity.apiLoginAuthTag = null;
-    entity.apiLoginMasked = null;
-    entity.organizationId = null;
-    entity.organizationName = null;
-    entity.status = 'not_connected';
-    entity.lastCheckedAt = new Date();
-    entity.connectedAt = null;
-    entity.lastError = null;
-    await this.repo.save(entity);
-
-    await this.logs.create('Директор відключив Syrve Cloud API', null, {
-      reason: String(reason || 'Не вказано').slice(0, 300),
-      actorName: actor?.name || null,
-      actorRole: actor?.role || null,
-    });
-
-    return {
-      message: 'Syrve відключено',
-      integration: this.response(entity),
-    };
+  async disconnect(dto: DisconnectSyrveDto, actor?: AuthUser) {
+    const snapshot = await this.checkedRevision(dto);
+    const updated = await this.settings.transaction(settingsVersion(snapshot), async (manager, current) => ({
+      ...current, entity: await this.settings.save(manager, { ...current.entity,
+        apiLoginEncrypted: null, apiLoginIv: null, apiLoginAuthTag: null, apiLoginMasked: null,
+        organizationId: null, organizationName: null, status: 'not_connected',
+        lastCheckedAt: new Date(), connectedAt: null, lastError: null }),
+    }));
+    await this.audit('Директор відключив Syrve Cloud API', { reason: dto.reason || 'Не вказано',
+      actorName: actor?.name || null, actorRole: actor?.role || null });
+    return { message: 'Syrve відключено. Підтверджені зв’язки збережено', integration: this.response(updated) };
   }
 
   private maskLogin(value: string) {
