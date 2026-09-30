@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
+import type { AuthUser } from '../auth/types/auth-user.type';
 import { Booking } from '../bookings/entities/booking.entity';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
@@ -110,7 +111,7 @@ export class TablesService {
     return this.tables.save(table);
   }
 
-  async setWaiterStatus(id: string, status: 'occupied' | 'free') {
+  async setWaiterStatus(id: string, status: 'occupied' | 'free', _actor?: AuthUser) {
     if (status !== 'occupied' && status !== 'free') {
       throw new BadRequestException('Офіціант може встановити лише статус «Зайнятий» або «Вільний»');
     }
@@ -152,15 +153,15 @@ export class TablesService {
     return this.tables.save(table);
   }
 
-  markOccupied(id: string) {
+  markOccupied(id: string, _actor?: AuthUser) {
     return this.setStatus(id, 'occupied');
   }
 
-  markCleaning(id: string) {
+  markCleaning(id: string, _actor?: AuthUser) {
     return this.setStatus(id, 'cleaning');
   }
 
-  markFree(id: string) {
+  markFree(id: string, _actor?: AuthUser) {
     return this.setStatus(id, 'free');
   }
 

@@ -50,6 +50,7 @@ type PersistedAssignmentRow = {
 
 const WAITER_ASSIGNMENT_HISTORY_ACTIONS = [
   'booking_checked_in',
+  'waiter_manual_visit_claimed',
   'waiter_table_transfer',
 ];
 const ACTIVE_CALL_STATUSES: WaiterCallStatus[] = ['new', 'accepted'];
@@ -279,7 +280,8 @@ export class WaiterCallsService {
       .getOne();
 
     const hasPersistedWaiter =
-      latestAssignmentEvent?.action === 'booking_checked_in' &&
+      (latestAssignmentEvent?.action === 'booking_checked_in' ||
+        latestAssignmentEvent?.action === 'waiter_manual_visit_claimed') &&
       latestAssignmentEvent.actorRole === 'waiter' &&
       Boolean(latestAssignmentEvent.actorStaffId);
 
