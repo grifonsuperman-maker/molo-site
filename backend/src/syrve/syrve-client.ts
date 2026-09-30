@@ -1,4 +1,5 @@
 import { BadGatewayException, BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { parseRestaurantSections, parseTerminalGroups, SyrveCatalogValidationError, type SyrveCatalog } from './syrve-catalog';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -123,7 +124,7 @@ export class SyrveClient {
     }
   }
 
-  async checkOrganizations(apiBaseUrl: string, apiLogin: string) {
+  private async openSession(apiBaseUrl: string, apiLogin: string) {
     const baseUrl = this.normalizeBaseUrl(apiBaseUrl);
     const auth = this.authentication(apiLogin);
     const payload = await this.postJson(auth.path, auth.body);
@@ -156,6 +157,7 @@ export class SyrveClient {
     });
     if (!organizations.length) throw new SyrveClientException('SYRVE_NO_ORGANIZATIONS');
     return {
+      token: payload.token,
       baseUrl,
       organizations,
       diagnostics: {
@@ -166,5 +168,31 @@ export class SyrveClient {
         syncEnabled: false,
       },
     };
+  }
+
+  async checkOrganizations(apiBaseUrl: string, apiLogin: string) {
+    const { baseUrl, organizations, diagnostics } = await this.openSession(apiBaseUrl, apiLogin);
+    return { baseUrl, organizations, diagnostics };
+  }
+
+  async getCatalog(apiBaseUrl: string, apiLogin: string, organizationId: string): Promise<SyrveCatalog> {
+    if (!UUID.test(organizationId)) throw new BadRequestException('Оберіть коректну організацію Syrve');
+    const session = await this.openSession(apiBaseUrl, apiLogin);
+    const organization = session.organizations.find((item) => item.id === organizationId.toLowerCase());
+    if (!organization) throw new BadRequestException('Обрана організація більше не доступна у Syrve');
+    try {
+      const terminalGroups = parseTerminalGroups(await this.postJson('/api/1/terminal_groups', {
+        organizationIds: [organization.id], includeDisabled: false,
+      }, session.token), organization.id);
+      const catalog = terminalGroups.active.length
+        ? parseRestaurantSections(await this.postJson('/api/1/reserve/available_restaurant_sections', {
+          terminalGroupIds: terminalGroups.active.map((group) => group.id), returnSchema: false,
+        }, session.token), terminalGroups.active.map((group) => group.id))
+        : { sectionsCount: 0, tables: [] };
+      return { organization, terminalGroups, ...catalog };
+    } catch (error: unknown) {
+      if (error instanceof SyrveCatalogValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+      throw error;
+    }
   }
 }

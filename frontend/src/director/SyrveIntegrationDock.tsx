@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Building2,
@@ -21,7 +21,9 @@ import {
   syrveApi,
   type SyrveIntegrationStatus,
   type SyrveOrganization,
+  type SyrveCatalogPreview,
 } from '../api/syrve';
+import SyrveCatalogPreviewPanel from './SyrveCatalogPreviewPanel';
 
 type Step = 1 | 2 | 3;
 
@@ -61,6 +63,8 @@ export default function SyrveIntegrationDock() {
   const [showLogin, setShowLogin] = useState(false);
   const [organizations, setOrganizations] = useState<SyrveOrganization[]>([]);
   const [organizationId, setOrganizationId] = useState('');
+  const [catalogPreview, setCatalogPreview] = useState<SyrveCatalogPreview | null>(null);
+  const requestVersion = useRef(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -81,6 +85,10 @@ export default function SyrveIntegrationDock() {
   }, []);
 
   function start(edit = false) {
+    requestVersion.current++;
+    setBusy(false);
+    setCatalogPreview(null);
+    setShowLogin(false);
     setError(null);
     setNotice(null);
     setStep(1);
@@ -94,11 +102,32 @@ export default function SyrveIntegrationDock() {
     setOpen(true);
   }
 
+  function close() {
+    requestVersion.current++;
+    setBusy(false);
+    setCatalogPreview(null);
+    setApiLogin('');
+    setShowLogin(false);
+    setStep(1);
+    setOpen(false);
+  }
+
+  function chooseOrganization(id: string) {
+    requestVersion.current++;
+    setOrganizationId(id);
+    setBusy(false);
+    setCatalogPreview(null);
+    setError(null);
+    setNotice(null);
+  }
+
   async function testConnection() {
     if (!displayName.trim()) return setError('Вкажіть назву підключення');
     if (!apiBaseUrl.trim()) return setError('Вкажіть адресу API');
     if (!apiLogin.trim()) return setError('Введіть API-логін Syrve');
 
+    const version = ++requestVersion.current;
+    setCatalogPreview(null);
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -108,22 +137,49 @@ export default function SyrveIntegrationDock() {
         apiBaseUrl: apiBaseUrl.trim(),
         apiLogin: apiLogin.trim(),
       });
+      if (version !== requestVersion.current) return;
       setApiBaseUrl(result.apiBaseUrl);
       setOrganizations(result.organizations);
       setOrganizationId(result.organizations[0]?.id || '');
       setNotice('Доступ до Syrve підтверджено');
       setStep(2);
     } catch (cause: any) {
+      if (version !== requestVersion.current) return;
       setError(cause?.message || 'Syrve не підтвердив доступ');
     } finally {
-      setBusy(false);
+      if (version === requestVersion.current) setBusy(false);
+    }
+  }
+
+  async function previewTables() {
+    if (!organizationId) return setError('Оберіть ресторан Syrve');
+    const version = ++requestVersion.current;
+    setBusy(true);
+    setCatalogPreview(null);
+    setError(null);
+    setNotice(null);
+    try {
+      const preview = await syrveApi.previewTables({ displayName: displayName.trim(), apiBaseUrl: apiBaseUrl.trim(),
+        apiLogin: apiLogin.trim(), organizationId });
+      if (version !== requestVersion.current) return;
+      if (preview.organization.id !== organizationId) throw new Error('Отримано відповідь для іншого ресторану');
+      setCatalogPreview(preview);
+    } catch (cause: any) {
+      if (version !== requestVersion.current) return;
+      setError(cause?.message || 'Не вдалося перевірити столи Syrve');
+    } finally {
+      if (version === requestVersion.current) setBusy(false);
     }
   }
 
   async function connect() {
     const organization = organizations.find((item) => item.id === organizationId);
     if (!organization) return setError('Оберіть ресторан Syrve');
+    if (!catalogPreview || catalogPreview.organization.id !== organizationId) {
+      return setError('Спочатку перевірте столи вибраного ресторану');
+    }
 
+    const version = ++requestVersion.current;
     setBusy(true);
     setError(null);
     try {
@@ -134,13 +190,15 @@ export default function SyrveIntegrationDock() {
         organizationId: organization.id,
         organizationName: organization.name,
       });
+      if (version !== requestVersion.current) return;
       setStatus(result.integration);
       setApiLogin('');
       setStep(3);
     } catch (cause: any) {
+      if (version !== requestVersion.current) return;
       setError(cause?.message || 'Не вдалося зберегти підключення');
     } finally {
-      setBusy(false);
+      if (version === requestVersion.current) setBusy(false);
     }
   }
 
@@ -207,12 +265,12 @@ export default function SyrveIntegrationDock() {
                 <span className="grid h-14 w-14 place-items-center rounded-2xl border border-cyan-200/35 bg-cyan-400/10 text-cyan-100 shadow-[0_0_24px_rgba(34,211,238,.12)]"><PlugZap size={26} /></span>
                 <div><p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-100/50">MOLO · Інтеграції</p><h1 className="mt-1 text-3xl font-black">Syrve Cloud API</h1></div>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/5 text-white/60"><X size={19} /></button>
+              <button type="button" onClick={close} aria-label="Закрити налаштування Syrve" className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/5 text-white/60"><X size={19} /></button>
             </header>
 
             <div className="mt-6 grid grid-cols-3 gap-2">
               <StepBadge number="1" label="Дані доступу" active={step === 1} done={step > 1} />
-              <StepBadge number="2" label="Організація" active={step === 2} done={step > 2} />
+              <StepBadge number="2" label="Ресторан і столи" active={step === 2} done={step > 2} />
               <StepBadge number="3" label="Готово" active={step === 3} done={false} />
             </div>
 
@@ -225,13 +283,13 @@ export default function SyrveIntegrationDock() {
                 <p className="mt-2 text-sm text-white/45">Введіть API-логін, наданий Syrve. Пароль Windows і PIN касира не потрібні.</p>
 
                 <Field icon={<Building2 size={18} />} label="Назва підключення">
-                  <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="h-12 w-full bg-transparent px-3 text-sm outline-none" />
+                  <input disabled={busy} value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="h-12 w-full bg-transparent px-3 text-sm outline-none" />
                 </Field>
                 <Field icon={<Link2 size={18} />} label="Адреса API">
-                  <input value={apiBaseUrl} onChange={(event) => setApiBaseUrl(event.target.value)} inputMode="url" className="h-12 w-full bg-transparent px-3 text-sm outline-none" />
+                  <input disabled={busy} value={apiBaseUrl} onChange={(event) => setApiBaseUrl(event.target.value)} inputMode="url" className="h-12 w-full bg-transparent px-3 text-sm outline-none" />
                 </Field>
                 <Field icon={<KeyRound size={18} />} label="API-логін / ключ">
-                  <input value={apiLogin} onChange={(event) => setApiLogin(event.target.value)} type={showLogin ? 'text' : 'password'} autoComplete="off" className="h-12 min-w-0 flex-1 bg-transparent px-3 text-sm outline-none" />
+                  <input disabled={busy} value={apiLogin} onChange={(event) => setApiLogin(event.target.value)} type={showLogin ? 'text' : 'password'} autoComplete="off" className="h-12 min-w-0 flex-1 bg-transparent px-3 text-sm outline-none" />
                   <button type="button" onClick={() => setShowLogin((value) => !value)} className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 text-white/45">{showLogin ? <EyeOff size={17} /> : <Eye size={17} />}</button>
                 </Field>
 
@@ -243,9 +301,11 @@ export default function SyrveIntegrationDock() {
             {step === 2 && (
               <section className="mt-5 rounded-[28px] border border-emerald-200/20 bg-neutral-950/80 p-4 sm:p-5">
                 <div className="flex items-center gap-3"><span className="grid h-12 w-12 place-items-center rounded-full border border-emerald-200/35 bg-emerald-400/10 text-emerald-100"><Check size={24} /></span><div><p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-100/50">Доступ підтверджено</p><h2 className="mt-1 text-2xl font-black">Оберіть ресторан</h2></div></div>
-                <div className="mt-5 grid gap-2">{organizations.map((organization) => <button key={organization.id} type="button" onClick={() => setOrganizationId(organization.id)} className={`flex items-center justify-between rounded-2xl border p-4 text-left ${organizationId === organization.id ? 'border-emerald-200/50 bg-emerald-400/12 text-emerald-50 shadow-[0_0_24px_rgba(52,211,153,.1)]' : 'border-white/10 bg-black/30 text-white/60'}`}><div className="flex items-center gap-3"><Building2 size={20} /><div><p className="font-black">{organization.name}</p><p className="mt-1 text-xs opacity-45">{organization.id}</p></div></div>{organizationId === organization.id && <Check size={19} />}</button>)}</div>
+                <div className="mt-5 grid gap-2">{organizations.map((organization) => <button key={organization.id} disabled={busy} type="button" onClick={() => chooseOrganization(organization.id)} className={`flex items-center justify-between rounded-2xl border p-4 text-left disabled:opacity-40 ${organizationId === organization.id ? 'border-emerald-200/50 bg-emerald-400/12 text-emerald-50 shadow-[0_0_24px_rgba(52,211,153,.1)]' : 'border-white/10 bg-black/30 text-white/60'}`}><div className="flex items-center gap-3"><Building2 size={20} /><div><p className="font-black">{organization.name}</p><p className="mt-1 text-xs opacity-45">{organization.id}</p></div></div>{organizationId === organization.id && <Check size={19} />}</button>)}</div>
                 {!organizations.length && <div className="mt-5 rounded-2xl border border-dashed border-white/10 p-5 text-center text-white/35">Syrve не повернув доступних організацій</div>}
-                <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => setStep(1)} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 font-black text-white/55">Назад</button><button type="button" disabled={busy || !organizationId} onClick={() => void connect()} className="flex items-center justify-center gap-2 rounded-2xl border border-emerald-200/50 bg-emerald-400/15 p-4 font-black text-emerald-50 disabled:opacity-40">{busy && <LoaderCircle className="animate-spin" size={18} />}Підключити</button></div>
+                <button type="button" disabled={busy || !organizationId} onClick={() => void previewTables()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-cyan-200/50 bg-cyan-400/15 p-4 font-black text-cyan-50 disabled:opacity-40">{busy && <LoaderCircle className="animate-spin" size={18} />}Перевірити столи</button>
+                {catalogPreview && <SyrveCatalogPreviewPanel preview={catalogPreview} />}
+                <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" disabled={busy} onClick={() => { setCatalogPreview(null); setStep(1); }} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 font-black text-white/55">Назад</button><button type="button" disabled={busy || !catalogPreview || catalogPreview.organization.id !== organizationId} onClick={() => void connect()} className="flex items-center justify-center gap-2 rounded-2xl border border-emerald-200/50 bg-emerald-400/15 p-4 font-black text-emerald-50 disabled:opacity-40">Зберегти підключення</button></div>
               </section>
             )}
 
@@ -255,8 +315,8 @@ export default function SyrveIntegrationDock() {
                 <p className="mt-5 text-xs font-black uppercase tracking-[0.2em] text-emerald-100/55">Підключення збережено</p>
                 <h2 className="mt-2 text-3xl font-black">Syrve доступний</h2>
                 <p className="mt-3 text-white/55">Організація: {status.organizationName || 'обрана'}</p>
-                <div className="mx-auto mt-5 max-w-xl rounded-2xl border border-amber-200/25 bg-amber-300/[0.07] p-4 text-left"><p className="font-black text-amber-100">Синхронізація ще не ввімкнена</p><p className="mt-2 text-sm text-white/50">Підключення підтверджує доступ до Syrve. Передача столів, замовлень і статусів буде додана окремим безпечним етапом.</p></div>
-                <button type="button" onClick={() => setOpen(false)} className="mt-5 w-full rounded-2xl border border-emerald-200/50 bg-emerald-400/15 p-4 font-black text-emerald-50">Готово</button>
+                <div className="mx-auto mt-5 max-w-xl rounded-2xl border border-amber-200/25 bg-amber-300/[0.07] p-4 text-left"><p className="font-black text-amber-100">Синхронізація ще не ввімкнена</p><p className="mt-2 text-sm text-white/50">Доступ до ресторану збережено. Зв’язки столів і автоматичні статуси ще не ввімкнені.</p></div>
+                <button type="button" onClick={close} className="mt-5 w-full rounded-2xl border border-emerald-200/50 bg-emerald-400/15 p-4 font-black text-emerald-50">Готово</button>
               </section>
             )}
 
