@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
@@ -60,6 +60,11 @@ export class TablesService {
   }
 
   async findOrCreateByNumber(tableNumber: string) {
+    if ((await this.mapIdentities.project([])).prepared) {
+      // A stale number may now belong to another UUID or an intentionally empty
+      // physical slot. Prepared clients must send the selected table UUID.
+      throw new ConflictException('Номер столу міг змінитися. Оновіть список та оберіть стіл знову.');
+    }
     const normalized = String(tableNumber || '').trim();
     let table = await this.tables.findOne({ where: { tableNumber: normalized }, relations: ['zone'] });
 

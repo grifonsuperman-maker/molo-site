@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { TableEntity } from '../tables/entities/table.entity';
+import { CANONICAL_TABLE_NUMBER_SQL_V1 } from '../migrations/2026093000040-ProtectCanonicalTableNumbers';
 import { canonicalTableNumber, physicalMapSlot } from '../tables/table-map-slots';
 import { rethrowTableNumberConflict } from '../tables/table-number-conflict';
 import type { SyrveCatalog } from './syrve-catalog';
@@ -37,9 +38,11 @@ export class SyrveTableRenamingService {
           AND EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace pn ON pn.oid = p.pronamespace
             WHERE pn.nspname = $1 AND p.proname = 'molo_canonical_table_number'
               AND p.provolatile = 'i' AND p.proisstrict AND p.pronargs = 1
-              AND p.proargtypes[0] = 'text'::regtype AND p.prorettype = 'text'::regtype)
+              AND p.proargtypes[0] = 'text'::regtype AND p.prorettype = 'text'::regtype
+              AND p.prosrc = $4 AND p.proconfig IS NULL AND NOT p.prosecdef AND p.proparallel = 's'
+              AND p.prolang = (SELECT oid FROM pg_language WHERE lanname = 'sql'))
       ) AS "numberUniquenessPrepared"`,
-    [schema.name, schema.quoted + '."table_map_identities"', schema.quoted + '."tables"']);
+    [schema.name, schema.quoted + '."table_map_identities"', schema.quoted + '."tables"', CANONICAL_TABLE_NUMBER_SQL_V1]);
     return { physicalIdentityPrepared: Boolean(state.physicalIdentityPrepared),
       numberUniquenessPrepared: Boolean(state.numberUniquenessPrepared) };
   }

@@ -485,7 +485,9 @@ audited reconciliation without renaming/deleting any row. Down drops only its
 index/function under the same lock and retains all data. The expression index is
 declared `synchronize: false` on the existing entity; TypeORM neither creates nor
 drops it implicitly. Prepared readiness checks require the actual valid unique
-index, its normalizer expression and immutable strict text function.
+index, its normalizer expression and the exact frozen SQL function body, language,
+strict/immutable/parallel-safe attributes, invoker security and absence of custom
+function settings. A same-name function returning raw input or NULL is not ready.
 
 The migration is registered only for the guarded disposable CI reference and its
 fresh/history/roundtrip probes. Production's eight bootstrap migrations, historical
@@ -502,6 +504,15 @@ Status responses reload the current table. Existing transactions already holding
 a table write lock retain their behavior. Generic physical-table create/update
 paths convert violations of the new number index into Ukrainian conflicts.
 
+The connected advanced `AdminPanel` also consumes prepared physical identity:
+it never synthesizes old-number virtual targets once the map is prepared, keeps
+physical/booking grouping by the persisted table UUID and map prefix, and sends
+actions through existing UUID endpoints. Empty prepared maps remain empty; legacy
+virtual-number behavior stays available only before schema preparation. The backend
+also refuses all number-based status/find-or-create actions after identity adoption,
+so an old client cannot recreate a renamed slot or mutate a different UUID that
+reused the old number. The waiter already uses UUID routes and retains its rules.
+
 `GET /syrve-integration/table-renaming` is Director-only with the existing real
 JWT/role guards and `Cache-Control: no-store`. It reports schema readiness,
 confirmed UUIDs, permanent map slot/location, original/current numbers and photo
@@ -516,8 +527,10 @@ and store in a separate namespace. It verifies duplicate-up refusal, SQL/JS numb
 normalization, direct/concurrent unique violations, a late second-update fault and
 full rollback, concurrent rename observations, stale/disconnected replies, booking
 and map/link preservation, actual waiter read/rename/save interleaving and lossless
-number-protection down/up. Every public bootstrap table/binding/zone is compared
-before/after and remains untouched. Earlier identity fixtures deliberately omit
+number-protection down/up. The probe additionally verifies refusal of raw-input/NULL
+function drift and missing/reused number actions without physical writes. Every
+public bootstrap table/binding/zone is compared before/after and remains untouched.
+Earlier identity fixtures deliberately omit
 the later index, and mapping probes now expect duplicate inserts to be rejected.
 
 ## Required regression gates

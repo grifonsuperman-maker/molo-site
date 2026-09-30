@@ -16,7 +16,7 @@ const { GuestBookingsService } = require('../dist/bookings/guest-bookings.servic
 const { TableEntity } = require('../dist/tables/entities/table.entity.js');
 const { JwtAuthGuard } = require('../dist/auth/guards/jwt-auth.guard.js');
 const { RolesGuard } = require('../dist/auth/guards/roles.guard.js');
-const { ProtectCanonicalTableNumbers2026093000040: Migration } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
+const { ProtectCanonicalTableNumbers2026093000040: Migration, CANONICAL_TABLE_NUMBER_SQL_V1 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
 
 function fixture() {
   const organizationId = randomUUID(), integrationId = randomUUID();
@@ -170,6 +170,32 @@ test('diagnostics expose original/current label conflicts without credentials or
   assert.equal(result.links[0].currentNumber, '99');
   assert.doesNotMatch(JSON.stringify(result), /ciphertext|synthetic-iv|synthetic-tag|apiLogin|OrderIds/);
   assert.ok(h.queries.every((row) => row.sql.startsWith('SELECT')));
+  const fence = h.queries.find((row) => row.sql.includes('AS "physicalIdentityPrepared"'));
+  assert.match(fence.sql, /p\.prosrc = \$4/);
+  assert.equal(fence.parameters[3], CANONICAL_TABLE_NUMBER_SQL_V1);
+});
+
+test('prepared number-status actions cannot recreate a missing slot or mutate a reused number', async () => {
+  let reads = 0, writes = 0;
+  const repository = { findOne: async () => { reads++; return { id: 'different-uuid', tableNumber: '12' }; },
+    save: async () => { writes++; }, create: () => { writes++; } };
+  const service = new TablesService(repository, {}, {}, { project: async () => ({ prepared: true, tables: [] }) });
+  for (const number of ['12', '99']) {
+    await assert.rejects(service.setStatusByNumber(number, 'closed'), (error) => error.getStatus() === 409);
+  }
+  assert.equal(reads, 0); assert.equal(writes, 0);
+});
+
+test('unprepared number-status action keeps its legacy create/status behavior', async () => {
+  let current = null;
+  const repository = { findOne: async (options) => current &&
+    (options.where.id === current.id || options.where.tableNumber === current.tableNumber) ? { ...current } : null,
+  create: (row) => ({ id: 'legacy-uuid', ...row }), save: async (patch) => {
+    current = { ...current, ...patch }; return { ...current };
+  } };
+  const service = new TablesService(repository, {}, {}, { project: async () => ({ prepared: false, tables: [] }) });
+  const result = await service.setStatusByNumber('12', 'closed');
+  assert.equal(result.id, 'legacy-uuid'); assert.equal(result.tableNumber, '12'); assert.equal(result.status, 'closed');
 });
 
 test('waiter status saves do not overwrite a number changed after its initial read', async () => {

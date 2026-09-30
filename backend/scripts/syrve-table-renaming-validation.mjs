@@ -19,7 +19,7 @@ export async function runSyrveTableRenamingValidation(env = process.env) {
   const { SyrveSettingsStore } = require('../dist/syrve/syrve-settings.store.js');
   const { SyrveTableRenamingService } = require('../dist/syrve/syrve-table-renaming.service.js');
   const { canonicalTableNumber } = require('../dist/tables/table-map-slots.js');
-  const { ProtectCanonicalTableNumbers2026093000040: NumberMigration } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
+  const { ProtectCanonicalTableNumbers2026093000040: NumberMigration, CANONICAL_TABLE_NUMBER_SQL_V1 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
   const { CreateTableMapIdentities2026093000030: IdentityMigration } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
   const schemaName = 'molo_rename_probe_' + randomUUID().replaceAll('-', '');
   const schema = '"' + schemaName + '"';
@@ -101,6 +101,19 @@ export async function runSyrveTableRenamingValidation(env = process.env) {
     const diagnostic = await service.diagnostics();
     assert.equal(diagnostic.renamingReady, true, JSON.stringify(diagnostic));
     assert.equal(diagnostic.renamingEnabled, false);
+    const beforeDrift = await service.capture();
+    for (const body of ['SELECT $1', 'SELECT NULL::text']) {
+      // Identical name/signature/volatility with the wrong body is not prepared.
+      await db.query('CREATE OR REPLACE FUNCTION ' + schema + '.molo_canonical_table_number(text) RETURNS text '
+        + 'LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$' + body + '$$');
+      assert.equal((await service.diagnostics()).numberUniquenessPrepared, false);
+      await assert.rejects(service.capture(), (error) => error.getStatus() === 503);
+      await assert.rejects(service.applyCatalog(catalog(99), beforeDrift), (error) => error.getStatus() === 503);
+      assert.deepEqual(await physical(), before);
+    }
+    await db.query('CREATE OR REPLACE FUNCTION ' + schema + '.molo_canonical_table_number(text) RETURNS text '
+      + 'LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$' + CANONICAL_TABLE_NUMBER_SQL_V1 + '$$');
+    assert.equal((await service.diagnostics()).numberUniquenessPrepared, true);
     const observation = await service.capture();
     const result = await service.applyCatalog(catalog(99), observation);
     assert.equal(result.renamed, 1);
@@ -113,6 +126,16 @@ export async function runSyrveTableRenamingValidation(env = process.env) {
     const projected = await new TableMapIdentityService(db).project(await db.getRepository(TableEntity).find());
     assert.equal(projected.tables.find((row) => row.id === ids[0]).mapKey, 'hall:12');
     assert.equal(projected.tables.find((row) => row.id === ids[0]).tableNumber, '99');
+    const adminTables = new TablesService(db.getRepository(TableEntity), db.getRepository(Zone),
+      db.getRepository(Booking), new TableMapIdentityService(db));
+    const afterRename = await physical();
+    await assert.rejects(adminTables.setStatusByNumber('12', 'closed'), (error) => error.getStatus() === 409);
+    assert.deepEqual(await physical(), afterRename, 'A missing old label cannot create a second UUID.');
+    await db.query('INSERT INTO ' + schema + '."tables" ("id","table_number") VALUES ($1,\'12\')', [ids[4]]);
+    const withReusedNumber = await physical();
+    await assert.rejects(adminTables.setStatusByNumber('12', 'closed'), (error) => error.getStatus() === 409);
+    assert.deepEqual(await physical(), withReusedNumber, 'A stale number cannot change a different physical UUID.');
+    await db.query('DELETE FROM ' + schema + '."tables" WHERE "id"=$1', [ids[4]]);
     assert.equal((await service.diagnostics()).summary.photoLabelConflicts, 1);
     assert.equal((await service.applyCatalog(catalog(99), await service.capture())).renamed, 0);
     await assert.rejects(service.applyCatalog(catalog(), observation), (error) => error.getStatus() === 409);
