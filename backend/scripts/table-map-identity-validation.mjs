@@ -52,7 +52,7 @@ export async function runTableMapIdentityValidation(env = process.env) {
     // A separate namespace keeps every seeded public table/binding untouched.
     await db.query('CREATE SCHEMA ' + schema);
     schemaCreated = true;
-    for (const table of ['restaurants', 'tables', 'zones', 'map_objects']) {
+    for (const table of ['restaurant', 'tables', 'zones', 'map_objects']) {
       await db.query('CREATE TABLE ' + schema + '."' + table + '" (LIKE public."' + table + '" INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)');
     }
     const columnsBefore = await columns();
