@@ -192,7 +192,7 @@ export class BookingExpirationService implements OnModuleInit {
     }
 
     table.status = nextStatus;
-    await this.tables.save(table);
+    await this.tables.save({ id: table.id, status: table.status });
 
     return nextStatus === 'free' ? 'released' : 'preserved';
   }

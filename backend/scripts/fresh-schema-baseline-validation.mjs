@@ -55,6 +55,7 @@ function loadMigrations(require) {
 
   const { FenceSyrveConfiguration2026093000020 } = require('../dist/migrations/2026093000020-FenceSyrveConfiguration.js');
   const { CreateTableMapIdentities2026093000030 } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
+  const { ProtectCanonicalTableNumbers2026093000040 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
 
   return [
     InitialSchemaBaseline2026081300000,
@@ -70,6 +71,7 @@ function loadMigrations(require) {
     CreateSyrveTableLinks2026093000010,
     FenceSyrveConfiguration2026093000020,
     CreateTableMapIdentities2026093000030,
+    ProtectCanonicalTableNumbers2026093000040,
   ];
 }
 

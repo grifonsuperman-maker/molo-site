@@ -1,8 +1,8 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 4b starts from fresh main `898ad0d361aeaea14977b032a30897e336d58b35` (2026-09-30),
-after manual merges of PRs #261, #264, #265, #266 and #267. Client diagnostics, link schema preparation,
+PR 5 starts from fresh main `f9092f500de0106c01fa44b3174d7f4aa2e3bc51` (2026-09-30),
+after manual merges of PRs #261, #264, #265, #266, #267 and #268. Client diagnostics, link schema preparation,
 read-only catalog preview and explicit UUID confirmation are implemented. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
@@ -22,6 +22,7 @@ Every later PR starts from freshly fetched main after the Director's manual merg
   a masked login, never ciphertext or the upstream access token.
 - `syncEnabled` is hard-coded to false. The link/sync schema is prepared by PR 2;
   explicit mapping writes are available only after the prepared schema is applied.
+  Internal UUID rename preparation exists; no HTTP mutation or automatic caller invokes it.
   No scheduler, order observations, manual-action hooks or status integration are enabled.
 - The existing `1785362400000-CreateSyrveIntegration.ts` has up/down, and the fresh
   schema baseline contains `syrve_integrations`. This legacy migration is NOT in
@@ -200,8 +201,8 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics and proposals by unambiguous numbers (merged #265); no mapping writes or migrations | Syrve client/catalog/service/controller/DTO/module and tests, `frontend/src/api/syrve.ts`, Director dock/preview panel/tests |
 | 3b | Explicit UUID mapping confirmation (merged #266); singleton/configuration revision and stale-preview fencing introduced with the first write transaction | integration entity + migration/registry, mapping DTO/service/controller, Director confirmation UI and PostgreSQL concurrency tests |
 | 4a | Independent immutable physical UUID ↔ map slot storage and read-only diagnostics (merged #267); legacy-compatible API projection, no map consumer switch | new table-map entity/service/module/catalog + migration, tables/map API, migration registry/scripts and PostgreSQL tests; frontend API types only |
-| 4b | Connected map/location consumers use permanent identity before any rename (this PR); missing/hidden slots remain unavailable in prepared guest maps, legacy behavior and frozen geometry/assets preserved | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver, `backend/src/zones/zones.service.ts` bootstrap identity guard and protected-map/booking/restart tests |
-| 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection | Syrve rename service, table-number uniqueness migration if needed, DTO diagnostics and concurrency tests |
+| 4b | Connected map/location consumers use permanent identity before any rename (merged #268); missing/hidden slots remain unavailable in prepared guest maps, legacy behavior and frozen geometry/assets preserved | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver, `backend/src/zones/zones.service.ts` bootstrap identity guard and protected-map/booking/restart tests |
+| 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection (this PR); internal methods remain unreachable from HTTP/automatic callers | Syrve rename service/plan, canonical table-number uniqueness migration, read-only Director diagnostics, partial status saves and concurrency tests |
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown | Syrve order client/observer and fixtures/tests; no status application |
 | 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority | isolated Syrve state reducer and regression tests; no enabled worker |
 | 8 | Transactional manual-action hooks and unified effective status reads, existing waiter/booking behavior retained | `TablesService`, map/status read services, dependency wiring and regression tests; sync remains off |
@@ -445,6 +446,79 @@ No migration, production schema adoption, external Syrve request, status integra
 worker, environment change or deployment is part of PR 4b. Photographs and section
 range captions still describe the original physical layout; the later rename stage
 must report original/current-number conflicts without rewriting those assets.
+
+### PR 5 UUID rename preparation boundary
+
+`SyrveTableRenamingService` is registered and exported for later observer/activation
+work. This stage has no HTTP rename route, worker, scheduler or automatic caller.
+Its `capture()` method records the configuration revision and a fingerprint of
+existing UUID links, physical bindings and current numbers before the future
+observer's external request. `applyCatalog()` accepts the already validated catalog
+and that observation, performs no HTTP request, and rejects expired, stale or
+disconnected observations inside the existing settings transaction fence.
+
+The transaction locks settings, then physical tables and bindings in a fixed order,
+with the existing 750 ms lock and five-second statement deadlines. It plans the
+whole batch before writing. Only persisted MOLO UUID ↔ Syrve UUID links belonging
+to the selected configuration/organization and a valid independent physical slot
+are eligible. Unknown provider tables never create MOLO records. Missing/deleted
+provider UUIDs only produce skipped diagnostics; they never delete or rebind a table.
+Duplicate provider IDs/numbers, invalid/nonpositive/out-of-int32 targets, unbound
+slots, duplicate MOLO canonical numbers and occupied targets block the whole batch.
+Occupied targets also block swaps/chains; no temporary number is introduced.
+
+Each update is scoped to the existing physical UUID and its observed number, and
+changes only `tables.table_number`, including leaving `updated_at` untouched.
+Bookings, table geometry/location/visibility/manual status, immutable map identity,
+confirmed links, order sets, manual overrides and settings remain unchanged.
+The observation fingerprint rejects a late result after a prior rename, insert,
+delete or remapping, even if the configuration revision itself did not change.
+Fresh repeated catalogs are idempotent. Any PostgreSQL failure rolls the entire
+batch back; canonical-number conflicts become fixed Ukrainian HTTP 409 messages.
+
+`ProtectCanonicalTableNumbers2026093000040` owns a strict immutable SQL normalizer
+and expression unique index on positive canonical numbers. It mirrors the frozen
+12-digit number normalization and JavaScript trim whitespace, so `12`, `0012` and
+outer-whitespace variants cannot describe two tables. Existing unsupported values
+remain untouched. Up holds a source-table lock and stops on duplicates for an
+audited reconciliation without renaming/deleting any row. Down drops only its
+index/function under the same lock and retains all data. The expression index is
+declared `synchronize: false` on the existing entity; TypeORM neither creates nor
+drops it implicitly. Prepared readiness checks require the actual valid unique
+index, its normalizer expression and immutable strict text function.
+
+The migration is registered only for the guarded disposable CI reference and its
+fresh/history/roundtrip probes. Production's eight bootstrap migrations, historical
+baseline/legacy definitions and Guest Push operator gate are unchanged. Production
+schema adoption remains the separately reviewed final step, after a fresh audit;
+no real Syrve connection, SQL, migration, environment change or deployment is
+performed against production during this development stage.
+
+Unlocked table-status saves now persist only UUID/status; explicit table updates
+persist only requested fields. This prevents an entity loaded before a rename from
+writing its stale number back. Existing waiter occupied/free decisions, checked-in
+booking priority, expiration and booking lifecycle conditions remain unchanged.
+Status responses reload the current table. Existing transactions already holding
+a table write lock retain their behavior. Generic physical-table create/update
+paths convert violations of the new number index into Ukrainian conflicts.
+
+`GET /syrve-integration/table-renaming` is Director-only with the existing real
+JWT/role guards and `Cache-Control: no-store`. It reports schema readiness,
+confirmed UUIDs, permanent map slot/location, original/current numbers and photo
+label conflicts. It returns no credentials, access tokens, order sets or overrides.
+`renamingEnabled` and `syncEnabled` remain false. Existing photographs and section
+range captions retain original layout numbers; conflicts are reported, never
+rewritten into assets.
+
+Local verification includes both npm installs/builds/full test suites, source and
+whitespace checks. The guarded CI PostgreSQL probe runs the actual compiled service
+and store in a separate namespace. It verifies duplicate-up refusal, SQL/JS number
+normalization, direct/concurrent unique violations, a late second-update fault and
+full rollback, concurrent rename observations, stale/disconnected replies, booking
+and map/link preservation, actual waiter read/rename/save interleaving and lossless
+number-protection down/up. Every public bootstrap table/binding/zone is compared
+before/after and remains untouched. Earlier identity fixtures deliberately omit
+the later index, and mapping probes now expect duplicate inserts to be rejected.
 
 ## Required regression gates
 

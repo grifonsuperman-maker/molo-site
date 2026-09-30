@@ -53,7 +53,11 @@ export async function runTableMapIdentityValidation(env = process.env) {
     await db.query('CREATE SCHEMA ' + schema);
     schemaCreated = true;
     for (const table of ['restaurant', 'tables', 'zones', 'map_objects']) {
-      await db.query('CREATE TABLE ' + schema + '."' + table + '" (LIKE public."' + table + '" INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)');
+      // This earlier identity-only probe intentionally includes ambiguous numbers.
+      // Do not copy the later number-protection expression index into its fixtures.
+      await db.query('CREATE TABLE ' + schema + '."' + table + '" (LIKE public."' + table + '" INCLUDING DEFAULTS INCLUDING CONSTRAINTS'
+        + (table === 'tables' ? '' : ' INCLUDING INDEXES') + ')');
+      if (table === 'tables') await db.query('ALTER TABLE ' + schema + '."tables" ADD PRIMARY KEY ("id")');
     }
     const columnsBefore = await columns();
     await db.query(

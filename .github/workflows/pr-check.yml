@@ -94,6 +94,8 @@ jobs:
         run: node backend/scripts/syrve-mapping-validation.mjs
       - name: Validate physical map identity and immutable UUID bindings
         run: node backend/scripts/table-map-identity-validation.mjs
+      - name: Validate UUID table renaming and concurrent number conflicts
+        run: node backend/scripts/syrve-table-renaming-validation.mjs
       - name: Capture fresh schema audit
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline

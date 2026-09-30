@@ -1,9 +1,11 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { Zone } from '../../zones/entities/zone.entity';
 import { Booking } from '../../bookings/entities/booking.entity';
 
 export type TableStatus = 'free' | 'pending' | 'reserved' | 'occupied' | 'cleaning' | 'closed';
 
+// The expression index is owned by its migration, never by synchronize.
+@Index('UQ_tables_canonical_number', { synchronize: false })
 @Entity('tables')
 export class TableEntity {
   @PrimaryGeneratedColumn('uuid') id: string;
