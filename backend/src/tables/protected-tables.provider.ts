@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -41,20 +42,60 @@ function assignedWaiter(history: BookingHistory | null): string | null {
   return null;
 }
 
-/**
- * Called inside a transaction that already holds the physical table row lock.
- * Only checked-in manual bookings gain waiter ownership; walk-ins and online
- * bookings keep their existing behavior.
- */
-async function claimOrAssertBookedTableWaiter(
+async function lockActiveManualVisitsForTable(
   manager: EntityManager,
   tableId: string,
-  actor: AuthUser,
-  allowClaim: boolean,
 ) {
-  if (!actor.staffId) throw new ForbiddenException('Не вдалося визначити офіціанта');
+  const bookings = manager.getRepository(Booking);
+  const today = kyivToday();
+  const candidates = await bookings.find({
+    where: {
+      table: { id: tableId },
+      bookingDate: today,
+      status: 'approved',
+      source: 'admin_manual',
+      checkedInAt: Not(IsNull()),
+    },
+  });
+  const lockedVisits: Booking[] = [];
 
-  const visits = await manager.getRepository(Booking).find({
+  // Every ownership claim must serialize on the booking row. Keep a stable
+  // lock order before the table row so concurrent check-in/cleaning/complete
+  // actions cannot create two waiter claims for the same manual visit.
+  for (const candidate of [...candidates].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  )) {
+    const locked = await bookings.findOne({
+      where: { id: candidate.id },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!locked) continue;
+
+    const current = await bookings.findOne({
+      where: { id: candidate.id },
+      relations: ['table'],
+    });
+    if (
+      current &&
+      current.table?.id === tableId &&
+      current.bookingDate === today &&
+      current.status === 'approved' &&
+      current.source === 'admin_manual' &&
+      current.checkedInAt
+    ) {
+      lockedVisits.push(current);
+    }
+  }
+
+  return lockedVisits;
+}
+
+async function assertNoNewManualVisits(
+  manager: EntityManager,
+  tableId: string,
+  lockedVisits: Booking[],
+) {
+  const current = await manager.getRepository(Booking).find({
     where: {
       table: { id: tableId },
       bookingDate: kyivToday(),
@@ -63,6 +104,27 @@ async function claimOrAssertBookedTableWaiter(
       checkedInAt: Not(IsNull()),
     },
   });
+  const lockedIds = new Set(lockedVisits.map((visit) => visit.id));
+
+  if (current.some((visit) => !lockedIds.has(visit.id))) {
+    throw new ConflictException(
+      'Стан бронювання змінився. Оновіть список та повторіть дію',
+    );
+  }
+}
+
+/**
+ * Only checked-in manual bookings gain waiter ownership; walk-ins and online
+ * bookings keep their existing behavior. Callers must lock every visit first.
+ */
+async function claimOrAssertBookedTableWaiter(
+  manager: EntityManager,
+  visits: Booking[],
+  actor: AuthUser,
+  allowClaim: boolean,
+) {
+  if (!actor.staffId) throw new ForbiddenException('Не вдалося визначити офіціанта');
+
   const histories = manager.getRepository(BookingHistory);
 
   for (const visit of visits) {
@@ -122,6 +184,7 @@ export function createProtectedTablesService(
     }
 
     return dataSource.transaction(async (manager) => {
+      const visits = await lockActiveManualVisitsForTable(manager, id);
       const tables = manager.getRepository(TableEntity);
       const table = await tables.findOne({
         where: { id },
@@ -129,7 +192,8 @@ export function createProtectedTablesService(
       });
       if (!table) throw new NotFoundException('Стіл не знайдено');
 
-      await claimOrAssertBookedTableWaiter(manager, id, actor, false);
+      await assertNoNewManualVisits(manager, id, visits);
+      await claimOrAssertBookedTableWaiter(manager, visits, actor, false);
 
       if (status === 'occupied') {
         if (table.status === 'closed') {
@@ -169,6 +233,7 @@ export function createProtectedTablesService(
     if (!actor.staffId) throw new ForbiddenException('Не вдалося визначити офіціанта');
 
     return dataSource.transaction(async (manager) => {
+      const visits = await lockActiveManualVisitsForTable(manager, id);
       const tables = manager.getRepository(TableEntity);
       const table = await tables.findOne({
         where: { id },
@@ -176,7 +241,8 @@ export function createProtectedTablesService(
       });
       if (!table) throw new NotFoundException('Стіл не знайдено');
 
-      await claimOrAssertBookedTableWaiter(manager, id, actor, true);
+      await assertNoNewManualVisits(manager, id, visits);
+      await claimOrAssertBookedTableWaiter(manager, visits, actor, true);
 
       if (table.status !== 'occupied') {
         throw new BadRequestException(
