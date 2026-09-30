@@ -277,7 +277,6 @@ export class WaiterCallsService {
         actions: WAITER_ASSIGNMENT_HISTORY_ACTIONS,
       })
       .orderBy('history.createdAt', 'DESC')
-      .addOrderBy('history.id', 'DESC')
       .getOne();
 
     const hasPersistedWaiter =
