@@ -88,6 +88,8 @@ jobs:
         run: npm --prefix backend run build
       - name: Initialize disposable fresh schema
         run: node backend/scripts/fresh-schema-reference.mjs
+      - name: Validate Syrve link constraints and concurrent writes
+        run: node backend/scripts/syrve-table-link-validation.mjs
       - name: Capture fresh schema audit
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline

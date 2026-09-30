@@ -25,6 +25,7 @@ import { AddGuestReviewArchive2026082200010 } from './migrations/2026082200010-A
 import { AddLogArchive2026082400010 } from './migrations/2026082400010-AddLogArchive';
 import { AddManualBookingGuestName2026082400020 } from './migrations/2026082400020-AddManualBookingGuestName';
 import { CreateGuestPushSubscriptions2026092000010 } from './migrations/2026092000010-CreateGuestPushSubscriptions';
+import { CreateSyrveTableLinks2026093000010 } from './migrations/2026093000010-CreateSyrveTableLinks';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -67,7 +68,7 @@ const staffPinMigrationOptions = {
         const dbHost = configService.get<string>('DB_HOST');
         const dbName = configService.get<string>('DB_NAME');
 
-        // Only the disposable CI schema reference may bootstrap this migration.
+        // Only the disposable CI schema reference may bootstrap prepared feature migrations.
         // Production adoption requires a separate, explicitly approved change.
         const isDisposableSchemaReference =
           configService.get<string>('NODE_ENV') === 'test' &&
@@ -81,6 +82,7 @@ const staffPinMigrationOptions = {
             ? [
                 ...staffPinMigrationOptions.migrations,
                 CreateGuestPushSubscriptions2026092000010,
+                CreateSyrveTableLinks2026093000010,
               ]
             : staffPinMigrationOptions.migrations,
         };

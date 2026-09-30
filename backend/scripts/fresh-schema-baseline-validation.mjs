@@ -49,6 +49,9 @@ function loadMigrations(require) {
   const {
     CreateGuestPushSubscriptions2026092000010,
   } = require('../dist/migrations/2026092000010-CreateGuestPushSubscriptions.js');
+  const {
+    CreateSyrveTableLinks2026093000010,
+  } = require('../dist/migrations/2026093000010-CreateSyrveTableLinks.js');
 
   return [
     InitialSchemaBaseline2026081300000,
@@ -61,6 +64,7 @@ function loadMigrations(require) {
     AddLogArchive2026082400010,
     AddManualBookingGuestName2026082400020,
     CreateGuestPushSubscriptions2026092000010,
+    CreateSyrveTableLinks2026093000010,
   ];
 }
 

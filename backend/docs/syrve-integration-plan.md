@@ -129,10 +129,10 @@ Prefer one new `syrve_table_links` table; embed per-table sync state in the link
 
 - `id`, `integrationId`, `organizationId`, `moloTableId`, `syrveTableId`.
 - `lastKnownNumber`, `lastSeenAt`, `lastSyncedAt`, `lastSyrveState` (unknown/open/closed).
-- `activeSyrveOrderIds`, `manuallyFreedSyrveOrderIds` as validated UUID sets in jsonb;
+- `activeSyrveOrderIds`, `manuallyFreedSyrveOrderIds` as validated UUID arrays (`uuid[]`);
   order metadata/timestamps sufficient to reject stale updates and prove closure.
 - FK to an EXISTING MOLO table; unique MOLO binding and unique provider binding
-  scoped to integration/organization. No cascade from Syrve to physical tables.
+  scoped to organization. No cascade from Syrve to physical tables.
 - Existing integration row gains activation state (default false), configuration
   revision and last successful sync/error metadata. Enforce the single configuration
   invariant before relying on it; never silently discard duplicate configurations.
@@ -173,21 +173,53 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | PR | Scope and acceptance gate | Expected files |
 | --- | --- | --- |
 | 1 | Safe auth/organization client and diagnostics (this PR) | `src/syrve/syrve-client.ts`, service/module, `test/syrve-*.test.js`, `.env*example`, this document |
-| 2 | Link/sync storage, uniqueness, configuration revision; reversible migration with explicit registration/application path | new Syrve entities/migration, integration entity/module, migration registry/bootstrap and schema tests |
-| 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics, proposals by unambiguous numbers; explicit UUID mapping confirmation | Syrve client/service/controller/DTOs and tests, `frontend/src/api/syrve.ts`, `SyrveIntegrationDock.tsx` |
+| 2 | Link/sync storage and uniqueness; reversible migration with explicit registration/application path; no mapping writes or status changes | new Syrve link entity/migration, module, migration registry and PostgreSQL schema tests |
+| 3 | Read-only terminal/section catalog, deleted/duplicate/unmapped diagnostics, proposals by unambiguous numbers; explicit UUID mapping confirmation, singleton/configuration revision fencing | Syrve client/service/controller/DTOs, integration entity + migration and tests, `frontend/src/api/syrve.ts`, `SyrveIntegrationDock.tsx` |
 | 4 | Stable physical map identity and location before any rename; frozen geometry/asset comparison | table entity + migration, map/table API DTOs, `GuestApp.tsx`, `AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, protected-map tests |
 | 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection | Syrve rename service, table-number uniqueness migration if needed, DTO diagnostics and concurrency tests |
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown | Syrve order client/observer and fixtures/tests; no status application |
 | 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority | isolated Syrve state reducer and regression tests; no enabled worker |
 | 8 | Transactional manual-action hooks and unified effective status reads, existing waiter/booking behavior retained | `TablesService`, map/status read services, dependency wiring and regression tests; sync remains off |
 | 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
-| 10 | Final Director activation, complete connection/catalog/mapping/order diagnostics and regression hardening | Director dock/API, activation DTO/controller, diagnostics, operational documentation and full regression suite |
+| 10 | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
 
 All paths above are under `backend/` unless prefixed `frontend/`. Boundaries may
 be narrowed after each fresh-main review, never expanded to include unrelated fixes.
 PR 4 is a prerequisite imposed by the existing implementation, not a redesign of
 coordinates, photographs, click zones or colors. Do not combine occupied application
 with a live worker before closure and manual override rules exist.
+
+### PR 2 storage boundary
+
+`CreateSyrveTableLinks2026093000010` adds only `syrve_table_links`. Existing
+integration rows, credentials, tables and bookings remain unchanged. The entity is
+registered through `SyrveIntegrationModule` with `synchronize: false`. The migration is
+explicitly registered for the guarded disposable CI database, where the existing
+transaction/advisory-lock bootstrap applies it. The live bootstrap retains its eight
+existing migrations. Production adoption is deferred until a fresh schema/history audit
+and a separately reviewed deployment step; PR 2 must not assume the unregistered legacy
+Syrve migration was applied. The eventual Director flow requires the backend schema to
+be deployed first, without requiring any real Syrve credentials during development.
+Historical baseline/legacy migrations and the production guest-push gate are unchanged.
+
+One physical MOLO UUID has at most one link. The provider UUID is unique per
+organization, including across duplicate existing integration rows. Both parent UUIDs
+must exist; deleting a parent removes its link only. No Syrve operation creates a
+physical table. Initial state is `unknown`, with empty order/override arrays and null
+observation timestamps. Native PostgreSQL `uuid[]` stores multiple order IDs without
+an extra sync-state table; checks reject invalid IDs, impossible state/order pairs and
+overrides for IDs outside the active set. This does not yet implement transitions.
+
+Rollback holds an exclusive lock and refuses to drop a non-empty link table, preserving
+confirmed links and overrides. Operators must explicitly remove mappings before a
+schema rollback; the migration never silently deletes them. Empty-table up/down is
+covered by existing schema roundtrip/fresh-baseline CI. The additional disposable-only
+PostgreSQL probe checks real FK/unique/check constraints, concurrent mapping inserts,
+last-valid-state preservation and unchanged physical fields.
+
+Singleton connection enforcement and configuration revision move to PR 3 so they are
+introduced together with the first actual mapping write transaction. PR 2 adds no
+HTTP routes, mapping service, polling, worker or activation; `syncEnabled` stays false.
 
 ## Required regression gates
 

@@ -11,9 +11,10 @@ const runtimeHistory = [
   'AddLogArchive2026082400010',
   'AddManualBookingGuestName2026082400020',
   'CreateGuestPushSubscriptions2026092000010',
+  'CreateSyrveTableLinks2026093000010',
 ];
 const baseline = 'InitialSchemaBaseline2026081300000';
-const probe = 'MigrationHistoryProbe2026092100010';
+const probe = 'MigrationHistoryProbe2026100100010';
 
 test('existing production history advances without an initial baseline row', async () => {
   const module = await import('../scripts/migration-history-track-validation.mjs');
