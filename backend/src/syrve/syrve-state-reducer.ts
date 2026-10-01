@@ -130,13 +130,19 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   // Missing/moved/ambiguous orders cannot make any partial closure free a table.
   const unknownOrders = table.unknownOrders.length > 0 || observation.orders.some((order) =>
     order.state === 'unknown' && (!order.tableIds.length || order.tableIds.includes(state.scope.syrveTableId)));
+  const candidates = observation.orders
+    .filter((order) => order.tableIds.includes(state.scope.syrveTableId) || active.has(order.id) || versions.has(order.id))
+    .map((order) => ({ order, previous: versions.get(order.id), signature: fingerprint(order) }));
+  // Inspect the whole set before mutating any closure/override, including when
+  // the conflicting UUID sorts after an otherwise valid closure in this response.
+  const storedConflict = candidates.some(({ order, previous, signature }) =>
+    previous && order.timestamp === previous.timestamp && previous.fingerprint !== signature);
   if (unknownOrders) diagnostics.add('unknown_orders');
+  if (storedConflict) diagnostics.add('conflicting_order_versions');
   if (!event.visibilityVerified) diagnostics.add('visibility_not_verified');
-  const canClose = event.visibilityVerified === true && !unknownOrders;
+  const canClose = event.visibilityVerified === true && !unknownOrders && !storedConflict;
 
-  for (const order of observation.orders) {
-    if (!order.tableIds.includes(state.scope.syrveTableId) && !active.has(order.id) && !versions.has(order.id)) continue;
-    const previous = versions.get(order.id), signature = fingerprint(order);
+  for (const { order, previous, signature } of candidates) {
     if (previous && order.timestamp < previous.timestamp) { diagnostics.add('stale_order'); continue; }
     if (previous && order.timestamp === previous.timestamp && previous.fingerprint !== signature) {
       // A conflict remains fenced at this version; only a strictly newer version can resolve it.

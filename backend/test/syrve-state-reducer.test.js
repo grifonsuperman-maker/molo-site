@@ -163,6 +163,33 @@ test('equal conflicting versions remain unknown across cycles until a strictly n
   assert.deepEqual(observe(replay.state, [row(ORDER, 'Closed', 101)]).state.activeSyrveOrderIds, []);
 });
 
+for (const conflictingId of [ORDER, ORDER2]) {
+  for (const conflictStatus of ['Bill', 'Closed']) {
+    test(`stored-version conflict ${conflictingId} / ${conflictStatus} blocks every closure and override removal`, () => {
+      const otherId = conflictingId === ORDER ? ORDER2 : ORDER;
+      const state = staff(opened(row(ORDER), row(ORDER2))).state;
+      const result = observe(state, [row(conflictingId, conflictStatus, 100), row(otherId, 'Closed', 200)]);
+      assert.deepEqual(result.state.activeSyrveOrderIds, [ORDER, ORDER2]);
+      assert.deepEqual(result.state.manuallyFreedSyrveOrderIds, [ORDER, ORDER2]);
+      assert.equal(result.state.lastSyrveState, 'open');
+      assert.ok(result.diagnostics.includes('conflicting_order_versions'));
+    });
+  }
+}
+
+test('persisted conflict keeps the entire set across replays; newer resolution permits exact closures', () => {
+  const state = staff(opened(row(ORDER), row(ORDER2))).state;
+  const conflict = observe(state, [row(ORDER, 'Closed', 100), row(ORDER2, 'New', 200)]).state;
+  const replay = observe(conflict, [row(ORDER, 'Closed', 100), row(ORDER2, 'Closed', 201)]);
+  assert.deepEqual(replay.state.activeSyrveOrderIds, [ORDER, ORDER2]);
+  assert.deepEqual(replay.state.manuallyFreedSyrveOrderIds, [ORDER, ORDER2]);
+  const resolved = observe(replay.state, [row(ORDER, 'New', 101), row(ORDER2, 'Closed', 201)]).state;
+  assert.deepEqual(resolved.activeSyrveOrderIds, [ORDER]);
+  assert.deepEqual(resolved.manuallyFreedSyrveOrderIds, [ORDER]);
+  const closed = observe(resolved, [row(ORDER, 'Closed', 102)]).state;
+  assert.deepEqual(closed.activeSyrveOrderIds, []); assert.deepEqual(closed.manuallyFreedSyrveOrderIds, []);
+});
+
 test('conflicting by-table/by-id versions are unknown and cannot close the previous order', () => {
   const state = opened(), value = probe([row(ORDER, 'New', 200)]);
   value.byId = parseSyrveOrders({ correlationId: id(99), orders: [row(ORDER, 'Closed', 200)] }, ORG, { orderIds: [ORDER] });
