@@ -1,9 +1,9 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 5 starts from fresh main `f9092f500de0106c01fa44b3174d7f4aa2e3bc51` (2026-09-30),
-after manual merges of PRs #261, #264, #265, #266, #267 and #268. Client diagnostics, link schema preparation,
-read-only catalog preview and explicit UUID confirmation are implemented. Real Syrve is not connected or
+PR 6 starts from fresh main `c01f4798899be74a08b736f9d02007a030c6d315` (2026-10-01),
+after manual merges of PRs #261, #264, #265, #266, #267, #268 and #269. Client diagnostics, link schema preparation,
+read-only catalog preview, explicit UUID confirmation and internal rename preparation are implemented. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
@@ -23,7 +23,8 @@ Every later PR starts from freshly fetched main after the Director's manual merg
 - `syncEnabled` is hard-coded to false. The link/sync schema is prepared by PR 2;
   explicit mapping writes are available only after the prepared schema is applied.
   Internal UUID rename preparation exists; no HTTP mutation or automatic caller invokes it.
-  No scheduler, order observations, manual-action hooks or status integration are enabled.
+  Read-only order observation is an explicit Director API action; no frontend/automatic caller invokes it.
+  No scheduler, observation persistence, manual-action hooks or status integration are enabled.
 - The existing `1785362400000-CreateSyrveIntegration.ts` has up/down, and the fresh
   schema baseline contains `syrve_integrations`. This legacy migration is NOT in
   `AppModule`'s runtime migration list. A file's existence does not establish its
@@ -67,6 +68,8 @@ Sources retrieved directly on 2026-09-25:
 
 Catalog contract rechecked from the same official OpenAPI on 2026-09-30; SHA-256:
 `344c44240dee9724129b9d0821295da411c4ab4fde2dcbc5ff9b8d17ab2bd2d9`.
+Order and POS-availability contracts rechecked on 2026-10-01; the downloaded
+official OpenAPI has the same SHA-256. Table-order by-ID reads also require POS >=7.4.6.
 Terminal responses contain organization-scoped `items` wrappers in both
 `terminalGroups` and `terminalGroupsInSleep`; each group's organization must match.
 Sections are scoped by `terminalGroupId`, with tables containing cloud `id`, integer
@@ -202,8 +205,8 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 3b | Explicit UUID mapping confirmation (merged #266); singleton/configuration revision and stale-preview fencing introduced with the first write transaction | integration entity + migration/registry, mapping DTO/service/controller, Director confirmation UI and PostgreSQL concurrency tests |
 | 4a | Independent immutable physical UUID ↔ map slot storage and read-only diagnostics (merged #267); legacy-compatible API projection, no map consumer switch | new table-map entity/service/module/catalog + migration, tables/map API, migration registry/scripts and PostgreSQL tests; frontend API types only |
 | 4b | Connected map/location consumers use permanent identity before any rename (merged #268); missing/hidden slots remain unavailable in prepared guest maps, legacy behavior and frozen geometry/assets preserved | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver, `backend/src/zones/zones.service.ts` bootstrap identity guard and protected-map/booking/restart tests |
-| 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection (this PR); internal methods remain unreachable from HTTP/automatic callers | Syrve rename service/plan, canonical table-number uniqueness migration, read-only Director diagnostics, partial status saves and concurrency tests |
-| 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown | Syrve order client/observer and fixtures/tests; no status application |
+| 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection (merged #269); internal methods remain unreachable from HTTP/automatic callers | Syrve rename service/plan, canonical table-number uniqueness migration, read-only Director diagnostics, partial status saves and concurrency tests |
+| 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown (this PR) | Syrve order client/observer, explicit Director API and synthetic fixtures/tests; no persistence or status application |
 | 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority | isolated Syrve state reducer and regression tests; no enabled worker |
 | 8 | Transactional manual-action hooks and unified effective status reads, existing waiter/booking behavior retained | `TablesService`, map/status read services, dependency wiring and regression tests; sync remains off |
 | 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
@@ -532,6 +535,94 @@ function drift and missing/reused number actions without physical writes. Every
 public bootstrap table/binding/zone is compared before/after and remains untouched.
 Earlier identity fixtures deliberately omit
 the later index, and mapping probes now expect duplicate inserts to be rejected.
+
+### PR 6 read-only order observation boundary
+
+`POST /syrve-integration/orders-observation` is Director-only under the existing
+real JWT/role guards and returns `Cache-Control: no-store`. Its only accepted input
+is the saved `configurationRevision`; arbitrary table/order IDs or credentials
+cannot expand its scope. It requires a prepared, connected saved configuration and
+confirmed UUID links. Legacy/unprepared, stale, disconnected and foreign-link
+configurations fail locally before any upstream request. The existing connection
+test/recheck and frontend actions retain their original auth/catalog scope. No
+frontend action, worker or automatic caller invokes the new observation endpoint.
+
+One backend token session reads the organization, active/sleeping groups, sections,
+POS availability and orders. It uses only the documented read endpoints; it never
+initializes POS orders, wakes terminals, configures webhooks or requests map layout.
+POS availability uses `organizationIds` and `terminalGroupIds`; its complete
+organization-scoped response must cover every requested active group exactly once.
+Only confirmed cloud table UUIDs present, nondeleted and on an alive catalog group
+are queried by table. Sleeping/offline/missing/deleted tables remain unknown.
+Previously active order UUIDs are additionally queried by ID with `posOrderIds:null`.
+There is no status/date filter that could turn an excluded order into closure.
+
+The saved UUID scope is not rejected at the size of one transport batch. Both order
+methods use sequential chunks: at most 100 table UUIDs or 200 known order UUIDs per
+request, with one shared backend token session. This supports 101–1000 confirmed
+links allowed by a connection confirmation, including larger cumulative mappings.
+An order spanning tables in different chunks may legitimately occur in multiple
+responses; its UUID is deduplicated and versions are reconciled by the same timestamp
+rules. Duplicate UUIDs within a single response still invalidate that response.
+
+MOLO bounds the entire probe to 25 upstream requests (including authentication and
+organizations), 2000 unique collected orders per channel and 45 seconds overall.
+The request budget or deadline never resets between chunks. Budget exhaustion,
+failure of any chunk or an invalid aggregate discards all partial evidence and
+returns incomplete/unknown diagnostics while retaining all saved data. Every request/body retains the existing
+12-second deadline, 1 MiB streaming cap, origin allowlist and redirect rejection.
+Response validation rejects duplicate/foreign/unrequested IDs, malformed/partial
+critical fields and timestamps that cannot be represented as safe nonnegative
+JavaScript integers. It validates the observation fields rather than requiring or
+forwarding unrelated customer, item, payment and external-data payloads. Provider
+timestamps are opaque ordered versions, never interpreted as a local wall clock.
+
+Only `Success` with valid table IDs, terminal-group UUID, timestamp and status is
+usable. `New`/`Bill` are open; `Closed`/`Deleted` explicitly close that order UUID.
+Payments or a closing-time field cannot override the explicit status. Pending/error
+creation and unknown statuses are unknown, with no error body forwarded. An empty
+list, missing known UUID, changed table association or conflicting equal-version
+responses never establish closure. Where both methods return an order, the greater
+provider timestamp wins. A failed/invalid required read invalidates all closure/open
+evidence in that probe; an offline/unknown order group or a catalog/order group
+mismatch also produces unknown.
+These are observation classifications only: stale-versus-persisted transition rules
+and manual override reduction remain PR 7.
+
+The pure observer handles multiple orders and an order's table-ID array. It returns
+sets of active, explicitly closed and unknown order evidence for existing UUID links
+without selecting the first order or creating an unlinked table. Positive open
+evidence can be reported, but table state is never "closed/free" in this stage.
+Even when every known order is explicitly closed, unobserved POS-created orders
+have not been ruled out. The response always reports incomplete visibility, unknown
+POS version, initialization not performed and activation/synchronization false.
+Successful reads prove only access to that endpoint, not a complete permission
+inventory or supported installed POS version. Diagnostics give the documented
+permission/version prerequisite per check and fixed safe failure codes.
+
+The service fingerprints the configuration, confirmed links, order/override sets
+and linked physical UUID/current numbers/manual status/update timestamp before HTTP,
+then re-reads them afterwards. The timestamp also fences a staff change followed
+by restoration of the original number/status during the same probe.
+Disconnect, remapping, manual free, order-set changes, rename/deletion and schema
+rollback fence both late successful and failed diagnostics. No database transaction
+or lock spans HTTP. Settings/revisions, links, observations, overrides, audit logs,
+physical fields, bookings and map bindings are never written by a probe. Rename
+preparation is not invoked. There is no migration, registry/production change,
+environment change, dependency, deployment or real restaurant query in PR 6.
+
+Synthetic fixtures exercise the actual client and integration service, including
+multiple/spanning orders, first empty reads, tracked-ID closure, moved/missing IDs,
+unknown/pending/error states, partial/malformed responses, equal/newer timestamps,
+POS sleeping/offline, permissions, rate limits, network/body/overall deadlines,
+secret projection, configuration/staff races and change/restore table versions.
+The actual integration service is also exercised with 100/101/1000/1001 saved
+links; client fixtures cover 201 known order IDs, multi-table orders across chunks,
+newer/equal-conflicting versions, later-chunk HTTP/body failures, the shared 45-second
+deadline, the 25-request budget and aggregate limits without partial closure.
+Real JWT/role/DTO HTTP tests cover
+every role and reject caller-supplied IDs. Protected frontend/maps/assets/geometry,
+existing waiter/booking rules and the exact 15-second polling remain unchanged.
 
 ## Required regression gates
 

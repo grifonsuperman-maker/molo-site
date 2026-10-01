@@ -42,6 +42,12 @@ export class SyrveIntegrationController {
     return this.service.previewTables(dto);
   }
 
+  @Post('orders-observation')
+  @Header('Cache-Control', 'no-store')
+  observeOrders(@Body() dto: SyrveRevisionDto) {
+    return this.service.observeOrders(dto);
+  }
+
   @Post('recheck')
   recheck(@Body() dto: SyrveRevisionDto, @Req() request: { user?: AuthUser }) {
     return this.service.recheck(dto, request.user);

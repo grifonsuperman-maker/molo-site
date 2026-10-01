@@ -18,6 +18,7 @@ import { SyrveClient, SyrveClientException } from './syrve-client';
 import { buildSyrveMappingPreview } from './syrve-mapping-preview';
 import { credentialFingerprint, issuePreviewProof, previewFingerprint, verifyPreviewProof } from './syrve-preview-proof';
 import { settingsVersion, staleSyrveSettings, SyrveSettingsSnapshot, SyrveSettingsStore } from './syrve-settings.store';
+import { buildSyrveOrderObservation } from './syrve-order-observer';
 
 type EncryptedValue = { encrypted: string; iv: string; authTag: string };
 
@@ -47,6 +48,40 @@ export class SyrveIntegrationService {
   }
 
   async getStatus() { return this.response(await this.settings.read()); }
+
+  async observeOrders(dto: SyrveRevisionDto) {
+    const snapshot = await this.checkedRevision(dto);
+    const entity = snapshot.entity!;
+    if (entity.status !== 'connected' || !entity.organizationId) {
+      throw new BadRequestException('Спочатку збережіть і перевірте підключення Syrve.');
+    }
+    if (!snapshot.links.length) throw new BadRequestException('Спочатку підтвердьте зв’язки столів Syrve.');
+    if (snapshot.links.some((link) => link.integrationId !== entity.id ||
+        link.organizationId.toLowerCase() !== entity.organizationId!.toLowerCase())) throw staleSyrveSettings();
+    const localTables = () => this.tablesRepo.find({ select: { id: true, tableNumber: true, status: true, updatedAt: true } });
+    const tables = await localTables();
+    if (snapshot.links.some((link) => !tables.some((table) => table.id === link.moloTableId))) throw staleSyrveSettings();
+    const fingerprint = (current: SyrveSettingsSnapshot, rows: TableEntity[]) => createHash('sha256').update(JSON.stringify({
+      version: settingsVersion(current), prepared: current.prepared,
+      connection: current.entity && [current.entity.status, current.entity.organizationId, current.entity.apiBaseUrl,
+        current.entity.apiLoginEncrypted, current.entity.apiLoginIv, current.entity.apiLoginAuthTag],
+      // Include observed sets and overrides: a reply fetched before a staff action is stale.
+      links: current.links.map((link) => [link.id, link.integrationId, link.organizationId, link.moloTableId, link.syrveTableId,
+        link.lastKnownNumber, link.lastSeenAt, link.lastSyncedAt, link.lastSyrveState,
+        [...link.activeSyrveOrderIds].sort(), [...link.manuallyFreedSyrveOrderIds].sort(), link.updatedAt])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      tables: rows.filter((table) => current.links.some((link) => link.moloTableId === table.id))
+        .map((table) => [table.id, table.tableNumber, table.status, table.updatedAt] as const)
+        .sort((a, b) => a[0].localeCompare(b[0])),
+    })).digest('hex');
+    const before = fingerprint(snapshot, tables);
+    const probe = await this.client.probeOrders(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId,
+      snapshot.links.map((link) => link.syrveTableId), [...new Set(snapshot.links.flatMap((link) => link.activeSyrveOrderIds))]);
+    // No transaction/lock spans HTTP, and even failures do not write settings/logs/state.
+    const current = await this.settings.read();
+    if (before !== fingerprint(current, await localTables())) throw staleSyrveSettings();
+    return { ...buildSyrveOrderObservation(probe, snapshot.links), configurationRevision: entity.configurationRevision };
+  }
 
   private requirePrepared(snapshot: SyrveSettingsSnapshot) {
     if (!snapshot.prepared) throw new ServiceUnavailableException('Серверна підготовка інтеграції ще не завершена. Збереження зв’язків поки недоступне.');

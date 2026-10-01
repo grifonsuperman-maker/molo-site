@@ -11,7 +11,7 @@ const { SyrveIntegrationService } = require('../dist/syrve/syrve-integration.ser
 
 test('real JWT and role guards protect every Syrve route from non-Directors', async (t) => {
   let serviceCalls = 0;
-  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'connect', 'recheck', 'updateMetadata', 'disconnect']
+  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'connect', 'recheck', 'updateMetadata', 'disconnect']
     .map((method) => [method, async () => { serviceCalls++; return { syncEnabled: false }; }]));
   const module = await Test.createTestingModule({
     controllers: [SyrveIntegrationController],
@@ -36,7 +36,8 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     apiBaseUrl: input.apiBaseUrl, apiLogin: input.apiLogin }], ['POST', '/connect', input],
     ['POST', '/tables-preview', { displayName: input.displayName, apiBaseUrl: input.apiBaseUrl,
       apiLogin: input.apiLogin, organizationId: input.organizationId }],
-    ['POST', '/recheck', revision], ['PATCH', '', { displayName: 'MOLO', ...revision }], ['POST', '/disconnect', revision]];
+    ['POST', '/orders-observation', revision], ['POST', '/recheck', revision],
+    ['PATCH', '', { displayName: 'MOLO', ...revision }], ['POST', '/disconnect', revision]];
   for (const [method, path, body] of routes) {
     for (const [role, expected] of [[null, 401], ['invalid', 401], ['guest', 403],
       ['waiter', 403], ['hookah', 403], ['admin', 403], ['owner', method === 'POST' ? 201 : 200]]) {
@@ -48,7 +49,7 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
       await response.text();
       assert.equal(response.status, expected, `${method} ${path} for ${role}`);
       assert.equal(serviceCalls - before, role === 'owner' ? 1 : 0);
-      if (path === '/tables-preview' && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
+      if (['/tables-preview', '/orders-observation'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
     }
   }
   const before = serviceCalls;
@@ -63,7 +64,9 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     ['/connect', { ...input, confirmationProof: undefined }],
     ['/connect', { ...input, pairs: [{ moloTableId: 'invalid', syrveTableId: input.organizationId }] }],
     ['/connect', { ...input, pairs: [{ moloTableId: input.organizationId, syrveTableId: input.organizationId, tableNumber: '77' }] }],
-    ['/recheck', {}], ['/disconnect', {}],
+    ['/recheck', {}], ['/disconnect', {}], ['/orders-observation', {}],
+    ['/orders-observation', { ...revision, tableIds: ['11111111-2222-4333-8444-555555555555'] }],
+    ['/orders-observation', { ...revision, orderIds: ['11111111-2222-4333-8444-555555555555'] }],
   ]) {
     const response = await fetch(`${base}/syrve-integration${path}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
