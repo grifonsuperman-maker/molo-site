@@ -12,7 +12,12 @@ export type SyrveStateScope = {
   moloTableId: string;
   syrveTableId: string;
 };
-export type SyrveOrderVersion = { id: string; timestamp: number; fingerprint: string | null };
+export type SyrveOrderVersion = {
+  id: string;
+  timestamp: number;
+  state: SyrveObservedOrder['state'];
+  fingerprint: string | null;
+};
 export type SyrveTableSyncState = {
   scope: SyrveStateScope;
   localRevision: string;
@@ -62,10 +67,12 @@ function copyState(value: SyrveTableSyncState): SyrveTableSyncState {
   const active = ids(value.activeSyrveOrderIds), freed = ids(value.manuallyFreedSyrveOrderIds);
   const versions = value.orderVersions.map((version) => {
     if (!version || !Number.isSafeInteger(version.timestamp) || version.timestamp < 0
+      || !['open', 'closed', 'unknown'].includes(version.state)
+      || (version.fingerprint === null && version.state !== 'unknown')
       || (version.fingerprint !== null && (typeof version.fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(version.fingerprint)))) {
       throw new SyrveStateValidationError();
     }
-    return { id: uuid(version.id), timestamp: version.timestamp, fingerprint: version.fingerprint };
+    return { id: uuid(version.id), timestamp: version.timestamp, state: version.state, fingerprint: version.fingerprint };
   }).sort((a, b) => a.id.localeCompare(b.id));
   const versionIds = new Set(versions.map((version) => version.id)), activeIds = new Set(active);
   if (versionIds.size !== versions.length || active.some((id) => !versionIds.has(id))
@@ -79,6 +86,13 @@ function copyState(value: SyrveTableSyncState): SyrveTableSyncState {
 export function createSyrveTableSyncState(currentScope: SyrveStateScope, localRevision: string): SyrveTableSyncState {
   return { scope: scope(currentScope), localRevision: uuid(localRevision), lastSyrveState: 'unknown',
     activeSyrveOrderIds: [], manuallyFreedSyrveOrderIds: [], orderVersions: [] };
+}
+
+export function getSyrveOrderIdsToObserve(current: SyrveTableSyncState): string[] {
+  const state = copyState(current);
+  // Suppressed active IDs and ambiguous tombstones still require by-ID evidence.
+  return [...new Set([...state.activeSyrveOrderIds,
+    ...state.orderVersions.filter((version) => version.state === 'unknown').map((version) => version.id)])].sort();
 }
 
 function fence(state: SyrveTableSyncState, event: SyrveStateFence): SyrveTransitionDiagnostic | null {
@@ -131,26 +145,38 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   const unknownOrders = table.unknownOrders.length > 0 || observation.orders.some((order) =>
     order.state === 'unknown' && (!order.tableIds.length || order.tableIds.includes(state.scope.syrveTableId)));
   const candidates = observation.orders
-    .filter((order) => order.tableIds.includes(state.scope.syrveTableId) || active.has(order.id) || versions.has(order.id))
-    .map((order) => ({ order, previous: versions.get(order.id), signature: fingerprint(order) }));
+    .filter((order) => order.tableIds.includes(state.scope.syrveTableId) || active.has(order.id) || versions.has(order.id)
+      || (order.state === 'unknown' && !order.tableIds.length))
+    .map((order) => ({ order, previous: versions.get(order.id), signature: fingerprint(order),
+      evidenceState: open.has(order.id) ? 'open' as const : closed.has(order.id) ? 'closed' as const
+        : !active.has(order.id) ? order.state : 'unknown' as const }));
+  const incoming = new Map(candidates.map((candidate) => [candidate.order.id, candidate]));
+  // An absent/stale row cannot resolve previously stored ambiguity, nor can a
+  // newer unknown row. Require a strictly newer usable outcome for that UUID.
+  const unresolved = state.orderVersions.filter((version) => {
+    if (version.state !== 'unknown') return false;
+    const candidate = incoming.get(version.id);
+    return !candidate || candidate.order.timestamp <= version.timestamp || candidate.evidenceState === 'unknown';
+  });
   // Inspect the whole set before mutating any closure/override, including when
   // the conflicting UUID sorts after an otherwise valid closure in this response.
-  const storedConflict = candidates.some(({ order, previous, signature }) =>
-    previous && order.timestamp === previous.timestamp && previous.fingerprint !== signature);
-  if (unknownOrders) diagnostics.add('unknown_orders');
+  const storedConflict = unresolved.some((version) => version.fingerprint === null)
+    || candidates.some(({ order, previous, signature }) =>
+      previous && order.timestamp === previous.timestamp && previous.fingerprint !== signature);
+  if (unknownOrders || unresolved.length) diagnostics.add('unknown_orders');
   if (storedConflict) diagnostics.add('conflicting_order_versions');
   if (!event.visibilityVerified) diagnostics.add('visibility_not_verified');
-  const canClose = event.visibilityVerified === true && !unknownOrders && !storedConflict;
+  const canClose = event.visibilityVerified === true && !unknownOrders && !unresolved.length && !storedConflict;
 
-  for (const { order, previous, signature } of candidates) {
+  for (const { order, previous, signature, evidenceState } of candidates) {
     if (previous && order.timestamp < previous.timestamp) { diagnostics.add('stale_order'); continue; }
     if (previous && order.timestamp === previous.timestamp && previous.fingerprint !== signature) {
       // A conflict remains fenced at this version; only a strictly newer version can resolve it.
-      versions.set(order.id, { id: order.id, timestamp: order.timestamp, fingerprint: null });
+      versions.set(order.id, { id: order.id, timestamp: order.timestamp, state: 'unknown', fingerprint: null });
       diagnostics.add('conflicting_order_versions');
       continue;
     }
-    versions.set(order.id, { id: order.id, timestamp: order.timestamp, fingerprint: signature });
+    versions.set(order.id, { id: order.id, timestamp: order.timestamp, state: evidenceState, fingerprint: signature });
     if (open.has(order.id)) active.add(order.id);
     else if (closed.has(order.id) && canClose) { active.delete(order.id); freed.delete(order.id); }
     // Unknown versions advance the high-water mark but retain active IDs/overrides.

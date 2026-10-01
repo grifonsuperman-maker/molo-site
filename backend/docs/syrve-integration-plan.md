@@ -656,6 +656,19 @@ last good state and remain fenced until a strictly newer version resolves them.
 Conflicts against the stored ledger are detected for the entire set before any
 closure: ambiguity in one UUID retains every active UUID/override, even when a
 different order has a newer explicit closure and sorts earlier in the response.
+The ledger stores the latest usable/unknown outcome as well as timestamp/fingerprint;
+only active UUID membership contributes occupancy. A moved previously active UUID
+remains unknown for its old link. Initially unassociated unknown discovery is also
+retained, so an older subsequent association/closure cannot erase that watermark.
+A strictly newer usable association elsewhere can resolve a never-active discovery
+without adding occupancy to this physical table or creating an unlinked table.
+Previously unknown/conflicting evidence keeps blocking every closure when the
+next row is stale, absent or itself newer-but-unknown; resolution requires a
+strictly newer usable observation for that same UUID. This includes ambiguous
+closed tombstones, not just currently active orders. The pure
+`getSyrveOrderIdsToObserve` helper retains active (including suppressed) and
+unresolved UUIDs for future by-ID reads; a future adapter must use that scope so
+an ambiguous tombstone is not silently dropped from observation.
 Identical evidence is idempotent.
 
 Closure additionally requires server-established POS-order visibility for the

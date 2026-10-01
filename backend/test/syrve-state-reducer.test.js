@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createSyrveTableSyncState, reduceSyrveOrderState, reduceSyrveStaffAction,
-  projectSyrveTableStatus, SyrveStateValidationError } = require('../dist/syrve/syrve-state-reducer.js');
+  projectSyrveTableStatus, getSyrveOrderIdsToObserve, SyrveStateValidationError } = require('../dist/syrve/syrve-state-reducer.js');
 const { parseSyrveOrders } = require('../dist/syrve/syrve-order-observer.js');
 
 const id = (n) => `b0000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -190,6 +190,76 @@ test('persisted conflict keeps the entire set across replays; newer resolution p
   assert.deepEqual(closed.activeSyrveOrderIds, []); assert.deepEqual(closed.manuallyFreedSyrveOrderIds, []);
 });
 
+for (const conflictingId of [ORDER, ORDER2]) {
+  for (const staleStatus of ['New', 'Closed']) {
+    test(`persisted ambiguity ${conflictingId} / stale ${staleStatus} blocks the other order's closure`, () => {
+      const otherId = conflictingId === ORDER ? ORDER2 : ORDER;
+      const state = staff(opened(row(ORDER), row(ORDER2))).state;
+      const conflicted = observe(state, [row(conflictingId, 'Closed', 100), row(otherId, 'New', 100)]).state;
+      const result = observe(conflicted, [row(conflictingId, staleStatus, 99), row(otherId, 'Closed', 200)]);
+      assert.deepEqual(result.state.activeSyrveOrderIds, [ORDER, ORDER2]);
+      assert.deepEqual(result.state.manuallyFreedSyrveOrderIds, [ORDER, ORDER2]);
+      assert.ok(result.diagnostics.includes('conflicting_order_versions'));
+    });
+  }
+}
+
+test('higher unknown evidence keeps ambiguity through a later stale open, until newer usable evidence', () => {
+  const state = staff(opened(row(ORDER), row(ORDER2))).state;
+  const conflict = observe(state, [row(ORDER, 'Closed', 100), row(ORDER2, 'New', 100)]).state;
+  const unknown = observe(conflict, [pending(ORDER, 500), row(ORDER2, 'New', 200)]).state;
+  const stale = observe(unknown, [row(ORDER, 'New', 499), row(ORDER2, 'Closed', 300)]);
+  assert.deepEqual(stale.state.activeSyrveOrderIds, [ORDER, ORDER2]);
+  assert.deepEqual(stale.state.manuallyFreedSyrveOrderIds, [ORDER, ORDER2]);
+  const resolved = observe(stale.state, [row(ORDER, 'New', 501), row(ORDER2, 'Closed', 300)]).state;
+  assert.deepEqual(resolved.activeSyrveOrderIds, [ORDER]);
+  assert.deepEqual(resolved.manuallyFreedSyrveOrderIds, [ORDER]);
+});
+
+test('ordinary unknown watermark blocks partial closure when the next evidence for it is stale', () => {
+  const state = staff(opened(row(ORDER), row(ORDER2))).state;
+  const unknown = observe(state, [pending(ORDER, 200), row(ORDER2, 'New', 100)]).state;
+  const result = observe(unknown, [row(ORDER, 'New', 199), row(ORDER2, 'Closed', 300)]);
+  assert.deepEqual(result.state.activeSyrveOrderIds, [ORDER, ORDER2]);
+  assert.deepEqual(result.state.manuallyFreedSyrveOrderIds, [ORDER, ORDER2]);
+  assert.ok(result.diagnostics.includes('unknown_orders'));
+});
+
+test('persisted unassociated tombstone ambiguity blocks closure until explicitly resolved at a newer version', () => {
+  let state = opened(row(ORDER), row(ORDER2));
+  state = observe(state, [row(ORDER, 'Closed', 200), row(ORDER2, 'New', 200)]).state;
+  state = staff(state).state;
+  const conflicted = observe(state, [row(ORDER, 'New', 200), row(ORDER2, 'New', 300)]).state;
+  assert.deepEqual(conflicted.activeSyrveOrderIds, [ORDER2]);
+  assert.deepEqual(getSyrveOrderIdsToObserve(conflicted), [ORDER, ORDER2]);
+  const absent = observe(conflicted, [row(ORDER2, 'Closed', 400)]);
+  assert.deepEqual(absent.state.activeSyrveOrderIds, [ORDER2]);
+  assert.deepEqual(absent.state.manuallyFreedSyrveOrderIds, [ORDER2]);
+  const resolved = observe(absent.state, [row(ORDER, 'Closed', 201), row(ORDER2, 'Closed', 400)]).state;
+  assert.deepEqual(resolved.activeSyrveOrderIds, []); assert.deepEqual(resolved.manuallyFreedSyrveOrderIds, []);
+  assert.deepEqual(getSyrveOrderIdsToObserve(resolved), []);
+});
+
+test('new unassociated discovery watermark blocks stale closure until a newer usable version identifies it', () => {
+  const state = staff(opened()).state;
+  const unknown = observe(state, [row(ORDER), pending(ORDER2, 500)]).state;
+  assert.deepEqual(getSyrveOrderIdsToObserve(unknown), [ORDER, ORDER2]);
+  const stale = observe(unknown, [row(ORDER, 'Closed', 600), row(ORDER2, 'Closed', 499)]).state;
+  assert.deepEqual(stale.activeSyrveOrderIds, [ORDER]);
+  assert.deepEqual(stale.manuallyFreedSyrveOrderIds, [ORDER]);
+  const resolved = observe(stale, [row(ORDER, 'Closed', 600), row(ORDER2, 'Closed', 501)]).state;
+  assert.deepEqual(resolved.activeSyrveOrderIds, []);
+  assert.deepEqual(getSyrveOrderIdsToObserve(resolved), []);
+});
+
+test('newer usable association elsewhere resolves unassociated discovery without occupying this physical table', () => {
+  const unknown = observe(opened(), [row(ORDER), pending(ORDER2, 500)]).state;
+  const resolved = observe(unknown, [row(ORDER, 'Closed', 600), row(ORDER2, 'New', 501, [TABLE2])]).state;
+  assert.deepEqual(resolved.activeSyrveOrderIds, []);
+  assert.equal(resolved.lastSyrveState, 'closed'); assert.equal(status(resolved), 'free');
+  assert.deepEqual(getSyrveOrderIdsToObserve(resolved), []);
+});
+
 test('conflicting by-table/by-id versions are unknown and cannot close the previous order', () => {
   const state = opened(), value = probe([row(ORDER, 'New', 200)]);
   value.byId = parseSyrveOrders({ correlationId: id(99), orders: [row(ORDER, 'Closed', 200)] }, ORG, { orderIds: [ORDER] });
@@ -217,6 +287,7 @@ test('manual free suppresses every observed UUID, repeated same orders stay supp
   const state = opened(row(ORDER), row(ORDER2, 'Bill')), freed = staff(state).state;
   assert.deepEqual(freed.activeSyrveOrderIds, [ORDER, ORDER2]);
   assert.deepEqual(freed.manuallyFreedSyrveOrderIds, [ORDER, ORDER2]); assert.equal(status(freed), 'free');
+  assert.deepEqual(getSyrveOrderIdsToObserve(freed), [ORDER, ORDER2]);
   const repeated = observe(freed, [row(ORDER, 'New', 200), row(ORDER2, 'Bill', 200)]).state;
   assert.deepEqual(repeated.manuallyFreedSyrveOrderIds, [ORDER, ORDER2]); assert.equal(status(repeated), 'free');
   const next = observe(repeated, [row(ORDER, 'New', 300), row(ORDER2, 'Bill', 300), row(ORDER3, 'New', 300)]).state;
@@ -355,6 +426,8 @@ for (const [name, mutate] of [
   ['negative provider version', (s) => s.orderVersions[0].timestamp = -1],
   ['unsafe provider version', (s) => s.orderVersions[0].timestamp = Number.MAX_SAFE_INTEGER + 1],
   ['malformed fingerprint', (s) => s.orderVersions[0].fingerprint = 'restaurant-secret'],
+  ['missing watermark state', (s) => delete s.orderVersions[0].state],
+  ['unmarked null conflict', (s) => s.orderVersions[0].fingerprint = null],
   ['contradictory last state', (s) => s.lastSyrveState = 'closed'],
 ]) {
   test(`${name} fails before a transition with a fixed error and no partial mutation`, () => {
