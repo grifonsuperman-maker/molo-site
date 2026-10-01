@@ -590,7 +590,9 @@ inventory or supported installed POS version. Diagnostics give the documented
 permission/version prerequisite per check and fixed safe failure codes.
 
 The service fingerprints the configuration, confirmed links, order/override sets
-and linked physical UUID/current numbers/manual status before HTTP, then re-reads them afterwards.
+and linked physical UUID/current numbers/manual status/update timestamp before HTTP,
+then re-reads them afterwards. The timestamp also fences a staff change followed
+by restoration of the original number/status during the same probe.
 Disconnect, remapping, manual free, order-set changes, rename/deletion and schema
 rollback fence both late successful and failed diagnostics. No database transaction
 or lock spans HTTP. Settings/revisions, links, observations, overrides, audit logs,
@@ -602,7 +604,8 @@ Synthetic fixtures exercise the actual client and integration service, including
 multiple/spanning orders, first empty reads, tracked-ID closure, moved/missing IDs,
 unknown/pending/error states, partial/malformed responses, equal/newer timestamps,
 POS sleeping/offline, permissions, rate limits, network/body/overall deadlines,
-secret projection and configuration/staff races. Real JWT/role/DTO HTTP tests cover
+secret projection, configuration/staff races and change/restore table versions.
+Real JWT/role/DTO HTTP tests cover
 every role and reject caller-supplied IDs. Protected frontend/maps/assets/geometry,
 existing waiter/booking rules and the exact 15-second polling remain unchanged.
 

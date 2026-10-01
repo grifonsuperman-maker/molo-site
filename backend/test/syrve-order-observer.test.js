@@ -73,8 +73,8 @@ function setup(t, overrides = {}) {
 
 function serviceSetup(t, overrides = {}) {
   const h = setup(t, overrides);
-  const tables = [{ id: MOLO, tableNumber: '99', status: 'cleaning', x: 7 },
-    { id: MOLO2, tableNumber: '14', status: 'reserved', x: 9 }];
+  const tables = [{ id: MOLO, tableNumber: '99', status: 'cleaning', x: 7, updatedAt: new Date('2026-10-01T00:00:00.000Z') },
+    { id: MOLO2, tableNumber: '14', status: 'reserved', x: 9, updatedAt: new Date('2026-10-01T00:00:00.000Z') }];
   const state = { prepared: true, entity: { id: id(60), configurationRevision: randomUUID(),
     apiBaseUrl: BASE, status: 'connected', organizationId: ORG, syncEnabled: false }, links: [link(TABLE, [ORDER])] };
   let reads = 0;
@@ -85,7 +85,7 @@ function serviceSetup(t, overrides = {}) {
     save: () => { writes.push('save'); throw new Error('observation must not save'); },
   };
   const service = new SyrveIntegrationService(store, { create: () => writes.push('audit') }, h.client,
-    { find: async (options) => { assert.deepEqual(options, { select: { id: true, tableNumber: true, status: true } }); return structuredClone(tables); } });
+    { find: async (options) => { assert.deepEqual(options, { select: { id: true, tableNumber: true, status: true, updatedAt: true } }); return structuredClone(tables); } });
   const encrypted = service.encrypt(LOGIN);
   Object.assign(state.entity, { apiLoginEncrypted: encrypted.encrypted, apiLoginIv: encrypted.iv, apiLoginAuthTag: encrypted.authTag });
   return { ...h, state, tables, service, writes, reads: () => reads, dto: () => ({ configurationRevision: state.entity.configurationRevision }) };
@@ -476,6 +476,25 @@ test('failed read after concurrent disconnect cannot publish an old-configuratio
   await assert.rejects(h.service.observeOrders(h.dto()), (e) => e.getStatus() === 409);
   assert.deepEqual(h.writes, []);
 });
+
+for (const field of ['status', 'tableNumber']) {
+  test(`in-flight ${field} change and restore is still stale when the table update version changed`, async (t) => {
+    const h = serviceSetup(t);
+    const original = structuredClone(h.tables[0]);
+    h.routes['/api/1/order/by_table'] = () => {
+      h.tables[0][field] = field === 'status' ? 'occupied' : '100';
+      h.tables[0].updatedAt = new Date('2026-10-01T00:00:01.000Z');
+      h.tables[0][field] = original[field];
+      h.tables[0].updatedAt = new Date('2026-10-01T00:00:02.000Z');
+      return orders(wrapper(ORDER, 'Closed'));
+    };
+    h.routes['/api/1/order/by_id'] = orders(wrapper(ORDER, 'Closed'));
+    await assert.rejects(h.service.observeOrders(h.dto()), (e) => e.getStatus() === 409);
+    assert.deepEqual({ ...h.tables[0], updatedAt: original.updatedAt }, original,
+      'all requested table values returned to their original values');
+    assert.deepEqual(h.writes, []);
+  });
+}
 
 test('legacy schema, stale revision, disconnected state and absent/foreign links stop before any upstream request', async (t) => {
   const h = serviceSetup(t);
