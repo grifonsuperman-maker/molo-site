@@ -12,6 +12,8 @@ export async function runTableMapIdentityValidation(env = process.env) {
   const { DataSource, In } = require('typeorm');
   const { TableMapIdentityService } = require('../dist/tables/table-map-identity.service.js');
   const { TablesService } = require('../dist/tables/tables.service.js');
+  const { SyrveSettingsStore } = require('../dist/syrve/syrve-settings.store.js');
+  const { SyrveStaffActionsService } = require('../dist/syrve/syrve-staff-actions.service.js');
   const { MapService } = require('../dist/map/map.service.js');
   const { ZonesService } = require('../dist/zones/zones.service.js');
   const { Restaurant } = require('../dist/restaurant/entities/restaurant.entity.js');
@@ -80,7 +82,7 @@ export async function runTableMapIdentityValidation(env = process.env) {
     assert.equal(diagnostic.syncEnabled, false);
 
     const tablesService = new TablesService(db.getRepository(TableEntity), db.getRepository(Zone),
-      db.getRepository(Booking), identities);
+      db.getRepository(Booking), identities, new SyrveStaffActionsService(db, new SyrveSettingsStore(db)));
     assert.equal((await tablesService.findAll()).find((table) => table.id === ids[1]).mapKey, 'hall:14');
     const maps = new MapService(db.getRepository(TableEntity), db.getRepository(Zone),
       { getRestaurant: async () => ({ id: 'test-restaurant', status: 'open' }) }, db.getRepository(MapObject), identities);

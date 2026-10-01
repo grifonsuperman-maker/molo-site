@@ -11,6 +11,7 @@ const { buildSyrveTableRenamePlan } = require('../dist/syrve/syrve-table-rename-
 const { SyrveTableRenamingService } = require('../dist/syrve/syrve-table-renaming.service.js');
 const { SyrveTableRenamingController } = require('../dist/syrve/syrve-table-renaming.controller.js');
 const { TablesService } = require('../dist/tables/tables.service.js');
+const { repositoryStaffActions } = require('./helpers/repository-staff-actions.js');
 const { BookingsService } = require('../dist/bookings/bookings.service.js');
 const { GuestBookingsService } = require('../dist/bookings/guest-bookings.service.js');
 const { TableEntity } = require('../dist/tables/entities/table.entity.js');
@@ -179,7 +180,7 @@ test('prepared number-status actions cannot recreate a missing slot or mutate a 
   let reads = 0, writes = 0;
   const repository = { findOne: async () => { reads++; return { id: 'different-uuid', tableNumber: '12' }; },
     save: async () => { writes++; }, create: () => { writes++; } };
-  const service = new TablesService(repository, {}, {}, { project: async () => ({ prepared: true, tables: [] }) });
+  const service = new TablesService(repository, {}, {}, { project: async () => ({ prepared: true, tables: [] }) }, repositoryStaffActions(repository));
   for (const number of ['12', '99']) {
     await assert.rejects(service.setStatusByNumber(number, 'closed'), (error) => error.getStatus() === 409);
   }
@@ -193,7 +194,7 @@ test('unprepared number-status action keeps its legacy create/status behavior', 
   create: (row) => ({ id: 'legacy-uuid', ...row }), save: async (patch) => {
     current = { ...current, ...patch }; return { ...current };
   } };
-  const service = new TablesService(repository, {}, {}, { project: async () => ({ prepared: false, tables: [] }) });
+  const service = new TablesService(repository, {}, {}, { project: async () => ({ prepared: false, tables: [] }) }, repositoryStaffActions(repository));
   const result = await service.setStatusByNumber('12', 'closed');
   assert.equal(result.id, 'legacy-uuid'); assert.equal(result.tableNumber, '12'); assert.equal(result.status, 'closed');
 });
@@ -207,7 +208,8 @@ test('waiter status saves do not overwrite a number changed after its initial re
       if (reads++ === 0) current.tableNumber = '99';
       return copy;
     }, save: async (patch) => { writes.push(patch); Object.assign(current, patch); return patch; } };
-    const service = new TablesService(repository, {}, { find: async () => [] });
+    const bookings = { find: async () => [] };
+    const service = new TablesService(repository, {}, bookings, undefined, repositoryStaffActions(repository, bookings));
     const result = await service[method](current.id, 'occupied');
     assert.deepEqual(writes, [{ id: 'same-table', status: 'occupied' }]);
     assert.equal(result.tableNumber, '99'); assert.equal(result.status, 'occupied');

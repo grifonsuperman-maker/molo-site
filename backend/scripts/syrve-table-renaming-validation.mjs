@@ -17,6 +17,7 @@ export async function runSyrveTableRenamingValidation(env = process.env) {
   const { TableMapIdentityService } = require('../dist/tables/table-map-identity.service.js');
   const { TablesService } = require('../dist/tables/tables.service.js');
   const { SyrveSettingsStore } = require('../dist/syrve/syrve-settings.store.js');
+  const { SyrveStaffActionsService } = require('../dist/syrve/syrve-staff-actions.service.js');
   const { SyrveTableRenamingService } = require('../dist/syrve/syrve-table-renaming.service.js');
   const { canonicalTableNumber } = require('../dist/tables/table-map-slots.js');
   const { ProtectCanonicalTableNumbers2026093000040: NumberMigration, CANONICAL_TABLE_NUMBER_SQL_V1 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
@@ -127,7 +128,7 @@ export async function runSyrveTableRenamingValidation(env = process.env) {
     assert.equal(projected.tables.find((row) => row.id === ids[0]).mapKey, 'hall:12');
     assert.equal(projected.tables.find((row) => row.id === ids[0]).tableNumber, '99');
     const adminTables = new TablesService(db.getRepository(TableEntity), db.getRepository(Zone),
-      db.getRepository(Booking), new TableMapIdentityService(db));
+      db.getRepository(Booking), new TableMapIdentityService(db), new SyrveStaffActionsService(db, store));
     const afterRename = await physical();
     await assert.rejects(adminTables.setStatusByNumber('12', 'closed'), (error) => error.getStatus() === 409);
     assert.deepEqual(await physical(), afterRename, 'A missing old label cannot create a second UUID.');
@@ -185,18 +186,30 @@ export async function runSyrveTableRenamingValidation(env = process.env) {
     assert.deepEqual(await physical(), beforeConflict);
     await db.query('UPDATE ' + schema + '."syrve_integrations" SET "configuration_revision"=$1,"status"=\'connected\'', [revision]);
 
-    // Actual waiter service reads an old entity, then the rename commits before
-    // its status save. Only status is persisted; its response reloads number 99.
+    // A real staff transaction now serializes renames. Hold its settings/table
+    // locks while starting an old rename; the staff fence must reject that
+    // rename, and a fresh rename must preserve the committed occupied status.
     const repository = db.getRepository(TableEntity);
     const raceObservation = await service.capture();
-    let pause = true;
-    const waiterTables = { save: repository.save.bind(repository), findOne: async (options) => {
-      const table = await repository.findOne(options);
-      if (pause) { pause = false; await service.applyCatalog(catalog(99), raceObservation); }
-      return table;
-    } };
-    const waiter = new TablesService(waiterTables, db.getRepository(Zone), db.getRepository(Booking), new TableMapIdentityService(db));
-    const occupied = await waiter.setWaiterStatus(ids[0], 'occupied');
+    let signalHeld, rejectHeld, release;
+    const held = new Promise((resolve, reject) => { signalHeld = resolve; rejectHeld = reject; });
+    const released = new Promise((resolve) => { release = resolve; });
+    const coordinator = new SyrveStaffActionsService(db, store);
+    const pausedCoordinator = { run: (id, action, write) => coordinator.run(id, action, async (manager) => {
+      await manager.getRepository(TableEntity).findOne({where:{id},lock:{mode:'pessimistic_write'}});
+      signalHeld(); await released;
+      return write(manager);
+    }) };
+    const waiter = new TablesService(repository, db.getRepository(Zone), db.getRepository(Booking), new TableMapIdentityService(db), pausedCoordinator);
+    const manual = waiter.setWaiterStatus(ids[0], 'occupied'); manual.catch(rejectHeld);
+    await held;
+    const oldRename = service.applyCatalog(catalog(99), raceObservation);
+    release();
+    const raced = await Promise.allSettled([manual, oldRename]);
+    assert.equal(raced[0].status, 'fulfilled'); assert.equal(raced[0].value.status, 'occupied');
+    assert.equal(raced[1].status, 'rejected'); assert.equal(raced[1].reason.getStatus(), 409);
+    assert.equal((await service.applyCatalog(catalog(99), await service.capture())).renamed, 1);
+    const occupied = await repository.findOne({where:{id:ids[0]}});
     assert.equal(occupied.tableNumber, '99'); assert.equal(occupied.status, 'occupied');
     assert.equal((await bindings()).find((row) => row.table_id === ids[0]).map_key, 'hall:12');
     assert.deepEqual(await bookings(), bookingsBefore);

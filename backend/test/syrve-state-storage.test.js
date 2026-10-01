@@ -3,54 +3,11 @@ const test = require('node:test');
 const { randomUUID } = require('node:crypto');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
-const { SyrveStateStore } = require('../dist/syrve/syrve-state.store.js');
 const { CreateSyrveDurableState2026093000050: Migration } = require('../dist/migrations/2026093000050-CreateSyrveDurableState.js');
-const { staleSyrveSettings } = require('../dist/syrve/syrve-settings.store.js');
 const { id, row, probe, batches } = require('./helpers/syrve-state-fixtures.js');
 
-// Transactional test double for failure injection. The same scenarios also run
-// against the compiled adapter and real PostgreSQL in database-reference CI.
-function harness() {
-  const entity = { id: randomUUID(), configurationRevision: randomUUID(), organizationId: randomUUID(), status: 'connected' };
-  let db = { saved: null, versions: [], link: { id: randomUUID(), integration_id: entity.id,
-    organization_id: entity.organizationId, molo_table_id: randomUUID(), syrve_table_id: randomUUID(),
-    last_syrve_state: 'unknown', active_syrve_order_ids: [], manually_freed_syrve_order_ids: [] } };
-  const queries = []; let prepared = true, fail = false, tail = Promise.resolve();
-  const manager = { query: async (sql, args = []) => {
-    queries.push(sql);
-    if (sql.includes('to_regclass')) return [{ prepared }];
-    if (sql.startsWith('SELECT "id"')) return args[0] === db.link.molo_table_id ? [{ id: args[0] }] : [];
-    if (sql.startsWith('SELECT *') && sql.includes('syrve_table_links')) return [structuredClone(db.link)];
-    if (sql.startsWith('SELECT *')) return db.saved ? [structuredClone(db.saved)] : [];
-    if (sql.startsWith('SELECT "order_id"')) return db.versions.map((v) => ({ order_id: v.id, timestamp: String(v.timestamp), state: v.state, fingerprint: v.fingerprint }));
-    if (sql.startsWith('INSERT') && sql.includes('syrve_table_sync_states')) {
-      db.saved = Object.fromEntries(['link_id','integration_id','configuration_revision','organization_id','molo_table_id','syrve_table_id','local_revision'].map((key, index) => [key,args[index]]));
-    } else if (sql.startsWith('INSERT')) {
-      const versions = new Map(db.versions.map((v) => [v.id, v]));
-      for (const v of JSON.parse(args[1])) versions.set(v.id, v);
-      db.versions = [...versions.values()].sort((a,b) => a.id.localeCompare(b.id));
-    } else if (sql.startsWith('UPDATE') && sql.includes('syrve_table_links')) {
-      db.link.last_syrve_state = args[1]; db.link.active_syrve_order_ids = [...args[2]]; db.link.manually_freed_syrve_order_ids = [...args[3]];
-    } else if (sql.startsWith('UPDATE')) {
-      if (fail) throw new Error('synthetic write failure');
-      db.saved.configuration_revision = args[1]; db.saved.local_revision = args[2];
-    }
-    return [];
-  } };
-  const snapshot = () => ({ prepared: true, entity: { ...entity }, links: [] });
-  const settings = { read: async () => snapshot(), transaction: async (expected, action) => {
-    const previous = tail; let release; tail = new Promise((yes) => release = yes); await previous;
-    const before = structuredClone(db);
-    try {
-      if (expected.id !== entity.id || expected.revision !== entity.configurationRevision) throw staleSyrveSettings();
-      return await action(manager, snapshot());
-    } catch (error) { db = before; throw error; } finally { release(); }
-  } };
-  const source = { options: { type: 'postgres', schema: 'public' }, manager };
-  const restart = () => new SyrveStateStore(source, settings);
-  return { entity, queries, restart, store: restart(), table: db.link.molo_table_id, saved: () => structuredClone(db),
-    mutate: (action) => action(db), unprepare: () => prepared = false, failWrite: () => fail = true };
-}
+const { harness } = require('./helpers/syrve-state-harness.js');
+
 async function open(h, orders = [id(10)]) {
   const c = await h.store.capture(h.table);
   await h.store.applyObservation(c, [{ orderIds: c.orderIds[0], probe: probe(c.state.scope, orders.map((orderId) => row(c.state.scope, orderId))) }]);
@@ -163,7 +120,7 @@ test('migration rollback requires a transaction before checking or dropping save
   assert.deepEqual(queries,[]);
 });
 
-test('preparation has no runtime provider, live migration registration, HTTP caller or activation', () => {
+test('observation storage has no runtime provider, live migration registration, HTTP caller or activation', () => {
   const read = (p) => readFileSync(resolve(__dirname,'../src',p),'utf8');
   const module = read('syrve/syrve-integration.module.ts'); assert.doesNotMatch(module,/SyrveStateStore|syrve-state.store/);
   const app = read('app.module.ts');

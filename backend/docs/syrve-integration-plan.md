@@ -1,10 +1,10 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 8a starts from fresh main `64bb5c22246d3fd2e2e06dc7128f9b7beaa8021f` (2026-10-01),
-after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270 and #271. Client diagnostics, link schema preparation,
+PR 8b starts from fresh main `6744a1c4fd747e627787865bbfe65f6966b14e7b` (2026-10-01),
+after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270, #271 and #272. Client diagnostics, link schema preparation,
 read-only catalog preview, explicit UUID confirmation, internal rename preparation and read-only order observation are implemented.
-Pure state policy and the durable storage adapter are isolated from runtime callers. Real Syrve is not connected or
+The durable adapter is used only by transactional staff hooks; observation and effective status application stay isolated. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
@@ -25,7 +25,8 @@ Every later PR starts from freshly fetched main after the Director's manual merg
   explicit mapping writes are available only after the prepared schema is applied.
   Internal UUID rename preparation exists; no HTTP mutation or automatic caller invokes it.
   Read-only order observation is an explicit Director API action; no frontend/automatic caller invokes it.
-  No scheduler, observation persistence, manual-action hooks or status integration are enabled.
+  The staff coordinator records local revisions/overrides when prepared links exist.
+  No scheduler, automatic observation persistence or effective status integration is enabled.
 - The existing `1785362400000-CreateSyrveIntegration.ts` has up/down, and the fresh
   schema baseline contains `syrve_integrations`. This legacy migration is NOT in
   `AppModule`'s runtime migration list. A file's existence does not establish its
@@ -209,8 +210,9 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection (merged #269); internal methods remain unreachable from HTTP/automatic callers | Syrve rename service/plan, canonical table-number uniqueness migration, read-only Director diagnostics, partial status saves and concurrency tests |
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown (merged #270) | Syrve order client/observer, explicit Director API and synthetic fixtures/tests; no persistence or status application |
 | 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority (merged #271) | isolated Syrve state reducer and regression tests; no enabled worker |
-| 8a | Durable version ledger and local staff fence, transactional internal adapter (this PR); no runtime caller, staff hook or status application | separate migration-owned state/version tables, internal store, disposable PostgreSQL restart/concurrency tests and CI migration registry |
-| 8 | Transactional manual-action hooks and unified effective status reads, existing waiter/booking behavior retained | `TablesService`, map/status read services, dependency wiring and regression tests; sync remains off |
+| 8a | Durable version ledger and local staff fence, transactional internal adapter (merged #272) | separate migration-owned state/version tables, internal store, disposable PostgreSQL restart/concurrency tests and CI migration registry |
+| 8b | Transactional manual-action hooks, existing waiter/booking behavior retained (this PR) | `TablesService`, minimal staff coordinator/module, durable adapter and PostgreSQL regression tests; sync remains off |
+| 8c | Unified effective status reads with the existing role/date priorities | map/status read services, shared projection, dependency wiring and regression tests; sync remains off |
 | 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
 | 10 | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
 
@@ -790,6 +792,52 @@ request is made. Controller/service/module callers, staff button behavior, map
 reads, polling and all protected product areas stay unchanged. The next PR must
 join staff-state recording and existing MOLO actions in the same transaction
 before any worker or effective-status application is permitted.
+
+### PR 8b transactional staff action boundary
+
+`TablesModule` imports the small `SyrveStaffActionsModule`, which exports only
+`SyrveStaffActionsService`. It depends on the existing DataSource/settings store,
+not the integration module, client, credentials or table module. There is no
+module cycle and no upstream HTTP call. The state adapter remains internal and
+unregistered. Its transaction-only recorder rejects managers outside a transaction.
+
+All explicit staff status commands use the same callback: `setStatus`, the legacy
+number route, waiter status and the occupied/cleaning/free/open/close aliases.
+The coordinator acquires the existing bounded settings fence; the callback locks
+the physical UUID without a nullable join, reloads its zone, reads today's active
+bookings and saves only `{id,status}`. The adapter then locks the link/snapshot,
+reloads the ledger and records the action in that same transaction. Both writes
+commit together, or both roll back. No stale table number/geometry is saved.
+The prepared number route still rejects number-based changes as before; the
+unprepared legacy route retains its existing create/status behavior.
+
+The action type comes from the requested command, not the resulting status.
+Waiter free therefore suppresses known POS IDs even when checked-in guests keep
+the physical table occupied or an approved/pending booking restores its status.
+Bookings, history and notifications are never written here. All successful staff
+commands rotate the fence, including same-status and change-and-restore actions;
+invalid/disallowed/missing-table actions change neither physical nor POS state.
+Automatic booking lifecycle writes do not call this hook.
+
+Error/offline and disconnected configurations retain their bindings and allow
+local actions; disconnected settings may have no selected organization, so the
+stored link's immutable organization is used. Revision rebasing retains the
+ledger and suppression. An absent legacy link/configuration schema or an unlinked
+table keeps ordinary MOLO behavior. If configuration/links are prepared but durable
+storage is temporarily absent, the same transaction rotates the configuration
+revision and copies only existing active IDs into manual suppression for a free
+command. After schema recovery, an old capture is rejected and the unchanged
+watermark ledger is adopted; no history is invented or truncated. Corrupt or
+foreign durable state blocks the whole action rather than half-saving it.
+
+Tests exercise the actual TablesService/coordinator, every status entry point,
+booking outcomes, local/configuration fences, restart, failed physical/late
+durable writes, offline/disconnect, uppercase UUIDs, unknown bindings and
+concurrent observation/manual commands. The guarded disposable PostgreSQL CI
+validator runs real repository/locking/booking queries and a late failure trigger,
+checks restart and temporary schema recovery, then removes its synthetic fixtures.
+No migration/schema/production registry changes, worker, activation or effective
+status reads are included. Unified role/date projection remains the next stage.
 
 ## Required regression gates
 
