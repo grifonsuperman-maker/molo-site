@@ -3,6 +3,7 @@ const test = require('node:test');
 const { createSyrveTableSyncState, reduceSyrveOrderState, reduceSyrveStaffAction,
   projectSyrveTableStatus, getSyrveOrderIdsToObserve, SyrveStateValidationError } = require('../dist/syrve/syrve-state-reducer.js');
 const { parseSyrveOrders } = require('../dist/syrve/syrve-order-observer.js');
+const { SyrveClient } = require('../dist/syrve/syrve-client.js');
 
 const id = (n) => `b0000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ORG = id(1), GROUP = id(2), TABLE = id(3), TABLE2 = id(4), ORDER = id(10), ORDER2 = id(11), ORDER3 = id(12);
@@ -231,25 +232,25 @@ test('persisted unassociated tombstone ambiguity blocks closure until explicitly
   state = staff(state).state;
   const conflicted = observe(state, [row(ORDER, 'New', 200), row(ORDER2, 'New', 300)]).state;
   assert.deepEqual(conflicted.activeSyrveOrderIds, [ORDER2]);
-  assert.deepEqual(getSyrveOrderIdsToObserve(conflicted), [ORDER, ORDER2]);
+  assert.deepEqual(getSyrveOrderIdsToObserve(conflicted), [[ORDER, ORDER2]]);
   const absent = observe(conflicted, [row(ORDER2, 'Closed', 400)]);
   assert.deepEqual(absent.state.activeSyrveOrderIds, [ORDER2]);
   assert.deepEqual(absent.state.manuallyFreedSyrveOrderIds, [ORDER2]);
   const resolved = observe(absent.state, [row(ORDER, 'Closed', 201), row(ORDER2, 'Closed', 400)]).state;
   assert.deepEqual(resolved.activeSyrveOrderIds, []); assert.deepEqual(resolved.manuallyFreedSyrveOrderIds, []);
-  assert.deepEqual(getSyrveOrderIdsToObserve(resolved), []);
+  assert.deepEqual(getSyrveOrderIdsToObserve(resolved), [[]]);
 });
 
 test('new unassociated discovery watermark blocks stale closure until a newer usable version identifies it', () => {
   const state = staff(opened()).state;
   const unknown = observe(state, [row(ORDER), pending(ORDER2, 500)]).state;
-  assert.deepEqual(getSyrveOrderIdsToObserve(unknown), [ORDER, ORDER2]);
+  assert.deepEqual(getSyrveOrderIdsToObserve(unknown), [[ORDER, ORDER2]]);
   const stale = observe(unknown, [row(ORDER, 'Closed', 600), row(ORDER2, 'Closed', 499)]).state;
   assert.deepEqual(stale.activeSyrveOrderIds, [ORDER]);
   assert.deepEqual(stale.manuallyFreedSyrveOrderIds, [ORDER]);
   const resolved = observe(stale, [row(ORDER, 'Closed', 600), row(ORDER2, 'Closed', 501)]).state;
   assert.deepEqual(resolved.activeSyrveOrderIds, []);
-  assert.deepEqual(getSyrveOrderIdsToObserve(resolved), []);
+  assert.deepEqual(getSyrveOrderIdsToObserve(resolved), [[]]);
 });
 
 test('newer usable association elsewhere resolves unassociated discovery without occupying this physical table', () => {
@@ -257,7 +258,7 @@ test('newer usable association elsewhere resolves unassociated discovery without
   const resolved = observe(unknown, [row(ORDER, 'Closed', 600), row(ORDER2, 'New', 501, [TABLE2])]).state;
   assert.deepEqual(resolved.activeSyrveOrderIds, []);
   assert.equal(resolved.lastSyrveState, 'closed'); assert.equal(status(resolved), 'free');
-  assert.deepEqual(getSyrveOrderIdsToObserve(resolved), []);
+  assert.deepEqual(getSyrveOrderIdsToObserve(resolved), [[]]);
 });
 
 for (const kind of ['unknown_status', 'offline_group', 'group_mismatch']) {
@@ -280,7 +281,7 @@ for (const kind of ['unknown_status', 'offline_group', 'group_mismatch']) {
     const result = observe(state, [], { probe: value });
     assert.deepEqual(result.state.activeSyrveOrderIds, [ORDER2]);
     assert.deepEqual(result.state.manuallyFreedSyrveOrderIds, [ORDER2]);
-    assert.deepEqual(getSyrveOrderIdsToObserve(result.state), [ORDER, ORDER2]);
+    assert.deepEqual(getSyrveOrderIdsToObserve(result.state), [[ORDER, ORDER2]]);
     assert.ok(result.diagnostics.includes('unknown_orders'));
     const resolved = observe(result.state, [row(ORDER, 'New', 301, [TABLE2]), row(ORDER2, 'Closed', 300)]).state;
     assert.deepEqual(resolved.activeSyrveOrderIds, []); assert.deepEqual(resolved.manuallyFreedSyrveOrderIds, []);
@@ -326,7 +327,7 @@ test('manual free suppresses every observed UUID, repeated same orders stay supp
   const state = opened(row(ORDER), row(ORDER2, 'Bill')), freed = staff(state).state;
   assert.deepEqual(freed.activeSyrveOrderIds, [ORDER, ORDER2]);
   assert.deepEqual(freed.manuallyFreedSyrveOrderIds, [ORDER, ORDER2]); assert.equal(status(freed), 'free');
-  assert.deepEqual(getSyrveOrderIdsToObserve(freed), [ORDER, ORDER2]);
+  assert.deepEqual(getSyrveOrderIdsToObserve(freed), [[ORDER, ORDER2]]);
   const repeated = observe(freed, [row(ORDER, 'New', 200), row(ORDER2, 'Bill', 200)]).state;
   assert.deepEqual(repeated.manuallyFreedSyrveOrderIds, [ORDER, ORDER2]); assert.equal(status(repeated), 'free');
   const next = observe(repeated, [row(ORDER, 'New', 300), row(ORDER2, 'Bill', 300), row(ORDER3, 'New', 300)]).state;
@@ -454,6 +455,176 @@ test('cumulative known sets exceed one provider response cap without truncation 
   assert.equal(state.activeSyrveOrderIds.length, 2100); assert.equal(state.orderVersions.length, 2100);
   const freed = staff(state).state;
   assert.equal(freed.manuallyFreedSyrveOrderIds.length, 2100); assert.equal(status(freed), 'free');
+});
+
+function largeState(count, unknown = false) {
+  const state = opened(), version = state.orderVersions[0];
+  const orderIds = Array.from({ length: count }, (_, index) => id(100000 + index));
+  return { ...state, lastSyrveState: unknown ? 'unknown' : 'open',
+    activeSyrveOrderIds: unknown ? [] : orderIds,
+    manuallyFreedSyrveOrderIds: unknown ? [] : [...orderIds],
+    orderVersions: orderIds.map((orderId) => ({ ...version, id: orderId,
+      state: unknown ? 'unknown' : 'open', fingerprint: unknown ? null : version.fingerprint })) };
+}
+
+for (const count of [2100, 4201]) {
+  test(`bounded observation plan resolves all ${count} tracked UUIDs through the actual mocked client`, async (t) => {
+    const oldAppId = process.env.SYRVE_APP_ID, oldSecret = process.env.SYRVE_APP_CLIENT_SECRET;
+    process.env.SYRVE_APP_ID = ''; process.env.SYRVE_APP_CLIENT_SECRET = '';
+    t.after(() => {
+      for (const [key, value] of [['SYRVE_APP_ID', oldAppId], ['SYRVE_APP_CLIENT_SECRET', oldSecret]]) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    });
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+      const path = new URL(url).pathname, body = JSON.parse(options.body);
+      calls.push({ path, body });
+      const payloads = {
+        '/api/1/access_token': { token: 'state-policy-test-token' },
+        '/api/1/organizations': { organizations: [{ id: ORG, name: 'MOLO' }] },
+        '/api/1/terminal_groups': { terminalGroups: [{ organizationId: ORG,
+          items: [{ id: GROUP, organizationId: ORG, name: 'Каса' }] }], terminalGroupsInSleep: [] },
+        '/api/1/reserve/available_restaurant_sections': { restaurantSections: [{ id: id(98), name: 'Зал',
+          terminalGroupId: GROUP, tables: [{ id: TABLE, number: 12, name: 'Стіл', isDeleted: false }] }] },
+        '/api/1/terminal_groups/is_alive': { correlationId: id(99),
+          isAliveStatus: [{ organizationId: ORG, terminalGroupId: GROUP, isAlive: true }] },
+        '/api/1/order/by_table': { correlationId: id(99), orders: [] },
+        '/api/1/order/by_id': { correlationId: id(99), orders: (body.orderIds || []).map((orderId) => row(orderId, 'Closed', 200)) },
+      };
+      assert.ok(path in payloads, `unexpected mocked read: ${path}`);
+      return Response.json(payloads[path]);
+    });
+    const state = freeze(largeState(count)), plan = getSyrveOrderIdsToObserve(state);
+    const client = new SyrveClient(), batches = [];
+    for (const orderIds of plan) {
+      const value = await client.probeOrders('https://api-eu.syrve.live', 'state-policy-test-login', ORG, [TABLE], orderIds);
+      assert.equal(value.checks.ordersById.status, 'ok', 'every bounded by-ID read must succeed');
+      assert.ok(orderIds.length <= 2000);
+      batches.push({ orderIds, probe: value });
+    }
+    assert.equal(batches.length, Math.ceil(count / 2000));
+    const result = reduceSyrveOrderState(state, { ...fence(state), probe: batches, visibilityVerified: true });
+    assert.deepEqual(result.state.activeSyrveOrderIds, []);
+    assert.deepEqual(result.state.manuallyFreedSyrveOrderIds, []);
+    assert.equal(result.state.lastSyrveState, 'closed');
+    assert.equal(result.state.orderVersions.length, count);
+    assert.ok(result.state.orderVersions.every((version) => version.state === 'closed' && version.timestamp === 200));
+    const fetched = calls.filter((call) => call.path === '/api/1/order/by_id').flatMap((call) => call.body.orderIds);
+    assert.deepEqual(fetched.sort(), state.activeSyrveOrderIds);
+    assert.ok(calls.filter((call) => call.path === '/api/1/order/by_id').every((call) => call.body.orderIds.length <= 200));
+  });
+}
+
+function batchEvidence(state, makeRow = (orderId) => row(orderId, 'Closed', 200)) {
+  return getSyrveOrderIdsToObserve(state).map((orderIds) => ({ orderIds,
+    probe: probe(orderIds.map(makeRow).filter(Boolean)) }));
+}
+function observeBatches(state, batches = batchEvidence(state), overrides = {}) {
+  return reduceSyrveOrderState(state, { ...fence(state), probe: batches, visibilityVerified: true, ...overrides });
+}
+
+test('bounded plan includes suppressed active and unknown tombstones exactly once without mutable aliases', () => {
+  const state = largeState(2100), unknownIds = [id(110000), id(110001)];
+  state.orderVersions.push(...unknownIds.map((orderId) => ({ id: orderId, timestamp: 300, state: 'unknown', fingerprint: null })),
+    { ...state.orderVersions[0], id: id(120000), state: 'closed' });
+  const before = structuredClone(state), plan = getSyrveOrderIdsToObserve(freeze(state));
+  assert.deepEqual(plan.map((batch) => batch.length), [2000, 102]);
+  assert.deepEqual(plan.flat(), [...state.activeSyrveOrderIds, ...unknownIds].sort());
+  plan[0].pop(); plan.push([ORDER]);
+  assert.deepEqual(state, before);
+  assert.deepEqual(getSyrveOrderIdsToObserve(initial()), [[]]);
+});
+
+test('all 2100 unresolved inactive UUIDs are reachable and resolve without inventing occupancy or a closed table', () => {
+  const state = largeState(2100, true), result = observeBatches(state);
+  assert.deepEqual(result.state.activeSyrveOrderIds, []);
+  assert.equal(result.state.lastSyrveState, 'unknown');
+  assert.ok(result.state.orderVersions.every((version) => version.state === 'closed' && version.timestamp === 200));
+  assert.deepEqual(getSyrveOrderIdsToObserve(result.state), [[]]);
+});
+
+test('failed by-ID evidence for inactive unknown tombstones cannot bypass the required-read gate', () => {
+  const state = largeState(2100, true), batches = batchEvidence(state);
+  batches[1].probe.checks.ordersById = { status: 'error', code: 'SYRVE_UNAVAILABLE' };
+  const result = observeBatches(state, batches);
+  assert.equal(result.changed, false); assert.deepEqual(result.state, state);
+  assert.deepEqual(result.diagnostics, ['observation_unknown']);
+});
+
+for (const [name, mutate, diagnostic = 'observation_unknown'] of [
+  ['omitted final batch', (batches) => batches.pop()],
+  ['omitted unresolved scope', (batches) => batches[1].orderIds.pop()],
+  ['duplicated first scope', (batches) => batches[1] = structuredClone(batches[0])],
+  ['failed later by-ID read', (batches) => batches[1].probe.checks.ordersById = { status: 'error', code: 'SYRVE_UNAVAILABLE' }],
+  ['absent later by-ID channel', (batches) => batches[1].probe.byId = null],
+  ['offline later POS', (batches) => batches[1].probe.availability[0].isAlive = false],
+  ['foreign later organization', (batches) => batches[1].probe.organizationId = id(90), 'scope_changed'],
+]) {
+  test(`${name} preserves the entire saved state before any batch closure or version update`, () => {
+    const state = freeze(largeState(2100)), batches = batchEvidence(state), before = structuredClone(state);
+    mutate(batches);
+    const result = observeBatches(state, batches);
+    assert.equal(result.changed, false); assert.deepEqual(result.state, before);
+    assert.deepEqual(result.diagnostics, [diagnostic]); assert.deepEqual(state, before);
+  });
+}
+
+for (const missing of [false, true]) {
+  test(`${missing ? 'missing' : 'unknown'} order in a later batch fences every other closure and override deletion`, () => {
+    const state = largeState(2100), last = state.activeSyrveOrderIds.at(-1);
+    const batches = batchEvidence(state, (orderId) => orderId !== last ? row(orderId, 'Closed', 200)
+      : missing ? null : pending(orderId, 300));
+    const result = observeBatches(state, batches);
+    assert.deepEqual(result.state.activeSyrveOrderIds, state.activeSyrveOrderIds);
+    assert.deepEqual(result.state.manuallyFreedSyrveOrderIds, state.manuallyFreedSyrveOrderIds);
+    assert.ok(result.diagnostics.includes('unknown_orders'));
+    const resolved = observeBatches(result.state, batchEvidence(result.state, (orderId) => row(orderId, 'Closed', 400)));
+    assert.deepEqual(resolved.state.activeSyrveOrderIds, []);
+    assert.deepEqual(resolved.state.manuallyFreedSyrveOrderIds, []);
+  });
+}
+
+test('equal-version conflicts across independent probes still fence the complete closure set', () => {
+  const state = largeState(2100), batches = batchEvidence(state), first = state.activeSyrveOrderIds[0];
+  batches[1].probe.byTable.push(...probe([row(first, 'New', 200)]).byTable);
+  const result = observeBatches(state, batches);
+  assert.deepEqual(result.state.activeSyrveOrderIds, state.activeSyrveOrderIds);
+  assert.deepEqual(result.state.manuallyFreedSyrveOrderIds, state.manuallyFreedSyrveOrderIds);
+  assert.equal(result.state.orderVersions.find((version) => version.id === first).state, 'unknown');
+  assert.ok(result.diagnostics.includes('unknown_orders'));
+});
+
+test('a current table moving POS groups between bounded probes cannot publish old-group closures', () => {
+  const state = largeState(2100), batches = batchEvidence(state), nextGroup = id(90);
+  const value = batches[1].probe;
+  value.catalogTables[0].terminalGroupId = nextGroup;
+  value.terminalGroups.active = [{ id: nextGroup }]; value.availability = [{ terminalGroupId: nextGroup, isAlive: true }];
+  for (const orders of [value.byTable, value.byId]) for (const order of orders) order.terminalGroupId = nextGroup;
+  const result = observeBatches(state, batches);
+  assert.equal(result.changed, false); assert.deepEqual(result.state, state);
+  assert.deepEqual(result.diagnostics, ['observation_unknown']);
+});
+
+test('a single bounded probe cannot partially apply a saved scope requiring multiple probes', () => {
+  const state = largeState(2100), result = observe(state, [row(state.activeSyrveOrderIds[0], 'Closed', 200)]);
+  assert.equal(result.changed, false); assert.deepEqual(result.state, state);
+  assert.deepEqual(result.diagnostics, ['observation_unknown']);
+});
+
+test('staff changes fence a complete multi-probe reply before any evidence is consumed', () => {
+  const state = largeState(2100), event = { ...fence(state), probe: batchEvidence(state), visibilityVerified: true };
+  const current = staff(state, 'status_changed').state;
+  const result = reduceSyrveOrderState(current, event);
+  assert.equal(result.changed, false); assert.deepEqual(result.state, current);
+  assert.deepEqual(result.diagnostics, ['local_revision_changed']);
+});
+
+test('unexpected by-ID UUID in a bounded batch fails with the fixed internal error and no saved mutation', () => {
+  const state = largeState(2100), before = structuredClone(state), batches = batchEvidence(state);
+  batches[1].probe.byId.push(...probe([row(ORDER, 'Closed', 200)]).byId);
+  assert.throws(() => observeBatches(state, batches), SyrveStateValidationError);
+  assert.deepEqual(state, before);
 });
 
 for (const [name, mutate] of [

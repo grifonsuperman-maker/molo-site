@@ -666,9 +666,29 @@ Previously unknown/conflicting evidence keeps blocking every closure when the
 next row is stale, absent or itself newer-but-unknown; resolution requires a
 strictly newer usable observation for that same UUID. This includes ambiguous
 closed tombstones, not just currently active orders. The pure
-`getSyrveOrderIdsToObserve` helper retains active (including suppressed) and
-unresolved UUIDs for future by-ID reads; a future adapter must use that scope so
-an ambiguous tombstone is not silently dropped from observation.
+`getSyrveOrderIdsToObserve` helper returns a deterministic array of scopes, each
+containing at most 2000 active (including suppressed) or unresolved UUIDs. Empty
+state returns one empty scope for table discovery. Each scope requires its own
+`SyrveClient.probeOrders` call for this one linked physical table, rather than
+merging all scopes into one call. This respects both the existing 2000-order
+channel cap and 25-request budget; the client's 200-ID HTTP chunks alone cannot
+read an arbitrarily large cumulative set in one probe.
+
+The future adapter must capture the complete plan with the snapshot/fence, collect
+every `{ orderIds, probe }` result and pass the whole batch array to the reducer
+once. The reducer checks exact canonical scope coverage, per-batch organization,
+catalog/POS/read success and a consistent current-table POS group across probes;
+missing, duplicated, foreign or failed batches retain
+the entire old snapshot before any UUID, override or watermark update. By-ID
+evidence outside a declared scope is invalid. Required by-ID reads also apply to
+inactive unresolved tombstones. Sanitized evidence across all successful probes
+is reconciled by version, including equal conflicts, before the whole-ledger
+closure fence. Missing/moved/unknown orders in any scope still block every closure.
+The original single-probe input remains usable only for snapshots whose complete
+known scope fits one probe. No partial page may be persisted, and fresh staff or
+configuration changes fence the whole reply. The future adapter must bound job
+work/resume collection without reapplying early pages; no worker or HTTP loop is
+introduced here. Discovery responses themselves retain PR 6's safe limits.
 Identical evidence is idempotent.
 
 Closure additionally requires server-established POS-order visibility for the
@@ -706,8 +726,11 @@ status application is allowed. An active UUID without its watermark is rejected,
 not silently assigned a fabricated version. Closed tombstones must not be pruned
 while old evidence can still arrive. Prepared migrations remain subject to the
 final reviewed production audit/adoption path; this PR changes no database.
-The policy does not impose one-response limits on cumulative saved UUID/version
-sets; tests include 2100 tracked orders across multiple bounded observations.
+The policy does not truncate cumulative saved UUID/version sets to one response.
+Tests run 2100 and 4201 tracked UUIDs through separate probes using the actual
+client with mocked upstream replies, then close the complete set in one reduction.
+Unknown tombstones remain reachable, and a missing/failed/ambiguous later probe
+cannot publish early closures or clear overrides. No real provider request runs.
 
 Synthetic sequences test multiple/spanning orders, partial closure, initial and
 later empty responses, offline/deleted/missing tables, every required read failure,

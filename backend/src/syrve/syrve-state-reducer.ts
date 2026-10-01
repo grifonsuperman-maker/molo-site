@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import type { TableStatus } from '../tables/entities/table.entity';
 import type { SyrveTableState } from './entities/syrve-table-link.entity';
-import { buildSyrveOrderObservation, observationIds } from './syrve-order-observer';
+import { buildSyrveOrderObservation, MAX_RESPONSE_ORDERS, mergeSyrveOrders, observationIds } from './syrve-order-observer';
 import type { SyrveObservedOrder, SyrveOrderProbe } from './syrve-order-observer';
 
 // Pure policy only. No entity saves, API route, scheduler or activation wiring.
@@ -40,6 +40,11 @@ export type SyrveTransition = {
   state: SyrveTableSyncState;
   changed: boolean;
   diagnostics: SyrveTransitionDiagnostic[];
+};
+export type SyrveOrderObservationBatch = {
+  // One independently bounded probe for this table and these saved UUIDs.
+  orderIds: string[];
+  probe: SyrveOrderProbe;
 };
 export class SyrveStateValidationError extends Error {
   constructor() { super('Invalid internal Syrve state'); }
@@ -88,11 +93,16 @@ export function createSyrveTableSyncState(currentScope: SyrveStateScope, localRe
     activeSyrveOrderIds: [], manuallyFreedSyrveOrderIds: [], orderVersions: [] };
 }
 
-export function getSyrveOrderIdsToObserve(current: SyrveTableSyncState): string[] {
+export function getSyrveOrderIdsToObserve(current: SyrveTableSyncState): string[][] {
   const state = copyState(current);
   // Suppressed active IDs and ambiguous tombstones still require by-ID evidence.
-  return [...new Set([...state.activeSyrveOrderIds,
+  const orderIds = [...new Set([...state.activeSyrveOrderIds,
     ...state.orderVersions.filter((version) => version.state === 'unknown').map((version) => version.id)])].sort();
+  // A full saved set can exceed both the per-probe response and request budgets.
+  // Each entry is a separate probeOrders call for this one physical table, not
+  // merely another HTTP chunk inside one call. Empty state still needs discovery.
+  return orderIds.length ? Array.from({ length: Math.ceil(orderIds.length / MAX_RESPONSE_ORDERS) }, (_, index) =>
+    orderIds.slice(index * MAX_RESPONSE_ORDERS, (index + 1) * MAX_RESPONSE_ORDERS)) : [[]];
 }
 
 function fence(state: SyrveTableSyncState, event: SyrveStateFence): SyrveTransitionDiagnostic | null {
@@ -122,8 +132,42 @@ function validateOrder(order: SyrveObservedOrder) {
     || (order.state === 'closed' && !['Closed', 'Deleted'].includes(order.status))) throw new SyrveStateValidationError();
 }
 
+function collectOrderEvidence(state: SyrveTableSyncState,
+  input: SyrveOrderProbe | SyrveOrderObservationBatch[]): SyrveObservedOrder[] | null {
+  const plan = getSyrveOrderIdsToObserve(state);
+  const batches = Array.isArray(input) ? input : [{ orderIds: plan[0], probe: input }];
+  // Never apply an early page, omit unresolved IDs, or feed an oversized saved
+  // set back to the same bounded client call on every poll.
+  if (batches.length !== plan.length) return null;
+  const observations: SyrveObservedOrder[][] = [];
+  let tableGroup: string | null = null;
+  for (const [index, batch] of batches.entries()) {
+    const requested = ids(batch.orderIds), probe = batch.probe;
+    if (requested.length > MAX_RESPONSE_ORDERS) throw new SyrveStateValidationError();
+    if (JSON.stringify(requested) !== JSON.stringify(plan[index])) return null;
+    if (!probe || uuid(probe.organizationId) !== state.scope.organizationId) return null;
+    if (!Array.isArray(probe.byTable) || probe.byTable.length > MAX_RESPONSE_ORDERS
+      || (requested.length && (probe.checks.ordersById.status !== 'ok' || !Array.isArray(probe.byId)))
+      || (probe.byId && probe.byId.length > MAX_RESPONSE_ORDERS)) return null;
+    if (Array.isArray(input) && probe.byId?.some((order) => !requested.includes(uuid(order.id)))) {
+      throw new SyrveStateValidationError();
+    }
+    const observation = buildSyrveOrderObservation(probe, [{ ...state.scope,
+      activeSyrveOrderIds: state.activeSyrveOrderIds.filter((orderId) => requested.includes(orderId)) }]);
+    if (observation.tables[0].reason !== null && observation.tables[0].reason !== 'unverified_pos_visibility') return null;
+    const observedGroup = uuid(probe.catalogTables!.find((table) => table.id === state.scope.syrveTableId)!.terminalGroupId);
+    if (tableGroup !== null && observedGroup !== tableGroup) return null;
+    tableGroup = observedGroup;
+    observation.orders.forEach(validateOrder);
+    observations.push(observation.orders);
+  }
+  // Reconcile all reads before the existing whole-ledger closure gate. Equal
+  // conflicts across probes remain unknown; a failed probe publishes no state.
+  return mergeSyrveOrders(...observations);
+}
+
 export function reduceSyrveOrderState(current: SyrveTableSyncState, event: SyrveStateFence & {
-  probe: SyrveOrderProbe;
+  probe: SyrveOrderProbe | SyrveOrderObservationBatch[];
   // Server-established prerequisite, never a Director DTO flag. PR 6 cannot prove it.
   visibilityVerified: boolean;
 }): SyrveTransition {
@@ -131,20 +175,21 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   const retained = (diagnostic: SyrveTransitionDiagnostic): SyrveTransition => ({ state, changed: false, diagnostics: [diagnostic] });
   if (rejected) return retained(rejected);
   if (typeof event.visibilityVerified !== 'boolean') throw new SyrveStateValidationError();
-  if (uuid(event.probe.organizationId) !== state.scope.organizationId) return retained('scope_changed');
-  const observation = buildSyrveOrderObservation(event.probe, [{ ...state.scope, activeSyrveOrderIds: state.activeSyrveOrderIds }]);
-  const table = observation.tables[0];
-  if (table.reason !== null && table.reason !== 'unverified_pos_visibility') return retained('observation_unknown');
-  observation.orders.forEach(validateOrder);
+  const probes = Array.isArray(event.probe) ? event.probe.map((batch) => batch.probe) : [event.probe];
+  if (probes.some((probe) => uuid(probe.organizationId) !== state.scope.organizationId)) return retained('scope_changed');
+  const orders = collectOrderEvidence(state, event.probe);
+  if (!orders) return retained('observation_unknown');
 
   const diagnostics = new Set<SyrveTransitionDiagnostic>();
   const active = new Set(state.activeSyrveOrderIds), freed = new Set(state.manuallyFreedSyrveOrderIds);
   const versions = new Map(state.orderVersions.map((version) => [version.id, version]));
-  const open = new Set(table.activeOrderIds), closed = new Set(table.explicitlyClosedOrderIds);
+  const associated = orders.filter((order) => order.tableIds.includes(state.scope.syrveTableId));
+  const open = new Set(associated.filter((order) => order.state === 'open').map((order) => order.id));
+  const closed = new Set(associated.filter((order) => order.state === 'closed').map((order) => order.id));
   // Missing/moved/ambiguous orders cannot make any partial closure free a table.
-  const unknownOrders = table.unknownOrders.length > 0 || observation.orders.some((order) =>
+  const unknownOrders = state.activeSyrveOrderIds.some((orderId) => !open.has(orderId) && !closed.has(orderId)) || orders.some((order) =>
     order.state === 'unknown' && (!order.tableIds.length || order.tableIds.includes(state.scope.syrveTableId)));
-  const candidates = observation.orders
+  const candidates = orders
     .filter((order) => order.tableIds.includes(state.scope.syrveTableId) || active.has(order.id) || versions.has(order.id)
       || (order.state === 'unknown' && !order.tableIds.length))
     .map((order) => ({ order, previous: versions.get(order.id), signature: fingerprint(order),
