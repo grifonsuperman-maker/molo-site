@@ -11,6 +11,7 @@ const { TableMapIdentity } = require('../dist/tables/entities/table-map-identity
 const { TableMapIdentityService } = require('../dist/tables/table-map-identity.service.js');
 const { TablesService } = require('../dist/tables/tables.service.js');
 const { MapService } = require('../dist/map/map.service.js');
+const { disabledTableStatuses } = require('./helpers/disabled-table-statuses.js');
 const { CreateTableMapIdentities2026093000030: Migration } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
 
 function dataSource(tables = [], identities = [], prepared = true) {
@@ -151,7 +152,8 @@ test('legacy Director diagnostic reports preparation rather than creating schema
 test('tables API projects identity from the same read-only service', async () => {
   const tables = [physicalTable()];
   const identities = new TableMapIdentityService(dataSource(tables, [{ tableId: 'table-a', mapKey: 'hall:12' }]));
-  const service = new TablesService({ find: async () => tables }, {}, {}, identities);
+  const service = new TablesService({ find: async () => tables }, {}, {}, identities, undefined,
+    disabledTableStatuses());
   assert.equal((await service.findAll())[0].mapKey, 'hall:12');
 });
 
@@ -167,7 +169,8 @@ test('full and public map preserve physical fields, closed state and visibility 
     : parameters[0].map((id) => ({ tableId: id, mapKey: 'hall:12' }));
   const identities = new TableMapIdentityService(db);
   const service = new MapService({ find: async () => tables }, { find: async () => [visibleZone, hiddenZone] },
-    { getRestaurant: async () => ({ id: 'restaurant', status: 'closed' }) }, { find: async () => [] }, identities);
+    { getRestaurant: async () => ({ id: 'restaurant', status: 'closed' }) }, { find: async () => [] }, identities,
+    disabledTableStatuses());
   const full = await service.getFullMap();
   const publicMap = await service.getPublicMap();
   assert.equal(full.tables.length, 3);

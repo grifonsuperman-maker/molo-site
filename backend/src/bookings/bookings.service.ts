@@ -18,6 +18,7 @@ import { LogsService } from '../logs/logs.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
 import type { AuthUser } from '../auth/types/auth-user.type';
+import { TableStatusProjectionService } from '../tables/table-status-projection.service';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
@@ -36,6 +37,7 @@ export class BookingsService {
     private readonly logs: LogsService,
     private readonly notifications: NotificationsService,
     private readonly waiterCalls: WaiterCallsService,
+    private readonly statuses: TableStatusProjectionService,
   ) {}
 
   async restaurant() {
@@ -552,6 +554,7 @@ export class BookingsService {
       .getMany();
 
     const result: Record<string, unknown> = {};
+    const snapshot = await this.statuses.capture(tables, bookingDate === today ? 'today' : 'future');
 
     for (const table of tables) {
       const tableNumber = String(table.tableNumber);
@@ -561,25 +564,8 @@ export class BookingsService {
       const conflict = this.findConflict(tableBookings, timeInfo.startMinutes, timeInfo.availableFromMinutes);
       const conflictInfo = conflict ? this.bookingToAvailabilityConflict(conflict) : null;
 
-      let status: TableEntity['status'] = 'free';
-      let reason: string | null = null;
-
-      if (!table.isVisible || table.zone?.isVisible === false) {
-        status = 'closed';
-        reason = 'hidden';
-      } else if (table.status === 'closed' || table.zone?.isClosed) {
-        status = 'closed';
-        reason = 'closed';
-      } else if (bookingDate === today && table.status === 'occupied') {
-        status = 'occupied';
-        reason = 'physical_status_today';
-      } else if (bookingDate === today && table.status === 'cleaning') {
-        status = 'cleaning';
-        reason = 'physical_status_today';
-      } else if (conflict) {
-        status = conflict.status === 'pending' ? 'pending' : 'reserved';
-        reason = 'booking_conflict';
-      }
+      const { status, reason } = this.statuses.window(table, snapshot, { bookingDate, today,
+        conflict: conflict ? conflict.status === 'pending' ? 'pending' : 'approved' : null });
 
       result[tableNumber] = {
         tableId: table.id,

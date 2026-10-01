@@ -39,6 +39,7 @@ import { GuestReviewsController } from './guest-reviews.controller';
 import { GuestTableNumberValidationService } from './guest-table-number-validation.service';
 import { GuestTelegramLinkService } from './guest-telegram-link.service';
 import { GuestTimeChangeService } from './guest-time-change.service';
+import { TableStatusProjectionModule } from '../tables/table-status-projection.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { GuestTimeChangeService } from './guest-time-change.service';
     NotificationsModule,
     WaiterCallsModule,
     RestaurantModule,
+    TableStatusProjectionModule,
   ],
   controllers: [
     BookingsController,

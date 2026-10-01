@@ -7,6 +7,7 @@ import { TableEntity } from '../tables/entities/table.entity';
 import { Zone } from '../zones/entities/zone.entity';
 import { MapObject } from './entities/map-object.entity';
 import { TableMapIdentityService } from '../tables/table-map-identity.service';
+import { TableStatusProjectionService } from '../tables/table-status-projection.service';
 
 @Injectable()
 export class MapService {
@@ -19,6 +20,7 @@ export class MapService {
     @InjectRepository(MapObject)
     private readonly objects: Repository<MapObject>,
     private readonly mapIdentities: TableMapIdentityService,
+    private readonly statuses: TableStatusProjectionService,
   ) {}
 
   private restaurant() {
@@ -27,16 +29,16 @@ export class MapService {
 
   async getFullMap() {
     const restaurant = await this.restaurant();
-    const physical = await this.mapIdentities.project(await this.tables.find({
+    const tables = await this.tables.find({
       relations: ['zone'], order: { tableNumber: 'ASC' } as any,
-    }));
+    });
+    const zones = await this.zones.find({ relations: ['tables'], order: { createdAt: 'ASC' } as any });
+    const snapshot = await this.statuses.capture([...tables, ...zones.flatMap((zone) => zone.tables || [])]);
+    const physical = await this.mapIdentities.project(this.statuses.physical(tables, snapshot));
 
     return {
       restaurant,
-      zones: await this.zones.find({
-        relations: ['tables'],
-        order: { createdAt: 'ASC' } as any,
-      }),
+      zones: this.statuses.zones(zones, snapshot),
       tables: physical.tables,
       mapIdentityPrepared: physical.prepared,
       objects: await this.objects.find({
@@ -68,7 +70,8 @@ export class MapService {
       );
     });
 
-    const physical = await this.mapIdentities.project(tables);
+    const snapshot = await this.statuses.capture([...tables, ...zones.flatMap((zone) => zone.tables || [])]);
+    const physical = await this.mapIdentities.project(this.statuses.physical(tables, snapshot));
 
     const objects = (
       await this.objects.find({
@@ -97,7 +100,7 @@ export class MapService {
         mapWidth: (restaurant as any).mapWidth,
         mapHeight: (restaurant as any).mapHeight,
       },
-      zones,
+      zones: this.statuses.zones(zones, snapshot),
       tables: physical.tables,
       mapIdentityPrepared: physical.prepared,
       objects,

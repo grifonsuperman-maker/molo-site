@@ -8,6 +8,7 @@ const test = require('node:test');
 const { MapModule } = require('../dist/map/map.module.js');
 const { MapService } = require('../dist/map/map.service.js');
 const { RestaurantModule } = require('../dist/restaurant/restaurant.module.js');
+const { disabledTableStatuses } = require('./helpers/disabled-table-statuses.js');
 
 function createHarness() {
   const calls = {
@@ -59,7 +60,7 @@ function createHarness() {
     restaurant,
     service: new MapService(tables, zones, restaurantService, objects, {
       project: async (tables) => ({ prepared: false, tables }),
-    }),
+    }, disabledTableStatuses()),
   };
 }
 
