@@ -15,6 +15,8 @@ export async function runTableMapIdentityValidation(env = process.env) {
   const { SyrveSettingsStore } = require('../dist/syrve/syrve-settings.store.js');
   const { SyrveStaffActionsService } = require('../dist/syrve/syrve-staff-actions.service.js');
   const { MapService } = require('../dist/map/map.service.js');
+  const { SyrveStatusReadService } = require('../dist/syrve/syrve-status-read.service.js');
+  const { TableStatusProjectionService } = require('../dist/tables/table-status-projection.service.js');
   const { ZonesService } = require('../dist/zones/zones.service.js');
   const { Restaurant } = require('../dist/restaurant/entities/restaurant.entity.js');
   const { TableEntity } = require('../dist/tables/entities/table.entity.js');
@@ -35,6 +37,7 @@ export async function runTableMapIdentityValidation(env = process.env) {
   const ids = Array.from({ length: 6 }, () => randomUUID());
   const migration = new Migration();
   const identities = new TableMapIdentityService(db);
+  const statuses = new TableStatusProjectionService(new SyrveStatusReadService(db));
   const physicalRows = () => db.query('SELECT * FROM ' + schema + '."tables" WHERE "id"=ANY($1::uuid[]) ORDER BY "id"', [ids]);
   const publicSnapshot = async () => ({
     tables: await db.query('SELECT * FROM public."tables" ORDER BY "id"'),
@@ -82,10 +85,10 @@ export async function runTableMapIdentityValidation(env = process.env) {
     assert.equal(diagnostic.syncEnabled, false);
 
     const tablesService = new TablesService(db.getRepository(TableEntity), db.getRepository(Zone),
-      db.getRepository(Booking), identities, new SyrveStaffActionsService(db, new SyrveSettingsStore(db)));
+      db.getRepository(Booking), identities, new SyrveStaffActionsService(db, new SyrveSettingsStore(db)), statuses);
     assert.equal((await tablesService.findAll()).find((table) => table.id === ids[1]).mapKey, 'hall:14');
     const maps = new MapService(db.getRepository(TableEntity), db.getRepository(Zone),
-      { getRestaurant: async () => ({ id: 'test-restaurant', status: 'open' }) }, db.getRepository(MapObject), identities);
+      { getRestaurant: async () => ({ id: 'test-restaurant', status: 'open' }) }, db.getRepository(MapObject), identities, statuses);
     for (const map of [await maps.getFullMap(), await maps.getPublicMap()]) {
       assert.equal(map.mapIdentityPrepared, true);
       assert.equal(map.tables.find((table) => table.id === ids[1]).mapKey, 'hall:14');

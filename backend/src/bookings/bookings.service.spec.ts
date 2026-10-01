@@ -4,6 +4,10 @@ import { BookingsService } from './bookings.service';
 import { Booking } from './entities/booking.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { TableEntity } from '../tables/entities/table.entity';
+import { TableStatusProjectionService } from '../tables/table-status-projection.service';
+import { SyrveStatusReadService } from '../syrve/syrve-status-read.service';
+
+const statuses = new TableStatusProjectionService(new SyrveStatusReadService({} as any));
 
 test('waiterTransfer preserves an occupied table used by an earlier booking', async () => {
   const oldTable = {
@@ -75,6 +79,7 @@ test('waiterTransfer preserves an occupied table used by an earlier booking', as
         callsClosedAfterTransaction = true;
       },
     } as any,
+    statuses,
   );
 
   (service as any).restaurantDateToday = () => '2026-07-21';
@@ -134,6 +139,7 @@ test('waiterTransfer preserves a closed source table', async () => {
     { manager: { transaction: async (work: (value: typeof manager) => Promise<unknown>) => work(manager) } } as any,
     {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
     { closeActiveCallsAndDetachBooking: () => undefined } as any,
+    statuses,
   );
 
   (service as any).restaurantDateToday = () => '2026-07-21';

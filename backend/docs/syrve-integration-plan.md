@@ -1,10 +1,11 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 8b starts from fresh main `6744a1c4fd747e627787865bbfe65f6966b14e7b` (2026-10-01),
-after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270, #271 and #272. Client diagnostics, link schema preparation,
+PR 8c starts from fresh main `d11c0b5f7800abaf9dee7277509ee9f3d0b095eb` (2026-10-01),
+after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270, #271, #272 and #273. Client diagnostics, link schema preparation,
 read-only catalog preview, explicit UUID confirmation, internal rename preparation and read-only order observation are implemented.
-The durable adapter is used only by transactional staff hooks; observation and effective status application stay isolated. Real Syrve is not connected or
+The transition adapter is used only by transactional staff hooks. Common role/date projection is wired behind a hard-disabled read source;
+automatic observation and effective POS status application stay off. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
@@ -26,7 +27,8 @@ Every later PR starts from freshly fetched main after the Director's manual merg
   Internal UUID rename preparation exists; no HTTP mutation or automatic caller invokes it.
   Read-only order observation is an explicit Director API action; no frontend/automatic caller invokes it.
   The staff coordinator records local revisions/overrides when prepared links exist.
-  No scheduler, automatic observation persistence or effective status integration is enabled.
+  The shared status engine is used by table/map/booking-window reads; its Syrve source is hard-disabled.
+  No scheduler, automatic observation persistence or effective POS status application is enabled.
 - The existing `1785362400000-CreateSyrveIntegration.ts` has up/down, and the fresh
   schema baseline contains `syrve_integrations`. This legacy migration is NOT in
   `AppModule`'s runtime migration list. A file's existence does not establish its
@@ -838,6 +840,61 @@ validator runs real repository/locking/booking queries and a late failure trigge
 checks restart and temporary schema recovery, then removes its synthetic fixtures.
 No migration/schema/production registry changes, worker, activation or effective
 status reads are included. Unified role/date projection remains the next stage.
+
+### PR 8c shared role/date status reads
+
+`TablesModule`, `MapModule` and `BookingsModule` import the small
+`TableStatusProjectionModule`. Its only export is the common status engine;
+there is no integration-module cycle, controller, worker or HTTP client dependency.
+`/tables`, full/public flat maps, nested map-zone tables and
+`/bookings/table-statuses` use this engine. Each map response shares one captured
+POS contribution for its flat and nested copies. Existing public filtering,
+physical map identities, API fields and booking conflict details are preserved.
+
+Raw current-table reads keep the existing manual-status/visibility representation.
+For today's booking window, the unchanged priority is hidden/closed, occupied,
+cleaning, selected-window pending/approved conflict, free. Physical pending or
+reserved does not invent a conflict in another time window. Date/time calculation,
+the 15-minute cleanup boundary and availability-block overlay remain unchanged.
+Future windows skip the POS source entirely and use only their selected bookings
+while respecting hidden/closed tables and zones.
+
+The production `SyrveStatusReadService` has a private gate returning false: no
+environment variable, saved credential or request can activate it in this stage.
+Disabled reads execute zero Syrve feature queries and preserve the existing
+MOLO results. The internal read adapter is neither a provider nor an export.
+Only synthetic injected sources in tests exercise its prepared behavior.
+
+That adapter reads settings, immutable UUID links, durable state, the complete
+order-version ledger and physical status/version inside a PostgreSQL REPEATABLE
+READ, READ ONLY transaction with a five-second statement timeout. It never calls
+the write-capable capture adapter, creates state, rebases a revision, repairs rows,
+prunes tombstones, locks for writing or contacts Syrve. A changed/foreign scope
+contributes nothing. Missing/corrupt saved occupancy raises a fixed Ukrainian
+503; an untouched unknown binding needs no state creation. Error status can retain
+last-good state only within the same configuration revision; disconnected or
+unselected settings contribute nothing.
+
+Prepared POS can only add occupied from an unsuppressed active order. It cannot
+clear manual/check-in/booking state, override hidden/closed state, cancel a booking
+or affect future windows. Staff free suppresses existing UUIDs; a different new
+order UUID may add occupied later. Scope and physical status/update-time checks
+reject mixed versions; duplicated flat/nested UUIDs with differing physical
+frames decline POS on every copy. The frame also includes table visibility and
+the zone UUID/visibility/closure actually used by each representation: a zone-only
+update does not advance the table timestamp. Nested capture/projection both use
+the loaded parent zone. These are coherent snapshot checks, not a
+promise that concurrent network responses arrive in commit order.
+
+Regression tests cover the legacy priority matrix, actual role read services,
+booking details and cleanup boundary, availability blocks, manual suppression,
+new orders, scope changes, mixed versions, no response leaks and real Nest DI.
+The guarded disposable PostgreSQL validator exercises the compiled reader and
+actual table/map/booking/staff services, a rejected write in READ ONLY mode,
+restart, 4201 additional tombstones, missing ledger and configuration changes.
+No migration/schema/runtime registry changes, frontend/assets/polling changes,
+Render/Neon/production operation or real Syrve request is part of this stage.
+Activation and automatic observation persistence require a separate next PR.
 
 ## Required regression gates
 

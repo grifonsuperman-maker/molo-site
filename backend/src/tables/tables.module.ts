@@ -7,9 +7,10 @@ import { TablesController } from './tables.controller';
 import { TablesService } from './tables.service';
 import { TableMapIdentityModule } from './table-map-identity.module';
 import { SyrveStaffActionsModule } from '../syrve/syrve-staff-actions.module';
+import { TableStatusProjectionModule } from './table-status-projection.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TableEntity, Zone, Booking]), TableMapIdentityModule, SyrveStaffActionsModule],
+  imports: [TypeOrmModule.forFeature([TableEntity, Zone, Booking]), TableMapIdentityModule, SyrveStaffActionsModule, TableStatusProjectionModule],
   controllers: [TablesController],
   providers: [TablesService],
   exports: [TablesService],

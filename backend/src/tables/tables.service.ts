@@ -10,6 +10,7 @@ import { Zone } from '../zones/entities/zone.entity';
 import { TableMapIdentityService } from './table-map-identity.service';
 import { rethrowTableNumberConflict } from './table-number-conflict';
 import { SyrveStaffActionsService } from '../syrve/syrve-staff-actions.service';
+import { TableStatusProjectionService } from './table-status-projection.service';
 
 const ACTIVE_BOOKING_STATUSES = ['pending', 'approved'] as const;
 
@@ -21,11 +22,13 @@ export class TablesService {
     @InjectRepository(Booking) private readonly bookings: Repository<Booking>,
     private readonly mapIdentities: TableMapIdentityService,
     private readonly staffActions: SyrveStaffActionsService,
+    private readonly statuses: TableStatusProjectionService,
   ) {}
 
   async findAll() {
     const tables = await this.tables.find({ relations: ['zone'], order: { tableNumber: 'ASC' } });
-    return (await this.mapIdentities.project(tables)).tables;
+    const snapshot = await this.statuses.capture(tables);
+    return (await this.mapIdentities.project(this.statuses.physical(tables, snapshot))).tables;
   }
 
   getMapIdentityDiagnostics() {
