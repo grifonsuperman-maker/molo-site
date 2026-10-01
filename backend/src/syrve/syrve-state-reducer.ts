@@ -150,24 +150,9 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
     .map((order) => ({ order, previous: versions.get(order.id), signature: fingerprint(order),
       evidenceState: open.has(order.id) ? 'open' as const : closed.has(order.id) ? 'closed' as const
         : !active.has(order.id) ? order.state : 'unknown' as const }));
-  const incoming = new Map(candidates.map((candidate) => [candidate.order.id, candidate]));
-  // An absent/stale row cannot resolve previously stored ambiguity, nor can a
-  // newer unknown row. Require a strictly newer usable outcome for that UUID.
-  const unresolved = state.orderVersions.filter((version) => {
-    if (version.state !== 'unknown') return false;
-    const candidate = incoming.get(version.id);
-    return !candidate || candidate.order.timestamp <= version.timestamp || candidate.evidenceState === 'unknown';
-  });
-  // Inspect the whole set before mutating any closure/override, including when
-  // the conflicting UUID sorts after an otherwise valid closure in this response.
-  const storedConflict = unresolved.some((version) => version.fingerprint === null)
-    || candidates.some(({ order, previous, signature }) =>
-      previous && order.timestamp === previous.timestamp && previous.fingerprint !== signature);
-  if (unknownOrders || unresolved.length) diagnostics.add('unknown_orders');
-  if (storedConflict) diagnostics.add('conflicting_order_versions');
-  if (!event.visibilityVerified) diagnostics.add('visibility_not_verified');
-  const canClose = event.visibilityVerified === true && !unknownOrders && !unresolved.length && !storedConflict;
-
+  const accepted: typeof candidates = [];
+  // Phase one derives the entire prospective ledger without changing membership
+  // or overrides. This fences existing, newly unknown and equal-conflict records.
   for (const { order, previous, signature, evidenceState } of candidates) {
     if (previous && order.timestamp < previous.timestamp) { diagnostics.add('stale_order'); continue; }
     if (previous && order.timestamp === previous.timestamp && previous.fingerprint !== signature) {
@@ -176,7 +161,20 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
       diagnostics.add('conflicting_order_versions');
       continue;
     }
+    // Even an identical fingerprint cannot certify an unresolved stored outcome
+    // at the same version. Only strictly newer usable evidence resolves it.
+    if (previous?.state === 'unknown' && order.timestamp === previous.timestamp) continue;
     versions.set(order.id, { id: order.id, timestamp: order.timestamp, state: evidenceState, fingerprint: signature });
+    accepted.push({ order, previous, signature, evidenceState });
+  }
+  const unresolved = [...versions.values()].filter((version) => version.state === 'unknown');
+  if (unknownOrders || unresolved.length) diagnostics.add('unknown_orders');
+  if (unresolved.some((version) => version.fingerprint === null)) diagnostics.add('conflicting_order_versions');
+  if (!event.visibilityVerified) diagnostics.add('visibility_not_verified');
+  const canClose = event.visibilityVerified === true && !unknownOrders && !unresolved.length;
+
+  // Phase two applies membership only after every prospective outcome is known.
+  for (const { order } of accepted) {
     if (open.has(order.id)) active.add(order.id);
     else if (closed.has(order.id) && canClose) { active.delete(order.id); freed.delete(order.id); }
     // Unknown versions advance the high-water mark but retain active IDs/overrides.

@@ -653,8 +653,8 @@ Provider timestamps are safe nonnegative integer versions, not wall-clock dates.
 Per-order high-water marks reject older evidence, including closure, while closed
 tombstones reject delayed old open replies. Conflicting equal versions preserve
 last good state and remain fenced until a strictly newer version resolves them.
-Conflicts against the stored ledger are detected for the entire set before any
-closure: ambiguity in one UUID retains every active UUID/override, even when a
+The entire prospective ledger is derived before any closure: stored, newly unknown
+or equal-conflicting outcomes in one UUID retain every active UUID/override, even when a
 different order has a newer explicit closure and sorts earlier in the response.
 The ledger stores the latest usable/unknown outcome as well as timestamp/fingerprint;
 only active UUID membership contributes occupancy. A moved previously active UUID

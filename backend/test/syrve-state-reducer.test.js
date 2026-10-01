@@ -260,6 +260,45 @@ test('newer usable association elsewhere resolves unassociated discovery without
   assert.deepEqual(getSyrveOrderIdsToObserve(resolved), []);
 });
 
+for (const kind of ['unknown_status', 'offline_group', 'group_mismatch']) {
+  test(`new ${kind} tombstone outcome blocks peer closure in that same observation`, () => {
+    let state = opened(row(ORDER), row(ORDER2));
+    state = observe(state, [row(ORDER, 'Closed', 200), row(ORDER2, 'New', 200)]).state;
+    state = staff(state).state;
+    const group2 = id(5), changed = row(ORDER, kind === 'unknown_status' ? 'FutureStatus' : 'New', 300, [TABLE2]);
+    const overrides = {};
+    if (kind !== 'unknown_status') {
+      changed.order.terminalGroupId = kind === 'offline_group' ? group2 : GROUP;
+      Object.assign(overrides, {
+        terminalGroups: { active: [{ id: GROUP }, { id: group2 }], sleeping: [] },
+        catalogTables: [{ id: TABLE, terminalGroupId: GROUP, isDeleted: false },
+          { id: TABLE2, terminalGroupId: group2, isDeleted: false }],
+        availability: [{ terminalGroupId: GROUP, isAlive: true }, { terminalGroupId: group2, isAlive: kind !== 'offline_group' }],
+      });
+    }
+    const value = probe([changed, row(ORDER2, 'Closed', 300)], overrides);
+    const result = observe(state, [], { probe: value });
+    assert.deepEqual(result.state.activeSyrveOrderIds, [ORDER2]);
+    assert.deepEqual(result.state.manuallyFreedSyrveOrderIds, [ORDER2]);
+    assert.deepEqual(getSyrveOrderIdsToObserve(result.state), [ORDER, ORDER2]);
+    assert.ok(result.diagnostics.includes('unknown_orders'));
+    const resolved = observe(result.state, [row(ORDER, 'New', 301, [TABLE2]), row(ORDER2, 'Closed', 300)]).state;
+    assert.deepEqual(resolved.activeSyrveOrderIds, []); assert.deepEqual(resolved.manuallyFreedSyrveOrderIds, []);
+  });
+}
+
+test('matching fingerprint at the same version cannot resolve a stored unknown classification', () => {
+  let state = opened(row(ORDER), row(ORDER2));
+  state = observe(state, [row(ORDER, 'Closed', 200), row(ORDER2, 'New', 200)]).state;
+  state = staff(state).state;
+  state.orderVersions.find((version) => version.id === ORDER).state = 'unknown';
+  const blocked = observe(state, [row(ORDER, 'Closed', 200), row(ORDER2, 'Closed', 300)]).state;
+  assert.deepEqual(blocked.activeSyrveOrderIds, [ORDER2]);
+  assert.deepEqual(blocked.manuallyFreedSyrveOrderIds, [ORDER2]);
+  const resolved = observe(blocked, [row(ORDER, 'Closed', 201), row(ORDER2, 'Closed', 300)]).state;
+  assert.deepEqual(resolved.activeSyrveOrderIds, []);
+});
+
 test('conflicting by-table/by-id versions are unknown and cannot close the previous order', () => {
   const state = opened(), value = probe([row(ORDER, 'New', 200)]);
   value.byId = parseSyrveOrders({ correlationId: id(99), orders: [row(ORDER, 'Closed', 200)] }, ORG, { orderIds: [ORDER] });
