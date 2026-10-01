@@ -61,6 +61,14 @@ test('a newer server configuration cannot be presented as readiness for the olde
   const h=mounted({getReadiness:async()=>report(OTHER)});h.render(VERSION);await flush();
   assert.equal(h.states[1],null);assert.equal(h.states[3],true);
 });
+test('a saved positive report is hidden immediately when configuration changes, before the new effect runs',async()=>{
+  const next=deferred();let count=0;
+  const h=mounted({getReadiness:()=>++count===1?Promise.resolve(report()):next.promise});
+  h.render(VERSION);await flush();assert.ok(h.states[1]);
+  const html=renderToStaticMarkup(h.render(OTHER));
+  assert.doesNotMatch(html,/Структуру бази та історію підготовки підтверджено/);
+  assert.equal(h.states[1],null);h.unmount();
+});
 test('network failure clears old readiness and shows only a fixed message',async()=>{
   let failed=false;const h=mounted({getReadiness:async()=>{if(failed)throw new Error('secret-driver-message');return report();}});
   h.render(VERSION);await flush();assert.ok(h.states[1]);failed=true;h.states[0]++;h.render(VERSION);await flush();

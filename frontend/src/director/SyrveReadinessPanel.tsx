@@ -68,6 +68,6 @@ export default function SyrveReadinessPanel({ configurationRevision }: { configu
     <p className="mt-2 text-sm text-white/55">Перевірка збереженого підключення. Синхронізація залишається вимкненою.</p>
     {loading && <p className="mt-3 text-sm" role="status">Перевіряємо готовність…</p>}
     {failed && <p className="mt-3 text-sm text-amber-100" role="alert">Перевірку не завершено або налаштування змінилися. Оновіть сторінку та повторіть перевірку.</p>}
-    {report && <SyrveReadinessView report={report} />}
+    {report && report.configurationRevision === configurationRevision && <SyrveReadinessView report={report} />}
   </section>;
 }
