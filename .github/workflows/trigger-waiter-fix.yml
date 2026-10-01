@@ -1,0 +1,43 @@
+name: Capture waiter fix application error
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/waiter-table-state-sync
+          fetch-depth: 0
+
+      - name: Run application script and capture output
+        shell: bash
+        continue-on-error: true
+        run: |
+          python -m pip install --quiet pyyaml
+          python <<'PY' > waiter-fix-application.log 2>&1
+          import pathlib
+          import subprocess
+          import yaml
+
+          document = yaml.safe_load(pathlib.Path('.github/workflows/export-waiter-fix-source.yml').read_text(encoding='utf-8'))
+          scripts = [step['run'] for step in document['jobs']['apply-and-verify']['steps'] if isinstance(step, dict) and step.get('run')]
+          print(f'Prepared scripts: {len(scripts)}', flush=True)
+          subprocess.run(['bash', '-lc', scripts[0]], check=True)
+          PY
+
+      - name: Upload application log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: waiter-fix-application-log
+          path: waiter-fix-application.log
