@@ -1,10 +1,10 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 7 starts from fresh main `31940912ca5c2d614088f67075a2f6ed5dfa25d6` (2026-10-01),
-after manual merges of PRs #261, #264, #265, #266, #267, #268, #269 and #270. Client diagnostics, link schema preparation,
+PR 8a starts from fresh main `64bb5c22246d3fd2e2e06dc7128f9b7beaa8021f` (2026-10-01),
+after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270 and #271. Client diagnostics, link schema preparation,
 read-only catalog preview, explicit UUID confirmation, internal rename preparation and read-only order observation are implemented.
-Pure state policy is isolated from runtime callers. Real Syrve is not connected or
+Pure state policy and the durable storage adapter are isolated from runtime callers. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
@@ -208,7 +208,8 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 4b | Connected map/location consumers use permanent identity before any rename (merged #268); missing/hidden slots remain unavailable in prepared guest maps, legacy behavior and frozen geometry/assets preserved | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver, `backend/src/zones/zones.service.ts` bootstrap identity guard and protected-map/booking/restart tests |
 | 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection (merged #269); internal methods remain unreachable from HTTP/automatic callers | Syrve rename service/plan, canonical table-number uniqueness migration, read-only Director diagnostics, partial status saves and concurrency tests |
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown (merged #270) | Syrve order client/observer, explicit Director API and synthetic fixtures/tests; no persistence or status application |
-| 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority (this PR) | isolated Syrve state reducer and regression tests; no enabled worker |
+| 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority (merged #271) | isolated Syrve state reducer and regression tests; no enabled worker |
+| 8a | Durable version ledger and local staff fence, transactional internal adapter (this PR); no runtime caller, staff hook or status application | separate migration-owned state/version tables, internal store, disposable PostgreSQL restart/concurrency tests and CI migration registry |
 | 8 | Transactional manual-action hooks and unified effective status reads, existing waiter/booking behavior retained | `TablesService`, map/status read services, dependency wiring and regression tests; sync remains off |
 | 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
 | 10 | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
@@ -739,6 +740,56 @@ orders, change/restore and local/configuration/identity fences. Frozen snapshots
 verify no mutation or mutable aliasing. Projection tests cover all booking/manual
 priorities and future dates. Neither a real Syrve restaurant nor production
 Neon/Render/configuration is accessed; all protected areas remain unchanged.
+
+### PR 8a durable state preparation boundary
+
+`CreateSyrveDurableState2026093000050` owns two separate tables:
+`syrve_table_sync_states` captures the UUID binding, configuration revision and
+local revision; `syrve_order_versions` retains each order's safe integer version,
+usable/unknown outcome and sanitized fingerprint, including inactive tombstones.
+Primary/foreign keys prevent duplicate or orphaned ledger rows; PostgreSQL checks
+bound versions to JavaScript's safe range and reject invalid outcomes/fingerprints.
+The existing entities need no new mapped columns. No legacy state is backfilled
+with invented versions, and no physical table, booking or credential is changed.
+
+`SyrveStateStore` is an internal, unregistered adapter. Capture, complete observation
+application and staff-state recording use the existing short settings transaction,
+then lock the existing physical UUID, link and state in that order. HTTP never runs
+inside these transactions. Ledger, active/suppressed sets and local revision commit
+atomically. The adapter reloads all saved rows and validates them before writes;
+an active legacy UUID without a durable watermark blocks preparation rather than
+silently dropping it. Captured membership, watermarks, caller proof flags and next
+revisions are not authoritative. The freshly locked database state and server
+generated revisions are used for every transition. No table insert/upsert or
+physical status change occurs.
+
+Configuration changes reject old requests. A new capture for the same immutable
+UUID binding adopts the new configuration revision and rotates the local fence
+while preserving all tracked versions and suppression. A changed UUID binding or
+disconnected setting is rejected. Storage does not truncate cumulative state to
+the HTTP response limit; it captures the complete bounded observation plan and
+applies all results in one transaction. Incomplete/failed batches publish no early
+UUID, watermark or override changes. Trusted POS visibility is not established in
+this stage: the adapter hard-codes it to false, so no observation can remove known
+occupancy or suppression. There is no proof setter or activation switch.
+
+The reversible migration is registered only for the guarded disposable CI schema,
+not production startup. Down requires an active transaction, locks both tables,
+and refuses to destroy even a saved fence before the first order. An operator
+must separately retire bindings before dropping durable history. Automatic
+disconnect retains the existing links and state. Production schema adoption
+remains a separately reviewed final step.
+
+Regression tests cover restored state, staff changes before the first order,
+simultaneous/replayed observations, full rollback after a late write failure,
+reconfiguration, incomplete batches and 4201 tracked UUIDs. Database-reference CI
+runs the compiled adapter on actual PostgreSQL, closes and rebuilds its connection
+pool, validates tombstone replay and constraints, and tests guarded down/up. Its
+synthetic visibility fixture is confined to test setup. No real Syrve/Render/Neon
+request is made. Controller/service/module callers, staff button behavior, map
+reads, polling and all protected product areas stay unchanged. The next PR must
+join staff-state recording and existing MOLO actions in the same transaction
+before any worker or effective-status application is permitted.
 
 ## Required regression gates
 

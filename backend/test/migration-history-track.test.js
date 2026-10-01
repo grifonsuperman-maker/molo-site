@@ -15,6 +15,7 @@ const runtimeHistory = [
   'FenceSyrveConfiguration2026093000020',
   'CreateTableMapIdentities2026093000030',
   'ProtectCanonicalTableNumbers2026093000040',
+  'CreateSyrveDurableState2026093000050',
 ];
 const baseline = 'InitialSchemaBaseline2026081300000';
 const probe = 'MigrationHistoryProbe2026100100010';

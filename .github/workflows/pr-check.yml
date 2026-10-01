@@ -96,6 +96,8 @@ jobs:
         run: node backend/scripts/table-map-identity-validation.mjs
       - name: Validate UUID table renaming and concurrent number conflicts
         run: node backend/scripts/syrve-table-renaming-validation.mjs
+      - name: Validate durable Syrve state, restarts and concurrent writes
+        run: node backend/scripts/syrve-state-storage-validation.mjs
       - name: Capture fresh schema audit
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline
