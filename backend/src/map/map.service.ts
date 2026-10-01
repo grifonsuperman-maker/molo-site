@@ -33,7 +33,7 @@ export class MapService {
       relations: ['zone'], order: { tableNumber: 'ASC' } as any,
     });
     const zones = await this.zones.find({ relations: ['tables'], order: { createdAt: 'ASC' } as any });
-    const snapshot = await this.statuses.capture([...tables, ...zones.flatMap((zone) => zone.tables || [])]);
+    const snapshot = await this.statuses.captureMap(tables, zones);
     const physical = await this.mapIdentities.project(this.statuses.physical(tables, snapshot));
 
     return {
@@ -70,7 +70,7 @@ export class MapService {
       );
     });
 
-    const snapshot = await this.statuses.capture([...tables, ...zones.flatMap((zone) => zone.tables || [])]);
+    const snapshot = await this.statuses.captureMap(tables, zones);
     const physical = await this.mapIdentities.project(this.statuses.physical(tables, snapshot));
 
     const objects = (

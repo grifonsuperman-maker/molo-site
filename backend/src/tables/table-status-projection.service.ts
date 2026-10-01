@@ -5,19 +5,33 @@ import { SyrveStatusReadService } from '../syrve/syrve-status-read.service';
 import { disabledSyrveStatus, SyrveStatusSnapshot } from '../syrve/syrve-status-read.store';
 import { projectSyrveTableStatus } from '../syrve/syrve-state-reducer';
 
+type TableStatusRead = { table: TableEntity; parent?: Zone };
+
 @Injectable()
 export class TableStatusProjectionService {
   constructor(private readonly syrve: SyrveStatusReadService) {}
 
   async capture(tables: TableEntity[], view: 'today' | 'future' = 'today'): Promise<SyrveStatusSnapshot> {
     if (view === 'future') return disabledSyrveStatus();
-    const snapshot = await this.syrve.snapshot(tables.map((table) => table.id));
+    return this.captureFrames(tables.map((table) => ({ table })));
+  }
+
+  captureMap(tables: TableEntity[], zones: Zone[]): Promise<SyrveStatusSnapshot> {
+    return this.captureFrames([...tables.map((table) => ({ table })),
+      ...zones.flatMap((parent) => (parent.tables || []).map((table) => ({ table, parent })))]);
+  }
+
+  private async captureFrames(reads: TableStatusRead[]): Promise<SyrveStatusSnapshot> {
+    const snapshot = await this.syrve.snapshot(reads.map(({ table }) => table.id));
     if (!snapshot.syncEnabled) return snapshot;
-    // A UUID duplicated in nested/flat reads with differing physical versions
-    // cannot contribute POS occupancy to just one copy of the same response.
+    // Table and zone queries are independent. A zone-only change does not
+    // advance table.updatedAt, so compare the actual visibility/closure context
+    // used by each representation as well as its physical table version.
     const seen = new Map<string, string>(), ambiguous = new Set<string>();
-    for (const table of tables) {
-      const version = table.status + ':' + new Date(table.updatedAt).getTime();
+    for (const { table, parent } of reads) {
+      const zone = parent || table.zone;
+      const version = JSON.stringify([table.status, new Date(table.updatedAt).getTime(), table.isVisible === false,
+        zone?.id || null, zone?.isVisible === false, Boolean(zone?.isClosed)]);
       if (seen.has(table.id) && seen.get(table.id) !== version) ambiguous.add(table.id);
       seen.set(table.id, version);
     }
@@ -28,7 +42,7 @@ export class TableStatusProjectionService {
     const entry = snapshot.syncEnabled ? snapshot.tables.get(table.id) : null;
     if (!entry || entry.physicalStatus !== table.status
       || entry.physicalUpdatedAt !== new Date(table.updatedAt).getTime()) return table.status;
-    const zone = table.zone || parent;
+    const zone = parent || table.zone;
     const pos = projectSyrveTableStatus(entry.state, { currentScope: entry.currentScope, syncEnabled: true, view: 'today',
       hidden: table.isVisible === false || zone?.isVisible === false, zoneClosed: Boolean(zone?.isClosed),
       manualStatus: 'free', booking: 'none', checkedIn: false });

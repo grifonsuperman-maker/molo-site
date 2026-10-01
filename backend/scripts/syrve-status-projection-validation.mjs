@@ -112,6 +112,39 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
     await new SyrveStatusReadStore(guardedSource, new SyrveSettingsStore(source)).read([tableId]);
     assert.equal(verifiedReadOnly, true); assert.deepEqual(await saved(), beforeReadOnly);
 
+    // Change only the real zone row between the map's independent queries.
+    // Table status/timestamp stay identical, reproducing the reviewed race.
+    const physicalBeforeRace = await source.query('SELECT * FROM "tables" WHERE id=$1', [tableId]);
+    const stateBeforeRace = await saved(); delete stateBeforeRace.zones;
+    const zoneRepository = source.getRepository(Zone), tableRepository = source.getRepository(TableEntity);
+    for (const method of ['getFullMap', 'getPublicMap']) {
+      for (const [flag, from, to] of [['isClosed', false, true], ['isClosed', true, false],
+        ['isVisible', true, false], ['isVisible', false, true]]) {
+        await zoneRepository.update(zoneId, { isVisible: true, isClosed: false, [flag]: from });
+        const change = () => zoneRepository.update(zoneId, { [flag]: to });
+        const tables = method === 'getFullMap' ? { find: async (options) => {
+          const values = await tableRepository.find(options); await change(); return values;
+        } } : tableRepository;
+        const zones = method === 'getPublicMap' ? { find: async (options) => {
+          const values = await zoneRepository.find(options); await change(); return values;
+        } } : zoneRepository;
+        const maps = new MapService(tables, zones, { getRestaurant: async () => ({ id: 'ci', status: 'open' }) },
+          source.getRepository(MapObject), new TableMapIdentityService(source), prepared());
+        const value = await maps[method]();
+        const flat = value.tables.find((row) => row.id === tableId), parent = value.zones.find((row) => row.id === zoneId);
+        if (method === 'getPublicMap' && flag === 'isVisible' && !from) {
+          assert.equal(flat, undefined); assert.equal(parent, undefined);
+        } else {
+          assert.equal(flat.status, 'free', `${method}/${flag}/${from}: flat`);
+          assert.equal(parent.tables.find((row) => row.id === tableId).status, 'free', `${method}/${flag}/${from}: nested`);
+        }
+        assert.deepEqual(await source.query('SELECT * FROM "tables" WHERE id=$1', [tableId]), physicalBeforeRace);
+      }
+    }
+    await zoneRepository.update(zoneId, { isVisible: true, isClosed: false });
+    const stateAfterRace = await saved(); delete stateAfterRace.zones;
+    assert.deepEqual(stateAfterRace, stateBeforeRace);
+
     // Actual waiter free keeps an approved booking and suppresses old POS IDs.
     await source.query('INSERT INTO "bookings" (table_id,booking_date,booking_time,guests_count,status,source,duration_minutes) VALUES ($1,$2,\'19:00\',2,\'approved\',\'admin_manual\',60)', [tableId, today]);
     assert.equal((await services(disabled()).tables.setWaiterStatus(tableId, 'free')).status, 'reserved');

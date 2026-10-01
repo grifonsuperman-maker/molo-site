@@ -32,10 +32,10 @@ function snapshot(physical, saved = state(physical)) {
   return { syncEnabled: true, tables: new Map([[physical.id, { state: saved, currentScope: saved.scope,
     physicalStatus: physical.status, physicalUpdatedAt: physical.updatedAt.getTime() }]]) };
 }
-function cohort(physical, projection, activeBookings = []) {
+function cohort(physical, projection, activeBookings = [], mapZone = physical.zone) {
   const tables = { find: async () => [structuredClone(physical)] };
   const nested = { ...structuredClone(physical) }; delete nested.zone;
-  const zones = { find: async () => [{ ...physical.zone, tables: [nested] }] };
+  const zones = { find: async () => [{ ...mapZone, tables: [nested] }] };
   const identities = { project: async (values) => ({ prepared: true, tables: values.map((value) => ({ ...value, mapKey: 'hall:12' })) }) };
   const waiter = new TablesService(tables, zones, {}, identities, undefined, projection);
   const maps = new MapService(tables, zones, { getRestaurant: async () => ({ id: 'restaurant', status: 'open' }) },
@@ -208,6 +208,54 @@ test('a changed physical frame or mixed flat/nested copies cannot replay POS occ
   assert.equal(projection.physical([physical], mixed)[0].status, 'free');
   const restored = { ...physical, status: 'cleaning' };
   assert.equal(projection.physical([restored], saved)[0].status, 'cleaning');
+});
+
+test('zone open/close changes between map queries decline POS on both flat and nested copies', async () => {
+  for (const [oldClosed, newClosed] of [[false, true], [true, false]]) {
+    const physical = table(); physical.zone.isClosed = oldClosed;
+    const saved = snapshot(physical), projection = new TableStatusProjectionService({ snapshot: async () => saved });
+    const newerZone = { ...physical.zone, isClosed: newClosed };
+    const maps = cohort(physical, projection, [], newerZone).maps;
+    for (const result of [await maps.getFullMap(), await maps.getPublicMap()]) {
+      assert.equal(result.tables[0].status, 'free');
+      assert.equal(result.zones[0].tables[0].status, 'free');
+      assert.equal(result.tables[0].zone.isClosed, oldClosed);
+      assert.equal(result.zones[0].isClosed, newClosed);
+      assert.equal(result.tables[0].updatedAt.getTime(), result.zones[0].tables[0].updatedAt.getTime());
+    }
+    assert.equal(saved.tables.size, 1, 'Capture must not mutate the shared saved state.');
+  }
+});
+
+test('zone visibility changes between map queries keep public filtering and cannot add inconsistent POS', async () => {
+  for (const [oldVisible, newVisible] of [[true, false], [false, true]]) {
+    const physical = table(); physical.zone.isVisible = oldVisible;
+    const projection = new TableStatusProjectionService({ snapshot: async () => snapshot(physical) });
+    const maps = cohort(physical, projection, [], { ...physical.zone, isVisible: newVisible }).maps;
+    const full = await maps.getFullMap();
+    assert.equal(full.tables[0].status, 'free'); assert.equal(full.zones[0].tables[0].status, 'free');
+    const publicMap = await maps.getPublicMap();
+    if (newVisible) {
+      assert.equal(publicMap.tables[0].status, 'free'); assert.equal(publicMap.zones[0].tables[0].status, 'free');
+    } else { assert.deepEqual(publicMap.tables, []); assert.deepEqual(publicMap.zones, []); }
+  }
+});
+
+test('map consistency checks include zone UUID and table visibility and use the actual nested parent', async () => {
+  const physical = table(), saved = snapshot(physical), projection = new TableStatusProjectionService({ snapshot: async () => saved });
+  const nested = { ...physical, zone: { ...physical.zone, isClosed: true } };
+  const visibleParent = { ...physical.zone, tables: [nested] };
+  const consistent = await projection.captureMap([physical], [visibleParent]);
+  assert.equal(consistent.tables.size, 1);
+  assert.equal(projection.zones([visibleParent], consistent)[0].tables[0].status, 'occupied',
+    'Nested projection and capture must use the same authoritative parent context.');
+  for (const parent of [{ ...visibleParent, id: id(999) },
+    { ...visibleParent, tables: [{ ...nested, isVisible: false }] }]) {
+    const mixed = await projection.captureMap([physical], [parent]);
+    assert.equal(mixed.tables.size, 0);
+    assert.equal(projection.physical([physical], mixed)[0].status, 'free');
+    assert.equal(projection.zones([parent], mixed)[0].tables[0].status, 'free');
+  }
 });
 
 test('foreign scopes and unlinked UUIDs never affect another physical table or create rows', () => {

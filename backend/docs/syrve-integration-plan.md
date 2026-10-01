@@ -880,7 +880,10 @@ clear manual/check-in/booking state, override hidden/closed state, cancel a book
 or affect future windows. Staff free suppresses existing UUIDs; a different new
 order UUID may add occupied later. Scope and physical status/update-time checks
 reject mixed versions; duplicated flat/nested UUIDs with differing physical
-frames decline POS on every copy. These are coherent snapshot checks, not a
+frames decline POS on every copy. The frame also includes table visibility and
+the zone UUID/visibility/closure actually used by each representation: a zone-only
+update does not advance the table timestamp. Nested capture/projection both use
+the loaded parent zone. These are coherent snapshot checks, not a
 promise that concurrent network responses arrive in commit order.
 
 Regression tests cover the legacy priority matrix, actual role read services,
