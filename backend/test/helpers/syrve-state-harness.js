@@ -6,11 +6,12 @@ const { staleSyrveSettings } = require('../../dist/syrve/syrve-settings.store.js
 // against the compiled adapter and real PostgreSQL in database-reference CI.
 function harness() {
   const entity = { id: randomUUID(), configurationRevision: randomUUID(), organizationId: randomUUID(), status: 'connected' };
-  let db = { saved: null, versions: [], link: { id: randomUUID(), integration_id: entity.id,
+  let db = { worker: null, saved: null, versions: [], link: { id: randomUUID(), integration_id: entity.id,
     organization_id: entity.organizationId, molo_table_id: randomUUID(), syrve_table_id: randomUUID(),
     last_syrve_state: 'unknown', active_syrve_order_ids: [], manually_freed_syrve_order_ids: [] } };
   db.physical = { id: db.link.molo_table_id, tableNumber: '12', status: 'free', zone: { id: randomUUID() } };
   db.bookings = [];
+  let now = 1_000_000, workerFail = false;
   const queries = []; let prepared = true, configurationPresent = true, settingsPrepared = true, fail = false, physicalFail = false, tail = Promise.resolve();
   const tables = { findOne: async (options) => (options.where.id
     ? options.where.id.toLowerCase() === db.physical.id : options.where.tableNumber === db.physical.tableNumber)
@@ -26,6 +27,23 @@ function harness() {
     throw new Error(`Unexpected repository ${entity.name}`);
   }, query: async (sql, args = []) => {
     queries.push(sql);
+    if (sql.includes('syrve_worker_state') && !sql.includes('to_regclass')) {
+      if (sql.startsWith('INSERT')) db.worker ||= { integration_id:args[0],configuration_revision:args[1],lease_id:null,lease_until:null,
+        failure_count:0,next_attempt_at:0,last_attempt_at:null,last_success_at:null,last_error_code:null,cursor_link_id:null };
+      if (sql.startsWith('SELECT')) return db.worker ? [{...structuredClone(db.worker),busy:db.worker.lease_until > now,
+        waiting:db.worker.next_attempt_at > now,live:db.worker.lease_until > now}] : [];
+      if (sql.startsWith('UPDATE') && sql.includes('SET lease_id=NULL')) {
+        if (db.worker?.lease_id === args[1]) Object.assign(db.worker,{lease_id:null,lease_until:null});
+      } else if (sql.startsWith('UPDATE') && args.length===3) {
+        if (db.worker.configuration_revision!==args[1]) Object.assign(db.worker,{failure_count:0,last_success_at:null,last_error_code:null,cursor_link_id:null});
+        Object.assign(db.worker,{configuration_revision:args[1],lease_id:args[2],lease_until:now+90_000,last_attempt_at:now});
+      } else if (sql.startsWith('UPDATE') && args.length===6) {
+        if (workerFail) throw new Error('synthetic worker write failure');
+        if (db.worker.lease_id===args[1]) Object.assign(db.worker,{cursor_link_id:args[2],failure_count:args[3],last_error_code:args[4],
+          next_attempt_at:now+args[5],last_success_at:args[4] ? db.worker.last_success_at : now});
+      }
+      return [];
+    }
     if (sql.includes('to_regclass')) return [{ prepared, durable:prepared, configuration_present:configurationPresent }];
     if (sql.startsWith('SELECT "id"')) return args[0].toLowerCase() === db.physical.id ? [{ id: db.physical.id }] : [];
     if (sql.startsWith('SELECT *') && sql.includes('syrve_table_links')) return db.link ? [structuredClone(db.link)] : [];
@@ -50,7 +68,7 @@ function harness() {
     return [];
   } };
   const snapshot = () => ({ prepared: settingsPrepared, entity: { ...entity }, links: db.link
-    ? [{id:db.link.id,moloTableId:db.link.molo_table_id,integrationId:db.link.integration_id,organizationId:db.link.organization_id}] : [] });
+    ? [{id:db.link.id,moloTableId:db.link.molo_table_id,integrationId:db.link.integration_id,organizationId:db.link.organization_id,syrveTableId:db.link.syrve_table_id}] : [] });
   const transaction = async (action, expected) => {
     const previous = tail; let release; tail = new Promise((yes) => release = yes); await previous;
     const before = structuredClone(db), entityBefore={...entity};
@@ -62,11 +80,11 @@ function harness() {
   const settings = { read: async () => { queries.push('settings read'); return snapshot(); },
     transaction: (expected, action) => transaction((m) => action(m, snapshot()), expected),
     localTransaction: (action) => transaction(action) };
-  const source = { options: { type: 'postgres', schema: 'public' }, manager, transaction };
+  const source = { options: { type: 'postgres', schema: 'public' }, manager, query:manager.query, transaction };
   const restart = () => new SyrveStateStore(source, settings);
   return { entity, queries, source, settings, manager, tables, bookings, snapshot, restart, store: restart(), table: db.physical.id,
     saved: () => structuredClone(db), mutate: (action) => action(db), unprepare: () => prepared = false,
     restore: () => prepared = true, legacy: () => {prepared=false;configurationPresent=false;},
-    unprepareSettings: () => settingsPrepared = false, failWrite: () => fail = true, failPhysical: () => physicalFail = true };
+    unprepareSettings: () => settingsPrepared = false, failWrite: () => fail = true, failPhysical: () => physicalFail = true, advance: (ms) => now += ms, failWorker: () => workerFail = true };
 }
 module.exports = { harness };

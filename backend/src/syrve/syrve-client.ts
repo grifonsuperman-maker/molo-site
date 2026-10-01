@@ -10,6 +10,7 @@ const MAX_RESPONSE_BYTES = 1_048_576;
 const OBSERVATION_TIMEOUT_MS = 45_000;
 const MAX_OBSERVATION_REQUESTS = 25;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export type SyrveProbeControls = { deadline?: number; signal?: AbortSignal };
 
 const ERRORS = {
   SYRVE_AUTH_FAILED: 'Syrve відхилив дані доступу. Перевірте API-ключ і налаштування підключення.',
@@ -72,10 +73,12 @@ export class SyrveClient {
     return { path: '/api/1/access_token', body: { apiLogin: apiKey }, mode: 'legacy_v1' };
   }
 
-  private async postJson(path: string, body: object, token?: string, deadline?: number): Promise<unknown> {
+  private async postJson(path: string, body: object, token?: string, deadline?: number, signal?: AbortSignal): Promise<unknown> {
     const remaining = deadline === undefined ? REQUEST_TIMEOUT_MS : Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now());
-    if (remaining <= 0) throw new SyrveClientException('SYRVE_TIMEOUT');
+    if (remaining <= 0 || signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
     const timeout = setTimeout(() => controller.abort(), remaining);
     try {
       const response = await fetch(`${API_ORIGIN}${path}`, {
@@ -130,13 +133,14 @@ export class SyrveClient {
       throw new SyrveClientException(controller.signal.aborted ? 'SYRVE_TIMEOUT' : 'SYRVE_UNAVAILABLE');
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
     }
   }
 
-  private async openSession(apiBaseUrl: string, apiLogin: string, deadline?: number) {
+  private async openSession(apiBaseUrl: string, apiLogin: string, deadline?: number, signal?: AbortSignal) {
     const baseUrl = this.normalizeBaseUrl(apiBaseUrl);
     const auth = this.authentication(apiLogin);
-    const payload = await this.postJson(auth.path, auth.body, undefined, deadline);
+    const payload = await this.postJson(auth.path, auth.body, undefined, deadline, signal);
     if (!isRecord(payload) || typeof payload.token !== 'string' ||
         !payload.token || payload.token.length > 16_384 || /\s/.test(payload.token)) {
       throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
@@ -146,7 +150,7 @@ export class SyrveClient {
       organizationIds: null,
       returnAdditionalInfo: false,
       includeDisabled: false,
-    }, payload.token, deadline);
+    }, payload.token, deadline, signal);
     if (!isRecord(result) || !Array.isArray(result.organizations)) {
       throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
     }
@@ -206,7 +210,7 @@ export class SyrveClient {
   }
 
   async probeOrders(apiBaseUrl: string, apiLogin: string, organizationId: string,
-    tableIds: string[], knownOrderIds: string[]): Promise<SyrveOrderProbe> {
+    tableIds: string[], knownOrderIds: string[], controls: SyrveProbeControls = {}): Promise<SyrveOrderProbe> {
     // Validate scope before authentication; callers cannot expand it with arbitrary IDs.
     this.normalizeBaseUrl(apiBaseUrl);
     if (!UUID.test(organizationId)) throw new BadRequestException('Оберіть коректну організацію Syrve');
@@ -220,7 +224,8 @@ export class SyrveClient {
     } catch {
       throw new BadRequestException('Для перевірки потрібні унікальні підтверджені UUID столів і замовлень.');
     }
-    const deadline = Date.now() + OBSERVATION_TIMEOUT_MS;
+    if (controls.deadline !== undefined && !Number.isFinite(controls.deadline)) throw new SyrveClientException('SYRVE_TIMEOUT');
+    const deadline = Math.min(Date.now() + OBSERVATION_TIMEOUT_MS, controls.deadline ?? Infinity);
     const probe: SyrveOrderProbe = {
       organizationId: organizationId.toLowerCase(), startedAt: new Date().toISOString(), completedAt: '', authentication: null,
       checks: Object.fromEntries(['connection', 'terminalGroups', 'restaurantSections', 'posAvailability', 'ordersByTable', 'ordersById']
@@ -241,7 +246,7 @@ export class SyrveClient {
         return null;
       }
     };
-    const session = await check('connection', () => this.openSession(apiBaseUrl, apiLogin, deadline));
+    const session = await check('connection', () => this.openSession(apiBaseUrl, apiLogin, deadline, controls.signal));
     if (!session) return finish();
     probe.authentication = session.diagnostics.authentication.method;
     if (!session.organizations.some((item) => item.id === probe.organizationId)) {
@@ -253,7 +258,7 @@ export class SyrveClient {
       if (Date.now() >= deadline) throw new SyrveClientException('SYRVE_TIMEOUT');
       if (requests >= MAX_OBSERVATION_REQUESTS) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
       requests++;
-      return this.postJson(path, body, session.token, deadline);
+      return this.postJson(path, body, session.token, deadline, controls.signal);
     };
     const groups = await check('terminalGroups', async () => parseTerminalGroups(await post('/api/1/terminal_groups', {
       organizationIds: [probe.organizationId], includeDisabled: false,

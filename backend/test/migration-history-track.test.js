@@ -16,9 +16,10 @@ const runtimeHistory = [
   'CreateTableMapIdentities2026093000030',
   'ProtectCanonicalTableNumbers2026093000040',
   'CreateSyrveDurableState2026093000050',
+  'CreateSyrveWorkerState2026100100060',
 ];
 const baseline = 'InitialSchemaBaseline2026081300000';
-const probe = 'MigrationHistoryProbe2026100100010';
+const probe = 'MigrationHistoryProbe9999999999999';
 
 test('existing production history advances without an initial baseline row', async () => {
   const module = await import('../scripts/migration-history-track-validation.mjs');

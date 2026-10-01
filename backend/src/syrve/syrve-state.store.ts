@@ -9,7 +9,7 @@ import { createSyrveTableSyncState, getSyrveOrderIdsToObserve, reduceSyrveOrderS
 export type SyrveStateCapture = { linkId: string; state: SyrveTableSyncState; orderIds: string[][] };
 
 // Internal adapter, not a provider/export or controller API. Only the staff
-// coordinator uses it at runtime; no observer/worker or status projection runs.
+// coordinator uses it at runtime; the prepared worker and POS read source stay disabled.
 export class SyrveStateStore {
   constructor(private readonly dataSource: DataSource, private readonly settings: SyrveSettingsStore) {}
 
@@ -100,16 +100,22 @@ export class SyrveStateStore {
 
   async applyObservation(captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[]): Promise<SyrveTransition> {
     const expected = captured.state.scope;
-    return this.settings.transaction({ id: expected.integrationId, revision: expected.configurationRevision }, async (manager, current) => {
-      const value = await this.lockedState(manager, current, expected.moloTableId);
-      if (value.linkId !== captured.linkId) throw staleSyrveSettings();
-      // Only the freshly locked state is authoritative. A modified/replayed
-      // capture cannot supply membership, watermarks, next revision or POS proof.
-      const result = reduceSyrveOrderState(value.state, { expectedScope: expected, expectedRevision: captured.state.localRevision,
-        currentScope: value.state.scope, nextRevision: randomUUID(), probe: batches, visibilityVerified: false });
-      if (result.changed) await this.persist(manager, value.linkId, result.state);
-      return result;
-    });
+    return this.settings.transaction({ id: expected.integrationId, revision: expected.configurationRevision }, (manager, current) =>
+      this.applyObservationInTransaction(manager, current, captured, batches));
+  }
+
+  async applyObservationInTransaction(manager: EntityManager, current: SyrveSettingsSnapshot,
+    captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[]): Promise<SyrveTransition> {
+    if (!manager.queryRunner?.isTransactionActive) throw new ServiceUnavailableException('Стан Syrve потребує активної транзакції.');
+    const expected = captured.state.scope;
+    const value = await this.lockedState(manager, current, expected.moloTableId);
+    if (value.linkId !== captured.linkId) throw staleSyrveSettings();
+    // Only the freshly locked state is authoritative. A modified/replayed
+    // capture cannot supply membership, watermarks, next revision or POS proof.
+    const result = reduceSyrveOrderState(value.state, { expectedScope: expected, expectedRevision: captured.state.localRevision,
+      currentScope: value.state.scope, nextRevision: randomUUID(), probe: batches, visibilityVerified: false });
+    if (result.changed) await this.persist(manager, value.linkId, result.state);
+    return result;
   }
 
   async recordStaffAction(moloTableId: string, action: 'manual_free' | 'status_changed'): Promise<SyrveTransition> {

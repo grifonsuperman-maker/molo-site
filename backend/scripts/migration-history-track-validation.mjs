@@ -8,7 +8,8 @@ import {
 } from './fresh-schema-baseline-validation.mjs';
 import { EXPECTED_RUNTIME_MIGRATIONS } from './runtime-migration-roundtrip.mjs';
 
-export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe2026100100010';
+// Disposable test sentinel: sort after every real migration even as the registry grows.
+export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe9999999999999';
 export const EXPECTED_EXISTING_TRACK_AFTER_PROBE = [
   ...EXPECTED_RUNTIME_MIGRATIONS,
   FUTURE_MIGRATION_PROBE,
@@ -62,6 +63,7 @@ function loadRuntimeMigrations(require) {
   const { CreateTableMapIdentities2026093000030 } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
   const { ProtectCanonicalTableNumbers2026093000040 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
   const { CreateSyrveDurableState2026093000050 } = require('../dist/migrations/2026093000050-CreateSyrveDurableState.js');
+  const { CreateSyrveWorkerState2026100100060 } = require('../dist/migrations/2026100100060-CreateSyrveWorkerState.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -78,6 +80,7 @@ function loadRuntimeMigrations(require) {
     CreateTableMapIdentities2026093000030,
     ProtectCanonicalTableNumbers2026093000040,
     CreateSyrveDurableState2026093000050,
+    CreateSyrveWorkerState2026100100060,
   ];
 }
 
@@ -88,7 +91,7 @@ function loadInitialBaseline(require) {
   return InitialSchemaBaseline2026081300000;
 }
 
-class MigrationHistoryProbe2026100100010 {
+class MigrationHistoryProbe9999999999999 {
   name = FUTURE_MIGRATION_PROBE;
 
   async up(queryRunner) {
@@ -148,11 +151,11 @@ export async function runMigrationHistoryTrackValidation(mode, env = process.env
   const runtimeMigrations = loadRuntimeMigrations(require);
   const migrations =
     mode === 'existing'
-      ? [...runtimeMigrations, MigrationHistoryProbe2026100100010]
+      ? [...runtimeMigrations, MigrationHistoryProbe9999999999999]
       : [
           loadInitialBaseline(require),
           ...runtimeMigrations,
-          MigrationHistoryProbe2026100100010,
+          MigrationHistoryProbe9999999999999,
         ];
 
   const expectedAfter =

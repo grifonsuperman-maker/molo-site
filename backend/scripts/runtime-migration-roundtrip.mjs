@@ -18,9 +18,11 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'CreateTableMapIdentities2026093000030',
   'ProtectCanonicalTableNumbers2026093000040',
   'CreateSyrveDurableState2026093000050',
+  'CreateSyrveWorkerState2026100100060',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  14: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   13: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   12: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   11: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
@@ -152,6 +154,7 @@ function loadRuntimeMigrations(require) {
   const { CreateTableMapIdentities2026093000030 } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
   const { ProtectCanonicalTableNumbers2026093000040 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
   const { CreateSyrveDurableState2026093000050 } = require('../dist/migrations/2026093000050-CreateSyrveDurableState.js');
+  const { CreateSyrveWorkerState2026100100060 } = require('../dist/migrations/2026100100060-CreateSyrveWorkerState.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -168,6 +171,7 @@ function loadRuntimeMigrations(require) {
     CreateTableMapIdentities2026093000030,
     ProtectCanonicalTableNumbers2026093000040,
     CreateSyrveDurableState2026093000050,
+    CreateSyrveWorkerState2026100100060,
   ];
 }
 
@@ -189,6 +193,7 @@ async function readRewindState(dataSource) {
       to_regclass('public.syrve_table_links') IS NOT NULL AS "syrveTableLinksTable",
       to_regclass('public.syrve_table_sync_states') IS NOT NULL AS "syrveSyncStatesTable",
       to_regclass('public.syrve_order_versions') IS NOT NULL AS "syrveOrderVersionsTable",
+      to_regclass('public.syrve_worker_state') IS NOT NULL AS "syrveWorkerStateTable",
       to_regclass('public.table_map_identities') IS NOT NULL AS "tableMapIdentitiesTable",
       to_regclass('public."UQ_tables_canonical_number"') IS NOT NULL AS "tableNumberUniqueIndex",
       to_regprocedure('public.molo_canonical_table_number(text)') IS NOT NULL AS "tableNumberFunction",
@@ -288,6 +293,7 @@ async function assertRewindCheckpoint(dataSource, remainingMigrationCount) {
       syrveTableLinksTable: remainingMigrationCount >= 10,
       syrveSyncStatesTable: remainingMigrationCount >= 14,
       syrveOrderVersionsTable: remainingMigrationCount >= 14,
+      syrveWorkerStateTable: remainingMigrationCount >= 15,
       syrveConfigurationRevision: remainingMigrationCount >= 11,
       tableMapIdentitiesTable: remainingMigrationCount >= 12,
       tableMapIdentityTrigger: remainingMigrationCount >= 12,
@@ -340,6 +346,7 @@ export async function runRuntimeMigrationRoundtripStep(
         syrveTableLinksTable: true,
         syrveSyncStatesTable: true,
         syrveOrderVersionsTable: true,
+        syrveWorkerStateTable: true,
         syrveConfigurationRevision: true,
         tableMapIdentitiesTable: true,
         tableMapIdentityTrigger: true,
@@ -371,6 +378,7 @@ export async function runRuntimeMigrationRoundtripStep(
       syrveTableLinksTable: true,
       syrveSyncStatesTable: true,
       syrveOrderVersionsTable: true,
+      syrveWorkerStateTable: true,
       syrveConfigurationRevision: true,
       tableMapIdentitiesTable: true,
       tableMapIdentityTrigger: true,
