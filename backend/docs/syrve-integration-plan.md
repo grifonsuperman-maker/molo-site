@@ -1,9 +1,10 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 6 starts from fresh main `c01f4798899be74a08b736f9d02007a030c6d315` (2026-10-01),
-after manual merges of PRs #261, #264, #265, #266, #267, #268 and #269. Client diagnostics, link schema preparation,
-read-only catalog preview, explicit UUID confirmation and internal rename preparation are implemented. Real Syrve is not connected or
+PR 7 starts from fresh main `31940912ca5c2d614088f67075a2f6ed5dfa25d6` (2026-10-01),
+after manual merges of PRs #261, #264, #265, #266, #267, #268, #269 and #270. Client diagnostics, link schema preparation,
+read-only catalog preview, explicit UUID confirmation, internal rename preparation and read-only order observation are implemented.
+Pure state policy is isolated from runtime callers. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
@@ -206,8 +207,8 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 4a | Independent immutable physical UUID ↔ map slot storage and read-only diagnostics (merged #267); legacy-compatible API projection, no map consumer switch | new table-map entity/service/module/catalog + migration, tables/map API, migration registry/scripts and PostgreSQL tests; frontend API types only |
 | 4b | Connected map/location consumers use permanent identity before any rename (merged #268); missing/hidden slots remain unavailable in prepared guest maps, legacy behavior and frozen geometry/assets preserved | `frontend/src/guest/GuestApp.tsx`, `frontend/src/admin/AdminVisualTablePlanner.tsx`, both `*TablesByLocation.tsx`, shared physical-slot resolver, `backend/src/zones/zones.service.ts` bootstrap identity guard and protected-map/booking/restart tests |
 | 5 | Rename by persisted UUID link, only `tableNumber`, atomic conflict protection (merged #269); internal methods remain unreachable from HTTP/automatic callers | Syrve rename service/plan, canonical table-number uniqueness migration, read-only Director diagnostics, partial status saves and concurrency tests |
-| 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown (this PR) | Syrve order client/observer, explicit Director API and synthetic fixtures/tests; no persistence or status application |
-| 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority | isolated Syrve state reducer and regression tests; no enabled worker |
+| 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown (merged #270) | Syrve order client/observer, explicit Director API and synthetic fixtures/tests; no persistence or status application |
+| 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority (this PR) | isolated Syrve state reducer and regression tests; no enabled worker |
 | 8 | Transactional manual-action hooks and unified effective status reads, existing waiter/booking behavior retained | `TablesService`, map/status read services, dependency wiring and regression tests; sync remains off |
 | 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
 | 10 | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
@@ -623,6 +624,82 @@ deadline, the 25-request budget and aggregate limits without partial closure.
 Real JWT/role/DTO HTTP tests cover
 every role and reject caller-supplied IDs. Protected frontend/maps/assets/geometry,
 existing waiter/booking rules and the exact 15-second polling remain unchanged.
+
+### PR 7 pure state-policy boundary
+
+`syrve-state-reducer.ts` exports isolated deterministic functions for an internal
+snapshot, order evidence, staff-action fencing and effective status projection.
+No controller/service/module/worker imports them. They issue no HTTP, query/save no
+entities, change no physical fields or bookings, and enable no synchronization.
+The existing Director observation endpoint and its explicit read-only response
+retain their PR 6 behavior. There is no frontend or schema/migration change.
+
+The input is an internal validated snapshot scoped to integration/configuration,
+organization, physical MOLO UUID and cloud table UUID. A captured request must
+match both that snapshot's local revision and the freshly locked current scope.
+Disconnected, remapped, reconfigured or staff-modified state rejects the whole
+reply. The future transactional adapter must provide the fresh scope under the
+same lock as staff writes and advance the local revision whenever state changes;
+there is no transaction over HTTP. Even a staff change/restore or an action before
+the first observed order rotates the fence. Replayed/concurrent whole requests
+are rejected without overwriting a newer state.
+
+The policy consumes the existing observer's sanitized evidence. Required read
+failure, missing/deleted catalog table or offline/sleeping POS preserves the
+entire last validated snapshot. An empty result, missing/moved order, pending/error
+creation or an unknown status never removes a tracked order. Positive open UUIDs
+are added as a set. Unknown versions retain active UUIDs and manual overrides.
+Provider timestamps are safe nonnegative integer versions, not wall-clock dates.
+Per-order high-water marks reject older evidence, including closure, while closed
+tombstones reject delayed old open replies. Conflicting equal versions preserve
+last good state and remain fenced until a strictly newer version resolves them.
+Identical evidence is idempotent.
+
+Closure additionally requires server-established POS-order visibility for the
+current scope and no relevant missing/moved/ambiguous order evidence. An unknown
+order without table association conservatively blocks closure. This proof is
+not a caller/Director DTO flag and is not inferred from a successful or empty API
+reply. PR 6 cannot establish it, so its unverified observations cannot remove
+the last known active UUID or clear a manual override. Once all prerequisites are
+actually proven, explicit `Closed`/`Deleted` can remove exactly that UUID and its
+override. Closing one of multiple orders leaves the rest occupied. Only closure
+of previously known active orders can change the saved state to closed; an
+initial empty response or an untracked historical closed order cannot do so.
+
+Manual free records all currently active UUIDs without deleting their tracking.
+Those same UUIDs stay suppressed across repeated/newer open replies, missing
+responses and errors. A new UUID can occupy the table; explicit trusted closure
+clears only its own override. Other staff status actions rotate the fence and
+retain existing overrides. Actual waiter/free/booking actions are not wired to
+these functions yet and retain their existing behavior.
+
+The pure projection keeps today's priority: hidden/closed, occupied, cleaning,
+reserved/pending, free. Syrve contributes occupied only when synchronization is
+enabled for the current matching scope and an active UUID is not suppressed.
+Closure removes only that contribution: manual occupied/cleaning/closed and
+checked-in/approved/pending booking sources remain intact. Future dates use only
+booking state, with hidden/closed availability preserved. There is no new automatic
+cleaning transition or booking cancellation. Disconnected/foreign/disabled POS
+state cannot contribute to the projection.
+
+`orderVersions` and `localRevision` describe the required internal concurrency
+contract; they are not new entity columns or a declaration that the existing
+prepared schema can already persist this state. A future migration-owned adapter
+must durably store/reload the version ledger and local fence before any worker or
+status application is allowed. An active UUID without its watermark is rejected,
+not silently assigned a fabricated version. Closed tombstones must not be pruned
+while old evidence can still arrive. Prepared migrations remain subject to the
+final reviewed production audit/adoption path; this PR changes no database.
+The policy does not impose one-response limits on cumulative saved UUID/version
+sets; tests include 2100 tracked orders across multiple bounded observations.
+
+Synthetic sequences test multiple/spanning orders, partial closure, initial and
+later empty responses, offline/deleted/missing tables, every required read failure,
+stale/unknown/conflicting versions, closure/reopening tombstones, manual free/new
+orders, change/restore and local/configuration/identity fences. Frozen snapshots
+verify no mutation or mutable aliasing. Projection tests cover all booking/manual
+priorities and future dates. Neither a real Syrve restaurant nor production
+Neon/Render/configuration is accessed; all protected areas remain unchanged.
 
 ## Required regression gates
 
