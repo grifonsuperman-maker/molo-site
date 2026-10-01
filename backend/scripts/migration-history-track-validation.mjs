@@ -8,7 +8,8 @@ import {
 } from './fresh-schema-baseline-validation.mjs';
 import { EXPECTED_RUNTIME_MIGRATIONS } from './runtime-migration-roundtrip.mjs';
 
-export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe2026100100010';
+// Disposable test sentinel: sort after every real migration even as the registry grows.
+export const FUTURE_MIGRATION_PROBE = 'MigrationHistoryProbe9999999999999';
 export const EXPECTED_EXISTING_TRACK_AFTER_PROBE = [
   ...EXPECTED_RUNTIME_MIGRATIONS,
   FUTURE_MIGRATION_PROBE,
@@ -90,7 +91,7 @@ function loadInitialBaseline(require) {
   return InitialSchemaBaseline2026081300000;
 }
 
-class MigrationHistoryProbe2026100100010 {
+class MigrationHistoryProbe9999999999999 {
   name = FUTURE_MIGRATION_PROBE;
 
   async up(queryRunner) {
@@ -150,11 +151,11 @@ export async function runMigrationHistoryTrackValidation(mode, env = process.env
   const runtimeMigrations = loadRuntimeMigrations(require);
   const migrations =
     mode === 'existing'
-      ? [...runtimeMigrations, MigrationHistoryProbe2026100100010]
+      ? [...runtimeMigrations, MigrationHistoryProbe9999999999999]
       : [
           loadInitialBaseline(require),
           ...runtimeMigrations,
-          MigrationHistoryProbe2026100100010,
+          MigrationHistoryProbe9999999999999,
         ];
 
   const expectedAfter =

@@ -63,9 +63,9 @@ export class SyrveWorkerStore {
 
   private async record(manager: EntityManager, lease: SyrveWorkerLease, linkId: string, failures: number, code: SyrveWorkerError | null) {
     const delay = code ? workerBackoff(failures, code) : 15_000;
-    await manager.query('UPDATE ' + this.table('syrve_worker_state') + ' SET cursor_link_id=$3,failure_count=$4,last_error_code=$5,'
+    await manager.query('UPDATE ' + this.table('syrve_worker_state') + ' SET cursor_link_id=$3,failure_count=$4,last_error_code=$5::varchar,'
       + " next_attempt_at=clock_timestamp()+($6::int*interval '1 millisecond'),"
-      + ' last_success_at=CASE WHEN $5::text IS NULL THEN clock_timestamp() ELSE last_success_at END'
+      + ' last_success_at=CASE WHEN $5::varchar IS NULL THEN clock_timestamp() ELSE last_success_at END'
       + ' WHERE integration_id=$1 AND lease_id=$2', [lease.version.id, lease.id, linkId, failures, code, delay]);
   }
 
