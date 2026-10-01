@@ -43,6 +43,46 @@ function errorCode(code, secrets = [LOGIN, TOKEN]) {
   };
 }
 
+test('worker cancellation aborts a stalled authentication request and removes its listener', async (t) => {
+  const { client, calls } = setup(t, [({ signal }) => new Promise((yes,no) => {
+    signal.addEventListener('abort', () => no(new DOMException('aborted','AbortError')), { once:true });
+  })]);
+  const controller=new AbortController(); const remove=t.mock.method(controller.signal,'removeEventListener');
+  const pending=client.probeOrders(BASE,LOGIN,ORG,[ORG],[],{signal:controller.signal});
+  controller.abort(); const result=await pending;
+  assert.equal(result.checks.connection.code,'SYRVE_TIMEOUT'); assert.equal(calls[0].signal.aborted,true);
+  assert.ok(remove.mock.callCount()>0); assert.equal(result.byTable,null);
+});
+
+test('worker cancellation covers a stalled response body and preserves no partial orders', async (t) => {
+  const { client }=setup(t,[({signal}) => new Response(new ReadableStream({start(controller){
+    signal.addEventListener('abort',()=>controller.error(new DOMException('aborted','AbortError')),{once:true});
+  }}),{headers:{'content-type':'application/json'}})]);
+  const controller=new AbortController();
+  const pending=client.probeOrders(BASE,LOGIN,ORG,[ORG],[],{signal:controller.signal});
+  await Promise.resolve(); await Promise.resolve(); controller.abort();
+  const result=await pending; assert.equal(result.checks.connection.code,'SYRVE_TIMEOUT');
+  assert.equal(result.byTable,null); assert.equal(result.byId,null);
+});
+
+test('worker shared deadline bounds authentication rather than starting a fresh 45 seconds', async (t) => {
+  const {client,calls}=setup(t,[({signal})=>new Promise((yes,no)=>{
+    signal.addEventListener('abort',()=>no(new DOMException('aborted','AbortError')),{once:true});
+  })]);
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:1000});
+  const pending=client.probeOrders(BASE,LOGIN,ORG,[ORG],[],{deadline:1050});
+  t.mock.timers.tick(49); assert.equal(calls[0].signal.aborted,false);
+  t.mock.timers.tick(1); assert.equal((await pending).checks.connection.code,'SYRVE_TIMEOUT');
+});
+
+test('expired or cancelled worker controls return before any authentication request', async (t) => {
+  const {client,calls}=setup(t,[]);const controller=new AbortController();controller.abort();
+  for(const controls of [{deadline:Date.now()-1},{signal:controller.signal}]) {
+    assert.equal((await client.probeOrders(BASE,LOGIN,ORG,[ORG],[],controls)).checks.connection.code,'SYRVE_TIMEOUT');
+  }
+  assert.equal(calls.length,0);
+});
+
 test('legacy diagnostics use only documented auth/organization endpoints and expose no secrets', async (t) => {
   const { client, calls } = setup(t, success());
   const result = await client.checkOrganizations(`${BASE}/`, ` ${LOGIN} `);

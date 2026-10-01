@@ -120,13 +120,14 @@ test('migration rollback requires a transaction before checking or dropping save
   assert.deepEqual(queries,[]);
 });
 
-test('observation storage has no runtime provider, live migration registration, HTTP caller or activation', () => {
+test('observation storage has no runtime provider, live migration registration or direct HTTP activation', () => {
   const read = (p) => readFileSync(resolve(__dirname,'../src',p),'utf8');
   const module = read('syrve/syrve-integration.module.ts'); assert.doesNotMatch(module,/SyrveStateStore|syrve-state.store/);
+  assert.doesNotMatch(read('syrve/syrve-integration.service.ts'), /new SyrveStateStore|applyObservation/);
   const app = read('app.module.ts');
   assert.doesNotMatch(app.split('const staffPinMigrationOptions = {')[1].split('};')[0],/CreateSyrveDurableState/);
   assert.match(app,/migrations: isDisposableSchemaReference[\s\S]*CreateSyrveDurableState/);
-  for (const file of ['syrve/syrve-integration.controller.ts','syrve/syrve-integration.service.ts','tables/tables.service.ts']) {
+  for (const file of ['syrve/syrve-integration.controller.ts','tables/tables.service.ts']) {
     assert.doesNotMatch(read(file),/SyrveStateStore|syrve-state.store/);
   }
 });

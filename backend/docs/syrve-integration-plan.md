@@ -1,11 +1,12 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 8c starts from fresh main `d11c0b5f7800abaf9dee7277509ee9f3d0b095eb` (2026-10-01),
-after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270, #271, #272 and #273. Client diagnostics, link schema preparation,
+PR 9 starts from fresh main `b2f2ae35d74c28e9ec2a6489c2b775569e78eb22` (2026-10-01),
+after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270, #271, #272, #273 and #274. Client diagnostics, link schema preparation,
 read-only catalog preview, explicit UUID confirmation, internal rename preparation and read-only order observation are implemented.
 The transition adapter is used only by transactional staff hooks. Common role/date projection is wired behind a hard-disabled read source;
-automatic observation and effective POS status application stay off. Real Syrve is not connected or
+a prepared background runner is now wired behind a hard-disabled scheduler gate.
+Automatic observation and effective POS status application stay off. Real Syrve is not connected or
 queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
@@ -213,8 +214,8 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 6 | Read-only order observation and POS/permissions diagnostics; classify explicit closure vs unknown (merged #270) | Syrve order client/observer, explicit Director API and synthetic fixtures/tests; no persistence or status application |
 | 7 | Pure state transition rules covering order sets, explicit closure, stale observations, manual overrides and priority (merged #271) | isolated Syrve state reducer and regression tests; no enabled worker |
 | 8a | Durable version ledger and local staff fence, transactional internal adapter (merged #272) | separate migration-owned state/version tables, internal store, disposable PostgreSQL restart/concurrency tests and CI migration registry |
-| 8b | Transactional manual-action hooks, existing waiter/booking behavior retained (this PR) | `TablesService`, minimal staff coordinator/module, durable adapter and PostgreSQL regression tests; sync remains off |
-| 8c | Unified effective status reads with the existing role/date priorities | map/status read services, shared projection, dependency wiring and regression tests; sync remains off |
+| 8b | Transactional manual-action hooks, existing waiter/booking behavior retained (merged #273) | `TablesService`, minimal staff coordinator/module, durable adapter and PostgreSQL regression tests; sync remains off |
+| 8c | Unified effective status reads with the existing role/date priorities (merged #274) | map/status read services, shared projection, dependency wiring and regression tests; sync remains off |
 | 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
 | 10 | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
 
@@ -926,3 +927,59 @@ request, and multiple backend instances. Missing orders are never treated as clo
 For every PR: backend/frontend `npm ci`, builds and tests, `git diff --check`,
 `git show --check HEAD`, protected-path diff review, fresh CI and Codex review on
 the current GitHub HEAD. Pending CI/review means the PR is not ready. Never merge.
+
+### PR 9 disabled worker preparation
+
+The existing Syrve integration module registers a 15-second scheduler service,
+but its private gate returns `false`. A tick returns before settings reads, lease
+creation, HTTP, observation persistence or logging. Credentials, environment
+flags and Director requests cannot enable it. `syncEnabled` and the POS status
+read source stay hard-disabled. There is no activation DTO or controller route.
+
+The internal runner reuses the existing credential decryptor and bounded Syrve
+client. It captures the entire durable ledger and probes every planned scope of
+at most 2000 saved active/unknown order UUIDs. One table commits only after all
+its scopes are collected and validated; incomplete scopes publish no early
+membership, watermarks or manual suppression changes. Observed closure remains
+non-authoritative because POS visibility is still unverified.
+
+`CreateSyrveWorkerState2026100100060` owns separate per-integration bookkeeping:
+a random lease token, configuration revision, expiry, failure count, next attempt,
+last attempt, last successful observation, allowlisted error code and link cursor.
+It is registered only in guarded disposable-schema CI, never in the deployed
+application migration list or entity synchronization. Down requires a transaction
+and an empty worker table; deleting a disposable integration cascades its state.
+No production database, migration history, configuration or connection is queried.
+
+Lease acquisition and all writes use short settings-fenced transactions and the
+database clock. A live 90-second lease prevents another instance from starting,
+even after reconfiguration. Expired leases can be reclaimed with a new random
+token. Every state/bookkeeping write checks token, configuration and expiry; an
+old caller cannot publish or clear its replacement's lease. No transaction or
+connection lock is held across HTTP. Local staff revisions are checked again
+under the same transaction that commits the complete table state and bookkeeping.
+
+Each cycle shares one 45-second HTTP deadline and cancellation signal and covers
+at most 32 tables in durable round-robin order. Earlier completed tables can
+commit before the deadline, while an incomplete table retains its previous state.
+The complete ledger is never trimmed to a transport page. Failure retries grow
+from 15 seconds to at most 5 minutes; rate limits start at 60 seconds. Counters,
+last good observations and cursor survive process/pool restarts. Nest module teardown aborts
+active HTTP and waits for the runner to release its lease. Process loss leaves
+a bounded lease that the next instance can reclaim. Final activation must also
+wire termination signals to Nest teardown; server bootstrap is unchanged here.
+
+`last_success_at` means a complete checked observation was processed, not proof
+of full POS visibility or authorization to clear a table. Unknown, malformed,
+offline, timed-out, revoked or stale observations preserve known occupancy and
+staff suppression. Only fixed diagnostic codes are persisted; API logins,
+upstream tokens, response bodies and exception messages are never saved there.
+
+Tests exercise the actual store/reducer/client and mocked upstream transport.
+The guarded PostgreSQL CI validator additionally checks independent pools,
+no idle HTTP transaction, real waiter free during a probe, expired-lease fencing,
+restart backoff, atomic rollback after a late bookkeeping failure, 4201 saved
+UUIDs, reconfiguration and refused/empty migration rollback. Frontend, booking
+lifecycle, staff buttons, protected assets and exact 15-second polling are unchanged.
+Final activation still requires a separately approved stage, proven visibility
+and a reviewed production schema-adoption path.

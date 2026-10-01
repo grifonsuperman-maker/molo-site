@@ -14,11 +14,12 @@ import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisi
   TestSyrveConnectionDto, UpdateSyrveConnectionDto } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
 import { SyrveTableLink } from './entities/syrve-table-link.entity';
-import { SyrveClient, SyrveClientException } from './syrve-client';
+import { SyrveClient, SyrveClientException, SyrveProbeControls } from './syrve-client';
 import { buildSyrveMappingPreview } from './syrve-mapping-preview';
 import { credentialFingerprint, issuePreviewProof, previewFingerprint, verifyPreviewProof } from './syrve-preview-proof';
 import { settingsVersion, staleSyrveSettings, SyrveSettingsSnapshot, SyrveSettingsStore } from './syrve-settings.store';
 import { buildSyrveOrderObservation } from './syrve-order-observer';
+import type { SyrveStateCapture } from './syrve-state.store';
 
 type EncryptedValue = { encrypted: string; iv: string; authTag: string };
 
@@ -48,6 +49,19 @@ export class SyrveIntegrationService {
   }
 
   async getStatus() { return this.response(await this.settings.read()); }
+
+  // Internal worker bridge only, never a controller route. Credentials are
+  // decrypted only after the saved configuration and immutable binding match.
+  async probeWorkerOrders(captured: SyrveStateCapture, orderIds: string[], controls: SyrveProbeControls) {
+    const snapshot = await this.settings.read(), entity = snapshot.entity, expected = captured.state.scope;
+    if (!snapshot.prepared || !entity || entity.status !== 'connected' || entity.id !== expected.integrationId
+      || entity.configurationRevision !== expected.configurationRevision || entity.organizationId !== expected.organizationId
+      || !snapshot.links.some((link) => link.id === captured.linkId && link.integrationId === entity.id
+        && link.organizationId === expected.organizationId && link.moloTableId === expected.moloTableId
+        && link.syrveTableId === expected.syrveTableId)) throw staleSyrveSettings();
+    return this.client.probeOrders(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId,
+      [expected.syrveTableId], orderIds, controls);
+  }
 
   async observeOrders(dto: SyrveRevisionDto) {
     const snapshot = await this.checkedRevision(dto);

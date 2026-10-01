@@ -102,6 +102,8 @@ jobs:
         run: node backend/scripts/syrve-staff-actions-validation.mjs
       - name: Validate unified status reads and disabled Syrve projection
         run: node backend/scripts/syrve-status-projection-validation.mjs
+      - name: Validate disabled Syrve worker, leases, retries and delayed responses
+        run: node backend/scripts/syrve-worker-validation.mjs
       - name: Capture fresh schema audit
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline

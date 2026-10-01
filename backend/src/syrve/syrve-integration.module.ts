@@ -11,11 +11,12 @@ import { SyrveClient } from './syrve-client';
 import { SyrveSettingsStore } from './syrve-settings.store';
 import { SyrveTableRenamingService } from './syrve-table-renaming.service';
 import { SyrveTableRenamingController } from './syrve-table-renaming.controller';
+import { SyrveWorkerService } from './syrve-worker.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([SyrveIntegration, SyrveTableLink, TableEntity]), LogsModule],
   controllers: [SyrveIntegrationController, SyrveTableRenamingController],
-  providers: [SyrveIntegrationService, SyrveClient, SyrveSettingsStore, SyrveTableRenamingService],
+  providers: [SyrveIntegrationService, SyrveClient, SyrveSettingsStore, SyrveTableRenamingService, SyrveWorkerService],
   exports: [SyrveIntegrationService, SyrveTableRenamingService],
 })
 export class SyrveIntegrationModule {}

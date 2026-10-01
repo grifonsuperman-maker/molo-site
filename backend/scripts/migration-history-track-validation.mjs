@@ -62,6 +62,7 @@ function loadRuntimeMigrations(require) {
   const { CreateTableMapIdentities2026093000030 } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
   const { ProtectCanonicalTableNumbers2026093000040 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
   const { CreateSyrveDurableState2026093000050 } = require('../dist/migrations/2026093000050-CreateSyrveDurableState.js');
+  const { CreateSyrveWorkerState2026100100060 } = require('../dist/migrations/2026100100060-CreateSyrveWorkerState.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -78,6 +79,7 @@ function loadRuntimeMigrations(require) {
     CreateTableMapIdentities2026093000030,
     ProtectCanonicalTableNumbers2026093000040,
     CreateSyrveDurableState2026093000050,
+    CreateSyrveWorkerState2026100100060,
   ];
 }
 
