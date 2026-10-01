@@ -6,9 +6,10 @@ import { Zone } from '../zones/entities/zone.entity';
 import { TablesController } from './tables.controller';
 import { TablesService } from './tables.service';
 import { TableMapIdentityModule } from './table-map-identity.module';
+import { SyrveStaffActionsModule } from '../syrve/syrve-staff-actions.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TableEntity, Zone, Booking]), TableMapIdentityModule],
+  imports: [TypeOrmModule.forFeature([TableEntity, Zone, Booking]), TableMapIdentityModule, SyrveStaffActionsModule],
   controllers: [TablesController],
   providers: [TablesService],
   exports: [TablesService],

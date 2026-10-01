@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 
 import { Booking } from '../bookings/entities/booking.entity';
 import { CreateTableDto } from './dto/create-table.dto';
@@ -9,6 +9,7 @@ import { TableEntity, TableStatus } from './entities/table.entity';
 import { Zone } from '../zones/entities/zone.entity';
 import { TableMapIdentityService } from './table-map-identity.service';
 import { rethrowTableNumberConflict } from './table-number-conflict';
+import { SyrveStaffActionsService } from '../syrve/syrve-staff-actions.service';
 
 const ACTIVE_BOOKING_STATUSES = ['pending', 'approved'] as const;
 
@@ -19,6 +20,7 @@ export class TablesService {
     @InjectRepository(Zone) private readonly zones: Repository<Zone>,
     @InjectRepository(Booking) private readonly bookings: Repository<Booking>,
     private readonly mapIdentities: TableMapIdentityService,
+    private readonly staffActions: SyrveStaffActionsService,
   ) {}
 
   async findAll() {
@@ -107,25 +109,32 @@ export class TablesService {
     return this.tables.findOne({ where: { id }, relations: ['zone'] });
   }
 
-  private async saveStatus(table: TableEntity) {
-    await this.tables.save({ id: table.id, status: table.status });
-    return this.tables.findOne({ where: { id: table.id }, relations: ['zone'] });
+  private async staffStatus(id: string, action: 'manual_free' | 'status_changed',
+    change: (table: TableEntity, bookings: Repository<Booking>) => Promise<void>) {
+    const write = async (manager: EntityManager) => {
+      const tables = manager.getRepository(TableEntity);
+      // Lock only the physical row; PostgreSQL cannot lock a nullable zone join.
+      await tables.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      const table = await tables.findOne({ where: { id }, relations: ['zone'] });
+      if (!table) throw new NotFoundException('Стіл не знайдено');
+      await change(table, manager.getRepository(Booking));
+      await tables.save({ id: table.id, status: table.status });
+      return tables.findOne({ where: { id: table.id }, relations: ['zone'] });
+    };
+    return this.staffActions.run(id, action, write);
   }
 
   async setStatus(id: string, status: TableStatus) {
-    const table = await this.tables.findOne({ where: { id }, relations: ['zone'] });
-    if (!table) throw new NotFoundException('Стіл не знайдено');
-
-    table.status = status;
-    return this.saveStatus(table);
+    return this.staffStatus(id, status === 'free' ? 'manual_free' : 'status_changed', async (table) => {
+      table.status = status;
+    });
   }
 
   async setStatusByNumber(tableNumber: string, status: TableStatus) {
     const table = await this.findOrCreateByNumber(tableNumber);
     if (!table) throw new NotFoundException('Стіл не знайдено');
 
-    table.status = status;
-    return this.saveStatus(table);
+    return this.setStatus(table.id, status);
   }
 
   async setWaiterStatus(id: string, status: 'occupied' | 'free') {
@@ -133,41 +142,38 @@ export class TablesService {
       throw new BadRequestException('Офіціант може встановити лише статус «Зайнятий» або «Вільний»');
     }
 
-    const table = await this.tables.findOne({ where: { id }, relations: ['zone'] });
-    if (!table) throw new NotFoundException('Стіл не знайдено');
+    return this.staffStatus(id, status === 'free' ? 'manual_free' : 'status_changed', async (table, bookings) => {
+      if (status === 'occupied') {
+        if (table.status === 'closed') {
+          throw new BadRequestException('Закритий Адміністратором стіл не можна позначити зайнятим');
+        }
+        if (table.status === 'reserved' || table.status === 'pending') {
+          throw new BadRequestException('На цей стіл уже є активне бронювання');
+        }
 
-    if (status === 'occupied') {
-      if (table.status === 'closed') {
-        throw new BadRequestException('Закритий Адміністратором стіл не можна позначити зайнятим');
+        table.status = 'occupied';
+        return;
       }
-      if (table.status === 'reserved' || table.status === 'pending') {
-        throw new BadRequestException('На цей стіл уже є активне бронювання');
+
+      const activeBookings = await bookings.find({
+        where: {
+          table: { id: table.id },
+          bookingDate: this.kyivToday(),
+          status: In([...ACTIVE_BOOKING_STATUSES]),
+        } as any,
+        relations: ['table'],
+      });
+
+      if (activeBookings.some((booking) => booking.status === 'approved' && booking.checkedInAt)) {
+        table.status = 'occupied';
+      } else if (activeBookings.some((booking) => booking.status === 'approved')) {
+        table.status = 'reserved';
+      } else if (activeBookings.some((booking) => booking.status === 'pending')) {
+        table.status = 'pending';
+      } else {
+        table.status = 'free';
       }
-
-      table.status = 'occupied';
-      return this.saveStatus(table);
-    }
-
-    const activeBookings = await this.bookings.find({
-      where: {
-        table: { id: table.id },
-        bookingDate: this.kyivToday(),
-        status: In([...ACTIVE_BOOKING_STATUSES]),
-      } as any,
-      relations: ['table'],
     });
-
-    if (activeBookings.some((booking) => booking.status === 'approved' && booking.checkedInAt)) {
-      table.status = 'occupied';
-    } else if (activeBookings.some((booking) => booking.status === 'approved')) {
-      table.status = 'reserved';
-    } else if (activeBookings.some((booking) => booking.status === 'pending')) {
-      table.status = 'pending';
-    } else {
-      table.status = 'free';
-    }
-
-    return this.saveStatus(table);
   }
 
   markOccupied(id: string) {

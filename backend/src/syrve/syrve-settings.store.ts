@@ -49,17 +49,25 @@ export class SyrveSettingsStore {
 
   async transaction<T>(expected: SyrveSettingsVersion,
     action: (manager: EntityManager, snapshot: SyrveSettingsSnapshot) => Promise<T>): Promise<T> {
+    return this.localTransaction(async (manager) => {
+      const snapshot = await this.read(manager, true);
+      if (!snapshot.prepared) throw new ServiceUnavailableException('Серверна підготовка інтеграції ще не завершена. Збереження зв’язків поки недоступне.');
+      const actual = settingsVersion(snapshot);
+      if (actual.id !== expected.id || actual.revision !== expected.revision) throw staleSyrveSettings();
+      return action(manager, snapshot);
+    });
+  }
+
+  // Staff operations can use the same lock order before schema adoption or
+  // while disconnected. Their caller decides whether durable state is present.
+  async localTransaction<T>(action: (manager: EntityManager) => Promise<T>): Promise<T> {
     try {
       return await this.dataSource.transaction(async (manager) => {
         // No upstream requests inside this short transaction. Bound lock waits.
         await manager.query("SET LOCAL lock_timeout = '750ms'");
         await manager.query("SET LOCAL statement_timeout = '5s'");
         await manager.query("SELECT pg_advisory_xact_lock(hashtext('molo-syrve'), hashtext('settings'))");
-        const snapshot = await this.read(manager, true);
-        if (!snapshot.prepared) throw new ServiceUnavailableException('Серверна підготовка інтеграції ще не завершена. Збереження зв’язків поки недоступне.');
-        const actual = settingsVersion(snapshot);
-        if (actual.id !== expected.id || actual.revision !== expected.revision) throw staleSyrveSettings();
-        return action(manager, snapshot);
+        return action(manager);
       });
     } catch (error) {
       const code = error?.driverError?.code || error?.code;

@@ -8,8 +8,8 @@ import { createSyrveTableSyncState, getSyrveOrderIdsToObserve, reduceSyrveOrderS
 
 export type SyrveStateCapture = { linkId: string; state: SyrveTableSyncState; orderIds: string[][] };
 
-// Internal preparation only. Deliberately not a provider/export in any module,
-// not a controller API, and not called by staff actions or an observer/worker.
+// Internal adapter, not a provider/export or controller API. Only the staff
+// coordinator uses it at runtime; no observer/worker or status projection runs.
 export class SyrveStateStore {
   constructor(private readonly dataSource: DataSource, private readonly settings: SyrveSettingsStore) {}
 
@@ -25,17 +25,19 @@ export class SyrveStateStore {
     return snapshot.entity;
   }
 
-  private async lockedState(manager: EntityManager, snapshot: SyrveSettingsSnapshot, moloTableId: string) {
-    const entity = this.requireConnection(snapshot);
+  private async lockedState(manager: EntityManager, snapshot: SyrveSettingsSnapshot, moloTableId: string, staff = false) {
+    const entity = staff ? snapshot.entity : this.requireConnection(snapshot);
+    if (!snapshot.prepared || !entity?.configurationRevision) throw staleSyrveSettings();
     const [schema] = await manager.query('SELECT to_regclass($1) IS NOT NULL AND to_regclass($2) IS NOT NULL AS prepared',
       [this.table('syrve_table_sync_states'), this.table('syrve_order_versions')]);
     if (!schema.prepared) throw new ServiceUnavailableException('Постійне зберігання стану Syrve ще не підготовлено.');
-    // Same order as the future staff hook: settings -> physical table -> link
+    // Same order as the staff hook: settings -> physical table -> link
     // -> snapshot. All competing instances use the settings transaction fence.
     const physical = await manager.query('SELECT "id" FROM ' + this.table('tables') + ' WHERE "id"=$1 FOR UPDATE', [moloTableId]);
     if (physical.length !== 1) throw staleSyrveSettings();
     const [link] = await manager.query('SELECT * FROM ' + this.table('syrve_table_links') + ' WHERE "molo_table_id"=$1 FOR UPDATE', [moloTableId]);
-    if (!link || link.integration_id !== entity.id || link.organization_id !== entity.organizationId) throw staleSyrveSettings();
+    if (!link || link.integration_id !== entity.id
+      || ((!staff || entity.organizationId) && link.organization_id !== entity.organizationId)) throw staleSyrveSettings();
     const scope: SyrveStateScope = { integrationId: entity.id, configurationRevision: entity.configurationRevision,
       organizationId: link.organization_id, moloTableId: link.molo_table_id, syrveTableId: link.syrve_table_id };
     let [saved] = await manager.query('SELECT * FROM ' + this.table('syrve_table_sync_states') + ' WHERE "link_id"=$1 FOR UPDATE', [link.id]);
@@ -113,12 +115,21 @@ export class SyrveStateStore {
   async recordStaffAction(moloTableId: string, action: 'manual_free' | 'status_changed'): Promise<SyrveTransition> {
     const snapshot = await this.settings.read();
     this.requireConnection(snapshot);
-    return this.settings.transaction(settingsVersion(snapshot), async (manager, current) => {
-      const value = await this.lockedState(manager, current, moloTableId);
-      const result = reduceSyrveStaffAction(value.state, { expectedScope: value.state.scope,
-        expectedRevision: value.state.localRevision, currentScope: value.state.scope, nextRevision: randomUUID(), action });
-      await this.persist(manager, value.linkId, result.state);
-      return result;
-    });
+    return this.settings.transaction(settingsVersion(snapshot), (manager, current) =>
+      this.recordStaffActionInTransaction(manager, current, moloTableId, action));
+  }
+
+  // The coordinator already holds the settings fence. Never start a second
+  // transaction here: the physical action and this revision must commit together.
+  async recordStaffActionInTransaction(manager: EntityManager, snapshot: SyrveSettingsSnapshot,
+    moloTableId: string, action: 'manual_free' | 'status_changed'): Promise<SyrveTransition> {
+    if (!manager.queryRunner?.isTransactionActive) {
+      throw new ServiceUnavailableException('Ручна дія та стан Syrve мають зберігатися в одній транзакції.');
+    }
+    const value = await this.lockedState(manager, snapshot, moloTableId, true);
+    const result = reduceSyrveStaffAction(value.state, { expectedScope: value.state.scope,
+      expectedRevision: value.state.localRevision, currentScope: value.state.scope, nextRevision: randomUUID(), action });
+    await this.persist(manager, value.linkId, result.state);
+    return result;
   }
 }

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { TablesService } = require('../dist/tables/tables.service.js');
+const { repositoryStaffActions } = require('./helpers/repository-staff-actions.js');
 
 function buildService(table, activeBookings = []) {
   const savedStatuses = [];
@@ -17,7 +18,7 @@ function buildService(table, activeBookings = []) {
   };
 
   return {
-    service: new TablesService(tableRepository, {}, bookingRepository),
+    service: new TablesService(tableRepository, {}, bookingRepository, undefined, repositoryStaffActions(tableRepository, bookingRepository)),
     savedStatuses,
   };
 }
