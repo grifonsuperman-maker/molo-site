@@ -30,9 +30,6 @@ export async function runSyrveReadinessValidation(env=process.env){
   };
   try{
     const original=await facts(),reference=schemaReference(original);
-    // Bootstrap the frozen reference from this guarded, migration-built PG17 CI.
-    // Removed once its six catalog hashes have been reviewed and committed.
-    if(!Object.keys(SYRVE_SCHEMA_REFERENCE).length){process.stdout.write('SYRVE_SCHEMA_REFERENCE='+JSON.stringify(reference)+'\n');return 'captured';}
     assert.deepEqual(reference,SYRVE_SCHEMA_REFERENCE);
     assert.equal(schemaPreflight(original).status,'prepared');
     const baseline=await snapshots();
@@ -115,6 +112,6 @@ export async function runSyrveReadinessValidation(env=process.env){
   }
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
-  runSyrveReadinessValidation().then(result=>process.stdout.write(result==='captured'?'Syrve schema reference captured; full validation pending.\n':'Syrve read-only readiness PostgreSQL validation passed.\n'))
+  runSyrveReadinessValidation().then(()=>process.stdout.write('Syrve read-only readiness PostgreSQL validation passed.\n'))
     .catch(error=>{console.error(`Readiness validation failed: ${error.message}`);process.exitCode=1;});
 }

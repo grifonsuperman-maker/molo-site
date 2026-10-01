@@ -3,9 +3,14 @@ const test=require('node:test');
 const {readFileSync}=require('node:fs');
 const {resolve}=require('node:path');
 const {schemaPreflight,schemaReference,readSyrveSchemaPreflight,preflightFingerprint}=require('../dist/syrve/syrve-schema-preflight.js');
-const {SYRVE_SCHEMA_STEPS,SYRVE_EXISTING_HISTORY}=require('../dist/syrve/syrve-schema-contract.js');
+const {SYRVE_SCHEMA_STEPS,SYRVE_EXISTING_HISTORY,SYRVE_SCHEMA_REFERENCE}=require('../dist/syrve/syrve-schema-contract.js');
 const {SyrveReadinessService,readinessResponse}=require('../dist/syrve/syrve-readiness.service.js');
 const history=names=>names.map((name,i)=>({id:i+1,timestamp:Number(name.match(/\d{13}$/)[0]),name}));
+test('the committed PostgreSQL catalog contract contains all six frozen migration references',()=>{
+  assert.deepEqual(Object.keys(SYRVE_SCHEMA_REFERENCE),SYRVE_SCHEMA_STEPS.map(step=>step.name));
+  for(const value of Object.values(SYRVE_SCHEMA_REFERENCE))assert.match(value,/^[0-9a-f]{64}$/);
+  assert.doesNotMatch(readFileSync(resolve(__dirname,'../scripts/syrve-readiness-validation.mjs'),'utf8'),/return 'captured'/);
+});
 function facts() {
   const tables=SYRVE_SCHEMA_STEPS.flatMap(step=>step.tables.map(table=>({table,kind:'r'})));
   return {tables,columns:[{table:'syrve_integrations',name:'configuration_revision',type:'uuid',notNull:true,default:'gen_random_uuid()'}],
