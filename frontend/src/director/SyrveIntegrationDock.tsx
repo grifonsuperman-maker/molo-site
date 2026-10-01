@@ -24,6 +24,7 @@ import {
   type SyrveCatalogPreview,
 } from '../api/syrve';
 import SyrveCatalogPreviewPanel from './SyrveCatalogPreviewPanel';
+import SyrveReadinessPanel from './SyrveReadinessPanel';
 
 type Step = 1 | 2 | 3;
 
@@ -358,6 +359,7 @@ export default function SyrveIntegrationDock() {
                 <div className="mt-4 grid gap-2 sm:grid-cols-3"><button type="button" disabled={busy} onClick={() => void recheck()} className="rounded-2xl border border-cyan-200/35 bg-cyan-400/10 p-3 text-sm font-black text-cyan-100 disabled:opacity-40">Перевірити</button><button type="button" disabled={busy} onClick={() => start(true)} className="rounded-2xl border border-amber-200/35 bg-amber-300/10 p-3 text-sm font-black text-amber-100 disabled:opacity-40">Змінити дані</button><button type="button" disabled={busy} onClick={() => void disconnect()} className="flex items-center justify-center gap-2 rounded-2xl border border-red-200/35 bg-red-500/10 p-3 text-sm font-black text-red-100 disabled:opacity-40"><Unplug size={16} />Відключити</button></div>
               </section>
             )}
+            <SyrveReadinessPanel configurationRevision={status.configurationRevision} />
           </main>
         </div>
       )}

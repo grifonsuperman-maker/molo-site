@@ -1,8 +1,8 @@
 # Syrve: audit, safety boundaries and staged implementation
 
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
-PR 9 starts from fresh main `b2f2ae35d74c28e9ec2a6489c2b775569e78eb22` (2026-10-01),
-after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270, #271, #272, #273 and #274. Client diagnostics, link schema preparation,
+PR 10a starts from fresh main `814d3bf3e1a19bd0a5736e3efeab41d8f7d6905d` (2026-10-01),
+after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270, #271, #272, #273, #274 and #275. Client diagnostics, link schema preparation,
 read-only catalog preview, explicit UUID confirmation, internal rename preparation and read-only order observation are implemented.
 The transition adapter is used only by transactional staff hooks. Common role/date projection is wired behind a hard-disabled read source;
 a prepared background runner is now wired behind a hard-disabled scheduler gate.
@@ -216,8 +216,9 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 8a | Durable version ledger and local staff fence, transactional internal adapter (merged #272) | separate migration-owned state/version tables, internal store, disposable PostgreSQL restart/concurrency tests and CI migration registry |
 | 8b | Transactional manual-action hooks, existing waiter/booking behavior retained (merged #273) | `TablesService`, minimal staff coordinator/module, durable adapter and PostgreSQL regression tests; sync remains off |
 | 8c | Unified effective status reads with the existing role/date priorities (merged #274) | map/status read services, shared projection, dependency wiring and regression tests; sync remains off |
-| 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
-| 10 | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
+| 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state (merged #275) | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
+| 10a | Read-only readiness and target-guarded schema adoption preflight (this PR) | schema contracts/catalog reader, Director GET/panel, read-only operator and disposable PostgreSQL checks; no application or activation |
+| 10b | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
 
 All paths above are under `backend/` unless prefixed `frontend/`. Boundaries may
 be narrowed after each fresh-main review, never expanded to include unrelated fixes.
@@ -983,3 +984,36 @@ UUIDs, reconfiguration and refused/empty migration rollback. Frontend, booking
 lifecycle, staff buttons, protected assets and exact 15-second polling are unchanged.
 Final activation still requires a separately approved stage, proven visibility
 and a reviewed production schema-adoption path.
+
+### PR 10a read-only readiness and schema preflight
+
+The Director's existing Syrve dock reads `GET /syrve-integration/readiness` only
+while its settings panel is open, with an explicit refresh button. JWT/Director
+role protection and `Cache-Control: no-store` cover the route. Reads use one
+REPEATABLE READ / READ ONLY transaction, bounded lock/statement timeouts and
+a fixed catalog search path. They take no write fence, repair no ledger, decrypt
+no credential and make no upstream request. Stale/failed/invalid responses clear
+the displayed result; a changed configuration cannot reuse an old readiness view.
+
+A frozen PostgreSQL 17 catalog reference covers every prepared migration's
+owned columns, defaults, validated constraints, index definitions/validity,
+function bodies and trigger definitions/enabled state. Object names alone do
+not establish readiness. History must match an existing/fresh baseline and an
+exact recorded prefix of the six prepared migrations. Unrecorded existing objects,
+recorded missing objects, partial structures, drift and unknown history require
+an audit. No baseline or migration history row is adopted automatically.
+
+Readiness additionally inspects saved connection flags, exact physical/identity
+links, ambiguous table numbers and the complete ledger/local scope. It reports
+fixed codes and no credentials, order IDs, SQL definitions or database target.
+Order-access rights and complete POS visibility remain explicitly unverified;
+activation and synchronization remain false even with a verified local schema.
+
+The standalone `scripts/syrve-schema-preflight.mjs --check` validates the private
+Neon target and forces verified TLS, session/transaction read-only and no entity
+synchronization or migration executor. It produces an ordered diagnostic plan
+and opaque snapshot fingerprint. Applying migrations is deliberately unavailable
+until a separately reviewed audit of the real target provides the missing
+production baseline. See `syrve-schema-adoption.md` for the concrete sequence,
+exit codes and guarded rollback boundaries. This PR adds no schema migration
+and changes no production registry, deployment or database.

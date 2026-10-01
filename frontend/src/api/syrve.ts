@@ -23,6 +23,14 @@ export type SyrveOrganization = {
   name: string;
 };
 
+export type SyrveReadiness = {
+  syncEnabled: false;
+  activationAvailable: false;
+  configurationRevision: string | null;
+  checkedAt: string;
+  checks: { key: string; status: 'ok' | 'blocked' | 'not_checked'; code: string }[];
+};
+
 export type SyrveConnectionInput = {
   displayName: string;
   apiBaseUrl: string;
@@ -59,6 +67,7 @@ export type SyrveCatalogPreview = {
 
 export const syrveApi = {
   getStatus: () => api.get<SyrveIntegrationStatus>('/syrve-integration'),
+  getReadiness: () => api.get<SyrveReadiness>('/syrve-integration/readiness'),
   test: (payload: SyrveConnectionInput) =>
     api.post<{
       message: string;

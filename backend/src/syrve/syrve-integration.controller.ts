@@ -11,11 +11,16 @@ import {
   UpdateSyrveConnectionDto,
 } from './dto/syrve-integration.dto';
 import { SyrveIntegrationService } from './syrve-integration.service';
+import { SyrveReadinessService } from './syrve-readiness.service';
 
 @Roles('owner')
 @Controller('syrve-integration')
 export class SyrveIntegrationController {
-  constructor(private readonly service: SyrveIntegrationService) {}
+  constructor(private readonly service: SyrveIntegrationService, private readonly readiness: SyrveReadinessService) {}
+
+  @Get('readiness')
+  @Header('Cache-Control', 'no-store')
+  getReadiness() { return this.readiness.read(); }
 
   @Get()
   @Header('Cache-Control', 'no-store')
