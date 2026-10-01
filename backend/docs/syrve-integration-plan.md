@@ -557,8 +557,19 @@ are queried by table. Sleeping/offline/missing/deleted tables remain unknown.
 Previously active order UUIDs are additionally queried by ID with `posOrderIds:null`.
 There is no status/date filter that could turn an excluded order into closure.
 
-MOLO bounds a probe to 100 confirmed tables, 200 distinct tracked orders, seven
-upstream requests and 45 seconds overall. Every request/body retains the existing
+The saved UUID scope is not rejected at the size of one transport batch. Both order
+methods use sequential chunks: at most 100 table UUIDs or 200 known order UUIDs per
+request, with one shared backend token session. This supports 101–1000 confirmed
+links allowed by a connection confirmation, including larger cumulative mappings.
+An order spanning tables in different chunks may legitimately occur in multiple
+responses; its UUID is deduplicated and versions are reconciled by the same timestamp
+rules. Duplicate UUIDs within a single response still invalidate that response.
+
+MOLO bounds the entire probe to 25 upstream requests (including authentication and
+organizations), 2000 unique collected orders per channel and 45 seconds overall.
+The request budget or deadline never resets between chunks. Budget exhaustion,
+failure of any chunk or an invalid aggregate discards all partial evidence and
+returns incomplete/unknown diagnostics while retaining all saved data. Every request/body retains the existing
 12-second deadline, 1 MiB streaming cap, origin allowlist and redirect rejection.
 Response validation rejects duplicate/foreign/unrequested IDs, malformed/partial
 critical fields and timestamps that cannot be represented as safe nonnegative
@@ -605,6 +616,10 @@ multiple/spanning orders, first empty reads, tracked-ID closure, moved/missing I
 unknown/pending/error states, partial/malformed responses, equal/newer timestamps,
 POS sleeping/offline, permissions, rate limits, network/body/overall deadlines,
 secret projection, configuration/staff races and change/restore table versions.
+The actual integration service is also exercised with 100/101/1000/1001 saved
+links; client fixtures cover 201 known order IDs, multi-table orders across chunks,
+newer/equal-conflicting versions, later-chunk HTTP/body failures, the shared 45-second
+deadline, the 25-request budget and aggregate limits without partial closure.
 Real JWT/role/DTO HTTP tests cover
 every role and reject caller-supplied IDs. Protected frontend/maps/assets/geometry,
 existing waiter/booking rules and the exact 15-second polling remain unchanged.

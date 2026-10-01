@@ -416,14 +416,167 @@ test('ambiguous catalog UUIDs prevent all order reads without repairing physical
   assert.ok(!h.calls.some((call) => call.path.includes('/order/')));
 });
 
-test('invalid/duplicate/excessive scopes are rejected locally before authentication', async (t) => {
+test('invalid/duplicate scopes are rejected locally before authentication', async (t) => {
   const h = setup(t);
-  for (const [tables, known] of [[[], []], [['invalid'], []], [[TABLE, TABLE], []],
-    [[TABLE], [ORDER, ORDER]], [Array.from({ length: 101 }, (_, i) => id(1000 + i)), []],
-    [[TABLE], Array.from({ length: 201 }, (_, i) => id(1000 + i))]]) {
+  for (const [tables, known] of [[[], []], [['invalid'], []], [[TABLE, TABLE], []], [[TABLE], [ORDER, ORDER]]]) {
     await assert.rejects(h.client.probeOrders(BASE, LOGIN, ORG, tables, known), (e) => e.getStatus() === 400);
   }
   assert.equal(h.calls.length, 0);
+});
+
+function manyLinks(h, count) {
+  const tableIds = Array.from({ length: count }, (_, i) => id(1000 + i));
+  h.state.links = tableIds.map((syrveTableId, i) => ({ ...link(), id: id(20_000 + i),
+    moloTableId: id(10_000 + i), syrveTableId, activeSyrveOrderIds: [] }));
+  h.tables.splice(0, h.tables.length, ...h.state.links.map((item, i) => ({ id: item.moloTableId,
+    tableNumber: String(i + 1), status: 'free', updatedAt: new Date('2026-10-01T00:00:00Z') })));
+  h.routes['/api/1/reserve/available_restaurant_sections'] = sections(tableIds.map((tableId) =>
+    ({ id: tableId, group: GROUP, isDeleted: false })));
+  return tableIds;
+}
+
+for (const count of [100, 101, 1000, 1001]) {
+  test(`actual service reads all ${count} saved links in bounded chunks without changing connection limits`, async (t) => {
+    const h = serviceSetup(t);
+    const tableIds = manyLinks(h, count);
+    h.routes['/api/1/order/by_table'] = (options) => {
+      const batch = JSON.parse(options.body).tableIds;
+      return orders(...batch.map((tableId) => wrapper(id(30_000 + tableIds.indexOf(tableId)), 'New', [tableId])));
+    };
+    const before = structuredClone(h.state);
+    const result = await h.service.observeOrders(h.dto());
+    const calls = h.calls.filter((call) => call.path === '/api/1/order/by_table');
+    assert.equal(calls.length, Math.ceil(count / 100));
+    assert.ok(calls.every((call) => call.body.tableIds.length <= 100));
+    assert.deepEqual(calls.flatMap((call) => call.body.tableIds), tableIds);
+    assert.equal(h.calls.filter((call) => call.path.endsWith('access_token')).length, 1);
+    assert.equal(result.tables.length, count);
+    assert.ok(result.tables.every((table) => table.state === 'open' && table.activeOrderIds.length === 1));
+    assert.deepEqual(h.state, before);
+    assert.deepEqual(h.writes, []);
+  });
+}
+
+test('201 tracked order UUIDs are all read in 200-ID chunks, not rejected by the first-request limit', async (t) => {
+  const h = setup(t, { '/api/1/order/by_table': orders() });
+  const known = Array.from({ length: 201 }, (_, i) => id(40_000 + i));
+  h.routes['/api/1/order/by_id'] = (options) => orders(...JSON.parse(options.body).orderIds
+    .map((orderId) => wrapper(orderId, 'Closed')));
+  const result = await h.observe([link(TABLE, known)]);
+  const calls = h.calls.filter((call) => call.path === '/api/1/order/by_id');
+  assert.deepEqual(calls.map((call) => call.body.orderIds.length), [200, 1]);
+  assert.deepEqual(calls.flatMap((call) => call.body.orderIds), known);
+  assert.deepEqual(result.tables[0].explicitlyClosedOrderIds, known);
+  assert.equal(result.tables[0].state, 'unknown');
+});
+
+test('the same multi-table order may occur in separate discovery chunks and is deduplicated', async (t) => {
+  const h = serviceSetup(t);
+  const tableIds = manyLinks(h, 101);
+  h.routes['/api/1/order/by_table'] = orders(wrapper(ORDER, 'New', tableIds));
+  const result = await h.service.observeOrders(h.dto());
+  assert.equal(result.checks.ordersByTable.status, 'ok');
+  assert.equal(result.orders.length, 1);
+  assert.ok(result.tables.every((table) => table.activeOrderIds.length === 1 && table.activeOrderIds[0] === ORDER));
+});
+
+for (const newer of [true, false]) {
+  test(`${newer ? 'newer' : 'equal conflicting'} duplicate versions across table chunks preserve safe classification`, async (t) => {
+    const h = serviceSetup(t);
+    const tableIds = manyLinks(h, 101);
+    let reads = 0;
+    h.routes['/api/1/order/by_table'] = () => orders(wrapper(ORDER, reads++ ? 'Bill' : 'Closed', tableIds,
+      reads === 1 || !newer ? 100 : 101));
+    const result = await h.service.observeOrders(h.dto());
+    assert.equal(result.orders.length, 1);
+    assert.equal(result.orders[0].state, newer ? 'open' : 'unknown');
+    assert.ok(result.tables.every((table) => table.explicitlyClosedOrderIds.length === 0));
+  });
+}
+
+test('failure of a later table chunk discards all earlier closure evidence and keeps saved links', async (t) => {
+  const h = serviceSetup(t);
+  const tableIds = manyLinks(h, 101);
+  let reads = 0;
+  h.routes['/api/1/order/by_table'] = () => ++reads === 1 ? orders(wrapper(ORDER, 'Closed', [tableIds[0]]))
+    : Response.json({ error: TOKEN }, { status: 403 });
+  const before = structuredClone(h.state);
+  const result = await h.service.observeOrders(h.dto());
+  assert.equal(result.checks.ordersByTable.code, 'SYRVE_ACCESS_DENIED');
+  assert.deepEqual(result.orders, []);
+  assert.ok(result.tables.every((table) => table.state === 'unknown' && table.explicitlyClosedOrderIds.length === 0));
+  assert.deepEqual(h.state, before);
+  assert.deepEqual(h.writes, []);
+});
+
+test('failure of a later tracked-ID chunk invalidates all earlier by-ID closure evidence', async (t) => {
+  const h = setup(t, { '/api/1/order/by_table': orders() });
+  const known = Array.from({ length: 201 }, (_, i) => id(40_000 + i));
+  let reads = 0;
+  h.routes['/api/1/order/by_id'] = (options) => ++reads === 1
+    ? orders(...JSON.parse(options.body).orderIds.map((orderId) => wrapper(orderId, 'Closed')))
+    : Response.json({ error: LOGIN }, { status: 403 });
+  const result = await h.observe([link(TABLE, known)]);
+  assert.equal(result.checks.ordersById.code, 'SYRVE_ACCESS_DENIED');
+  assert.deepEqual(result.orders, []);
+  assert.deepEqual(result.tables[0].explicitlyClosedOrderIds, []);
+  assert.equal(result.tables[0].unknownOrders.length, known.length);
+});
+
+test('all chunks share the original 45-second deadline, including a later stalled body', async (t) => {
+  const h = serviceSetup(t);
+  const tableIds = manyLinks(h, 101);
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
+  for (const path of ['/api/1/access_token', '/api/1/organizations', '/api/1/terminal_groups',
+    '/api/1/reserve/available_restaurant_sections', '/api/1/terminal_groups/is_alive']) {
+    const value = h.routes[path];
+    h.routes[path] = () => { t.mock.timers.tick(8_000); return value; };
+  }
+  let reads = 0, pulling = false;
+  h.routes['/api/1/order/by_table'] = (options) => {
+    if (++reads === 1) { t.mock.timers.tick(3_000); return orders(wrapper(ORDER, 'Closed', [tableIds[0]])); }
+    return new Response(new ReadableStream({
+      start(controller) { options.signal.addEventListener('abort', () => controller.error(new Error(TOKEN)), { once: true }); },
+      pull() { pulling = true; },
+    }), { headers: { 'Content-Type': 'application/json' } });
+  };
+  const started = Date.now();
+  const pending = h.service.observeOrders(h.dto());
+  while (!pulling) await new Promise(setImmediate);
+  assert.equal(Date.now() - started, 43_000);
+  t.mock.timers.tick(2_000);
+  const result = await pending;
+  assert.equal(Date.now() - started, 45_000);
+  assert.equal(result.checks.ordersByTable.code, 'SYRVE_TIMEOUT');
+  assert.deepEqual(result.orders, []);
+  assert.ok(result.tables.every((table) => table.explicitlyClosedOrderIds.length === 0));
+  assert.deepEqual(h.writes, []);
+});
+
+test('25-request safety budget returns incomplete diagnostics instead of a scope validation failure', async (t) => {
+  const known = Array.from({ length: 4001 }, (_, i) => id(40_000 + i));
+  const h = setup(t, { '/api/1/order/by_table': orders(wrapper(known[0], 'Closed')), '/api/1/order/by_id': orders() });
+  const result = await h.observe([link(TABLE, known)]);
+  assert.equal(h.calls.length, 25);
+  assert.equal(result.checks.ordersById.code, 'SYRVE_OBSERVATION_LIMIT');
+  assert.deepEqual(result.tables[0].explicitlyClosedOrderIds, []);
+  assert.equal(result.tables[0].state, 'unknown');
+  assert.equal(result.orders[0].state, 'unknown');
+});
+
+test('aggregate order cap applies across discovery chunks and discards partial results', async (t) => {
+  const h = serviceSetup(t);
+  manyLinks(h, 101);
+  let chunk = 0;
+  h.routes['/api/1/order/by_table'] = (options) => {
+    const tableId = JSON.parse(options.body).tableIds[0];
+    const start = chunk++ * 1001;
+    return orders(...Array.from({ length: 1001 }, (_, i) => wrapper(id(50_000 + start + i), 'Closed', [tableId])));
+  };
+  const result = await h.service.observeOrders(h.dto());
+  assert.equal(result.checks.ordersByTable.code, 'SYRVE_INVALID_RESPONSE');
+  assert.deepEqual(result.orders, []);
+  assert.ok(result.tables.every((table) => table.explicitlyClosedOrderIds.length === 0));
 });
 
 test('selected organization must remain available before any order/POS read', async (t) => {

@@ -1,9 +1,10 @@
 // Read-only evidence. No table status reducer, persistence or activation lives here.
 export class SyrveOrderValidationError extends Error {}
 
-export const MAX_OBSERVATION_TABLES = 100;
-export const MAX_TRACKED_ORDERS = 200;
-const MAX_RESPONSE_ORDERS = 2_000;
+export const TABLE_ORDER_BATCH_SIZE = 100;
+export const ORDER_ID_BATCH_SIZE = 200;
+export const MAX_CATALOG_TABLES = 2_000;
+export const MAX_RESPONSE_ORDERS = 2_000;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 export type OrderStatus = 'New' | 'Bill' | 'Closed' | 'Deleted';
@@ -95,7 +96,7 @@ export function parseSyrveOrders(payload: unknown, organizationId: string,
         reason: wrapper.creationStatus === 'Error' ? 'creation_error' : 'creation_in_progress' };
     }
     const order = record(wrapper.order);
-    const tableIds = observationIds(order.tableIds, MAX_OBSERVATION_TABLES);
+    const tableIds = observationIds(order.tableIds, MAX_CATALOG_TABLES);
     const terminalGroupId = uuid(order.terminalGroupId);
     if (!tableIds.length || typeof order.status !== 'string' || !order.status || order.status.length > 40
         || ('tableIds' in scope && !tableIds.some((tableId) => scope.tableIds.includes(tableId)))) {
@@ -108,9 +109,9 @@ export function parseSyrveOrders(payload: unknown, organizationId: string,
   });
 }
 
-function latestOrders(probe: SyrveOrderProbe): SyrveObservedOrder[] {
+export function mergeSyrveOrders(...batches: SyrveObservedOrder[][]): SyrveObservedOrder[] {
   const result = new Map<string, SyrveObservedOrder>();
-  for (const order of [...probe.byTable || [], ...probe.byId || []]) {
+  for (const order of batches.flat()) {
     const previous = result.get(order.id);
     if (!previous || order.timestamp > previous.timestamp) result.set(order.id, order);
     else if (order.timestamp === previous.timestamp &&
@@ -140,7 +141,7 @@ export function buildSyrveOrderObservation(probe: SyrveOrderProbe, links: OrderO
   const allReadsValid = ['connection', 'terminalGroups', 'restaurantSections', 'posAvailability', 'ordersByTable']
     .every((key: ObservationCheckName) => probe.checks[key].status === 'ok')
     && (!tracked.size || probe.checks.ordersById.status === 'ok');
-  const orders = latestOrders(probe).map((order): SyrveObservedOrder => {
+  const orders = mergeSyrveOrders(probe.byTable || [], probe.byId || []).map((order): SyrveObservedOrder => {
     if (!allReadsValid) return { ...order, status: null, state: 'unknown', reason: 'observation_failed' };
     if (!order.terminalGroupId || !alive.has(order.terminalGroupId)) {
       return { ...order, state: 'unknown', reason: order.reason || 'unavailable_pos' };

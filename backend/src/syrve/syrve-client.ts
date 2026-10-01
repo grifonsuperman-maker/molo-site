@@ -1,12 +1,14 @@
 import { BadGatewayException, BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { parseRestaurantSections, parseTerminalGroups, SyrveCatalogValidationError, type SyrveCatalog } from './syrve-catalog';
-import { MAX_OBSERVATION_TABLES, MAX_TRACKED_ORDERS, observationIds, parsePosAvailability,
-  parseSyrveOrders, SyrveOrderValidationError, type ObservationCheckName, type SyrveOrderProbe } from './syrve-order-observer';
+import { TABLE_ORDER_BATCH_SIZE, ORDER_ID_BATCH_SIZE, MAX_CATALOG_TABLES, MAX_RESPONSE_ORDERS,
+  mergeSyrveOrders, observationIds, parsePosAvailability, parseSyrveOrders, SyrveOrderValidationError,
+  type ObservationCheckName, type SyrveObservedOrder, type SyrveOrderProbe } from './syrve-order-observer';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
 const REQUEST_TIMEOUT_MS = 12_000;
 const MAX_RESPONSE_BYTES = 1_048_576;
 const OBSERVATION_TIMEOUT_MS = 45_000;
+const MAX_OBSERVATION_REQUESTS = 25;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ERRORS = {
@@ -18,6 +20,7 @@ const ERRORS = {
   SYRVE_INVALID_RESPONSE: 'Syrve повернув неочікувану відповідь. Синхронізацію не ввімкнено.',
   SYRVE_NO_ORGANIZATIONS: 'У доступі Syrve не знайдено активних організацій.',
   SYRVE_ORGANIZATION_UNAVAILABLE: 'Обрана організація більше не доступна у Syrve.',
+  SYRVE_OBSERVATION_LIMIT: 'Перевірку зупинено на безпечному ліміті запитів. Збережений стан не змінено.',
 } as const;
 
 export class SyrveClientException extends BadGatewayException {
@@ -209,11 +212,13 @@ export class SyrveClient {
     if (!UUID.test(organizationId)) throw new BadRequestException('Оберіть коректну організацію Syrve');
     let requestedTables: string[], requestedOrders: string[];
     try {
-      requestedTables = observationIds(tableIds, MAX_OBSERVATION_TABLES);
-      requestedOrders = observationIds(knownOrderIds, MAX_TRACKED_ORDERS);
+      // The scope comes from saved UUID links, not caller-supplied API IDs. Bound
+      // transport batches/deadlines instead of rejecting valid saved link counts.
+      requestedTables = observationIds(tableIds, Number.MAX_SAFE_INTEGER);
+      requestedOrders = observationIds(knownOrderIds, Number.MAX_SAFE_INTEGER);
       if (!requestedTables.length) throw new SyrveOrderValidationError();
     } catch {
-      throw new BadRequestException('Для перевірки потрібні унікальні підтверджені UUID столів і замовлень у межах ліміту.');
+      throw new BadRequestException('Для перевірки потрібні унікальні підтверджені UUID столів і замовлень.');
     }
     const deadline = Date.now() + OBSERVATION_TIMEOUT_MS;
     const probe: SyrveOrderProbe = {
@@ -243,7 +248,13 @@ export class SyrveClient {
       probe.checks.connection = { status: 'error', code: 'SYRVE_ORGANIZATION_UNAVAILABLE' };
       return finish();
     }
-    const post = (path: string, body: object) => this.postJson(path, body, session.token, deadline);
+    let requests = 2; // Authentication and organizations share the same probe budget.
+    const post = (path: string, body: object) => {
+      if (Date.now() >= deadline) throw new SyrveClientException('SYRVE_TIMEOUT');
+      if (requests >= MAX_OBSERVATION_REQUESTS) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
+      requests++;
+      return this.postJson(path, body, session.token, deadline);
+    };
     const groups = await check('terminalGroups', async () => parseTerminalGroups(await post('/api/1/terminal_groups', {
       organizationIds: [probe.organizationId], includeDisabled: false,
     }), probe.organizationId));
@@ -256,7 +267,7 @@ export class SyrveClient {
         terminalGroupIds: groupIds, returnSchema: false,
       }), groupIds);
       const ids = parsed.tables.map((table) => table.id);
-      if (ids.length > 2_000 || new Set(ids).size !== ids.length) throw new SyrveOrderValidationError();
+      if (ids.length > MAX_CATALOG_TABLES || new Set(ids).size !== ids.length) throw new SyrveOrderValidationError();
       return parsed.tables.map(({ id, terminalGroupId, isDeleted }) => ({ id, terminalGroupId, isDeleted }));
     });
     if (!sections) return finish();
@@ -269,14 +280,26 @@ export class SyrveClient {
     const eligibleTables = requestedTables.filter((id) => sections.some((table) => table.id === id && !table.isDeleted
       && availability.some((group) => group.terminalGroupId === table.terminalGroupId && group.isAlive)));
     if (!eligibleTables.length) return finish();
-    probe.byTable = await check('ordersByTable', async () => parseSyrveOrders(await post('/api/1/order/by_table', {
-      organizationIds: [probe.organizationId], tableIds: eligibleTables, statuses: null,
-    }), probe.organizationId, { tableIds: eligibleTables }));
+    const readBatches = (key: 'ordersByTable' | 'ordersById', ids: string[], size: number) => check(key, async () => {
+      let collected: SyrveObservedOrder[] = [];
+      for (let offset = 0; offset < ids.length; offset += size) {
+        const batch = ids.slice(offset, offset + size);
+        const scope = key === 'ordersByTable' ? { tableIds: batch } : { orderIds: batch };
+        const payload = key === 'ordersByTable'
+          ? await post('/api/1/order/by_table', { organizationIds: [probe.organizationId], tableIds: batch, statuses: null })
+          : await post('/api/1/order/by_id', { organizationIds: [probe.organizationId], orderIds: batch, posOrderIds: null });
+        // An order may span tables in different chunks. Reconcile its versions;
+        // only duplicate UUIDs inside one provider response are malformed.
+        collected = mergeSyrveOrders(collected, parseSyrveOrders(payload, probe.organizationId, scope));
+        if (collected.length > MAX_RESPONSE_ORDERS) throw new SyrveOrderValidationError();
+      }
+      // Publish this channel only after every chunk passed; no partial closures.
+      return collected;
+    });
+    probe.byTable = await readBatches('ordersByTable', eligibleTables, TABLE_ORDER_BATCH_SIZE);
     if (!probe.byTable) return finish();
     if (requestedOrders.length) {
-      probe.byId = await check('ordersById', async () => parseSyrveOrders(await post('/api/1/order/by_id', {
-        organizationIds: [probe.organizationId], orderIds: requestedOrders, posOrderIds: null,
-      }), probe.organizationId, { orderIds: requestedOrders }));
+      probe.byId = await readBatches('ordersById', requestedOrders, ORDER_ID_BATCH_SIZE);
     }
     return finish();
   }
