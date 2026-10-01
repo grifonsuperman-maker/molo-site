@@ -56,6 +56,7 @@ function loadMigrations(require) {
   const { FenceSyrveConfiguration2026093000020 } = require('../dist/migrations/2026093000020-FenceSyrveConfiguration.js');
   const { CreateTableMapIdentities2026093000030 } = require('../dist/migrations/2026093000030-CreateTableMapIdentities.js');
   const { ProtectCanonicalTableNumbers2026093000040 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
+  const { CreateSyrveDurableState2026093000050 } = require('../dist/migrations/2026093000050-CreateSyrveDurableState.js');
 
   return [
     InitialSchemaBaseline2026081300000,
@@ -72,6 +73,7 @@ function loadMigrations(require) {
     FenceSyrveConfiguration2026093000020,
     CreateTableMapIdentities2026093000030,
     ProtectCanonicalTableNumbers2026093000040,
+    CreateSyrveDurableState2026093000050,
   ];
 }
 
