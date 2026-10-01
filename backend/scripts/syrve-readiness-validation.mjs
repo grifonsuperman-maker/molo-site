@@ -58,6 +58,12 @@ export async function runSyrveReadinessValidation(env=process.env){
     await source.query('ALTER TABLE public.table_map_identities DISABLE TRIGGER "TRG_table_map_identities_immutable"');
     assert.equal(schemaPreflight(await facts()).status,'requires_audit');
     await source.query('ALTER TABLE public.table_map_identities ENABLE TRIGGER "TRG_table_map_identities_immutable"');
+    await source.query('ALTER TABLE public.syrve_order_versions DISABLE TRIGGER ALL');
+    assert.equal(schemaPreflight(await facts()).status,'requires_audit');
+    await source.query('ALTER TABLE public.syrve_order_versions ENABLE TRIGGER ALL');
+    await source.query('ALTER TABLE public.tables DISABLE TRIGGER ALL');
+    assert.equal(schemaPreflight(await facts()).status,'requires_audit');
+    await source.query('ALTER TABLE public.tables ENABLE TRIGGER ALL');
     const migration=baseline.migrations.find(row=>row.name===SYRVE_SCHEMA_STEPS.at(-1).name);
     await source.query('DELETE FROM public.migrations WHERE id=$1',[migration.id]);
     assert.equal(schemaPreflight(await facts()).status,'requires_audit');

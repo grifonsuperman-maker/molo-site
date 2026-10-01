@@ -52,7 +52,8 @@ export function schemaPreflight(facts: SyrveSchemaFacts, reference = SYRVE_SCHEM
     const recorded = history.some(row => row.name === step.name);
     return { name: step.name, status, recorded, fingerprint: absent ? null : fingerprint };
   });
-  const consistent = historyValid && steps.every((step, i) => i < suffix.length ? step.status === 'verified' && step.recorded
+  const consistent = historyValid && facts.triggers.every(trigger => trigger.enabled === 'O')
+    && steps.every((step, i) => i < suffix.length ? step.status === 'verified' && step.recorded
     : step.status === 'missing' && !step.recorded);
   const prerequisites = facts.data !== null && facts.data.tablesUnambiguous && facts.data.integrationCount <= 1;
   return { version: 1, applicationAvailable: false as const,
@@ -83,7 +84,7 @@ async function readFacts(manager: EntityManager): Promise<SyrveSchemaFacts> {
   const triggers = await manager.query(`SELECT c.relname AS "table",t.tgname AS name,t.tgenabled AS enabled,
     pg_catalog.pg_get_triggerdef(t.oid,true) AS definition FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY($1::text[])
-    AND NOT t.tgisinternal ORDER BY c.relname,t.tgname`, [TABLES]);
+    AND (NOT t.tgisinternal OR t.tgenabled <> 'O') ORDER BY c.relname,t.tgname`, [TABLES]);
   const has = (table: string, name: string, type: string) => tables.some(row => row.table === table && row.kind === 'r') && columns.some(row => row.table === table && row.name === name && row.type === type);
   const history = has('migrations', 'id', 'integer') && has('migrations', 'timestamp', 'bigint') && has('migrations', 'name', 'character varying')
     ? await manager.query('SELECT id,"timestamp",name FROM public.migrations ORDER BY id LIMIT 1001') : null;

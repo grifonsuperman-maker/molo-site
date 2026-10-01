@@ -33,7 +33,8 @@ test('verified catalog plus exact existing/fresh migration history produces a re
 });
 for(const mutate of [f=>f.columns[0].notNull=false,f=>f.constraints[0].validated=false,f=>f.constraints[0].definition='expected OR true',
   f=>f.indexes[0].valid=false,f=>f.indexes[0].definition='different table',f=>f.functions[0].definition='different body',
-  f=>f.triggers[0].enabled='D',f=>f.tables[0].kind='v',f=>f.columns.push({table:'syrve_worker_state',name:'extra',type:'text'}),
+  f=>f.triggers[0].enabled='D',f=>f.triggers.push({table:'tables',name:'internal_fk',enabled:'D'}),
+  f=>f.tables[0].kind='v',f=>f.columns.push({table:'syrve_worker_state',name:'extra',type:'text'}),
   f=>f.history.pop(),f=>f.history.at(-1).timestamp=1,f=>f.history.at(-1).name='Unknown2026100199999',
   f=>f.history[1].id=f.history[0].id,f=>f.data.integrationCount=2,f=>f.data.tablesUnambiguous=false]) {
   test('changed types, constraints, index validity, functions, triggers, history or prerequisites require audit',()=>{
