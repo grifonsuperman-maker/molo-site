@@ -91,6 +91,94 @@ function serviceSetup(t, overrides = {}) {
   return { ...h, state, tables, service, writes, reads: () => reads, dto: () => ({ configurationRevision: state.entity.configurationRevision }) };
 }
 
+test('Director diagnostics expose counts for multiple orders and tables, preserve state and exclude private evidence', async (t) => {
+  const h = serviceSetup(t, {
+    '/api/1/reserve/available_restaurant_sections': sections([{ id: TABLE, group: GROUP, isDeleted: false }, { id: TABLE2, group: GROUP, isDeleted: false }]),
+    '/api/1/order/by_table': orders(wrapper(ORDER, 'New', [TABLE, TABLE2]), wrapper(ORDER2, 'Bill'), wrapper(ORDER3, 'Closed')),
+    '/api/1/order/by_id': orders(wrapper(ORDER, 'New', [TABLE, TABLE2]), wrapper(ORDER2, 'Bill'), wrapper(ORDER3, 'Closed')),
+  });
+  h.state.links = [link(TABLE, [ORDER, ORDER2, ORDER3]), link(TABLE2, [ORDER])];
+  const before = structuredClone({ state: h.state, tables: h.tables });
+  const result = await h.service.orderDiagnostics(h.dto());
+  assert.deepEqual(result.summary, { linkedTables: 2, tablesWithOpenOrders: 2, unknownTables: 0,
+    observedOrders: 3, openOrders: 2, explicitlyClosedOrders: 1, unknownOrders: 0, unresolvedKnownOrders: 0,
+    terminalGroups: { alive: 1, sleeping: 0, offline: 0, unknown: 0 } });
+  assert.equal(result.configurationRevision, h.state.entity.configurationRevision);
+  assert.equal(result.organizationId, ORG);
+  for (const flag of ['activationAvailable', 'syncEnabled', 'statusesApplied', 'renamingApplied']) assert.equal(result[flag], false);
+  assert.equal(result.diagnostics.complete, false);
+  assert.equal(result.diagnostics.initializationPerformed, false);
+  assert.deepEqual({ state: h.state, tables: h.tables }, before);
+  assert.deepEqual(h.writes, []);
+  for (const privateValue of [ORDER, ORDER2, ORDER3, TABLE, TABLE2, MOLO, MOLO2, GROUP, LOGIN, TOKEN,
+    'apiLoginEncrypted', 'customer', 'externalData', 'permission', 'minimumPosVersion']) {
+    assert.ok(!JSON.stringify(result).includes(privateValue), privateValue);
+  }
+  assert.ok(h.calls.every(call => !/init_by_table|webhooks|schema/.test(call.path)));
+});
+
+test('Director diagnostics report empty discovery as unknown and retain unresolved known orders', async (t) => {
+  const h = serviceSetup(t, { '/api/1/order/by_table': orders(), '/api/1/order/by_id': orders() });
+  const result = await h.service.orderDiagnostics(h.dto());
+  assert.equal(result.summary.openOrders, 0); assert.equal(result.summary.explicitlyClosedOrders, 0);
+  assert.equal(result.summary.unknownTables, 1); assert.equal(result.summary.unresolvedKnownOrders, 1);
+  assert.equal(result.diagnostics.posOrderVisibility, 'not_verified');
+  assert.equal(result.activationAvailable, false); assert.deepEqual(h.writes, []);
+});
+
+test('permission failures and partial by-ID reads never publish successful occupancy or closure diagnostics', async (t) => {
+  const h = serviceSetup(t, { '/api/1/order/by_id': Response.json({ error: LOGIN + TOKEN }, { status: 403 }) });
+  const result = await h.service.orderDiagnostics(h.dto());
+  assert.deepEqual(result.checks.find(check => check.key === 'ordersById'), { key: 'ordersById', status: 'error', code: 'SYRVE_ACCESS_DENIED' });
+  assert.equal(result.summary.openOrders, 0); assert.equal(result.summary.explicitlyClosedOrders, 0);
+  assert.equal(result.summary.tablesWithOpenOrders, 0); assert.equal(result.summary.unknownTables, 1);
+  assert.equal(result.summary.unknownOrders, 1);
+  assert.ok(!JSON.stringify(result).includes(LOGIN)); assert.ok(!JSON.stringify(result).includes(TOKEN));
+  assert.deepEqual(h.writes, []);
+});
+
+test('offline and sleeping cash registers are counted without initialization or order commands', async (t) => {
+  const h = serviceSetup(t, { '/api/1/terminal_groups': groups([GROUP], [GROUP2]),
+    '/api/1/terminal_groups/is_alive': availability([], [GROUP]) });
+  const result = await h.service.orderDiagnostics(h.dto());
+  assert.deepEqual(result.summary.terminalGroups, { alive: 0, sleeping: 1, offline: 1, unknown: 0 });
+  assert.equal(result.summary.unknownTables, 1);
+  assert.ok(!h.calls.some(call => call.path.includes('/order/'))); assert.deepEqual(h.writes, []);
+});
+
+test('Director diagnostics retain preparation, saved revision and mapping guards before any HTTP', async (t) => {
+  const h = serviceSetup(t);
+  await assert.rejects(h.service.orderDiagnostics({ configurationRevision: randomUUID() }), error => error.getStatus() === 409);
+  h.state.prepared = false;
+  await assert.rejects(h.service.orderDiagnostics(h.dto()), error => error.getStatus() === 503);
+  h.state.prepared = true; h.state.entity.status = 'not_connected';
+  await assert.rejects(h.service.orderDiagnostics(h.dto()), error => error.getStatus() === 400);
+  h.state.entity.status = 'connected'; h.state.links = [];
+  await assert.rejects(h.service.orderDiagnostics(h.dto()), error => error.getStatus() === 400);
+  assert.equal(h.calls.length, 0); assert.deepEqual(h.writes, []);
+});
+
+test('Director diagnostics discard changed configuration or staff status during an upstream probe', async (t) => {
+  const h = serviceSetup(t);
+  h.routes['/api/1/order/by_table'] = () => { h.state.entity.configurationRevision = randomUUID(); return orders(wrapper()); };
+  await assert.rejects(h.service.orderDiagnostics(h.dto()), error => error.getStatus() === 409);
+  h.routes['/api/1/order/by_table'] = () => { h.tables[0].status = 'free'; return orders(wrapper()); };
+  await assert.rejects(h.service.orderDiagnostics(h.dto()), error => error.getStatus() === 409);
+  assert.deepEqual(h.writes, []);
+});
+
+test('Director diagnostics replace unexpected diagnostic text and exclude additional observation properties', async () => {
+  const { directorOrderDiagnostics } = require('../dist/syrve/syrve-order-diagnostics.js');
+  const observation = { organizationId: ORG, configurationRevision: id(60), startedAt: '2026-10-02T00:00:00Z', checkedAt: '2026-10-02T00:00:01Z',
+    checks: Object.fromEntries(['connection', 'terminalGroups', 'restaurantSections', 'posAvailability', 'ordersByTable', 'ordersById']
+      .map(key => [key, { status: 'error', code: LOGIN }])), orders: [], tables: [], terminalGroups: [],
+    diagnostics: { apiLogin: LOGIN }, privatePayload: TOKEN, activationReady: true };
+  const result = directorOrderDiagnostics(observation);
+  assert.ok(result.checks.every(check => check.code === 'SYRVE_UNAVAILABLE'));
+  assert.ok(!JSON.stringify(result).includes(LOGIN)); assert.ok(!JSON.stringify(result).includes(TOKEN));
+  assert.equal(result.activationAvailable, false);
+});
+
 test('observer uses one bounded backend session, read endpoints, confirmed table UUIDs and all tracked order UUIDs', async (t) => {
   const h = setup(t);
   const result = await h.observe([link(TABLE, [ORDER])]);

@@ -37,6 +37,27 @@ export type SyrveConnectionInput = {
   apiLogin: string;
 };
 
+export type SyrveOrderCheckKey = 'connection' | 'terminalGroups' | 'restaurantSections'
+  | 'posAvailability' | 'ordersByTable' | 'ordersById';
+export type SyrveOrderDiagnostics = {
+  configurationRevision: string;
+  organizationId: string;
+  startedAt: string;
+  checkedAt: string;
+  checks: { key: SyrveOrderCheckKey; status: 'ok' | 'error' | 'not_checked'; code: string | null }[];
+  summary: {
+    linkedTables: number; tablesWithOpenOrders: number; unknownTables: number;
+    observedOrders: number; openOrders: number; explicitlyClosedOrders: number;
+    unknownOrders: number; unresolvedKnownOrders: number;
+    terminalGroups: { alive: number; sleeping: number; offline: number; unknown: number };
+  };
+  diagnostics: { complete: false; posOrderVisibility: 'not_verified'; posVersion: 'not_verified'; initializationPerformed: false };
+  activationAvailable: false;
+  syncEnabled: false;
+  statusesApplied: false;
+  renamingApplied: false;
+};
+
 export type SyrveCatalogTable = {
   id: string;
   number: number;
@@ -68,6 +89,8 @@ export type SyrveCatalogPreview = {
 export const syrveApi = {
   getStatus: () => api.get<SyrveIntegrationStatus>('/syrve-integration'),
   getReadiness: () => api.get<SyrveReadiness>('/syrve-integration/readiness'),
+  orderDiagnostics: (configurationRevision: string) =>
+    api.post<SyrveOrderDiagnostics>('/syrve-integration/orders-diagnostics', { configurationRevision }),
   test: (payload: SyrveConnectionInput) =>
     api.post<{
       message: string;

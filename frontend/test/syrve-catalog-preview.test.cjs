@@ -32,6 +32,8 @@ function harness(api = {}) {
     setError: (value) => state.error = value, setNotice: (value) => state.notice = value,
     setApiLogin: (value) => state.login = value, setOrganizationId: (value) => state.organization = value,
     setOpen: (value) => state.open = value, setStep: (value) => state.step = value,
+    setEditingConnection: (value) => state.editingConnection = value,
+    setOrganizations: (value) => state.organizations = value,
     setShowLogin() {}, setStatus: (value) => state.status = value, setDisplayName() {}, setApiBaseUrl() {} };
   return { state, deps, run: (name) => handler(name, deps) };
 }
@@ -158,6 +160,8 @@ test('confirmed save sends only selected UUID pairs and the receipt to MOLO', as
   assert.equal(h.state.login, '');
   assert.equal(h.state.status.confirmedLinks, 1);
   assert.equal(h.state.status.syncEnabled, false);
+  assert.equal(h.state.editingConnection, false);
+  assert.equal(h.state.step, 3);
 });
 
 test('a rejected confirmation invalidates the preview and requires a fresh acknowledgement', async () => {

@@ -218,6 +218,7 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 8c | Unified effective status reads with the existing role/date priorities (merged #274) | map/status read services, shared projection, dependency wiring and regression tests; sync remains off |
 | 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state (merged #275) | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
 | 10a | Read-only readiness and target-guarded schema adoption preflight (this PR) | schema contracts/catalog reader, Director GET/panel, read-only operator and disposable PostgreSQL checks; no application or activation |
+| 10b1 | Explicit Director order/POS diagnostics after the reviewed schema-adoption path; safe counts and stale-response handling, no activation | aggregate diagnostics projection/route, Director API/panel, authorization and read-only/stale-response regression tests |
 | 10b | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
 
 All paths above are under `backend/` unless prefixed `frontend/`. Boundaries may
@@ -1017,3 +1018,47 @@ until a separately reviewed audit of the real target provides the missing
 production baseline. See `syrve-schema-adoption.md` for the concrete sequence,
 exit codes and guarded rollback boundaries. This PR adds no schema migration
 and changes no production registry, deployment or database.
+
+### PR 10b1 explicit Director order and POS diagnostics
+
+This stage starts from fresh main `ee0029a088181fa0ece6dd8381c477192574522e`,
+after the manual merge of #277. The separate approved database operation has
+applied the six frozen migrations and independently verified their catalog,
+original rows/history and all 60 physical UUID/map bindings. This code change
+performs no migration, database operation, deployment or real Syrve request.
+
+The Director can explicitly request `POST /syrve-integration/orders-diagnostics`
+with only the saved configuration revision. The route retains JWT/Director and
+no-store protection, the existing prepared/saved mapping guards, and the full
+configuration/link/manual/table fingerprint around the bounded HTTP probe.
+It reuses the read-only order observer; no transaction spans HTTP and no settings,
+logs, ledgers, overrides, physical table or booking is written by the check.
+
+The response projects only six fixed checks, safe diagnostic codes and counts
+of linked/unknown tables, observed order states, unresolved tracked orders and
+alive/sleeping/offline/unknown terminal groups. It excludes order/table/terminal
+UUIDs, tokens, credentials, customer records and arbitrary provider/driver text.
+An explicit closure count is evidence about orders; it never establishes that
+a physical table is free. Empty, missing, failed or partial reads retain unknown
+state. POS version, complete visibility and initialization remain unverified.
+
+The panel performs no order request when opening, changing settings or refreshing
+readiness. Its button is available only for a prepared saved connection with
+confirmed links and no parent operation. One in-flight request is permitted;
+closing, scope changes, recheck or disconnect discard its late result. Retry
+clears old success, malformed/inconsistent/other-scope responses are refused,
+and displayed messages are fixed Ukrainian text. The existing 15-second polling
+and all protected maps, photographs, staff and booking behavior are unchanged.
+
+Saved-connection summary and connection drafts are separate views. Starting a
+new/edit flow unmounts both saved readiness and order panels, invalidating late
+diagnostics even when the saved revision has not changed yet. Draft credentials
+or a different selected organization can never be presented beside old reading
+evidence. Cancel/reopen shows the saved summary with fresh panels; a successful
+confirmed save exits edit mode using the newly saved revision.
+
+These diagnostics are transient reading evidence, not an activation receipt.
+`syncEnabled`, worker and POS-read gates remain false. Final activation still
+requires a separate implementation with verified POS-created order visibility
+and explicitly scoped initialization when required; no completeness proof,
+activation button or caller-controlled proof setter is introduced here.

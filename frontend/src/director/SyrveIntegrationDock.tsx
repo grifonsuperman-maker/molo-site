@@ -25,6 +25,7 @@ import {
 } from '../api/syrve';
 import SyrveCatalogPreviewPanel from './SyrveCatalogPreviewPanel';
 import SyrveReadinessPanel from './SyrveReadinessPanel';
+import SyrveOrderDiagnosticsPanel from './SyrveOrderDiagnosticsPanel';
 
 type Step = 1 | 2 | 3;
 
@@ -61,6 +62,7 @@ export default function SyrveIntegrationDock() {
   const [status, setStatus] = useState<SyrveIntegrationStatus>(EMPTY_STATUS);
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>(1);
+  const [editingConnection, setEditingConnection] = useState(false);
   const [displayName, setDisplayName] = useState('MOLO · Syrve');
   const [apiBaseUrl, setApiBaseUrl] = useState('https://api-eu.syrve.live');
   const [apiLogin, setApiLogin] = useState('');
@@ -94,6 +96,7 @@ export default function SyrveIntegrationDock() {
 
   function start(edit = false) {
     requestVersion.current++;
+    setEditingConnection(true);
     setBusy(false);
     setCatalogPreview(null);
     setMappingAcknowledged(false);
@@ -104,7 +107,10 @@ export default function SyrveIntegrationDock() {
     setOrganizations([]);
     setOrganizationId('');
     setApiLogin('');
-    if (!edit) {
+    if (edit) {
+      setDisplayName(status.displayName || 'MOLO · Syrve');
+      setApiBaseUrl(status.apiBaseUrl || 'https://api-eu.syrve.live');
+    } else {
       setDisplayName('MOLO · Syrve');
       setApiBaseUrl('https://api-eu.syrve.live');
     }
@@ -113,6 +119,7 @@ export default function SyrveIntegrationDock() {
 
   function close() {
     requestVersion.current++;
+    setEditingConnection(false);
     setBusy(false);
     setCatalogPreview(null);
     setMappingAcknowledged(false);
@@ -211,6 +218,7 @@ export default function SyrveIntegrationDock() {
       if (version !== requestVersion.current) return;
       setStatus(result.integration);
       setApiLogin('');
+      setEditingConnection(false);
       setStep(3);
     } catch (cause: any) {
       if (version !== requestVersion.current) return;
@@ -297,15 +305,15 @@ export default function SyrveIntegrationDock() {
               <button type="button" onClick={close} aria-label="Закрити налаштування Syrve" className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/5 text-white/60"><X size={19} /></button>
             </header>
 
-            <div className="mt-6 grid grid-cols-3 gap-2">
+            {(editingConnection || step === 3) && <div className="mt-6 grid grid-cols-3 gap-2">
               <StepBadge number="1" label="Дані доступу" active={step === 1} done={step > 1} />
               <StepBadge number="2" label="Ресторан і столи" active={step === 2} done={step > 2} />
               <StepBadge number="3" label="Готово" active={step === 3} done={false} />
-            </div>
+            </div>}
 
             {(error || notice) && <div className={`mt-4 rounded-2xl border p-3 text-sm ${error ? 'border-red-300/35 bg-red-500/10 text-red-100' : 'border-emerald-300/35 bg-emerald-400/10 text-emerald-100'}`}>{error || notice}</div>}
 
-            {step === 1 && (
+            {editingConnection && step === 1 && (
               <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5">
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-white/35">Крок 1</p>
                 <h2 className="mt-1 text-2xl font-black">Дані доступу</h2>
@@ -327,7 +335,7 @@ export default function SyrveIntegrationDock() {
               </section>
             )}
 
-            {step === 2 && (
+            {editingConnection && step === 2 && (
               <section className="mt-5 rounded-[28px] border border-emerald-200/20 bg-neutral-950/80 p-4 sm:p-5">
                 <div className="flex items-center gap-3"><span className="grid h-12 w-12 place-items-center rounded-full border border-emerald-200/35 bg-emerald-400/10 text-emerald-100"><Check size={24} /></span><div><p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-100/50">Доступ підтверджено</p><h2 className="mt-1 text-2xl font-black">Оберіть ресторан</h2></div></div>
                 <div className="mt-5 grid gap-2">{organizations.map((organization) => <button key={organization.id} disabled={busy} type="button" onClick={() => chooseOrganization(organization.id)} className={`flex items-center justify-between rounded-2xl border p-4 text-left disabled:opacity-40 ${organizationId === organization.id ? 'border-emerald-200/50 bg-emerald-400/12 text-emerald-50 shadow-[0_0_24px_rgba(52,211,153,.1)]' : 'border-white/10 bg-black/30 text-white/60'}`}><div className="flex items-center gap-3"><Building2 size={20} /><div><p className="font-black">{organization.name}</p><p className="mt-1 text-xs opacity-45">{organization.id}</p></div></div>{organizationId === organization.id && <Check size={19} />}</button>)}</div>
@@ -353,13 +361,16 @@ export default function SyrveIntegrationDock() {
               </section>
             )}
 
-            {status.hasCredentials && step !== 3 && (
+            {!editingConnection && status.hasCredentials && step !== 3 && (
               <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-white/35">Поточне підключення</p><h2 className="mt-1 text-xl font-black">{status.displayName}</h2><p className="mt-2 text-sm text-white/45">{status.organizationName} · {status.apiLoginMasked}</p><p className="mt-1 text-xs text-white/30">Перевірено: {dateTime(status.lastCheckedAt)}</p></div><span className="rounded-full border border-emerald-200/35 bg-emerald-400/10 px-3 py-1 text-xs font-black text-emerald-100">{connected ? 'Підключено' : 'Потребує перевірки'}</span></div>
                 <div className="mt-4 grid gap-2 sm:grid-cols-3"><button type="button" disabled={busy} onClick={() => void recheck()} className="rounded-2xl border border-cyan-200/35 bg-cyan-400/10 p-3 text-sm font-black text-cyan-100 disabled:opacity-40">Перевірити</button><button type="button" disabled={busy} onClick={() => start(true)} className="rounded-2xl border border-amber-200/35 bg-amber-300/10 p-3 text-sm font-black text-amber-100 disabled:opacity-40">Змінити дані</button><button type="button" disabled={busy} onClick={() => void disconnect()} className="flex items-center justify-center gap-2 rounded-2xl border border-red-200/35 bg-red-500/10 p-3 text-sm font-black text-red-100 disabled:opacity-40"><Unplug size={16} />Відключити</button></div>
               </section>
             )}
-            <SyrveReadinessPanel configurationRevision={status.configurationRevision} />
+            {!editingConnection && <SyrveReadinessPanel configurationRevision={status.configurationRevision} />}
+            {!editingConnection && <SyrveOrderDiagnosticsPanel configurationRevision={status.configurationRevision}
+              organizationId={status.organizationId} linkedTables={status.confirmedLinks}
+              connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy} />}
           </main>
         </div>
       )}

@@ -53,6 +53,12 @@ export class SyrveIntegrationController {
     return this.service.observeOrders(dto);
   }
 
+  @Post('orders-diagnostics')
+  @Header('Cache-Control', 'no-store')
+  orderDiagnostics(@Body() dto: SyrveRevisionDto) {
+    return this.service.orderDiagnostics(dto);
+  }
+
   @Post('recheck')
   recheck(@Body() dto: SyrveRevisionDto, @Req() request: { user?: AuthUser }) {
     return this.service.recheck(dto, request.user);
