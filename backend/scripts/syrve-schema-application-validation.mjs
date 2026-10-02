@@ -11,6 +11,7 @@ export async function runSyrveApplicationValidation(env = process.env) {
   if (env !== process.env) throw new Error('Application validation requires the validated process environment.');
   const require = createRequire(import.meta.url), { DataSource } = require('typeorm');
   const { SYRVE_SCHEMA_STEPS } = require('../dist/syrve/syrve-schema-contract.js');
+  const { legacyMapSlot } = require('../dist/tables/table-map-slots.js');
   const { readSyrveSchemaPreflight, schemaPreflight, preflightFingerprint } = require('../dist/syrve/syrve-schema-preflight.js');
   const source = new DataSource({ type: 'postgres', host: env.DB_HOST, port: Number(env.DB_PORT || 5432),
     username: env.DB_USER || 'postgres', password: env.DB_PASSWORD || 'postgres', database: env.DB_NAME,
@@ -41,10 +42,15 @@ export async function runSyrveApplicationValidation(env = process.env) {
           await new Migration().down(runner);
           await manager.query('DELETE FROM public.migrations WHERE name=$1', [step.name]);
         }
-        const table = randomUUID(), integration = randomUUID();
-        await manager.query('INSERT INTO public.tables(id,table_number,status) VALUES ($1,\'1\',\'cleaning\')', [table]);
+        // Startup may already have a physical table 1. Reuse its stable UUID;
+        // adding another row would correctly make preflight reject duplicates.
+        const existing = (await manager.query('SELECT id,table_number FROM public.tables ORDER BY id'))
+          .find(row => legacyMapSlot(row.table_number)?.key === 'hall:1');
+        const table = existing?.id || randomUUID(), tableNumber = existing?.table_number || '1', integration = randomUUID();
+        if (!existing) await manager.query('INSERT INTO public.tables(id,table_number,status) VALUES ($1,\'1\',\'cleaning\')', [table]);
         await manager.query('INSERT INTO public.syrve_integrations(id,display_name,status,api_login_encrypted,api_login_iv,api_login_auth_tag) VALUES ($1,\'Synthetic application CI\',\'not_connected\',\'synthetic-cipher\',\'synthetic-iv\',\'synthetic-tag\')', [integration]);
-        if (prefix >= 3) await manager.query('INSERT INTO public.table_map_identities(table_id,map_key) VALUES ($1,\'hall:1\')', [table]);
+        if (prefix >= 3 && !(await manager.query('SELECT table_id FROM public.table_map_identities WHERE table_id=$1', [table])).length)
+          await manager.query('INSERT INTO public.table_map_identities(table_id,map_key) VALUES ($1,\'hall:1\')', [table]);
         if (prefix >= 5) {
           const link = randomUUID();
           await manager.query('INSERT INTO public.syrve_table_links(id,integration_id,organization_id,molo_table_id,syrve_table_id,last_known_number) VALUES ($1,$2,gen_random_uuid(),$3,gen_random_uuid(),1)', [link, integration, table]);
@@ -72,7 +78,7 @@ export async function runSyrveApplicationValidation(env = process.env) {
         await manager.query('UPDATE public.tables SET table_number=\'99999999\' WHERE id=$1', [table]);
         await assert.rejects((async () => { for (const sql of plan.request.sql_statements.slice(1)) await manager.query(sql); })(), /Syrve audit changed: physical/);
         await manager.query('ROLLBACK TO SAVEPOINT changed_data');
-        assert.equal((await manager.query('SELECT table_number FROM public.tables WHERE id=$1', [table]))[0].table_number, '1');
+        assert.equal((await manager.query('SELECT table_number FROM public.tables WHERE id=$1', [table]))[0].table_number, tableNumber);
         for (const sql of plan.request.sql_statements.slice(1)) await manager.query(sql);
         const result = await readAudit(manager);
         for (const [key, value] of Object.entries(audit.hashes).filter(([key]) => key.startsWith('business.') && key !== 'business.syrve_integrations')) assert.equal(result.hashes[key], value);
