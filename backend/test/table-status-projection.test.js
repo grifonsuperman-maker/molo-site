@@ -192,6 +192,7 @@ test('existing availability blocks still overlay the common status result as clo
   const payload = await cohort(physical, projection).bookings.getTableStatuses({ bookingDate: TODAY, bookingTime: '19:00' });
   const block = { id: id(300), table: physical, blockDate: TODAY, startTime: '18:00', endTime: '22:00', reason: 'CI' };
   const blocks = new AvailabilityBlocksService({}, { find: async () => [block] }, {}, {}, { find: async () => [physical] }, {}, {}, {});
+  blocks.today = () => TODAY;
   const result = await blocks.applyTableStatuses({ bookingDate: TODAY, bookingTime: '19:00' }, payload);
   assert.equal(result.statuses['12'].status, 'closed');
   assert.equal(result.statuses['12'].reason, 'availability_block');

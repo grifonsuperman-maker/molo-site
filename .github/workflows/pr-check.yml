@@ -106,6 +106,10 @@ jobs:
         run: node backend/scripts/syrve-worker-validation.mjs
       - name: Validate read-only Syrve readiness and schema preflight
         run: node backend/scripts/syrve-readiness-validation.mjs
+      - name: Rebuild and bind Syrve application artifacts to the clean checkout
+        run: node backend/scripts/syrve-application-build.mjs --build
+      - name: Validate reviewed Syrve application plans and preservation for every prefix
+        run: node backend/scripts/syrve-schema-application-validation.mjs
       - name: Capture fresh schema audit
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline
