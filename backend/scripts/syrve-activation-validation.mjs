@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
+import {AsyncLocalStorage} from 'node:async_hooks';
 import {createRequire} from 'node:module';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {assertFreshSchemaReferenceTarget} from './fresh-schema-reference.mjs';
@@ -27,7 +28,9 @@ export async function runSyrveActivationValidation(env=process.env){
   const options={type:'postgres',host:env.DB_HOST,port:Number(env.DB_PORT||5432),username:env.DB_USER||'postgres',password:env.DB_PASSWORD||'postgres',
     database:env.DB_NAME,synchronize:false,entities:[fileURLToPath(new URL('../dist/**/*.entity.js',import.meta.url))],
     extra:{application_name:'syrve-activation-ci',connectionTimeoutMillis:5000,statement_timeout:10000}};
-  let source=new DataSource(options);await source.initialize();const other=new DataSource(options);await other.initialize();
+  let source=new DataSource(options);await source.initialize();
+  const other=new DataSource({...options,extra:{...options.extra,application_name:'syrve-activation-ci-other'}});await other.initialize();
+  const caller=new AsyncLocalStorage();let idleCaller=0;
   const old=Object.fromEntries(['SYRVE_CREDENTIALS_SECRET','SYRVE_APP_ID','SYRVE_APP_CLIENT_SECRET'].map(key=>[key,env[key]]));
   env.SYRVE_CREDENTIALS_SECRET='synthetic-activation-ci-secret';delete env.SYRVE_APP_ID;delete env.SYRVE_APP_CLIENT_SECRET;
   const org=randomUUID(),provider=randomUUID(),group=randomUUID(),order=randomUUID(),correlation=randomUUID(),actor={sub:randomUUID(),role:'owner',directorSessionVersion:1};
@@ -48,7 +51,9 @@ export async function runSyrveActivationValidation(env=process.env){
     return (await new TableStatusProjectionService(new SyrveStatusReadService(source)).capture([table])).tables.get(tableId)?.state;};
   globalThis.fetch=async(url,request)=>{
     const path=new URL(url).pathname,body=JSON.parse(request.body);
-    assert.equal(Number((await other.query("SELECT count(*) AS count FROM pg_stat_activity WHERE application_name='syrve-activation-ci' AND state='idle in transaction'"))[0].count),0);
+    const name=caller.getStore()||options.extra.application_name;
+    idleCaller=Number((await other.query("SELECT count(*) AS count FROM pg_stat_activity WHERE application_name=$1 AND state='idle in transaction'",[name]))[0].count);
+    assert.equal(idleCaller,0,'HTTP must not span a transaction in its caller pool');
     let value;
     if(path.endsWith('access_token')){assert.equal(body.apiLogin,'synthetic-activation-ci-login');value={token:'synthetic-ci-token'};}
     else if(path.endsWith('/organizations'))value={organizations:[{id:org,name:'Тест'}]};
@@ -80,8 +85,10 @@ export async function runSyrveActivationValidation(env=process.env){
     const beforePhysical=await physical(),before=await saved(),p=await service().preview({configurationRevision:await revision()},actor);
     assert.equal(commands,0);assert.deepEqual(await saved(),before);assert.deepEqual(await physical(),beforePhysical);
     const dto={configurationRevision:p.configurationRevision,confirmationProof:p.confirmation.proof,confirmed:true};
-    const race=await Promise.allSettled([service().enable(dto,actor),service(other).enable(dto,actor)]);
-    assert.equal(race.filter(value=>value.status==='fulfilled'&&value.value.syncEnabled).length,1);
+    const race=await Promise.allSettled([caller.run(options.extra.application_name,()=>service().enable(dto,actor)),
+      caller.run(other.options.extra.application_name,()=>service(other).enable(dto,actor))]);
+    assert.equal(race.filter(value=>value.status==='fulfilled'&&value.value.syncEnabled).length,1,JSON.stringify({idleCaller,
+      outcomes:race.map(value=>value.status==='fulfilled'?{enabled:value.value.syncEnabled,code:value.value.code}:{status:value.reason.getStatus?.(),code:value.reason.getResponse?.()?.code})}));
     assert.equal(race.find(value=>value.status==='rejected').reason.getStatus(),409);assert.equal(commands,1);
     assert.deepEqual(await physical(),beforePhysical);assert.deepEqual(await saved(),before);
     await assert.rejects(service().enable(dto,actor),error=>error.getStatus()===409);
