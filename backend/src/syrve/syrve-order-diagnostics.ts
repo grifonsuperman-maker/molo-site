@@ -1,4 +1,5 @@
 import type { buildSyrveOrderObservation, ObservationCheckName } from './syrve-order-observer';
+import { missingPosVersions, type SyrvePosVersions } from './syrve-pos-version';
 
 const CHECKS: readonly ObservationCheckName[] = ['connection', 'terminalGroups', 'restaurantSections',
   'posAvailability', 'ordersByTable', 'ordersById'];
@@ -6,11 +7,10 @@ const SAFE_CODES = new Set(['SYRVE_AUTH_FAILED', 'SYRVE_ACCESS_DENIED', 'SYRVE_R
   'SYRVE_TIMEOUT', 'SYRVE_UNAVAILABLE', 'SYRVE_INVALID_RESPONSE', 'SYRVE_NO_ORGANIZATIONS',
   'SYRVE_ORGANIZATION_UNAVAILABLE', 'SYRVE_OBSERVATION_LIMIT']);
 
-// The Director view receives counts and fixed diagnostics, never order UUIDs,
+// The Director view receives table counts and fixed diagnostics, never orders,
 // provider payloads, credentials, or a receipt that could enable synchronization.
 export function directorOrderDiagnostics(observation: ReturnType<typeof buildSyrveOrderObservation>
-  & { configurationRevision: string }) {
-  const countOrders = (state: 'open' | 'closed' | 'unknown') => observation.orders.filter(order => order.state === state).length;
+  & { configurationRevision: string }, posVersions: SyrvePosVersions = missingPosVersions(observation.tables.length)) {
   const countGroups = (state: 'alive' | 'sleeping' | 'offline' | 'unknown') => observation.terminalGroups.filter(group => group.state === state).length;
   return {
     configurationRevision: observation.configurationRevision, organizationId: observation.organizationId,
@@ -22,16 +22,16 @@ export function directorOrderDiagnostics(observation: ReturnType<typeof buildSyr
     }),
     summary: {
       linkedTables: observation.tables.length,
-      tablesWithOpenOrders: observation.tables.filter(table => table.state === 'open').length,
+      tablesWithOccupancy: observation.tables.filter(table => table.state === 'open').length,
       unknownTables: observation.tables.filter(table => table.state === 'unknown').length,
-      observedOrders: observation.orders.length, openOrders: countOrders('open'),
-      explicitlyClosedOrders: countOrders('closed'), unknownOrders: countOrders('unknown'),
-      unresolvedKnownOrders: new Set(observation.tables.flatMap(table => table.unknownOrders.map(order => order.id))).size,
       terminalGroups: { alive: countGroups('alive'), sleeping: countGroups('sleeping'),
         offline: countGroups('offline'), unknown: countGroups('unknown') },
     },
+    posVersions,
     diagnostics: { complete: false as const, posOrderVisibility: 'not_verified' as const,
-      posVersion: 'not_verified' as const, initializationPerformed: false as const },
+      posVersion: posVersions.read.unsupported ? 'unsupported' as const
+        : observation.tables.length && !posVersions.read.unknown ? 'verified' as const : 'not_verified' as const,
+      initializationPerformed: false as const },
     activationAvailable: false as const, syncEnabled: false as const,
     statusesApplied: false as const, renamingApplied: false as const,
   };

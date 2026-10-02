@@ -29,7 +29,7 @@ export type SyrveOrderProbe = {
   completedAt: string;
   authentication: 'v2' | 'legacy_v1' | null;
   checks: Record<ObservationCheckName, ObservationCheck>;
-  terminalGroups: { active: { id: string }[]; sleeping: { id: string }[] } | null;
+  terminalGroups: { active: { id: string; posVersion?: string | null }[]; sleeping: { id: string; posVersion?: string | null }[] } | null;
   catalogTables: { id: string; terminalGroupId: string; isDeleted: boolean }[] | null;
   availability: { terminalGroupId: string; isAlive: boolean }[] | null;
   byTable: SyrveObservedOrder[] | null;

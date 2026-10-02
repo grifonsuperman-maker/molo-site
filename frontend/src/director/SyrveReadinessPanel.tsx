@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { syrveApi, type SyrveReadiness } from '../api/syrve';
 
 const LABELS: Record<string, string> = { schema: 'Підготовка бази', connection: 'Збережене підключення',
-  mapping: 'Зв’язки столів', state: 'Збережений стан замовлень', orders: 'Доступ до замовлень',
+  mapping: 'Зв’язки столів', state: 'Збережений стан столів', orders: 'Читання стану столів',
   visibility: 'Повнота даних каси', activation: 'Увімкнення синхронізації' };
 const MESSAGES: Record<string, string> = {
   SCHEMA_VERIFIED: 'Структуру бази та історію підготовки підтверджено.',
@@ -12,11 +12,11 @@ const MESSAGES: Record<string, string> = {
   CONNECTION_REQUIRED: 'Збережіть і перевірте підключення до ресторану.',
   MAPPING_VALID: 'Збережені зв’язки відповідають існуючим столам MOLO.',
   MAPPING_REQUIRED: 'Підтвердьте коректні зв’язки столів після підготовки бази.',
-  STATE_VALID: 'Збережений стан замовлень пройшов перевірку.',
-  STATE_UNOBSERVED: 'Замовлення ще не спостерігалися автоматично.',
+  STATE_VALID: 'Збережений стан столів пройшов перевірку.',
+  STATE_UNOBSERVED: 'Стани столів ще не перевірялися автоматично.',
   STATE_REQUIRES_AUDIT: 'Збережений стан потребує перевірки без зміни столів.',
-  ORDER_ACCESS_NOT_CHECKED: 'Права доступу до замовлень перевіряються окремо після підключення.',
-  POS_VISIBILITY_NOT_VERIFIED: 'Повноту даних каси ще не підтверджено. Відсутність замовлення не означає його закриття.',
+  ORDER_ACCESS_NOT_CHECKED: 'Права на читання стану столів перевіряються окремо після підключення.',
+  POS_VISIBILITY_NOT_VERIFIED: 'Повноту даних каси ще не підтверджено. Відсутність даних не означає, що стіл вільний.',
   ACTIVATION_NOT_AVAILABLE: 'Увімкнення стане доступним після завершення підготовки та перевірок.',
 };
 const CODES: Record<string, readonly string[]> = { schema: ['SCHEMA_VERIFIED','SCHEMA_PENDING','SCHEMA_REQUIRES_AUDIT'],

@@ -100,8 +100,7 @@ test('Director diagnostics expose counts for multiple orders and tables, preserv
   h.state.links = [link(TABLE, [ORDER, ORDER2, ORDER3]), link(TABLE2, [ORDER])];
   const before = structuredClone({ state: h.state, tables: h.tables });
   const result = await h.service.orderDiagnostics(h.dto());
-  assert.deepEqual(result.summary, { linkedTables: 2, tablesWithOpenOrders: 2, unknownTables: 0,
-    observedOrders: 3, openOrders: 2, explicitlyClosedOrders: 1, unknownOrders: 0, unresolvedKnownOrders: 0,
+  assert.deepEqual(result.summary, { linkedTables: 2, tablesWithOccupancy: 2, unknownTables: 0,
     terminalGroups: { alive: 1, sleeping: 0, offline: 0, unknown: 0 } });
   assert.equal(result.configurationRevision, h.state.entity.configurationRevision);
   assert.equal(result.organizationId, ORG);
@@ -111,7 +110,8 @@ test('Director diagnostics expose counts for multiple orders and tables, preserv
   assert.deepEqual({ state: h.state, tables: h.tables }, before);
   assert.deepEqual(h.writes, []);
   for (const privateValue of [ORDER, ORDER2, ORDER3, TABLE, TABLE2, MOLO, MOLO2, GROUP, LOGIN, TOKEN,
-    'apiLoginEncrypted', 'customer', 'externalData', 'permission', 'minimumPosVersion']) {
+    'apiLoginEncrypted', 'customer', 'externalData', 'permission', 'minimumPosVersion',
+    'observedOrders', 'openOrders', 'explicitlyClosedOrders', 'unknownOrders', 'unresolvedKnownOrders']) {
     assert.ok(!JSON.stringify(result).includes(privateValue), privateValue);
   }
   assert.ok(h.calls.every(call => !/init_by_table|webhooks|schema/.test(call.path)));
@@ -120,8 +120,8 @@ test('Director diagnostics expose counts for multiple orders and tables, preserv
 test('Director diagnostics report empty discovery as unknown and retain unresolved known orders', async (t) => {
   const h = serviceSetup(t, { '/api/1/order/by_table': orders(), '/api/1/order/by_id': orders() });
   const result = await h.service.orderDiagnostics(h.dto());
-  assert.equal(result.summary.openOrders, 0); assert.equal(result.summary.explicitlyClosedOrders, 0);
-  assert.equal(result.summary.unknownTables, 1); assert.equal(result.summary.unresolvedKnownOrders, 1);
+  assert.equal(result.summary.tablesWithOccupancy, 0); assert.equal(result.summary.unknownTables, 1);
+  assert.equal(result.summary.openOrders, undefined); assert.equal(result.summary.explicitlyClosedOrders, undefined);
   assert.equal(result.diagnostics.posOrderVisibility, 'not_verified');
   assert.equal(result.activationAvailable, false); assert.deepEqual(h.writes, []);
 });
@@ -130,9 +130,8 @@ test('permission failures and partial by-ID reads never publish successful occup
   const h = serviceSetup(t, { '/api/1/order/by_id': Response.json({ error: LOGIN + TOKEN }, { status: 403 }) });
   const result = await h.service.orderDiagnostics(h.dto());
   assert.deepEqual(result.checks.find(check => check.key === 'ordersById'), { key: 'ordersById', status: 'error', code: 'SYRVE_ACCESS_DENIED' });
-  assert.equal(result.summary.openOrders, 0); assert.equal(result.summary.explicitlyClosedOrders, 0);
-  assert.equal(result.summary.tablesWithOpenOrders, 0); assert.equal(result.summary.unknownTables, 1);
-  assert.equal(result.summary.unknownOrders, 1);
+  assert.equal(result.summary.tablesWithOccupancy, 0); assert.equal(result.summary.unknownTables, 1);
+  assert.equal(result.summary.unknownOrders, undefined);
   assert.ok(!JSON.stringify(result).includes(LOGIN)); assert.ok(!JSON.stringify(result).includes(TOKEN));
   assert.deepEqual(h.writes, []);
 });
@@ -156,6 +155,67 @@ test('Director diagnostics retain preparation, saved revision and mapping guards
   h.state.entity.status = 'connected'; h.state.links = [];
   await assert.rejects(h.service.orderDiagnostics(h.dto()), error => error.getStatus() === 400);
   assert.equal(h.calls.length, 0); assert.deepEqual(h.writes, []);
+});
+
+test('documented POS versions produce table-scoped support without initializing or applying statuses', async (t) => {
+  const payload = groups(); payload.terminalGroups[0].items[0].posVersion = '7.7.1.123';
+  const h = serviceSetup(t, { '/api/1/terminal_groups': payload });
+  const before = structuredClone({ state: h.state, tables: h.tables });
+  const result = await h.service.orderDiagnostics(h.dto());
+  assert.deepEqual(result.posVersions, { read: { supported: 1, unsupported: 0, unknown: 0 },
+    initialization: { supported: 1, unsupported: 0, unknown: 0 } });
+  assert.equal(result.diagnostics.posVersion, 'verified');
+  for (const flag of ['complete', 'initializationPerformed']) assert.equal(result.diagnostics[flag], false);
+  for (const flag of ['activationAvailable', 'syncEnabled', 'statusesApplied', 'renamingApplied']) assert.equal(result[flag], false);
+  assert.equal(result.diagnostics.posOrderVisibility, 'not_verified');
+  assert.equal(result.summary.tablesWithOccupancy, 1);
+  assert.deepEqual({ state: h.state, tables: h.tables }, before); assert.deepEqual(h.writes, []);
+  assert.ok(!h.calls.some(call => /init_by_table|commands\/status|awake|webhook/.test(call.path)));
+});
+
+test('mixed mapped POS versions cannot borrow support from a different register', async (t) => {
+  const payload = groups([GROUP, GROUP2]);
+  payload.terminalGroups[0].items[0].posVersion = '7.10.0';
+  payload.terminalGroups[0].items[1].posVersion = '7.4.5';
+  const h = serviceSetup(t, { '/api/1/terminal_groups': payload,
+    '/api/1/reserve/available_restaurant_sections': sections([{ id: TABLE, group: GROUP, isDeleted: false },
+      { id: TABLE2, group: GROUP2, isDeleted: false }]), '/api/1/terminal_groups/is_alive': availability([GROUP, GROUP2]) });
+  h.state.links = [link(), link(TABLE2)];
+  const result = await h.service.orderDiagnostics(h.dto());
+  assert.deepEqual(result.posVersions, { read: { supported: 1, unsupported: 1, unknown: 0 },
+    initialization: { supported: 1, unsupported: 1, unknown: 0 } });
+  assert.equal(result.diagnostics.posVersion, 'unsupported'); assert.equal(result.activationAvailable, false);
+});
+
+test('unknown POS version is never inferred from organization RMS, timestamps or successful reads', async (t) => {
+  const payload = groups();
+  const h = serviceSetup(t, { '/api/1/terminal_groups': payload,
+    '/api/1/organizations': { organizations: [{ id: ORG, name: 'MOLO', version: '9.9.9', posVersion: '9.9.9' }] } });
+  for (const version of [undefined, null, 'provider-secret-token', { apiLogin: LOGIN }, '7.7.1-beta', '7.7.1\n']) {
+    payload.terminalGroups[0].items[0].posVersion = version;
+    const result = await h.service.orderDiagnostics(h.dto());
+    assert.equal(result.summary.tablesWithOccupancy, 1);
+    assert.equal(result.diagnostics.posVersion, 'not_verified');
+    assert.deepEqual(result.posVersions, { read: { supported: 0, unsupported: 0, unknown: 1 },
+      initialization: { supported: 0, unsupported: 0, unknown: 1 } });
+    assert.ok(!JSON.stringify(result).includes('provider-secret-token')); assert.ok(!JSON.stringify(result).includes(LOGIN));
+  }
+  assert.deepEqual(h.writes, []);
+});
+
+test('a failed catalog invalidates version evidence while a failed state read never applies occupancy', async (t) => {
+  const payload = groups(); payload.terminalGroups[0].items[0].posVersion = '7.7.1';
+  const h = serviceSetup(t, { '/api/1/terminal_groups': payload,
+    '/api/1/reserve/available_restaurant_sections': Response.json({ error: LOGIN }, { status: 403 }) });
+  let result = await h.service.orderDiagnostics(h.dto());
+  assert.equal(result.posVersions.read.unknown, 1); assert.equal(result.diagnostics.posVersion, 'not_verified');
+  assert.equal(result.summary.unknownTables, 1); assert.equal(result.summary.tablesWithOccupancy, 0);
+  h.routes['/api/1/reserve/available_restaurant_sections'] = sections();
+  h.routes['/api/1/order/by_id'] = Response.json({ error: LOGIN }, { status: 403 });
+  result = await h.service.orderDiagnostics(h.dto());
+  assert.equal(result.posVersions.read.supported, 1); assert.equal(result.diagnostics.posVersion, 'verified');
+  assert.equal(result.summary.unknownTables, 1); assert.equal(result.summary.tablesWithOccupancy, 0);
+  assert.equal(result.diagnostics.complete, false); assert.equal(result.activationAvailable, false); assert.deepEqual(h.writes, []);
 });
 
 test('Director diagnostics discard changed configuration or staff status during an upstream probe', async (t) => {

@@ -218,7 +218,8 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 8c | Unified effective status reads with the existing role/date priorities (merged #274) | map/status read services, shared projection, dependency wiring and regression tests; sync remains off |
 | 9 | Disabled-by-default backend worker, configuration fencing, one runner, backoff and durable last good state (merged #275) | Syrve worker/module/state service and failure/concurrency tests; no automatic activation |
 | 10a | Read-only readiness and target-guarded schema adoption preflight (this PR) | schema contracts/catalog reader, Director GET/panel, read-only operator and disposable PostgreSQL checks; no application or activation |
-| 10b1 | Explicit Director order/POS diagnostics after the reviewed schema-adoption path; safe counts and stale-response handling, no activation | aggregate diagnostics projection/route, Director API/panel, authorization and read-only/stale-response regression tests |
+| 10b1 | Explicit Director diagnostics after the reviewed schema-adoption path (merged #278); stale-response handling, no activation | aggregate diagnostics projection/route, Director API/panel, authorization and read-only/stale-response regression tests |
+| 10b2 | Table-only Director diagnostics and mapped POS version compatibility; no initialization or activation | bounded version parser/counts, saved-scope probe/projection, Director diagnostics/readiness text and regression tests |
 | 10b | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
 
 All paths above are under `backend/` unless prefixed `frontend/`. Boundaries may
@@ -1062,3 +1063,53 @@ These diagnostics are transient reading evidence, not an activation receipt.
 requires a separate implementation with verified POS-created order visibility
 and explicitly scoped initialization when required; no completeness proof,
 activation button or caller-controlled proof setter is introduced here.
+
+### PR 10b2 table diagnostics and POS version compatibility
+
+This stage starts from fresh main `7c20c0f4e330640e00c3eca10dfcbb6be6b40796`,
+after the manual merge of #278. The product scope is table statuses only. Syrve's
+open/closed account records are an internal source of occupancy evidence; MOLO
+does not add order management, items, payments, sums or customer details. The
+Director diagnostics response and UI now contain table/register counts only;
+the previous aggregate order counters are removed. Readiness and catalog text
+also describe table status checks rather than a separate order feature.
+
+Official OpenAPI was downloaded again on 2026-10-02 from
+https://api-eu.syrve.live/api-docs/docs, SHA-256
+`e7f6671de2f95ce4c6de543e3fcdf096ab22f08466c56544b789f9ef00470b6d`.
+Its terminal-group schema includes nullable `posVersion`. The documented minimum
+for table/by-ID reads is 7.4.6; `init_by_table` requires 7.7.1 and the separate
+loading-data permission. Command status uses `organizationId`/`correlationId`
+and distinguishes InProgress, Success and Error. This stage invokes neither
+initialization nor command-status, wake or webhook endpoints.
+
+The existing bounded read probe now retains only a strictly numeric three/four
+component POS version from the selected organization's terminal groups. Absent,
+null, malformed, suffixed or arbitrary version text becomes unknown and is never
+projected. Numeric comparison handles 7.10 correctly and preserves distinct read
+and initialization version prerequisites. Organization RMS/cloud API versions,
+successful state reads and order timestamps do not establish the installed POS version.
+
+Version compatibility is counted per confirmed physical table, using that
+table's unique, non-deleted catalog entry and active terminal group. A missing,
+deleted, sleeping, ambiguous or foreign-group table stays unknown; a supported
+unrelated register cannot supply evidence for it. Failed connection/group/section
+reads invalidate every version count. A fresh version finding is independent of
+successful access to table-state data and never establishes permissions or completeness.
+
+The saved-revision/link/manual/table fingerprint encloses both table and version
+diagnostics, without a database transaction over HTTP or a write to any table,
+settings, audit, durable ledger or overrides. Frontend decoding verifies both
+per-table count totals, version-state consistency and the ordered prerequisite
+relationship; failed-scope and legacy/inconsistent responses are refused. It
+retains only the table contract and rejects activation-like flags. Existing
+explicit-click, draft/unmount, parent-busy and stale-response guards stay in place.
+
+Even when every mapped POS version supports the required operation, complete
+table-state visibility remains unverified, initialization has not been performed,
+and synchronization/activation/worker/POS-read gates remain off. The next activation
+stage still needs explicitly scoped loading, confirmed command results and fresh
+state verification; version support alone is never an activation receipt. No
+migration, database operation, deployment, environment change or real Syrve
+request is performed during development. Protected assets, table geometry/numbers,
+waiter behavior, booking flow/status priority and exact 15-second polling are unchanged.

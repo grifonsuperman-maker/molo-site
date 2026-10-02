@@ -37,7 +37,8 @@ test('actual API adapter only reads the Director readiness route',async()=>{
 test('Director readiness renders understandable Ukrainian conditions without technical migration details or activation button',()=>{
   const {validateReadiness,SyrveReadinessView}=load();const checked=validateReadiness(report());
   const html=renderToStaticMarkup(React.createElement(SyrveReadinessView,{report:checked}));
-  for(const text of ['Підготовка бази','Зв’язки столів','Повнота даних каси','Відсутність замовлення','ще не підтверджено'])assert.ok(html.includes(text),text);
+  for(const text of ['Підготовка бази','Зв’язки столів','Повнота даних каси','Відсутність даних','ще не підтверджено'])assert.ok(html.includes(text),text);
+  assert.doesNotMatch(html, /[Зз]амовлен/);
   assert.doesNotMatch(html,/CREATE TABLE|syrve_worker_state|fingerprint|<button|api_login/);
 });
 test('malformed or inconsistent readiness never displays a positive result',()=>{

@@ -20,6 +20,7 @@ import { credentialFingerprint, issuePreviewProof, previewFingerprint, verifyPre
 import { settingsVersion, staleSyrveSettings, SyrveSettingsSnapshot, SyrveSettingsStore } from './syrve-settings.store';
 import { buildSyrveOrderObservation } from './syrve-order-observer';
 import { directorOrderDiagnostics } from './syrve-order-diagnostics';
+import { diagnoseSyrvePosVersions } from './syrve-pos-version';
 import type { SyrveStateCapture } from './syrve-state.store';
 
 type EncryptedValue = { encrypted: string; iv: string; authTag: string };
@@ -64,7 +65,7 @@ export class SyrveIntegrationService {
       [expected.syrveTableId], orderIds, controls);
   }
 
-  async observeOrders(dto: SyrveRevisionDto) {
+  private async probeSavedTables(dto: SyrveRevisionDto) {
     const snapshot = await this.checkedRevision(dto);
     const entity = snapshot.entity!;
     if (entity.status !== 'connected' || !entity.organizationId) {
@@ -95,11 +96,17 @@ export class SyrveIntegrationService {
     // No transaction/lock spans HTTP, and even failures do not write settings/logs/state.
     const current = await this.settings.read();
     if (before !== fingerprint(current, await localTables())) throw staleSyrveSettings();
-    return { ...buildSyrveOrderObservation(probe, snapshot.links), configurationRevision: entity.configurationRevision };
+    return { observation: { ...buildSyrveOrderObservation(probe, snapshot.links), configurationRevision: entity.configurationRevision },
+      posVersions: diagnoseSyrvePosVersions(probe, snapshot.links) };
+  }
+
+  async observeOrders(dto: SyrveRevisionDto) {
+    return (await this.probeSavedTables(dto)).observation;
   }
 
   async orderDiagnostics(dto: SyrveRevisionDto) {
-    return directorOrderDiagnostics(await this.observeOrders(dto));
+    const { observation, posVersions } = await this.probeSavedTables(dto);
+    return directorOrderDiagnostics(observation, posVersions);
   }
 
   private requirePrepared(snapshot: SyrveSettingsSnapshot) {

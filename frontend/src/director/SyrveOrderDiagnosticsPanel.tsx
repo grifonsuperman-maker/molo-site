@@ -4,7 +4,7 @@ import { syrveApi, type SyrveOrderCheckKey, type SyrveOrderDiagnostics } from '.
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const LABELS: Record<SyrveOrderCheckKey, string> = {
   connection: 'Доступ до ресторану', terminalGroups: 'Касові групи', restaurantSections: 'Столи ресторану',
-  posAvailability: 'Доступність кас', ordersByTable: 'Замовлення за столами', ordersById: 'Раніше відомі замовлення',
+  posAvailability: 'Доступність кас', ordersByTable: 'Читання стану столів', ordersById: 'Повторна перевірка стану',
 };
 const ERROR_MESSAGES: Record<string, string> = {
   SYRVE_AUTH_FAILED: 'Перевірте API-ключ і збережене підключення.',
@@ -17,11 +17,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   SYRVE_ORGANIZATION_UNAVAILABLE: 'Обраний ресторан більше не доступний у Syrve.',
   SYRVE_OBSERVATION_LIMIT: 'Перевірку зупинено на безпечному ліміті. Потрібна перевірка обсягу даних.',
 };
-const COUNTS = ['linkedTables', 'tablesWithOpenOrders', 'unknownTables', 'observedOrders', 'openOrders',
-  'explicitlyClosedOrders', 'unknownOrders', 'unresolvedKnownOrders'] as const;
+const COUNTS = ['linkedTables', 'tablesWithOccupancy', 'unknownTables'] as const;
 const GROUPS = ['alive', 'sleeping', 'offline', 'unknown'] as const;
+const SUPPORT = ['supported', 'unsupported', 'unknown'] as const;
 type Scope = { configurationRevision: string; organizationId: string; linkedTables: number };
-function invalid(): never { throw new Error('Недійсний результат перевірки замовлень.'); }
+function invalid(): never { throw new Error('Недійсний результат перевірки столів.'); }
 const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
 export function validateOrderDiagnostics(value: unknown, expected: Scope): SyrveOrderDiagnostics {
@@ -35,7 +35,7 @@ export function validateOrderDiagnostics(value: unknown, expected: Scope): Syrve
     || report.syncEnabled !== false || report.activationAvailable !== false
     || report.statusesApplied !== false || report.renamingApplied !== false
     || report.diagnostics?.complete !== false || report.diagnostics.posOrderVisibility !== 'not_verified'
-    || report.diagnostics.posVersion !== 'not_verified' || report.diagnostics.initializationPerformed !== false
+    || report.diagnostics.initializationPerformed !== false
     || !Array.isArray(report.checks) || report.checks.length !== Object.keys(LABELS).length
     || new Set(report.checks.map(check => check?.key)).size !== report.checks.length
     || report.checks.some(check => !check || !Object.prototype.hasOwnProperty.call(LABELS, check.key)
@@ -45,24 +45,34 @@ export function validateOrderDiagnostics(value: unknown, expected: Scope): Syrve
   if (!summary || typeof summary !== 'object' || !summary.terminalGroups
     || COUNTS.some(key => !count(summary[key])) || GROUPS.some(key => !count(summary.terminalGroups[key]))
     || summary.linkedTables !== expected.linkedTables
-    || summary.tablesWithOpenOrders + summary.unknownTables !== summary.linkedTables
-    || summary.openOrders + summary.explicitlyClosedOrders + summary.unknownOrders !== summary.observedOrders) invalid();
+    || summary.tablesWithOccupancy + summary.unknownTables !== summary.linkedTables) invalid();
+  const versions = report.posVersions;
+  if (!versions || !versions.read || !versions.initialization
+    || [versions.read, versions.initialization].some(counts => SUPPORT.some(key => !count(counts[key]))
+      || SUPPORT.reduce((sum, key) => sum + counts[key], 0) !== summary.linkedTables)
+    || versions.read.unknown !== versions.initialization.unknown
+    || versions.read.supported < versions.initialization.supported
+    || versions.read.unsupported > versions.initialization.unsupported
+    || report.diagnostics.posVersion !== (versions.read.unsupported ? 'unsupported'
+      : summary.linkedTables && !versions.read.unknown ? 'verified' : 'not_verified')) invalid();
+  if (report.checks.some(check => ['connection', 'terminalGroups', 'restaurantSections'].includes(check.key) && check.status !== 'ok')
+    && versions.read.unknown !== summary.linkedTables) invalid();
   const required = report.checks.filter(check => check.key !== 'ordersById');
   if ((required.some(check => check.status !== 'ok') || report.checks.some(check => check.key === 'ordersById' && check.status === 'error'))
-    && (summary.openOrders || summary.explicitlyClosedOrders || summary.tablesWithOpenOrders)) invalid();
+    && summary.tablesWithOccupancy) invalid();
   // Retain only the bounded public contract; arbitrary response fields and
   // driver/upstream messages must never become displayed or retained evidence.
   return {
     configurationRevision: report.configurationRevision, organizationId: report.organizationId,
     startedAt: report.startedAt, checkedAt: report.checkedAt,
     checks: report.checks.map(({ key, status, code }) => ({ key, status, code })),
-    summary: { linkedTables: summary.linkedTables, tablesWithOpenOrders: summary.tablesWithOpenOrders,
-      unknownTables: summary.unknownTables, observedOrders: summary.observedOrders, openOrders: summary.openOrders,
-      explicitlyClosedOrders: summary.explicitlyClosedOrders, unknownOrders: summary.unknownOrders,
-      unresolvedKnownOrders: summary.unresolvedKnownOrders,
+    summary: { linkedTables: summary.linkedTables, tablesWithOccupancy: summary.tablesWithOccupancy,
+      unknownTables: summary.unknownTables,
       terminalGroups: { alive: summary.terminalGroups.alive, sleeping: summary.terminalGroups.sleeping,
         offline: summary.terminalGroups.offline, unknown: summary.terminalGroups.unknown } },
-    diagnostics: { complete: false, posOrderVisibility: 'not_verified', posVersion: 'not_verified', initializationPerformed: false },
+    posVersions: { read: { supported: versions.read.supported, unsupported: versions.read.unsupported, unknown: versions.read.unknown },
+      initialization: { supported: versions.initialization.supported, unsupported: versions.initialization.unsupported, unknown: versions.initialization.unknown } },
+    diagnostics: { complete: false, posOrderVisibility: 'not_verified', posVersion: report.diagnostics.posVersion, initializationPerformed: false },
     syncEnabled: false, activationAvailable: false, statusesApplied: false, renamingApplied: false,
   };
 }
@@ -77,15 +87,17 @@ export function SyrveOrderDiagnosticsView({ report }: { report: SyrveOrderDiagno
     <dl className="grid grid-cols-2 gap-3 rounded-2xl border border-white/10 p-3 text-sm">
       <div><dt className="text-white/50">Перевірено зв’язків столів</dt><dd className="font-bold">{report.summary.linkedTables}</dd></div>
       <div><dt className="text-white/50">Столи з невідомим станом</dt><dd className="font-bold">{report.summary.unknownTables}</dd></div>
-      <div><dt className="text-white/50">Побачено відкритих замовлень</dt><dd className="font-bold">{report.summary.openOrders}</dd></div>
-      <div><dt className="text-white/50">Явно закриті замовлення</dt><dd className="font-bold">{report.summary.explicitlyClosedOrders}</dd></div>
-      <div><dt className="text-white/50">Раніше відомі замовлення без підтвердження</dt><dd className="font-bold">{report.summary.unresolvedKnownOrders}</dd></div>
+      <div><dt className="text-white/50">Столи з ознаками зайнятості</dt><dd className="font-bold">{report.summary.tablesWithOccupancy}</dd></div>
       <div><dt className="text-white/50">Доступні касові групи</dt><dd className="font-bold">{report.summary.terminalGroups.alive}</dd></div>
     </dl>
     {(report.summary.terminalGroups.sleeping > 0 || report.summary.terminalGroups.offline > 0 || report.summary.terminalGroups.unknown > 0)
       && <p className="text-sm text-amber-100">Сплячі касові групи: {report.summary.terminalGroups.sleeping}. Недоступні: {report.summary.terminalGroups.offline}. Без підтвердження доступності: {report.summary.terminalGroups.unknown}.</p>}
-    <p className="text-sm text-white/55">Порожня відповідь або зникнення замовлення не означає, що стіл вільний. Закриття окремого замовлення не підтверджує вільний стіл.</p>
-    <p className="text-sm text-amber-100">Повноту даних і версію каси ще не підтверджено. Синхронізація залишається вимкненою.</p>
+    <p className="text-sm text-white/55">{report.diagnostics.posVersion === 'verified' ? 'Версія каси підтримує читання стану столів.'
+      : report.diagnostics.posVersion === 'unsupported' ? 'Для читання стану столів потрібен Syrve POS від версії 7.4.6. Оновіть несумісні каси.'
+        : 'Syrve не підтвердив версію каси для всіх пов’язаних столів. Перевірте налаштування кас.'}</p>
+    {report.posVersions.initialization.unsupported > 0 && <p className="text-sm text-amber-100">Для завантаження повного стану столів потрібен Syrve POS від версії 7.7.1. Оновіть несумісні каси.</p>}
+    <p className="text-sm text-white/55">Порожня відповідь або недоступна каса не підтверджують, що стіл вільний.</p>
+    <p className="text-sm text-amber-100">Повноту стану столів ще не підтверджено. Синхронізація залишається вимкненою.</p>
   </div>;
 }
 
@@ -121,13 +133,13 @@ export default function SyrveOrderDiagnosticsPanel(props: Props) {
   }
   const displayed = eligible && report?.configurationRevision === configurationRevision
     && report.organizationId === organizationId?.toLowerCase() && report.summary.linkedTables === linkedTables;
-  return <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5" aria-label="Перевірка замовлень Syrve">
-    <h2 className="font-black">Замовлення та доступність кас</h2>
+  return <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5" aria-label="Перевірка столів Syrve">
+    <h2 className="font-black">Столи та доступність кас</h2>
     <p className="mt-2 text-sm text-white/55">Одноразова перевірка підтверджених столів. Бронювання, ручні статуси та збережені дані залишаються без змін.</p>
     <button type="button" disabled={!eligible || loading} onClick={() => void checkOrders()}
-      className="mt-3 rounded-xl border border-cyan-200/35 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-100 disabled:opacity-40">Перевірити замовлення та каси</button>
+      className="mt-3 rounded-xl border border-cyan-200/35 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-100 disabled:opacity-40">Перевірити столи та каси</button>
     {!eligible && <p className="mt-3 text-sm text-white/55">{busy ? 'Дочекайтеся завершення поточної дії.' : 'Спочатку збережіть і перевірте підключення та підтвердьте зв’язки столів.'}</p>}
-    {loading && <p className="mt-3 text-sm" role="status">Перевіряємо доступ до замовлень і кас…</p>}
+    {loading && <p className="mt-3 text-sm" role="status">Перевіряємо стан столів і доступність кас…</p>}
     {failed && <p className="mt-3 text-sm text-amber-100" role="alert">Перевірку не завершено або налаштування змінилися. Оновіть підключення та повторіть перевірку.</p>}
     {displayed && report && <SyrveOrderDiagnosticsView report={report} />}
   </section>;

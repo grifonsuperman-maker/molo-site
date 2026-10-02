@@ -262,9 +262,10 @@ export class SyrveClient {
     };
     const groups = await check('terminalGroups', async () => parseTerminalGroups(await post('/api/1/terminal_groups', {
       organizationIds: [probe.organizationId], includeDisabled: false,
-    }), probe.organizationId));
+    }), probe.organizationId, true));
     if (!groups) return finish();
-    probe.terminalGroups = { active: groups.active.map(({ id }) => ({ id })), sleeping: groups.sleeping.map(({ id }) => ({ id })) };
+    probe.terminalGroups = { active: groups.active.map(({ id, posVersion }) => ({ id, posVersion })),
+      sleeping: groups.sleeping.map(({ id, posVersion }) => ({ id, posVersion })) };
     if (!groups.active.length) return finish();
     const groupIds = groups.active.map((group) => group.id);
     const sections = await check('restaurantSections', async () => {
