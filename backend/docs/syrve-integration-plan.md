@@ -1050,6 +1050,13 @@ clears old success, malformed/inconsistent/other-scope responses are refused,
 and displayed messages are fixed Ukrainian text. The existing 15-second polling
 and all protected maps, photographs, staff and booking behavior are unchanged.
 
+Saved-connection summary and connection drafts are separate views. Starting a
+new/edit flow unmounts both saved readiness and order panels, invalidating late
+diagnostics even when the saved revision has not changed yet. Draft credentials
+or a different selected organization can never be presented beside old reading
+evidence. Cancel/reopen shows the saved summary with fresh panels; a successful
+confirmed save exits edit mode using the newly saved revision.
+
 These diagnostics are transient reading evidence, not an activation receipt.
 `syncEnabled`, worker and POS-read gates remain false. Final activation still
 requires a separate implementation with verified POS-created order visibility

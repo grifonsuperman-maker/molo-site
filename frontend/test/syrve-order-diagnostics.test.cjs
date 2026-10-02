@@ -54,6 +54,44 @@ function mounted(api) {
   return { states, render, click: () => button(render()).props.onClick(), unmount: () => cleanup?.() };
 }
 
+function find(node, predicate) {
+  if (!node || typeof node !== 'object') return null;
+  if (predicate(node)) return node;
+  for (const child of [node.props?.children].flat(Infinity)) { const match = find(child, predicate); if (match) return match; }
+  return null;
+}
+function text(node) {
+  if (typeof node === 'string') return node;
+  return node && typeof node === 'object' ? [node.props?.children].flat(Infinity).map(text).join('') : '';
+}
+function dock() {
+  const saved = { ...scope(), id: ORG, displayName: 'Збережене підключення', apiBaseUrl: 'https://api-eu.syrve.live',
+    apiLoginMasked: '••••', hasCredentials: true, organizationName: 'Збережений ресторан', status: 'connected',
+    settingsPrepared: true, confirmedLinks: 2, syncEnabled: false, lastCheckedAt: null, connectedAt: null, lastError: null };
+  const api = { getStatus: async () => saved, test: async () => ({ apiBaseUrl: saved.apiBaseUrl,
+    organizations: [{ id: ORG, name: 'Збережений ресторан' }, { id: OTHER, name: 'Інший ресторан' }] }) };
+  const states = [], refs = [], effects = []; let stateIndex = 0, refIndex = 0, previous;
+  const OrderPanel = () => React.createElement('div', { 'data-order-panel': true });
+  const ReadinessPanel = () => React.createElement('div', { 'data-readiness-panel': true });
+  const hooks = {
+    useState(value) { const position = stateIndex++; if (!(position in states)) states[position] = value;
+      return [states[position], value => { states[position] = typeof value === 'function' ? value(states[position]) : value; }]; },
+    useRef(value) { const position = refIndex++; if (!(position in refs)) refs[position] = { current: value }; return refs[position]; },
+    useEffect(effect, deps) { if (JSON.stringify(previous) !== JSON.stringify(deps)) { previous = deps; effects.push(effect); } },
+  };
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/director/SyrveIntegrationDock.tsx'), 'utf8');
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText,
+    { exports, require: name => name === 'react' ? hooks : name === '../api/syrve' ? { syrveApi: api }
+      : name === './SyrveOrderDiagnosticsPanel' ? { __esModule: true, default: OrderPanel }
+      : name === './SyrveReadinessPanel' ? { __esModule: true, default: ReadinessPanel }
+      : name === './SyrveCatalogPreviewPanel' ? { __esModule: true, default: () => null } : require(name) });
+  const render = () => { stateIndex = 0; refIndex = 0; const tree = exports.default(); while (effects.length) effects.shift()(); return tree; };
+  const click = predicate => { const target = find(render(), predicate); assert.ok(target, 'actual dock control must exist'); target.props.onClick(); };
+  return { render, click, saved, panels: tree => ({ order: find(tree, node => node.type === OrderPanel),
+    readiness: find(tree, node => node.type === ReadinessPanel) }) };
+}
+
 test('the actual API adapter sends only saved configuration revision to the Director diagnostics route', async () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/api/syrve.ts'), 'utf8');
   const exports = {}; let request;
@@ -163,4 +201,43 @@ test('permission failure and sleeping or offline registers retain unknown tables
   const html = renderToStaticMarkup(React.createElement(SyrveOrderDiagnosticsView, { report: checked }));
   assert.match(html, /Syrve не надав потрібного дозволу/); assert.match(html, /Сплячі касові групи: 1/);
   assert.match(html, /Недоступні: 1/); assert.equal(checked.summary.unknownTables, 2);
+});
+
+test('actual dock opens saved diagnostics separately from credential and organization drafts', async () => {
+  const h = dock(); h.render(); await flush(); h.click(node => node.type === 'button' && node.props['aria-label']?.startsWith('Syrve підключено'));
+  let tree = h.render(); assert.ok(h.panels(tree).order); assert.ok(h.panels(tree).readiness);
+  assert.equal(find(tree, node => node.type === 'input' && node.props.type === 'password'), null);
+  h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
+  tree = h.render(); assert.equal(h.panels(tree).order, null); assert.equal(h.panels(tree).readiness, null);
+  assert.equal(find(tree, node => node.type === 'button' && text(node) === 'Відключити'), null);
+  const input = find(tree, node => node.type === 'input' && node.props.type === 'password');
+  assert.ok(input); input.props.onChange({ target: { value: 'test-only-api-secret' } });
+  h.click(node => node.type === 'button' && text(node).includes('Перевірити підключення')); await flush();
+  h.click(node => node.type === 'button' && text(node).includes('Інший ресторан'));
+  tree = h.render(); assert.equal(h.panels(tree).order, null); assert.equal(h.panels(tree).readiness, null);
+  assert.equal(h.saved.configurationRevision, VERSION); assert.equal(h.saved.organizationId, ORG);
+});
+
+test('editing the actual dock unmounts a pending saved probe despite an unchanged saved revision', async () => {
+  const h = dock(); h.render(); await flush(); h.click(node => node.type === 'button' && node.props['aria-label']?.startsWith('Syrve підключено'));
+  assert.ok(h.panels(h.render()).order);
+  const response = deferred(), child = mounted({ orderDiagnostics: () => response.promise }); child.click();
+  h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
+  assert.equal(h.panels(h.render()).order, null); child.unmount();
+  response.resolve(report()); await flush(); assert.equal(child.states[0], null);
+});
+
+test('cancel and reopen return to the saved summary instead of exposing the cancelled draft', async () => {
+  const h = dock(); h.render(); await flush();
+  const cloud = node => node.type === 'button' && node.props['aria-label']?.startsWith('Syrve підключено');
+  h.click(cloud); h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
+  const draftName = find(h.render(), node => node.type === 'input' && node.props.value === h.saved.displayName);
+  assert.ok(draftName); draftName.props.onChange({ target: { value: 'Незбережена чернетка' } });
+  assert.equal(h.panels(h.render()).order, null);
+  h.click(node => node.type === 'button' && node.props['aria-label'] === 'Закрити налаштування Syrve');
+  h.click(cloud); const tree = h.render(); assert.ok(h.panels(tree).order); assert.ok(h.panels(tree).readiness);
+  assert.equal(find(tree, node => node.type === 'input' && node.props.type === 'password'), null);
+  assert.equal(h.saved.configurationRevision, VERSION);
+  h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
+  assert.ok(find(h.render(), node => node.type === 'input' && node.props.value === h.saved.displayName));
 });
