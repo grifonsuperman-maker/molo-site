@@ -31,13 +31,15 @@ export class SyrveActivationStore {
       if (!row.consented_at || typeof row.actor_hash !== 'string' || !/^[0-9a-f]{64}$/.test(row.actor_hash)
         || activationBindings(snapshot, tables) !== row.bindings_fingerprint) throw staleSyrveSettings();
       return { prepared: true, enabled: true, plan: activationPlan(row.loading_plan, snapshot) };
-    } catch { throw new ServiceUnavailableException('Збережене підтвердження автостатусів потребує перевірки. Вимкніть і повторно перевірте інтеграцію.'); }
+    } catch {
+      // Ordinary table edits can invalidate consent without rotating settings.
+      // Keep public/manual reads and explicit recovery available; never reuse
+      // the old scope for upstream commands or projected occupancy.
+      return { ...disabled, prepared: true };
+    }
   }
   async requireDisabled(snapshot: SyrveSettingsSnapshot, manager = this.source.manager) {
-    if (!await this.prepared(manager)) return;
-    const [row] = await manager.query('SELECT enabled,configuration_revision FROM ' + this.table('syrve_sync_activation')
-      + ' WHERE integration_id=$1', [snapshot.entity?.id]);
-    if (row?.enabled && row.configuration_revision === snapshot.entity?.configurationRevision) {
+    if ((await this.read(snapshot, manager)).enabled) {
       throw new ConflictException('Спочатку вимкніть автоматичні статуси перед зміною або повторною перевіркою підключення.');
     }
   }

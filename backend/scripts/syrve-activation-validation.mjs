@@ -31,7 +31,7 @@ export async function runSyrveActivationValidation(env=process.env){
   const old=Object.fromEntries(['SYRVE_CREDENTIALS_SECRET','SYRVE_APP_ID','SYRVE_APP_CLIENT_SECRET'].map(key=>[key,env[key]]));
   env.SYRVE_CREDENTIALS_SECRET='synthetic-activation-ci-secret';delete env.SYRVE_APP_ID;delete env.SYRVE_APP_CLIENT_SECRET;
   const org=randomUUID(),provider=randomUUID(),group=randomUUID(),order=randomUUID(),correlation=randomUUID(),actor={sub:randomUUID(),role:'owner',directorSessionVersion:1};
-  let tableId,integrationId,created=false,original,trigger=false,rows=[],commandError=false,missing=false,hold=null,commands=0;
+  let tableId,integrationId,created=false,original,trigger=false,rows=[],commandError=false,commandPending=false,missing=false,hold=null,commands=0;
   const previousFetch=globalThis.fetch;
   const client=new SyrveClient();
   const settings=(db=source)=>new SyrveSettingsStore(db),activation=(db=source)=>new SyrveActivationStore(db,settings(db));
@@ -57,7 +57,7 @@ export async function runSyrveActivationValidation(env=process.env){
     else if(path.endsWith('is_alive'))value={correlationId:correlation,isAliveStatus:[{organizationId:org,terminalGroupId:group,isAlive:true}]};
     else if(path.endsWith('init_by_table')){commands++;assert.equal(body.organizationId,org);assert.equal(body.terminalGroupId,group);assert.deepEqual(body.tableIds,[provider]);
       if(hold)await hold();value={correlationId:correlation};}
-    else if(path.endsWith('commands/status'))value=commandError?{state:'Error',exception:'private-ci-error'}:{state:'Success'};
+    else if(path.endsWith('commands/status'))value=commandError?{state:'Error',exception:'private-ci-error'}:{state:commandPending?'InProgress':'Success'};
     else if(path.endsWith('by_table'))value={correlationId:correlation,orders:rows};
     else if(path.endsWith('by_id'))value={correlationId:correlation,orders:missing?[]:rows.filter(row=>body.orderIds.includes(row.id))};
     else assert.fail('Unexpected Syrve operation '+path);
@@ -85,12 +85,26 @@ export async function runSyrveActivationValidation(env=process.env){
     assert.equal(race.find(value=>value.status==='rejected').reason.getStatus(),409);assert.equal(commands,1);
     assert.deepEqual(await physical(),beforePhysical);assert.deepEqual(await saved(),before);
     await assert.rejects(service().enable(dto,actor),error=>error.getStatus()===409);
+    // Legitimate physical-number changes disable only effective consent. Public
+    // map reads and a new Director preview remain available without settings edits.
+    const sameRevision=await revision(),renamed=String(9_000_000+Math.floor(Math.random()*1_000_000));
+    await source.query('UPDATE tables SET table_number=$2 WHERE id=$1',[tableId,renamed]);
+    assert.equal((await integration().getStatus()).syncEnabled,false);assert.equal((await service().status()).configurationRevision,sameRevision);
+    const changedTable=await source.getRepository(TableEntity).findOneByOrFail({id:tableId}),projection=new TableStatusProjectionService(new SyrveStatusReadService(source));
+    const changedMap=await projection.captureMap([changedTable],[]);assert.equal(changedMap.syncEnabled,false);
+    assert.equal(projection.physical([changedTable],changedMap)[0].status,'free');assert.equal((await worker.tick()).status,'disabled');
+    assert.equal((await service().preview({configurationRevision:sameRevision},actor)).tableNumbers[0],renamed);assert.equal(commands,1);
+    await source.query('UPDATE tables SET table_number=$2 WHERE id=$1',[tableId,beforePhysical[0].table_number]);
     await source.destroy();source=new DataSource(options);await source.initialize();await worker.onModuleDestroy();
     assert.equal((await integration().getStatus()).syncEnabled,true);assert.equal((await service().status()).syncEnabled,true);
     worker=new SyrveWorkerService(source,settings(),integration());
     rows=[wrapper(order,'New',100)];assert.equal((await worker.tick()).status,'observed');assert.equal((await status()).lastSyrveState,'open');
     assert.deepEqual(await physical(),beforePhysical);const opened=await saved();
     await due();commandError=true;assert.equal((await worker.tick()).status,'failed');assert.deepEqual(await saved(),opened);commandError=false;
+    await due();commandPending=true;assert.equal((await worker.tick()).status,'failed');commandPending=false;
+    assert.ok((await job()).lease_id);const pendingCommands=commands;assert.equal((await new SyrveWorkerStore(other,settings(other)).claim()).status,'busy');
+    assert.equal(commands,pendingCommands);assert.deepEqual(await saved(),opened);
+    await source.query("UPDATE syrve_worker_state SET lease_until=clock_timestamp()-interval '1 second' WHERE integration_id=$1",[integrationId]);
     await due();rows=[];missing=true;assert.equal((await worker.tick()).status,'failed');assert.deepEqual((await saved()).links,opened.links);missing=false;
     await due();rows=[wrapper(order,'Closed',200)];assert.equal((await worker.tick()).status,'observed');assert.deepEqual((await status()).activeSyrveOrderIds,[]);
     assert.equal((await status()).lastSyrveState,'closed');assert.deepEqual(await physical(),beforePhysical);
@@ -101,8 +115,13 @@ export async function runSyrveActivationValidation(env=process.env){
     const atDisable=await saved(),disabled=await service(other).disable({configurationRevision:await revision()},actor);
     assert.equal(disabled.syncEnabled,false);assert.equal((await new SyrveWorkerStore(other,settings(other)).claim()).status,'disabled');
     resume();assert.equal((await late).status,'stale');hold=null;assert.deepEqual(await saved(),atDisable);
+    assert.ok((await job()).lease_id);
     assert.equal((await new SyrveStatusReadService(source).snapshot([tableId])).syncEnabled,false);assert.deepEqual(await physical(),beforePhysical);
     await worker.onModuleDestroy();
+    const recovery=new SyrveTableLoadingStore(other,settings(other));
+    await assert.rejects(recovery.claim(await recovery.capture(await revision())),error=>error.getStatus()===409);
+    // Advance only the disposable lease clock instead of waiting ninety seconds.
+    await source.query("UPDATE syrve_worker_state SET lease_until=clock_timestamp()-interval '1 second' WHERE integration_id=$1",[integrationId]);
 
     // A final receipt-write failure rolls back consent, never the one-use claim.
     const next=await service().preview({configurationRevision:await revision()},actor);

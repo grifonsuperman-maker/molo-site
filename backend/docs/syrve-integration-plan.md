@@ -1212,9 +1212,17 @@ A saved receipt binds credentials, organization, UUID bindings and physical numb
 while manual status/revision and the cumulative ledger remain independent. Settings
 revision changes invalidate consent. Changing/rechecking a live connection or manually
 loading tables requires disabling auto-status first; disconnecting invalidates it directly.
+An ordinary table rename/delete or an invalid saved plan makes consent ineffective
+without breaking public map/manual status reads or the Director's revision/status
+read. New preview, repair and explicit disable remain available; an old binding can
+never authorize worker commands or occupancy while it differs from the saved scope.
 Disabling uses the common settings transaction fence and rotates the configuration.
 Every in-flight runner loses write/command permission, while an unresolved bounded
 lease stays until release/expiry so another instance cannot overlap it.
+The runtime transport reports command start and terminal Success/Error internally.
+An unresolved initialization (pending, expired, timed out or revoked before status
+confirmation) retains its ninety-second lease; retry/backoff cannot release that
+exclusion early. Read-only failures and confirmed terminal commands release normally.
 
 Each worker observation revalidates the consented POS group/version/table, calls scoped
 `init_by_table`, confirms `commands/status`, then performs full table and saved-ID reads.

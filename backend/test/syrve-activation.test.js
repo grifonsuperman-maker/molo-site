@@ -3,6 +3,14 @@ const test=require('node:test');
 const {createCipheriv}=require('node:crypto');
 const {ConflictException}=require('@nestjs/common');
 const {SyrveActivationService}=require('../dist/syrve/syrve-activation.service.js');
+const {SyrveActivationStore}=require('../dist/syrve/syrve-activation.store.js');
+const {SyrveStatusReadStore}=require('../dist/syrve/syrve-status-read.store.js');
+const {SyrveWorkerStore}=require('../dist/syrve/syrve-worker.store.js');
+const {SyrveWorkerRunner}=require('../dist/syrve/syrve-worker.runner.js');
+const {SyrveIntegrationService}=require('../dist/syrve/syrve-integration.service.js');
+const {TableStatusProjectionService}=require('../dist/tables/table-status-projection.service.js');
+const {harness}=require('./helpers/syrve-state-harness.js');
+const {consent}=require('./helpers/syrve-confirmed-worker.js');
 const {SyrveTableLoadingService}=require('../dist/syrve/syrve-table-loading.service.js');
 const {SyrveClient,SyrveClientException,isVerifiedLoadedProbe}=require('../dist/syrve/syrve-client.js');
 const {syrveCredentialsKey}=require('../dist/syrve/syrve-credentials.js');
@@ -78,6 +86,23 @@ test('consent binds credentials and immutable UUID/number bindings while staff s
   h.capture.snapshot.links[0].syrveTableId=id(301);assert.notEqual(activationBindings(h.capture.snapshot,h.capture.tables),before);
   const plan=tableLoadingPlan(probe(scope,[]),[TABLE]);assert.throws(()=>activationPlan(plan,h.capture.snapshot));
 });
+for(const change of ['rename','delete','invalid-plan'])test('stale '+change+' consent keeps manual map/status reads and recovery available',async()=>{
+  const h=harness();Object.assign(h.entity,{apiLoginEncrypted:'synthetic',apiLoginIv:'synthetic',apiLoginAuthTag:'synthetic'});consent(h);
+  const store=new SyrveActivationStore(h.source,h.settings),revision=h.entity.configurationRevision;
+  assert.equal((await store.read(h.snapshot())).enabled,true);
+  await assert.rejects(store.requireDisabled(h.snapshot()),e=>e.getStatus()===409);
+  h.mutate(db=>{db.physical.status='cleaning';if(change==='rename')db.physical.tableNumber='13';
+    if(change==='delete')db.link=null;if(change==='invalid-plan')db.activation.loading_plan.groups=[];});
+  assert.equal((await store.read(h.snapshot())).enabled,false);await store.requireDisabled(h.snapshot());
+  const integration=new SyrveIntegrationService(h.settings,{}, {},{},store);
+  const status=await integration.getStatus();assert.equal(status.syncEnabled,false);assert.equal(status.configurationRevision,revision);
+  h.source.transaction=(_level,action)=>h.settings.localTransaction(action);
+  const read=new SyrveStatusReadStore(h.source,h.settings),projection=new TableStatusProjectionService({snapshot:ids=>read.read(ids)}),table=h.saved().physical;
+  const map=await projection.captureMap([table],[{...table.zone,tables:[table]}]);
+  assert.equal(map.syncEnabled,false);assert.strictEqual(projection.physical([table],map)[0],table);assert.equal(table.status,'cleaning');
+  assert.equal((await new SyrveWorkerStore(h.source,h.settings).claim()).status,'disabled');
+  assert.equal(h.entity.configurationRevision,revision);assert.equal(h.saved().activation.enabled,true);
+});
 test('migration defaults off and refuses to erase any saved Director consent on rollback',async()=>{
   const sql=[],m=new Migration();await m.up({query:async q=>sql.push(q)});assert.match(sql[0],/DEFAULT false/);
   assert.doesNotMatch(sql[0],/UPDATE "tables"|INSERT INTO/);
@@ -122,6 +147,20 @@ for(const failure of ['command','partial','changed','guard','expired','budget'])
   if(failure==='budget')h.controls.requestBudget={remaining:3};
   await assert.rejects(h.read([id(300)]));
   if(['changed','guard','expired','budget'].includes(failure))assert.equal(h.calls.filter(c=>c.path.endsWith('init_by_table')).length,0);
+});
+for(const result of ['InProgress','expired','Error'])test('runtime '+result+' command preserves exclusion until terminal completion or lease expiry',async t=>{
+  const tx=transport(t,{'/api/1/commands/status':result==='expired'?Response.json({}, {status:410}):{state:result}}),h=harness();
+  Object.assign(h.entity,{organizationId:ORG,apiLoginEncrypted:'synthetic',apiLoginIv:'synthetic',apiLoginAuthTag:'synthetic'});
+  h.mutate(db=>{db.link.organization_id=ORG;db.link.syrve_table_id=TABLE;});consent(h);
+  const store=new SyrveWorkerStore(h.source,h.settings),runner=new SyrveWorkerRunner(store,(c,ids,controls)=>
+    tx.client.probeLoadedOrders('https://api-eu.syrve.live','synthetic-login',ORG,[TABLE],ids,controls));
+  assert.equal((await runner.run()).status,'failed');
+  if(result==='Error'){assert.equal(h.saved().worker.lease_id,null);return;}
+  const lease=h.saved().worker.lease_id;assert.ok(lease);const calls=tx.calls.length;
+  h.advance(15001);assert.equal((await runner.run()).status,'busy');assert.equal(tx.calls.length,calls);
+  assert.equal(h.saved().worker.lease_id,lease);h.advance(75000);
+  const replacement=await store.claim();assert.equal(replacement.status,'claimed');assert.notEqual(replacement.lease.id,lease);
+  await store.release(replacement.lease);
 });
 
 test('activation PostgreSQL validation refuses unapproved or remote targets before connection',async()=>{
