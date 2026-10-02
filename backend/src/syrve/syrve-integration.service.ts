@@ -19,6 +19,7 @@ import { buildSyrveMappingPreview } from './syrve-mapping-preview';
 import { credentialFingerprint, issuePreviewProof, previewFingerprint, verifyPreviewProof } from './syrve-preview-proof';
 import { settingsVersion, staleSyrveSettings, SyrveSettingsSnapshot, SyrveSettingsStore } from './syrve-settings.store';
 import { buildSyrveOrderObservation } from './syrve-order-observer';
+import { directorOrderDiagnostics } from './syrve-order-diagnostics';
 import type { SyrveStateCapture } from './syrve-state.store';
 
 type EncryptedValue = { encrypted: string; iv: string; authTag: string };
@@ -95,6 +96,10 @@ export class SyrveIntegrationService {
     const current = await this.settings.read();
     if (before !== fingerprint(current, await localTables())) throw staleSyrveSettings();
     return { ...buildSyrveOrderObservation(probe, snapshot.links), configurationRevision: entity.configurationRevision };
+  }
+
+  async orderDiagnostics(dto: SyrveRevisionDto) {
+    return directorOrderDiagnostics(await this.observeOrders(dto));
   }
 
   private requirePrepared(snapshot: SyrveSettingsSnapshot) {

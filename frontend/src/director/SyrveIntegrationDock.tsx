@@ -25,6 +25,7 @@ import {
 } from '../api/syrve';
 import SyrveCatalogPreviewPanel from './SyrveCatalogPreviewPanel';
 import SyrveReadinessPanel from './SyrveReadinessPanel';
+import SyrveOrderDiagnosticsPanel from './SyrveOrderDiagnosticsPanel';
 
 type Step = 1 | 2 | 3;
 
@@ -360,6 +361,9 @@ export default function SyrveIntegrationDock() {
               </section>
             )}
             <SyrveReadinessPanel configurationRevision={status.configurationRevision} />
+            <SyrveOrderDiagnosticsPanel configurationRevision={status.configurationRevision}
+              organizationId={status.organizationId} linkedTables={status.confirmedLinks}
+              connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy} />
           </main>
         </div>
       )}
