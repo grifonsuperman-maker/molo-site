@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { assertFreshSchemaReferenceTarget } from './fresh-schema-reference.mjs';
-import { inventoryQueries, auditQueries, parseAudit, buildSyrveApplicationPlan } from './syrve-schema-application-plan.mjs';
+import { inventoryQueries, auditQueries, parseAudit, applicationFacts, buildSyrveApplicationPlan } from './syrve-schema-application-plan.mjs';
 
 // Destructive fixtures are confined to the guarded disposable CI database.
 export async function runSyrveApplicationValidation(env = process.env) {
@@ -11,7 +11,7 @@ export async function runSyrveApplicationValidation(env = process.env) {
   if (env !== process.env) throw new Error('Application validation requires the validated process environment.');
   const require = createRequire(import.meta.url), { DataSource } = require('typeorm');
   const { SYRVE_SCHEMA_STEPS } = require('../dist/syrve/syrve-schema-contract.js');
-  const { readSyrveSchemaPreflight, preflightFingerprint } = require('../dist/syrve/syrve-schema-preflight.js');
+  const { readSyrveSchemaPreflight, schemaPreflight, preflightFingerprint } = require('../dist/syrve/syrve-schema-preflight.js');
   const source = new DataSource({ type: 'postgres', host: env.DB_HOST, port: Number(env.DB_PORT || 5432),
     username: env.DB_USER || 'postgres', password: env.DB_PASSWORD || 'postgres', database: env.DB_NAME,
     synchronize: false, migrations: [], logging: false, extra: { connectionTimeoutMillis: 5000, statement_timeout: 10000 } });
@@ -53,6 +53,9 @@ export async function runSyrveApplicationValidation(env = process.env) {
         }
         if (prefix === 6) await manager.query('INSERT INTO public.syrve_worker_state(integration_id,configuration_revision,failure_count) SELECT id,configuration_revision,3 FROM public.syrve_integrations WHERE id=$1', [integration]);
         const audit = await readAudit(manager);
+        const preflight = schemaPreflight(applicationFacts(audit));
+        assert.notEqual(preflight.status, 'requires_audit', JSON.stringify({ prefix, historyValid: preflight.historyValid,
+          steps: preflight.steps.map(({name,status,recorded}) => ({name,status,recorded})), data: applicationFacts(audit).data }));
         const input = { audit, inventory: audit.inventory, reference, context: { sourceCommit: 'a'.repeat(40),
           target: { projectId: 'ci-project', branchId: 'br-ci-restored', endpointId: 'ep-ci-test', host: 'ep-ci-test.ci.neon.tech', database: env.DB_NAME, purpose: 'rehearsal' },
           backup: { projectId: 'ci-project', sourceBranchId: 'br-ci-source', branchId: 'br-ci-backup', parentId: 'br-ci-source',
