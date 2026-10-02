@@ -146,7 +146,7 @@ export async function runSyrveWorkerValidation(env = process.env) {
     await assert.rejects(source.transaction(m=>new Migration().down(m.queryRunner)),/saved worker state exists/);
     await source.query('DELETE FROM "syrve_integrations" WHERE id=$1',[integrationId]);
     assert.equal(await job(),undefined);
-    await consentDatabase(source,new SyrveSettingsStore(source)); integrationId=null;
+    integrationId=null;
     await source.transaction(async(m)=>{await new Migration().down(m.queryRunner);await new Migration().up(m.queryRunner);});
   } finally {
     try {
