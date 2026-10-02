@@ -58,7 +58,7 @@ export async function runSyrveApplicationValidation(env = process.env) {
           await manager.query('INSERT INTO public.syrve_table_sync_states(link_id,integration_id,configuration_revision,organization_id,molo_table_id,syrve_table_id,local_revision) SELECT l.id,l.integration_id,i.configuration_revision,l.organization_id,l.molo_table_id,l.syrve_table_id,gen_random_uuid() FROM public.syrve_table_links l JOIN public.syrve_integrations i ON i.id=l.integration_id WHERE l.id=$1', [link]);
           await manager.query('INSERT INTO public.syrve_order_versions(link_id,order_id,"timestamp",state) VALUES ($1,gen_random_uuid(),100,\'unknown\')', [link]);
         }
-        if (prefix === 6) await manager.query('INSERT INTO public.syrve_worker_state(integration_id,configuration_revision,failure_count) SELECT id,configuration_revision,3 FROM public.syrve_integrations WHERE id=$1', [integration]);
+        if (prefix >= 6) await manager.query('INSERT INTO public.syrve_worker_state(integration_id,configuration_revision,failure_count) SELECT id,configuration_revision,3 FROM public.syrve_integrations WHERE id=$1', [integration]);
         const audit = await readAudit(manager);
         const preflight = schemaPreflight(applicationFacts(audit));
         assert.notEqual(preflight.status, 'requires_audit', JSON.stringify({ prefix, historyValid: preflight.historyValid,

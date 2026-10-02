@@ -1,5 +1,5 @@
 import { SyrveClientException } from './syrve-client';
-import type { SyrveProbeControls } from './syrve-client';
+import type { SyrveLoadedProbeControls } from './syrve-client';
 import type { SyrveOrderProbe } from './syrve-order-observer';
 import { SyrveStateValidationError } from './syrve-state-reducer';
 import type { SyrveOrderObservationBatch } from './syrve-state-reducer';
@@ -7,10 +7,10 @@ import type { SyrveStateCapture } from './syrve-state.store';
 import { SyrveWorkerStore } from './syrve-worker.store';
 import { SYRVE_WORKER_BUDGET_MS, SyrveWorkerError, SyrveWorkerLease, SyrveWorkerResult, workerError } from './syrve-worker.model';
 
-export type SyrveWorkerProbe = (capture: SyrveStateCapture, orderIds: string[], controls: SyrveProbeControls) => Promise<SyrveOrderProbe>;
+export type SyrveWorkerProbe = (capture: SyrveStateCapture, orderIds: string[], controls: SyrveLoadedProbeControls) => Promise<SyrveOrderProbe>;
 
 // Internal engine, neither provider nor controller/export. Tests inject mocks;
-// only the hard-disabled service owns the production runner.
+// the scheduler owns it only for a saved, explicitly consented configuration.
 export class SyrveWorkerRunner {
   private active: Promise<SyrveWorkerResult> | null = null;
   private stopped = false;
@@ -30,14 +30,16 @@ export class SyrveWorkerRunner {
 
   private code(error: unknown): SyrveWorkerError {
     if (error instanceof SyrveStateValidationError) return 'SYRVE_STATE_INVALID';
+    if ((error as any)?.getResponse?.()?.code === 'SYRVE_LOCAL_STATE_CHANGED') return 'SYRVE_LOCAL_STATE_CHANGED';
     if ((error as any)?.getStatus?.() === 409) return 'SYRVE_CONFIGURATION_CHANGED';
     return workerError((error as any)?.getResponse?.()?.code);
   }
 
   private async cycle(): Promise<SyrveWorkerResult> {
-    let lease: SyrveWorkerLease | undefined, linkId: string | undefined, processed = 0;
+    let lease: SyrveWorkerLease | undefined, linkId: string | undefined, processed = 0, unresolvedCommands = 0;
     const controller = new AbortController(); this.abort = controller;
     const deadline = Date.now() + SYRVE_WORKER_BUDGET_MS;
+    const requestBudget = { remaining: 800 }; // Shared bounded cycle; each read/load is additionally capped at 25.
     const timeout = setTimeout(() => controller.abort(), SYRVE_WORKER_BUDGET_MS);
     try {
       const claimed = await this.store.claim();
@@ -57,9 +59,14 @@ export class SyrveWorkerRunner {
           return { status: 'stale', processed, code: 'SYRVE_CONFIGURATION_CHANGED' };
         }
         const batches: SyrveOrderObservationBatch[] = [];
+        const loadingPlan = await this.store.guard(lease, captured);
         for (const orderIds of captured.orderIds) {
           if (this.stopped) return { status: 'stopped', processed };
-          const probe = await this.probe(captured, orderIds, { deadline, signal: controller.signal });
+          const probe = await this.probe(captured, orderIds, { deadline, signal: controller.signal, requestBudget, loadingPlan,
+            visibilityContext: lease.id + ':' + captured.state.localRevision,
+            commandStarted: () => { unresolvedCommands++; },
+            commandFinished: () => { unresolvedCommands--; },
+            beforeCommand: async () => { await this.store.guard(lease!, captured); } });
           if (this.stopped) return { status: 'stopped', processed };
           if (controller.signal.aborted || Date.now() >= deadline) {
             await this.store.failure(lease, link.id, 'SYRVE_TIMEOUT');
@@ -83,10 +90,12 @@ export class SyrveWorkerRunner {
       if (lease && linkId && !this.stopped) {
         try { await this.store.failure(lease, linkId, code); } catch { /* Changed scope or unavailable database: no stale bookkeeping. */ }
       }
-      return { status: this.stopped ? 'stopped' : code === 'SYRVE_CONFIGURATION_CHANGED' ? 'stale' : 'failed', processed, code };
+      return { status: this.stopped ? 'stopped' : ['SYRVE_CONFIGURATION_CHANGED','SYRVE_LOCAL_STATE_CHANGED'].includes(code) ? 'stale' : 'failed', processed, code };
     } finally {
       clearTimeout(timeout); this.abort = null;
-      if (lease) { try { await this.store.release(lease); } catch { /* Bounded DB lease expires after connection loss. */ } }
+      // A timed-out/pending/expired command may still be running in the POS.
+      // Retain exclusion until the bounded lease expires, including revocation.
+      if (lease && unresolvedCommands === 0) { try { await this.store.release(lease); } catch { /* Bounded DB lease expires after connection loss. */ } }
     }
   }
 }

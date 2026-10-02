@@ -6,14 +6,14 @@ const { staleSyrveSettings } = require('../../dist/syrve/syrve-settings.store.js
 // against the compiled adapter and real PostgreSQL in database-reference CI.
 function harness() {
   const entity = { id: randomUUID(), configurationRevision: randomUUID(), organizationId: randomUUID(), status: 'connected' };
-  let db = { worker: null, saved: null, versions: [], link: { id: randomUUID(), integration_id: entity.id,
+  let db = { activation: null, worker: null, saved: null, versions: [], link: { id: randomUUID(), integration_id: entity.id,
     organization_id: entity.organizationId, molo_table_id: randomUUID(), syrve_table_id: randomUUID(),
     last_syrve_state: 'unknown', active_syrve_order_ids: [], manually_freed_syrve_order_ids: [] } };
   db.physical = { id: db.link.molo_table_id, tableNumber: '12', status: 'free', zone: { id: randomUUID() } };
   db.bookings = [];
   let now = 1_000_000, workerFail = false;
   const queries = []; let prepared = true, configurationPresent = true, settingsPrepared = true, fail = false, physicalFail = false, tail = Promise.resolve();
-  const tables = { findOne: async (options) => (options.where.id
+  const tables = { find: async () => [structuredClone(db.physical)], findOne: async (options) => (options.where.id
     ? options.where.id.toLowerCase() === db.physical.id : options.where.tableNumber === db.physical.tableNumber)
     ? structuredClone(db.physical) : null,
     save: async (patch) => {
@@ -27,6 +27,8 @@ function harness() {
     throw new Error(`Unexpected repository ${entity.name}`);
   }, query: async (sql, args = []) => {
     queries.push(sql);
+    if (sql.includes('syrve_sync_activation') && !sql.includes('to_regclass')) return db.activation ? [structuredClone(db.activation)] : [];
+    if (sql.startsWith('SELECT local_revision')) return db.saved ? [{local_revision:db.saved.local_revision}] : [];
     if (sql.includes('syrve_worker_state') && !sql.includes('to_regclass')) {
       if (sql.startsWith('INSERT')) db.worker ||= { integration_id:args[0],configuration_revision:args[1],lease_id:null,lease_until:null,
         failure_count:0,next_attempt_at:0,last_attempt_at:null,last_success_at:null,last_error_code:null,cursor_link_id:null };
@@ -57,6 +59,10 @@ function harness() {
       db.versions = [...versions.values()].sort((a,b) => a.id.localeCompare(b.id));
     } else if (sql.startsWith('UPDATE') && sql.includes('syrve_integrations')) {
       entity.configurationRevision=args[1];
+    } else if (sql.startsWith('UPDATE') && sql.includes('"tables"')) {
+      if (physicalFail) throw new Error('synthetic physical failure');
+      if (args[0] !== db.physical.id) throw new Error('unexpected physical UUID');
+      db.physical.status = args[1]; db.physical.updatedAt = new Date(now);
     } else if (sql.startsWith('UPDATE') && sql.includes('syrve_table_links') && args.length===1) {
       db.link.manually_freed_syrve_order_ids=[...db.link.active_syrve_order_ids];
     } else if (sql.startsWith('UPDATE') && sql.includes('syrve_table_links')) {

@@ -15,12 +15,14 @@ import { SyrveWorkerService } from './syrve-worker.service';
 import { SyrveReadinessService } from './syrve-readiness.service';
 import { SyrveTableLoadingService } from './syrve-table-loading.service';
 import { SyrveTableLoadingStore } from './syrve-table-loading.store';
+import { SyrveActivationStore } from './syrve-activation.store';
+import { SyrveActivationService } from './syrve-activation.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([SyrveIntegration, SyrveTableLink, TableEntity]), LogsModule],
   controllers: [SyrveIntegrationController, SyrveTableRenamingController],
   providers: [SyrveIntegrationService, SyrveClient, SyrveSettingsStore, SyrveTableRenamingService, SyrveWorkerService, SyrveReadinessService,
-    SyrveTableLoadingService, SyrveTableLoadingStore],
+    SyrveTableLoadingService, SyrveTableLoadingStore, SyrveActivationStore, SyrveActivationService],
   exports: [SyrveIntegrationService, SyrveTableRenamingService],
 })
 export class SyrveIntegrationModule {}

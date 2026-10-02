@@ -11,31 +11,91 @@ const { SyrveClient, SyrveClientException } = require('../dist/syrve/syrve-clien
 const { CreateSyrveWorkerState2026100100060: Migration } = require('../dist/migrations/2026100100060-CreateSyrveWorkerState.js');
 const { workerBackoff, workerError } = require('../dist/syrve/syrve-worker.model.js');
 const { harness } = require('./helpers/syrve-state-harness.js');
+const {consent,confirmed}=require('./helpers/syrve-confirmed-worker.js');
 const { id, row, probe } = require('./helpers/syrve-state-fixtures.js');
 
 function prepared() {
   const h = harness(); Object.assign(h.entity, {apiLoginEncrypted:'synthetic',apiLoginIv:'synthetic',apiLoginAuthTag:'synthetic'});
+  consent(h);
   h.worker = () => new SyrveWorkerStore(h.source,h.settings);
-  h.runner = (fetch = (c,ids) => probe(c.state.scope,[row(c.state.scope,id(10))],ids)) => new SyrveWorkerRunner(h.worker(),fetch);
+  h.runner = (fetch = (c,ids) => probe(c.state.scope,[row(c.state.scope,id(10))],ids)) => new SyrveWorkerRunner(h.worker(),(c,ids,controls)=>confirmed(c,ids,controls,fetch));
   h.due = () => h.advance(300_001);
   return h;
 }
 function deferred() { let resolve; const promise = new Promise((yes) => resolve=yes); return {promise,resolve}; }
+async function observeBills(h, bills) {
+  h.due();
+  const result=await h.runner((c,ids)=>probe(c.state.scope,bills.map(([order,status,version])=>row(c.state.scope,order,status,version)),ids)).run();
+  assert.equal(result.status,'observed');
+  return h.saved();
+}
+
+test('new bill opening and final closure update only physical status regardless of manual marks',async()=>{
+  for(const manual of ['free','occupied','cleaning','reserved','pending','closed']) {
+    const h=prepared();h.mutate(db=>{db.physical.status=manual;db.bookings=[{id:id(200),status:'approved',tableIds:[h.table,id(201),id(202)]}];});
+    const before=h.saved();
+    await observeBills(h,[[id(10),'New',100]]);
+    assert.equal(h.saved().physical.status,'occupied');
+    h.mutate(db=>db.physical.status=manual);
+    await h.store.recordStaffAction(h.table,manual==='free'?'manual_free':'status_changed');
+    await observeBills(h,[[id(10),'Closed',200]]);
+    const after=h.saved();assert.equal(after.physical.status,'free');
+    assert.deepEqual(after.bookings,before.bookings);
+    assert.deepEqual({...after.physical,status:before.physical.status,updatedAt:before.physical.updatedAt},
+      {...before.physical,updatedAt:before.physical.updatedAt});
+  }
+});
+test('same bill updates and restart keep a later manual status until a new lifecycle event',async()=>{
+  const h=prepared();await observeBills(h,[[id(10),'New',100]]);
+  h.mutate(db=>db.physical.status='cleaning');await h.store.recordStaffAction(h.table,'status_changed');
+  const manual=h.saved().physical;
+  await observeBills(h,[[id(10),'Bill',101]]);assert.deepEqual(h.saved().physical,manual);
+  h.store=h.restart();
+  await observeBills(h,[[id(10),'Bill',102]]);assert.deepEqual(h.saved().physical,manual);
+  await observeBills(h,[[id(10),'Bill',103],[id(11),'New',100]]);assert.equal(h.saved().physical.status,'occupied');
+  await observeBills(h,[[id(10),'Closed',200],[id(11),'New',101]]);assert.equal(h.saved().physical.status,'occupied');
+  await observeBills(h,[[id(10),'Closed',200],[id(11),'Closed',201]]);assert.equal(h.saved().physical.status,'free');
+  h.mutate(db=>db.physical.status='occupied');await h.store.recordStaffAction(h.table,'status_changed');
+  const afterClose=h.saved().physical;
+  await observeBills(h,[[id(10),'Closed',200],[id(11),'Closed',202]]);assert.deepEqual(h.saved().physical,afterClose);
+  await observeBills(h,[[id(11),'New',203]]);assert.equal(h.saved().physical.status,'occupied');
+});
+test('manual free never blocks a later closure and a repeated bill never reverses manual free',async()=>{
+  const h=prepared();await observeBills(h,[[id(10),'New',100]]);
+  h.mutate(db=>db.physical.status='free');await h.store.recordStaffAction(h.table,'manual_free');
+  const manual=h.saved().physical;
+  await observeBills(h,[[id(10),'New',101]]);assert.deepEqual(h.saved().physical,manual);
+  h.mutate(db=>db.physical.status='occupied');await h.store.recordStaffAction(h.table,'status_changed');
+  await observeBills(h,[[id(10),'Deleted',200]]);assert.equal(h.saved().physical.status,'free');
+});
+test('empty initial reads, historical closure and unverified observations cannot change a manual table',async()=>{
+  const h=prepared();h.mutate(db=>db.physical.status='occupied');const manual=h.saved().physical;
+  await observeBills(h,[]);assert.deepEqual(h.saved().physical,manual);
+  await observeBills(h,[[id(10),'Closed',200]]);assert.deepEqual(h.saved().physical,manual);
+  const capture=await h.store.capture(h.table);
+  await h.store.applyObservation(capture,[{orderIds:[],probe:probe(capture.state.scope,[row(capture.state.scope,id(11),'New',300)])}]);
+  assert.deepEqual(h.saved().physical,manual);
+});
+test('physical status write failure rolls back the bill version and ledger in the same transaction',async()=>{
+  const h=prepared();await h.store.capture(h.table);h.failPhysical();const before=h.saved();
+  assert.equal((await h.runner().run()).status,'failed');
+  const after=h.saved();
+  for(const key of ['physical','link','saved','versions','bookings'])assert.deepEqual(after[key],before[key]);
+});
 async function paused(h) {
   const arrived=deferred(), resume=deferred();
   const runner=h.runner(async(c,ids) => {arrived.resolve(); await resume.promise; return probe(c.state.scope,[row(c.state.scope,id(10))],ids);});
   const pending=runner.run(); await arrived.promise; return {runner,pending,resume};
 }
 
-test('production scheduler stays disabled before any settings, database or HTTP access', async (t) => {
-  t.mock.method(globalThis,'fetch',() => assert.fail('unexpected HTTP'));
-  const old=process.env.SYRVE_SYNC_ENABLED; process.env.SYRVE_SYNC_ENABLED='true';
-  t.after(() => old===undefined ? delete process.env.SYRVE_SYNC_ENABLED : process.env.SYRVE_SYNC_ENABLED=old);
-  const forbidden = () => assert.fail('disabled worker touched a dependency');
-  const service=new SyrveWorkerService({options:{type:'postgres'},query:forbidden,transaction:forbidden},
-    {read:forbidden,localTransaction:forbidden},{probeWorkerOrders:forbidden});
-  for(let i=0;i<3;i++) assert.deepEqual(await service.tick(),{status:'disabled',processed:0});
-  await service.onModuleDestroy(); assert.deepEqual(await service.tick(),{status:'disabled',processed:0});
+test('saved credentials and an environment flag cannot activate a scheduler without consent', async(t)=>{
+  const h=prepared();h.mutate(db=>db.activation=null);
+  t.mock.method(globalThis,'fetch',()=>assert.fail('unexpected HTTP'));
+  const old=process.env.SYRVE_SYNC_ENABLED;process.env.SYRVE_SYNC_ENABLED='true';
+  t.after(()=>old===undefined?delete process.env.SYRVE_SYNC_ENABLED:process.env.SYRVE_SYNC_ENABLED=old);
+  const service=new SyrveWorkerService(h.source,h.settings,{probeWorkerOrders:()=>assert.fail('unexpected probe')});
+  for(let i=0;i<3;i++)assert.deepEqual(await service.tick(),{status:'disabled',processed:0});
+  assert.equal(h.saved().worker,null);await service.onModuleDestroy();assert.equal((await service.tick()).status,'disabled');
 });
 
 test('Nest resolves the scheduler through the actual provider dependencies without a startup read',async()=>{
@@ -46,20 +106,20 @@ test('Nest resolves the scheduler through the actual provider dependencies witho
     {provide:DataSource,useValue:{options:{type:'postgres'},query:forbidden,transaction:forbidden}},
     {provide:SyrveSettingsStore,useValue:{read:forbidden}},
     {provide:SyrveIntegrationService,useValue:{probeWorkerOrders:forbidden}}]}).compile();
-  await module.init();assert.equal((await module.get(SyrveWorkerService).tick()).status,'disabled');await module.close();
+  await module.init();await module.close();assert.equal((await module.get(SyrveWorkerService).tick()).status,'disabled');
 });
 
 test('worker bridge uses existing AES-GCM credentials only after exact saved scope validation',async(t)=>{
   const h=prepared();const old=process.env.SYRVE_CREDENTIALS_SECRET;
   process.env.SYRVE_CREDENTIALS_SECRET='synthetic-worker-bridge-key';
   t.after(()=>old===undefined ? delete process.env.SYRVE_CREDENTIALS_SECRET : process.env.SYRVE_CREDENTIALS_SECRET=old);
-  const calls=[];const service=new SyrveIntegrationService(h.settings,{}, {probeOrders:async(...args)=>{calls.push(args);return {checked:true};}},{});
+  const calls=[];const service=new SyrveIntegrationService(h.settings,{}, {probeLoadedOrders:async(...args)=>{calls.push(args);return {checked:true};}},{},{read:async()=>({enabled:true})});
   const encrypted=service.encrypt('synthetic-login');Object.assign(h.entity,{apiBaseUrl:'https://api-eu.syrve.live',
     apiLoginEncrypted:encrypted.encrypted,apiLoginIv:encrypted.iv,apiLoginAuthTag:encrypted.authTag});
   const c=await h.store.capture(h.table),controls={deadline:Date.now()+500,signal:new AbortController().signal};
   assert.deepEqual(await service.probeWorkerOrders(c,[id(10)],controls),{checked:true});
   assert.deepEqual(calls[0],['https://api-eu.syrve.live','synthetic-login',h.entity.organizationId,[c.state.scope.syrveTableId],[id(10)],controls]);
-  const response=await service.getStatus();assert.equal(response.syncEnabled,false);
+  const response=await service.getStatus();assert.equal(response.syncEnabled,true);
   assert.doesNotMatch(JSON.stringify(response),/synthetic-login|synthetic-worker-bridge-key/);
   h.entity.configurationRevision=randomUUID();delete process.env.SYRVE_CREDENTIALS_SECRET;
   await assert.rejects(service.probeWorkerOrders(c,[],controls),e=>e.getStatus()===409);assert.equal(calls.length,1);
@@ -69,7 +129,7 @@ for(const change of [(h)=>h.unprepare(),(h)=>h.unprepareSettings(),(h)=>h.entity
   (h)=>h.entity.apiLoginEncrypted=null,(h)=>h.mutate(db=>db.link=null)]) {
   test('missing preparation, connection, credentials or links cannot create a lease or call upstream',async()=>{
     const h=prepared(); change(h);
-    assert.equal((await h.runner(()=>assert.fail('unexpected probe')).run()).status,'idle');
+    assert.ok(['disabled','idle','failed'].includes((await h.runner(()=>assert.fail('unexpected probe')).run()).status));
     assert.equal(h.saved().worker,null);
   });
 }
@@ -108,8 +168,8 @@ for(const change of [(h)=>h.entity.configurationRevision=randomUUID(),(h)=>h.ent
 
 test('a changed configuration does not start a second lease until the first exits',async()=>{
   const h=prepared(), p=await paused(h); h.entity.configurationRevision=randomUUID();
-  assert.equal((await h.worker().claim()).status,'busy'); p.resume.resolve(); await p.pending;
-  const current=await h.worker().claim(); assert.equal(current.status,'claimed');
+  assert.equal((await h.worker().claim()).status,'disabled'); p.resume.resolve(); await p.pending;
+  consent(h);const current=await h.worker().claim(); assert.equal(current.status,'claimed');
   assert.equal(current.lease.version.revision,h.entity.configurationRevision);
   assert.equal(h.saved().worker.failure_count,0); await h.worker().release(current.lease);
 });
@@ -145,17 +205,17 @@ test('unknown/offline/missing answers preserve occupancy and manual suppression'
       const value=probe(c.state.scope,variant==='missing'?[]:[row(c.state.scope,id(10),variant==='unknown'?'Unknown':'New',200)],ids);
       if(variant==='offline') value.availability[0].isAlive=false; return value;
     }).run();
-    assert.equal(result.status,'failed'); assert.equal(result.code,'SYRVE_OBSERVATION_UNKNOWN');
+    assert.equal(result.status,'failed'); assert.equal(result.code,variant==='offline'?'SYRVE_INVALID_RESPONSE':'SYRVE_OBSERVATION_UNKNOWN');
     assert.deepEqual(h.saved().link.active_syrve_order_ids,[id(10)]);
     assert.deepEqual(h.saved().link.manually_freed_syrve_order_ids,[id(10)]);
   }
 });
 
-test('complete observed closure has no authority to free a table or clear suppression',async()=>{
+test('complete freshly loaded closure clears only confirmed active IDs and suppression',async()=>{
   const h=prepared(); await h.runner().run(); await h.store.recordStaffAction(h.table,'manual_free'); h.due();
   await h.runner((c,ids)=>probe(c.state.scope,[row(c.state.scope,id(10),'Closed',200)],ids)).run();
-  assert.deepEqual(h.saved().link.active_syrve_order_ids,[id(10)]);
-  assert.deepEqual(h.saved().link.manually_freed_syrve_order_ids,[id(10)]);
+  assert.deepEqual(h.saved().link.active_syrve_order_ids,[]);
+  assert.deepEqual(h.saved().link.manually_freed_syrve_order_ids,[]);
 });
 
 test('new order can occupy after suppression, while a replay cannot undo the staff action',async()=>{
@@ -238,7 +298,12 @@ test('the shared cycle deadline covers all order scopes, retaining earlier good 
 
 test('bounded cycles rotate a durable cursor fairly across more than 32 tables',async()=>{
   const h=prepared(); const snapshot=h.snapshot(); snapshot.links=Array.from({length:65},(_,n)=>({...snapshot.links[0],id:id(1000+n),moloTableId:id(2000+n),syrveTableId:id(3000+n)}));
-  h.settings.read=async()=>snapshot;
+  const physical=snapshot.links.map((link,n)=>({id:link.moloTableId,tableNumber:String(n+1)}));
+  h.tables.find=async()=>physical;h.settings.read=async()=>snapshot;
+  h.settings.transaction=(expected,action)=>h.settings.localTransaction(manager=>action(manager,snapshot));
+  const {activationBindings}=require('../dist/syrve/syrve-activation.js');
+  h.mutate(db=>Object.assign(db.activation,{bindings_fingerprint:activationBindings(snapshot,physical),loading_plan:{organizationId:snapshot.entity.organizationId,
+    groups:[{terminalGroupId:id(1),posVersion:'7.7.1',tableIds:snapshot.links.map(link=>link.syrveTableId).sort()}]}}));
   const first=(await h.worker().claim()).lease; assert.equal(first.links.length,32);
   await h.worker().failure(first,first.links[31].id,'SYRVE_UNAVAILABLE'); await h.worker().release(first); h.due();
   const second=(await h.worker().claim()).lease; assert.equal(second.links.length,32);

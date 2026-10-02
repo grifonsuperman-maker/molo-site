@@ -3,6 +3,7 @@ import { DataSource, In } from 'typeorm';
 import { TableEntity } from '../tables/entities/table.entity';
 import { SyrveSettingsStore } from './syrve-settings.store';
 import { getSyrveOrderIdsToObserve, SyrveStateScope, SyrveTableSyncState } from './syrve-state-reducer';
+import { SyrveActivationStore } from './syrve-activation.store';
 
 export type SyrveStatusEntry = {
   state: SyrveTableSyncState;
@@ -36,6 +37,7 @@ export class SyrveStatusReadStore {
         [this.table('syrve_table_sync_states'), this.table('syrve_order_versions')]);
       if (!storage.prepared) return disabledSyrveStatus();
       const snapshot = await this.settings.read(manager);
+      if (!(await new SyrveActivationStore(this.source, this.settings).read(snapshot, manager)).enabled) return disabledSyrveStatus();
       const entity = snapshot.entity;
       if (!snapshot.prepared || !entity?.configurationRevision || !entity.organizationId
         || !['connected', 'error'].includes(entity.status)) return disabledSyrveStatus();

@@ -14,12 +14,35 @@ import {
 import { SyrveIntegrationService } from './syrve-integration.service';
 import { SyrveReadinessService } from './syrve-readiness.service';
 import { SyrveTableLoadingService } from './syrve-table-loading.service';
+import { SyrveActivationService } from './syrve-activation.service';
 
 @Roles('owner')
 @Controller('syrve-integration')
 export class SyrveIntegrationController {
   constructor(private readonly service: SyrveIntegrationService, private readonly readiness: SyrveReadinessService,
-    private readonly loading: SyrveTableLoadingService) {}
+    private readonly loading: SyrveTableLoadingService, private readonly activation: SyrveActivationService) {}
+
+  @Get('auto-status')
+  @Header('Cache-Control', 'no-store')
+  autoStatus() { return this.activation.status(); }
+
+  @Post('auto-status-preview')
+  @Header('Cache-Control', 'no-store')
+  previewAutoStatus(@Body() dto: SyrveRevisionDto, @Req() request: { user?: AuthUser }) {
+    return this.activation.preview(dto, request.user);
+  }
+
+  @Post('enable-auto-status')
+  @Header('Cache-Control', 'no-store')
+  enableAutoStatus(@Body() dto: ConfirmSyrveTableLoadingDto, @Req() request: { user?: AuthUser }) {
+    return this.activation.enable(dto, request.user);
+  }
+
+  @Post('disable-auto-status')
+  @Header('Cache-Control', 'no-store')
+  disableAutoStatus(@Body() dto: SyrveRevisionDto, @Req() request: { user?: AuthUser }) {
+    return this.activation.disable(dto, request.user);
+  }
 
   @Get('readiness')
   @Header('Cache-Control', 'no-store')

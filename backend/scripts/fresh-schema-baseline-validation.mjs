@@ -58,6 +58,7 @@ function loadMigrations(require) {
   const { ProtectCanonicalTableNumbers2026093000040 } = require('../dist/migrations/2026093000040-ProtectCanonicalTableNumbers.js');
   const { CreateSyrveDurableState2026093000050 } = require('../dist/migrations/2026093000050-CreateSyrveDurableState.js');
   const { CreateSyrveWorkerState2026100100060 } = require('../dist/migrations/2026100100060-CreateSyrveWorkerState.js');
+  const { CreateSyrveActivation2026100200070 } = require('../dist/migrations/2026100200070-CreateSyrveActivation.js');
 
   return [
     InitialSchemaBaseline2026081300000,
@@ -76,6 +77,7 @@ function loadMigrations(require) {
     ProtectCanonicalTableNumbers2026093000040,
     CreateSyrveDurableState2026093000050,
     CreateSyrveWorkerState2026100100060,
+    CreateSyrveActivation2026100200070,
   ];
 }
 

@@ -23,6 +23,9 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
   const { SyrveStatusReadStore } = require('../dist/syrve/syrve-status-read.store.js');
   const { SyrveStatusReadService } = require('../dist/syrve/syrve-status-read.service.js');
   const { SyrveStaffActionsService } = require('../dist/syrve/syrve-staff-actions.service.js');
+  const { SyrveWorkerStore } = require('../dist/syrve/syrve-worker.store.js');
+  const { SyrveWorkerRunner } = require('../dist/syrve/syrve-worker.runner.js');
+  const { confirmed } = require('../test/helpers/syrve-confirmed-worker.js');
   const { id, row, probe, batches } = require('../test/helpers/syrve-state-fixtures.js');
   const options = { type: 'postgres', host: env.DB_HOST, port: Number(env.DB_PORT || 5432),
     username: env.DB_USER || 'postgres', password: env.DB_PASSWORD || 'postgres', database: env.DB_NAME,
@@ -37,7 +40,7 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
   const reader = () => new SyrveStatusReadStore(source, new SyrveSettingsStore(source));
   // Synthetic dependency injection, never a production activation path.
   const prepared = () => new TableStatusProjectionService({ snapshot: (ids) => reader().read(ids) });
-  const disabled = () => new TableStatusProjectionService(new SyrveStatusReadService(source));
+  const disabled = () => new TableStatusProjectionService({snapshot:async()=>({syncEnabled:false,tables:new Map()})});
   const services = (projection) => {
     const tables = source.getRepository(TableEntity), zones = source.getRepository(Zone), bookings = source.getRepository(Booking);
     const identities = new TableMapIdentityService(source), staff = new SyrveStaffActionsService(source, new SyrveSettingsStore(source));
@@ -73,21 +76,25 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
     assert.ok(value.rows.every((row) => row.status === physicalStatus)); assert.equal(value.window.status, windowStatus);
   };
   const observe = async (rows) => {
-    const captured = await states().capture(tableId), parts = batches(captured, rows);
-    parts[0].probe.byTable = probe(captured.state.scope, rows).byTable;
-    return states().applyObservation(captured, parts);
+    await source.query("UPDATE syrve_worker_state SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE integration_id=$1",[integrationId]);
+    const runner=new SyrveWorkerRunner(new SyrveWorkerStore(source,new SyrveSettingsStore(source)),
+      (capture,ids,controls)=>confirmed(capture,ids,controls,()=>probe(capture.state.scope,rows,ids)));
+    const result=await runner.run();assert.equal(result.status,'observed');return result;
   };
   try {
     assert.equal(Number((await source.query('SELECT count(*) AS count FROM "syrve_integrations"'))[0].count), 0);
     await source.query('INSERT INTO "zones" (id,name,is_visible,is_closed) VALUES ($1,\'Synthetic status CI\',true,false)', [zoneId]);
     await source.query('INSERT INTO "tables" (id,zone_id,table_number,status,x,rotation,photo_url) VALUES ($1,$2,$3,\'free\',17,45,\'/existing-status-ci.jpg\')', [tableId, zoneId, number]);
-    integrationId = (await source.query('INSERT INTO "syrve_integrations" (display_name,organization_id,status) VALUES (\'Synthetic status CI\',$1,\'connected\') RETURNING id', [organizationId]))[0].id;
+    integrationId = (await source.query('INSERT INTO "syrve_integrations" (display_name,organization_id,status,api_login_encrypted,api_login_iv,api_login_auth_tag) VALUES (\'Synthetic status CI\',$1,\'connected\',\'synthetic\',\'synthetic\',\'synthetic\') RETURNING id', [organizationId]))[0].id;
     linkId = (await source.query('INSERT INTO "syrve_table_links" (integration_id,organization_id,molo_table_id,syrve_table_id,last_known_number) VALUES ($1,$2,$3,$4,1) RETURNING id', [integrationId, organizationId, tableId, providerId]))[0].id;
+    assert.equal((await new SyrveStatusReadService(source).snapshot([tableId])).syncEnabled,false);
+    const {consentDatabase}=require('../test/helpers/syrve-confirmed-worker.js');
+    await consentDatabase(source,new SyrveSettingsStore(source));
     await expectToday(prepared(), 'free');
     assert.equal(Number((await source.query('SELECT count(*) AS count FROM "syrve_table_sync_states" WHERE link_id=$1', [linkId]))[0].count), 0);
     const first = await states().capture(tableId);
     await observe([row(first.state.scope, id(10))]);
-    await expectToday(disabled(), 'free'); await expectToday(prepared(), 'occupied');
+    await expectToday(disabled(), 'occupied'); await expectToday(prepared(), 'occupied');
     const nextDate = await readRoles(prepared(), future);
     assert.ok(nextDate.rows.every((value) => value.status === 'occupied')); assert.equal(nextDate.window.status, 'free');
 
@@ -135,8 +142,8 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
         if (method === 'getPublicMap' && flag === 'isVisible' && !from) {
           assert.equal(flat, undefined); assert.equal(parent, undefined);
         } else {
-          assert.equal(flat.status, 'free', `${method}/${flag}/${from}: flat`);
-          assert.equal(parent.tables.find((row) => row.id === tableId).status, 'free', `${method}/${flag}/${from}: nested`);
+          assert.equal(flat.status, 'occupied', `${method}/${flag}/${from}: flat`);
+          assert.equal(parent.tables.find((row) => row.id === tableId).status, 'occupied', `${method}/${flag}/${from}: nested`);
         }
         assert.deepEqual(await source.query('SELECT * FROM "tables" WHERE id=$1', [tableId]), physicalBeforeRace);
       }
@@ -145,7 +152,8 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
     const stateAfterRace = await saved(); delete stateAfterRace.zones;
     assert.deepEqual(stateAfterRace, stateBeforeRace);
 
-    // Actual waiter free keeps an approved booking and suppresses old POS IDs.
+    // Actual waiter free keeps an approved booking; same-bill polls do not
+    // replay occupancy over this later manual action.
     await source.query('INSERT INTO "bookings" (table_id,booking_date,booking_time,guests_count,status,source,duration_minutes) VALUES ($1,$2,\'19:00\',2,\'approved\',\'admin_manual\',60)', [tableId, today]);
     assert.equal((await services(disabled()).tables.setWaiterStatus(tableId, 'free')).status, 'reserved');
     await expectToday(prepared(), 'reserved');
@@ -169,16 +177,17 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
     await source.query('UPDATE "syrve_integrations" SET configuration_revision=uuid_generate_v4() WHERE id=$1', [integrationId]);
     const changed = await saved(); assert.equal((await reader().read([tableId])).tables.size, 0); assert.deepEqual(await saved(), changed);
     await services(disabled()).tables.markFree(tableId); // explicit staff action adopts the revision
+    await consentDatabase(source,new SyrveSettingsStore(source));
     const captured = await states().capture(tableId); await observe([row(captured.state.scope, id(12), 'New', 400)]);
     const originalVersion = (await source.query('SELECT * FROM "syrve_order_versions" WHERE link_id=$1 AND order_id=$2', [linkId, id(12)]))[0];
     await source.query('DELETE FROM "syrve_order_versions" WHERE link_id=$1 AND order_id=$2', [linkId, id(12)]);
     const corrupt = await saved(); await assert.rejects(reader().read([tableId]), error => error.getStatus() === 503);
-    await expectToday(disabled(), 'free', 'reserved');
+    await expectToday(disabled(), 'occupied');
     const futureOnly = await services(prepared()).bookings.getTableStatuses({ bookingDate: future, bookingTime: '19:00' });
     assert.equal(futureOnly.statuses[number].status, 'free'); assert.deepEqual(await saved(), corrupt);
     await source.query('INSERT INTO "syrve_order_versions" (link_id,order_id,timestamp,state,fingerprint) VALUES ($1,$2,$3,$4,$5)', [linkId, originalVersion.order_id, originalVersion.timestamp, originalVersion.state, originalVersion.fingerprint]);
     await source.query('UPDATE "syrve_integrations" SET status=\'disconnected\' WHERE id=$1', [integrationId]);
-    await expectToday(prepared(), 'free', 'reserved');
+    await expectToday(prepared(), 'occupied');
   } finally {
     try {
       if (integrationId) await source.query('DELETE FROM "syrve_integrations" WHERE id=$1', [integrationId]);

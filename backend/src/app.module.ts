@@ -31,6 +31,7 @@ import { CreateTableMapIdentities2026093000030 } from './migrations/202609300003
 import { ProtectCanonicalTableNumbers2026093000040 } from './migrations/2026093000040-ProtectCanonicalTableNumbers';
 import { CreateSyrveDurableState2026093000050 } from './migrations/2026093000050-CreateSyrveDurableState';
 import { CreateSyrveWorkerState2026100100060 } from './migrations/2026100100060-CreateSyrveWorkerState';
+import { CreateSyrveActivation2026100200070 } from './migrations/2026100200070-CreateSyrveActivation';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -93,6 +94,7 @@ const staffPinMigrationOptions = {
                 ProtectCanonicalTableNumbers2026093000040,
                 CreateSyrveDurableState2026093000050,
                 CreateSyrveWorkerState2026100100060,
+                CreateSyrveActivation2026100200070,
               ]
             : staffPinMigrationOptions.migrations,
         };

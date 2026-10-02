@@ -1,9 +1,10 @@
 import { BadGatewayException, BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { parseRestaurantSections, parseTerminalGroups, SyrveCatalogValidationError, type SyrveCatalog } from './syrve-catalog';
 import { TABLE_ORDER_BATCH_SIZE, ORDER_ID_BATCH_SIZE, MAX_CATALOG_TABLES, MAX_RESPONSE_ORDERS,
   mergeSyrveOrders, observationIds, parsePosAvailability, parseSyrveOrders, SyrveOrderValidationError,
   type ObservationCheckName, type SyrveObservedOrder, type SyrveOrderProbe } from './syrve-order-observer';
-import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, parseLoadingCommand, parseLoadingCorrelation, SyrveLoadingValidationError, type TableLoadingPlan } from './syrve-table-loading';
+import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, loadingPlanFingerprint, tableLoadingPlan, parseLoadingCommand, parseLoadingCorrelation, SyrveLoadingValidationError, type TableLoadingPlan } from './syrve-table-loading';
 import { assessSyrvePosVersion } from './syrve-pos-version';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
@@ -12,7 +13,20 @@ const MAX_RESPONSE_BYTES = 1_048_576;
 const OBSERVATION_TIMEOUT_MS = 45_000;
 const MAX_OBSERVATION_REQUESTS = 25;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export type SyrveProbeControls = { deadline?: number; signal?: AbortSignal; requestBudget?: { remaining: number } };
+type RequestBudget = { remaining: number; parent?: RequestBudget };
+export type SyrveProbeControls = { deadline?: number; signal?: AbortSignal; requestBudget?: RequestBudget };
+type SyrveCommandControls = SyrveProbeControls & { beforeCommand: () => Promise<void>; commandStarted?: () => void; commandFinished?: () => void };
+export type SyrveLoadedProbeControls = SyrveCommandControls & { loadingPlan: TableLoadingPlan; visibilityContext: string };
+
+// The issuer is private to the transport. Serialized DTOs, a copied/mutated
+// probe and a successful manual load cannot manufacture worker visibility.
+const loadedProbes = new WeakMap<SyrveOrderProbe, { context: string; fingerprint: string; expires: number; tableIds: string[] }>();
+const probeFingerprint = (probe: SyrveOrderProbe) => createHash('sha256').update(JSON.stringify(probe)).digest('hex');
+export function isVerifiedLoadedProbe(probe: SyrveOrderProbe, context: string, organizationId: string, tableId: string) {
+  const receipt = loadedProbes.get(probe);
+  return Boolean(receipt && receipt.context === context && receipt.expires > Date.now() && receipt.tableIds.includes(tableId)
+    && probe.organizationId === organizationId && receipt.fingerprint === probeFingerprint(probe));
+}
 
 const ERRORS = {
   SYRVE_AUTH_FAILED: 'Syrve відхилив дані доступу. Перевірте API-ключ і налаштування підключення.',
@@ -80,13 +94,15 @@ export class SyrveClient {
   }
 
   private async postJson(path: string, body: object, token?: string, deadline?: number, signal?: AbortSignal,
-    requestBudget?: { remaining: number }): Promise<unknown> {
+    requestBudget?: RequestBudget): Promise<unknown> {
     const remaining = deadline === undefined ? REQUEST_TIMEOUT_MS : Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now());
     if (remaining <= 0 || signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
-    if (requestBudget) {
-      if (!Number.isSafeInteger(requestBudget.remaining) || requestBudget.remaining <= 0) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
-      requestBudget.remaining--;
+    const budgets: RequestBudget[] = [];
+    for (let budget = requestBudget; budget; budget = budget.parent) {
+      if (budgets.includes(budget) || budgets.length >= 4 || !Number.isSafeInteger(budget.remaining) || budget.remaining <= 0) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
+      budgets.push(budget);
     }
+    budgets.forEach(budget => budget.remaining--);
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
@@ -149,7 +165,7 @@ export class SyrveClient {
     }
   }
 
-  private async openSession(apiBaseUrl: string, apiLogin: string, deadline?: number, signal?: AbortSignal, requestBudget?: { remaining: number }) {
+  private async openSession(apiBaseUrl: string, apiLogin: string, deadline?: number, signal?: AbortSignal, requestBudget?: RequestBudget) {
     const baseUrl = this.normalizeBaseUrl(apiBaseUrl);
     const auth = this.authentication(apiLogin);
     const payload = await this.postJson(auth.path, auth.body, undefined, deadline, signal, requestBudget);
@@ -322,10 +338,10 @@ export class SyrveClient {
     return finish();
   }
 
-  // Called only by the explicit Director loading service after its durable
-  // one-use revision/lease claim. Read-only probes never call this method.
+  // Explicit Director loading or a consented worker with a current durable
+  // lease. Read-only diagnostics never call this method.
   async initializeTables(apiBaseUrl: string, apiLogin: string, plan: TableLoadingPlan,
-    controls: SyrveProbeControls & { beforeCommand: () => Promise<void> }) {
+    controls: SyrveCommandControls) {
     this.normalizeBaseUrl(apiBaseUrl);
     const ids = Array.isArray(plan?.groups) ? plan.groups.flatMap(group => group?.tableIds || []) : [];
     const uuid = (value: unknown) => typeof value === 'string' && value.length === 36 && UUID.test(value);
@@ -337,13 +353,13 @@ export class SyrveClient {
       || typeof controls.beforeCommand !== 'function') throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
     if (controls.deadline !== undefined && !Number.isFinite(controls.deadline)) throw new SyrveClientException('SYRVE_TIMEOUT');
     const deadline = Math.min(Date.now() + OBSERVATION_TIMEOUT_MS, controls.deadline ?? Infinity);
-    const budget = controls.requestBudget || { remaining: MAX_OBSERVATION_REQUESTS };
-    if (!Number.isSafeInteger(budget.remaining) || budget.remaining > MAX_OBSERVATION_REQUESTS) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
+    const budget: RequestBudget = { remaining: MAX_OBSERVATION_REQUESTS, parent: controls.requestBudget };
     const session = await this.openSession(apiBaseUrl, apiLogin, deadline, controls.signal, budget);
     if (!session.organizations.some(item => item.id === plan.organizationId)) throw new SyrveClientException('SYRVE_ORGANIZATION_UNAVAILABLE');
     const correlations = new Set<string>();
     for (const group of plan.groups) {
       await controls.beforeCommand();
+      controls.commandStarted?.();
       let correlation: string;
       try {
         correlation = parseLoadingCorrelation(await this.postJson('/api/1/order/init_by_table', {
@@ -367,8 +383,8 @@ export class SyrveClient {
           if (error instanceof SyrveLoadingValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
           throw error;
         }
-        if (state === 'Success') { succeeded = true; break; }
-        if (state === 'Error') throw new SyrveClientException('SYRVE_COMMAND_FAILED');
+        if (state === 'Success') { controls.commandFinished?.(); succeeded = true; break; }
+        if (state === 'Error') { controls.commandFinished?.(); throw new SyrveClientException('SYRVE_COMMAND_FAILED'); }
         if (attempt < 5) {
           if (deadline - Date.now() <= 250 || controls.signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
           await new Promise<void>(resolve => setTimeout(resolve, 250));
@@ -377,5 +393,35 @@ export class SyrveClient {
       if (!succeeded) throw new SyrveClientException('SYRVE_COMMAND_IN_PROGRESS');
     }
     return { completedGroups: plan.groups.length };
+  }
+
+  async probeLoadedOrders(apiBaseUrl: string, apiLogin: string, organizationId: string,
+    tableIds: string[], knownOrderIds: string[], controls: SyrveLoadedProbeControls): Promise<SyrveOrderProbe> {
+    if (!controls || typeof controls.beforeCommand !== 'function' || typeof controls.visibilityContext !== 'string'
+      || !controls.visibilityContext || controls.visibilityContext.length > 200) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+    const deadline = Math.min(Date.now() + OBSERVATION_TIMEOUT_MS, controls.deadline ?? Infinity);
+    const shared: SyrveProbeControls = { ...controls, deadline, requestBudget: controls.requestBudget || { remaining: 75 } };
+    const expected = loadingPlanFingerprint(controls.loadingPlan);
+    const checkedPlan = (probe: SyrveOrderProbe) => {
+      const failure = Object.values(probe.checks).find(check => check.status === 'error');
+      if (failure) throw new SyrveClientException(failure.code as keyof typeof ERRORS);
+      let plan: TableLoadingPlan;
+      try { plan = tableLoadingPlan(probe, tableIds); }
+      catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
+      if (probe.organizationId !== organizationId || loadingPlanFingerprint(plan) !== expected) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+      return plan;
+    };
+    await controls.beforeCommand();
+    const plan = checkedPlan(await this.probeOrders(apiBaseUrl, apiLogin, organizationId, tableIds, [], shared));
+    await this.initializeTables(apiBaseUrl, apiLogin, plan, { ...shared, beforeCommand: controls.beforeCommand,
+      commandStarted: controls.commandStarted, commandFinished: controls.commandFinished });
+    await controls.beforeCommand();
+    const probe = await this.probeOrders(apiBaseUrl, apiLogin, organizationId, tableIds, knownOrderIds, shared);
+    checkedPlan(probe);
+    if (knownOrderIds.length && probe.checks.ordersById.status !== 'ok') throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+    await controls.beforeCommand();
+    if (Date.now() >= deadline || controls.signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
+    loadedProbes.set(probe, { context: controls.visibilityContext, expires: deadline, fingerprint: probeFingerprint(probe), tableIds: [...tableIds] });
+    return probe;
   }
 }

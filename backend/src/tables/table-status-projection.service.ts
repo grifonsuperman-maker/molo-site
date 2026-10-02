@@ -3,65 +3,32 @@ import { TableEntity, TableStatus } from './entities/table.entity';
 import { Zone } from '../zones/entities/zone.entity';
 import { SyrveStatusReadService } from '../syrve/syrve-status-read.service';
 import { disabledSyrveStatus, SyrveStatusSnapshot } from '../syrve/syrve-status-read.store';
-import { projectSyrveTableStatus } from '../syrve/syrve-state-reducer';
-
-type TableStatusRead = { table: TableEntity; parent?: Zone };
 
 @Injectable()
 export class TableStatusProjectionService {
-  constructor(private readonly syrve: SyrveStatusReadService) {}
+  // Keep the existing DI signature; table reads no longer depend on POS storage.
+  constructor(_syrve: SyrveStatusReadService) {}
 
   async capture(tables: TableEntity[], view: 'today' | 'future' = 'today'): Promise<SyrveStatusSnapshot> {
-    if (view === 'future') return disabledSyrveStatus();
-    return this.captureFrames(tables.map((table) => ({ table })));
+    return disabledSyrveStatus();
   }
 
-  captureMap(tables: TableEntity[], zones: Zone[]): Promise<SyrveStatusSnapshot> {
-    return this.captureFrames([...tables.map((table) => ({ table })),
-      ...zones.flatMap((parent) => (parent.tables || []).map((table) => ({ table, parent })))]);
-  }
-
-  private async captureFrames(reads: TableStatusRead[]): Promise<SyrveStatusSnapshot> {
-    const snapshot = await this.syrve.snapshot(reads.map(({ table }) => table.id));
-    if (!snapshot.syncEnabled) return snapshot;
-    // Table and zone queries are independent. A zone-only change does not
-    // advance table.updatedAt, so compare the actual visibility/closure context
-    // used by each representation as well as its physical table version.
-    const seen = new Map<string, string>(), ambiguous = new Set<string>();
-    for (const { table, parent } of reads) {
-      const zone = parent || table.zone;
-      const version = JSON.stringify([table.status, new Date(table.updatedAt).getTime(), table.isVisible === false,
-        zone?.id || null, zone?.isVisible === false, Boolean(zone?.isClosed)]);
-      if (seen.has(table.id) && seen.get(table.id) !== version) ambiguous.add(table.id);
-      seen.set(table.id, version);
-    }
-    return { ...snapshot, tables: new Map([...snapshot.tables].filter(([id]) => !ambiguous.has(id))) };
+  async captureMap(tables: TableEntity[], zones: Zone[]): Promise<SyrveStatusSnapshot> {
+    return disabledSyrveStatus();
   }
 
   private effective(table: TableEntity, snapshot: SyrveStatusSnapshot, parent?: Zone): TableStatus {
-    const entry = snapshot.syncEnabled ? snapshot.tables.get(table.id) : null;
-    if (!entry || entry.physicalStatus !== table.status
-      || entry.physicalUpdatedAt !== new Date(table.updatedAt).getTime()) return table.status;
-    const zone = parent || table.zone;
-    const pos = projectSyrveTableStatus(entry.state, { currentScope: entry.currentScope, syncEnabled: true, view: 'today',
-      hidden: table.isVisible === false || zone?.isVisible === false, zoneClosed: Boolean(zone?.isClosed),
-      manualStatus: 'free', booking: 'none', checkedIn: false });
-    // Preserve the role's existing manual/visibility representation. POS can
-    // only add occupied; it cannot clear any existing source or close a table.
-    return pos === 'occupied' && table.status !== 'closed' ? 'occupied' : table.status;
+    // The worker commits each new bill event to this physical status. A read
+    // must never replay an older open/closed bill over a newer manual action.
+    return table.status;
   }
 
   physical<T extends TableEntity>(tables: T[], snapshot: SyrveStatusSnapshot, parent?: Zone): T[] {
-    if (!snapshot.syncEnabled) return tables;
-    return tables.map((table) => {
-      const status = this.effective(table, snapshot, parent);
-      return status === table.status ? table : { ...table, status };
-    });
+    return tables;
   }
 
   zones<T extends Zone>(zones: T[], snapshot: SyrveStatusSnapshot): T[] {
-    if (!snapshot.syncEnabled) return zones;
-    return zones.map((zone) => zone.tables ? { ...zone, tables: this.physical(zone.tables, snapshot, zone) } : zone);
+    return zones;
   }
 
   window(table: TableEntity, snapshot: SyrveStatusSnapshot, input: {

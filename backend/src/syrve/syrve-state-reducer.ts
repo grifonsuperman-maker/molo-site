@@ -247,6 +247,21 @@ export function reduceSyrveStaffAction(current: SyrveTableSyncState, event: Syrv
       ? [...state.activeSyrveOrderIds] : [...state.manuallyFreedSyrveOrderIds] }, changed: true, diagnostics: [] };
 }
 
+// Runtime status changes are lifecycle events, not a continuously projected
+// POS source. Legacy manual suppression IDs never veto a new opening/closure.
+export function syrveTableStatusEvent(previous: SyrveTableSyncState, transition: SyrveTransition): 'occupied' | 'free' | null {
+  if (!transition.changed || transition.diagnostics.some(code => ['scope_changed', 'local_revision_changed',
+    'observation_unknown', 'visibility_not_verified'].includes(code))) return null;
+  const before = copyState(previous), after = copyState(transition.state);
+  if (!sameScope(before.scope, after.scope)) return null;
+  const activeBefore = new Set(before.activeSyrveOrderIds);
+  if (after.activeSyrveOrderIds.some(id => !activeBefore.has(id))) return 'occupied';
+  if (before.activeSyrveOrderIds.length && !after.activeSyrveOrderIds.length && after.lastSyrveState === 'closed') return 'free';
+  return null;
+}
+
+// Legacy pure projection retained for compatibility tests only. Runtime table
+// reads must use the physical status committed by syrveTableStatusEvent.
 export function projectSyrveTableStatus(state: SyrveTableSyncState | null, input: {
   currentScope: SyrveStateScope | null;
   syncEnabled: boolean;
