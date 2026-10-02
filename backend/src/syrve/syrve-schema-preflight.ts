@@ -10,6 +10,31 @@ export type SyrveSchemaFacts = { tables: Row[]; columns: Row[]; constraints: Row
     links: number; linksValid: boolean; configurationRevision: string | null; snapshot: string; workerRecords: number; state: 'unobserved' | 'valid' | 'invalid' | 'stale' } | null };
 const TABLES = ['tables', 'syrve_integrations', 'migrations', ...SYRVE_SCHEMA_STEPS.flatMap(step => [...step.tables])];
 const FUNCTIONS = ['molo_keep_table_map_identity', 'molo_canonical_table_number'];
+export const SYRVE_CATALOG_QUERIES = {
+  tables: { sql: `SELECT c.relname AS "table",c.relkind AS kind FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY($1::text[]) ORDER BY c.relname`, parameters: TABLES },
+  columns: { sql: `SELECT c.relname AS "table",a.attname AS name,pg_catalog.format_type(a.atttypid,a.atttypmod) AS type,
+    a.attnotnull AS "notNull",pg_catalog.pg_get_expr(d.adbin,d.adrelid) AS "default"
+    FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+    WHERE n.nspname='public' AND c.relname=ANY($1::text[]) AND a.attnum>0 AND NOT a.attisdropped ORDER BY c.relname,a.attname`, parameters: TABLES },
+  constraints: { sql: `SELECT c.relname AS "table",k.conname AS name,pg_catalog.pg_get_constraintdef(k.oid,true) AS definition,
+    k.convalidated AS validated,k.condeferrable AS deferrable,k.condeferred AS deferred FROM pg_catalog.pg_constraint k
+    JOIN pg_catalog.pg_class c ON c.oid=k.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND c.relname=ANY($1::text[]) ORDER BY c.relname,k.conname`, parameters: TABLES },
+  indexes: { sql: `SELECT t.relname AS "table",c.relname AS name,pg_catalog.pg_get_indexdef(c.oid) AS definition,
+    i.indisvalid AS valid,i.indisready AS ready,i.indisunique AS "unique",i.indimmediate AS immediate FROM pg_catalog.pg_index i
+    JOIN pg_catalog.pg_class c ON c.oid=i.indexrelid JOIN pg_catalog.pg_class t ON t.oid=i.indrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname=ANY($1::text[]) ORDER BY t.relname,c.relname`, parameters: TABLES },
+  functions: { sql: `SELECT p.proname AS name,pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
+    pg_catalog.pg_get_functiondef(p.oid) AS definition FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND p.proname=ANY($1::text[]) ORDER BY p.proname,arguments`, parameters: FUNCTIONS },
+  triggers: { sql: `SELECT c.relname AS "table",t.tgname AS name,t.tgenabled AS enabled,
+    pg_catalog.pg_get_triggerdef(t.oid,true) AS definition FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY($1::text[])
+    AND (NOT t.tgisinternal OR t.tgenabled <> 'O') ORDER BY c.relname,t.tgname`, parameters: TABLES },
+} as const;
+
 
 function canonical(value: any): any {
   if (value instanceof Date) return value.toISOString();
@@ -63,28 +88,12 @@ export function schemaPreflight(facts: SyrveSchemaFacts, reference = SYRVE_SCHEM
 }
 
 async function readFacts(manager: EntityManager): Promise<SyrveSchemaFacts> {
-  const tables = await manager.query(`SELECT c.relname AS "table",c.relkind AS kind FROM pg_catalog.pg_class c
-    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY($1::text[]) ORDER BY c.relname`, [TABLES]);
-  const columns = await manager.query(`SELECT c.relname AS "table",a.attname AS name,pg_catalog.format_type(a.atttypid,a.atttypmod) AS type,
-    a.attnotnull AS "notNull",pg_catalog.pg_get_expr(d.adbin,d.adrelid) AS "default"
-    FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid
-    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
-    WHERE n.nspname='public' AND c.relname=ANY($1::text[]) AND a.attnum>0 AND NOT a.attisdropped ORDER BY c.relname,a.attname`, [TABLES]);
-  const constraints = await manager.query(`SELECT c.relname AS "table",k.conname AS name,pg_catalog.pg_get_constraintdef(k.oid,true) AS definition,
-    k.convalidated AS validated,k.condeferrable AS deferrable,k.condeferred AS deferred FROM pg_catalog.pg_constraint k
-    JOIN pg_catalog.pg_class c ON c.oid=k.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relname=ANY($1::text[]) ORDER BY c.relname,k.conname`, [TABLES]);
-  const indexes = await manager.query(`SELECT t.relname AS "table",c.relname AS name,pg_catalog.pg_get_indexdef(c.oid) AS definition,
-    i.indisvalid AS valid,i.indisready AS ready,i.indisunique AS "unique",i.indimmediate AS immediate FROM pg_catalog.pg_index i
-    JOIN pg_catalog.pg_class c ON c.oid=i.indexrelid JOIN pg_catalog.pg_class t ON t.oid=i.indrelid
-    JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname=ANY($1::text[]) ORDER BY t.relname,c.relname`, [TABLES]);
-  const functions = await manager.query(`SELECT p.proname AS name,pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
-    pg_catalog.pg_get_functiondef(p.oid) AS definition FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
-    WHERE n.nspname='public' AND p.proname=ANY($1::text[]) ORDER BY p.proname,arguments`, [FUNCTIONS]);
-  const triggers = await manager.query(`SELECT c.relname AS "table",t.tgname AS name,t.tgenabled AS enabled,
-    pg_catalog.pg_get_triggerdef(t.oid,true) AS definition FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
-    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY($1::text[])
-    AND (NOT t.tgisinternal OR t.tgenabled <> 'O') ORDER BY c.relname,t.tgname`, [TABLES]);
+  const tables = await manager.query(SYRVE_CATALOG_QUERIES.tables.sql, [SYRVE_CATALOG_QUERIES.tables.parameters]);
+  const columns = await manager.query(SYRVE_CATALOG_QUERIES.columns.sql, [SYRVE_CATALOG_QUERIES.columns.parameters]);
+  const constraints = await manager.query(SYRVE_CATALOG_QUERIES.constraints.sql, [SYRVE_CATALOG_QUERIES.constraints.parameters]);
+  const indexes = await manager.query(SYRVE_CATALOG_QUERIES.indexes.sql, [SYRVE_CATALOG_QUERIES.indexes.parameters]);
+  const functions = await manager.query(SYRVE_CATALOG_QUERIES.functions.sql, [SYRVE_CATALOG_QUERIES.functions.parameters]);
+  const triggers = await manager.query(SYRVE_CATALOG_QUERIES.triggers.sql, [SYRVE_CATALOG_QUERIES.triggers.parameters]);
   const has = (table: string, name: string, type: string) => tables.some(row => row.table === table && row.kind === 'r') && columns.some(row => row.table === table && row.name === name && row.type === type);
   const history = has('migrations', 'id', 'integer') && has('migrations', 'timestamp', 'bigint') && has('migrations', 'name', 'character varying')
     ? await manager.query('SELECT id,"timestamp",name FROM public.migrations ORDER BY id LIMIT 1001') : null;
