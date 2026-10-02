@@ -13,7 +13,7 @@ The operator accepts only the reviewed post-Syrve migration history, with Guest 
 1. GitHub → repository → main: confirm the exact merged commit that contains this operator and confirm both main push workflows are green.
 2. Neon → Project → Branches → production: independently confirm the production branch, direct endpoint hostname and database.
 3. Neon → Project → Branches → production: create a fresh backup branch. Restore/rehearse on a separate child test branch first; do not point Render production at it.
-4. Use a private operator terminal with Node 24 and a clean checkout of the exact reviewed commit. Run `npm --prefix backend ci && npm --prefix backend run build`.
+4. Use a private operator terminal with Node 24 and a clean checkout of the exact reviewed commit. Run `npm --prefix backend ci`. The operator itself deletes old `backend/dist` and incremental compiler state, performs the reviewed full-backend build, fingerprints every emitted artifact and binds that build to the exact git commit before it opens a database connection.
 5. Never paste `DB_URL`, passwords, booking rows, table UUIDs or private audit output into GitHub, chat or shell history.
 
 ## Private environment
@@ -40,7 +40,8 @@ This uses a REPEATABLE READ, read-only transaction with bounded lock/statement t
 - exact reviewed migration-history shape and timestamps;
 - UUID booking/table keys and `uuid_generate_v4()`;
 - absence of `booking_table_assignments`;
-- exact reviewed checkout SHA and a clean working tree.
+- exact reviewed checkout SHA and a clean working tree;
+- a fresh clean backend build whose full emitted artifact fingerprint is bound to that same commit/tree before any database connection is opened.
 
 No Nest bootstrap, synchronize, other migration or write path is loaded.
 

@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { buildReviewedArtifacts } from './syrve-application-build.mjs';
+
 export const BANQUET_MIGRATION = 'CreateBookingTableAssignments2026100200010';
 export const GUEST_PUSH_MIGRATION = 'CreateGuestPushSubscriptions2026092000010';
 
@@ -129,6 +131,27 @@ export function assertReviewedBanquetCheckout(env, actualHead, status) {
   return reviewed;
 }
 
+export function assertReviewedBanquetBuild(env, build) {
+  const reviewed = String(env.MOLO_BANQUET_REVIEWED_COMMIT || '').trim().toLowerCase();
+  if (!build || build.sourceCommit !== reviewed || !/^[0-9a-f]{40}$/.test(build.sourceTree || '')
+    || !/^[0-9a-f]{64}$/.test(build.artifactFingerprint || '')) {
+    throw new BanquetMigrationOperatorError('Compiled backend artifacts do not match the exact reviewed commit.');
+  }
+  return build;
+}
+
+function buildBanquetArtifacts(env) {
+  try {
+    // Reuse the existing reviewed full-backend build: it deletes dist and
+    // incremental state, rebuilds from the clean checkout, fingerprints every
+    // emitted artifact and binds the result to the current git commit/tree.
+    return assertReviewedBanquetBuild(env, buildReviewedArtifacts());
+  } catch (error) {
+    if (error instanceof BanquetMigrationOperatorError) throw error;
+    throw new BanquetMigrationOperatorError('Reviewed backend build failed before database connection.');
+  }
+}
+
 function readCheckoutState() {
   const root = fileURLToPath(new URL('../..', import.meta.url));
   return {
@@ -185,21 +208,51 @@ export async function assertBookingTableAssignmentsSchema(queryRunner, after = f
           )
       ) AS "columnShape",
       EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname='PK_booking_table_assignments'
-          AND conrelid='public.booking_table_assignments'::regclass AND contype='p'
+        SELECT 1 FROM pg_constraint k
+        WHERE k.conname='PK_booking_table_assignments'
+          AND k.conrelid='public.booking_table_assignments'::regclass
+          AND k.contype='p' AND k.convalidated AND NOT k.condeferrable AND NOT k.condeferred
+          AND k.conkey = ARRAY[
+            (SELECT attnum FROM pg_attribute
+             WHERE attrelid='public.booking_table_assignments'::regclass
+               AND attname='id' AND NOT attisdropped)
+          ]::smallint[]
       ) AS "primaryKey",
       EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname='FK_booking_table_assignments_booking'
-          AND conrelid='public.booking_table_assignments'::regclass
-          AND confrelid='public.bookings'::regclass AND contype='f' AND confdeltype='c'
+        SELECT 1 FROM pg_constraint k
+        WHERE k.conname='FK_booking_table_assignments_booking'
+          AND k.conrelid='public.booking_table_assignments'::regclass
+          AND k.confrelid='public.bookings'::regclass
+          AND k.contype='f' AND k.convalidated AND NOT k.condeferrable AND NOT k.condeferred
+          AND k.confmatchtype='s' AND k.confupdtype='a' AND k.confdeltype='c'
+          AND k.conkey = ARRAY[
+            (SELECT attnum FROM pg_attribute
+             WHERE attrelid='public.booking_table_assignments'::regclass
+               AND attname='booking_id' AND NOT attisdropped)
+          ]::smallint[]
+          AND k.confkey = ARRAY[
+            (SELECT attnum FROM pg_attribute
+             WHERE attrelid='public.bookings'::regclass
+               AND attname='id' AND NOT attisdropped)
+          ]::smallint[]
       ) AS "bookingForeignKey",
       EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname='FK_booking_table_assignments_table'
-          AND conrelid='public.booking_table_assignments'::regclass
-          AND confrelid='public.tables'::regclass AND contype='f' AND confdeltype='c'
+        SELECT 1 FROM pg_constraint k
+        WHERE k.conname='FK_booking_table_assignments_table'
+          AND k.conrelid='public.booking_table_assignments'::regclass
+          AND k.confrelid='public.tables'::regclass
+          AND k.contype='f' AND k.convalidated AND NOT k.condeferrable AND NOT k.condeferred
+          AND k.confmatchtype='s' AND k.confupdtype='a' AND k.confdeltype='c'
+          AND k.conkey = ARRAY[
+            (SELECT attnum FROM pg_attribute
+             WHERE attrelid='public.booking_table_assignments'::regclass
+               AND attname='table_id' AND NOT attisdropped)
+          ]::smallint[]
+          AND k.confkey = ARRAY[
+            (SELECT attnum FROM pg_attribute
+             WHERE attrelid='public.tables'::regclass
+               AND attname='id' AND NOT attisdropped)
+          ]::smallint[]
       ) AS "tableForeignKey",
       EXISTS (
         SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
@@ -262,6 +315,7 @@ export async function operateBookingTableAssignmentsMigration(mode = '--check', 
   const target = assertBanquetOperatorIntent(mode, env);
   const checkout = readCheckoutState();
   assertReviewedBanquetCheckout(env, checkout.head, checkout.status);
+  buildBanquetArtifacts(env);
 
   const require = createRequire(import.meta.url);
   const { DataSource, MigrationExecutor } = require('typeorm');

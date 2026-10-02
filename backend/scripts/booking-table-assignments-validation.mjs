@@ -74,6 +74,32 @@ export async function runBookingTableAssignmentsValidation(env = process.env) {
         await migration.up(runner);
         await assertBookingTableAssignmentsSchema(manager, true);
 
+        await manager.query('SAVEPOINT malformed_primary_key');
+        await manager.query(
+          'ALTER TABLE public.booking_table_assignments DROP CONSTRAINT "PK_booking_table_assignments"',
+        );
+        await manager.query(
+          'ALTER TABLE public.booking_table_assignments ADD CONSTRAINT "PK_booking_table_assignments" PRIMARY KEY (booking_id)',
+        );
+        await assert.rejects(
+          assertBookingTableAssignmentsSchema(manager, true),
+          /constraints or indexes/,
+        );
+        await manager.query('ROLLBACK TO SAVEPOINT malformed_primary_key');
+
+        await manager.query('SAVEPOINT malformed_booking_fk');
+        await manager.query(
+          'ALTER TABLE public.booking_table_assignments DROP CONSTRAINT "FK_booking_table_assignments_booking"',
+        );
+        await manager.query(
+          'ALTER TABLE public.booking_table_assignments ADD CONSTRAINT "FK_booking_table_assignments_booking" FOREIGN KEY (table_id) REFERENCES public.bookings(id) ON DELETE CASCADE NOT VALID',
+        );
+        await assert.rejects(
+          assertBookingTableAssignmentsSchema(manager, true),
+          /constraints or indexes/,
+        );
+        await manager.query('ROLLBACK TO SAVEPOINT malformed_booking_fk');
+
         const assignments = await manager.query(
           `SELECT booking_id, table_id, is_primary
            FROM public.booking_table_assignments

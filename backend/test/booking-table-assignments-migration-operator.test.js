@@ -76,6 +76,22 @@ test('reviewed checkout must match the exact SHA and be clean', async () => {
   assert.throws(() => assertReviewedBanquetCheckout(validEnv(), SHA, ' M file'), /uncommitted/);
 });
 
+test('compiled artifacts must be bound to the same reviewed commit', async () => {
+  const { assertReviewedBanquetBuild } = await loader;
+  const build = {
+    sourceCommit: SHA,
+    sourceTree: 'b'.repeat(40),
+    artifactFingerprint: 'c'.repeat(64),
+  };
+  assert.equal(assertReviewedBanquetBuild(validEnv(), build), build);
+  assert.throws(() => assertReviewedBanquetBuild(validEnv(), {
+    ...build, sourceCommit: 'd'.repeat(40),
+  }), /Compiled backend artifacts/);
+  assert.throws(() => assertReviewedBanquetBuild(validEnv(), {
+    ...build, artifactFingerprint: 'bad',
+  }), /Compiled backend artifacts/);
+});
+
 test('history accepts only reviewed post-Syrve baselines and the banquet row as the next migration', async () => {
   const { ACCEPTED_PRE_BANQUET_HISTORIES, BANQUET_MIGRATION, assertBanquetMigrationHistory } = await loader;
   for (const names of ACCEPTED_PRE_BANQUET_HISTORIES) {
