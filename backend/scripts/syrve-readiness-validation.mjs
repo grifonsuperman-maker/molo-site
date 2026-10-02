@@ -70,6 +70,38 @@ export async function runSyrveReadinessValidation(env=process.env){
     await source.query('INSERT INTO public.migrations(id,"timestamp",name) VALUES ($1,$2,$3)',[migration.id,migration.timestamp,migration.name]);
     assert.equal(schemaPreflight(await facts()).status,'prepared');assert.deepEqual(await snapshots(),baseline);
 
+    // Exercise both real installation orders: six Syrve migrations -> banquet
+    // -> activation, and seven Syrve migrations -> banquet. Restore the exact
+    // original history before the existing roundtrip below.
+    const {CreateBookingTableAssignments2026100200010:Banquet}=require('../dist/migrations/2026100200010-CreateBookingTableAssignments.js');
+    const {CreateSyrveActivation2026100200070:Activation}=require('../dist/migrations/2026100200070-CreateSyrveActivation.js');
+    const banquetName='CreateBookingTableAssignments2026100200010';
+    await source.transaction(async manager=>{
+      await new Banquet().up(manager.queryRunner);
+      await manager.query('INSERT INTO migrations("timestamp",name) VALUES ($1,$2)',[2026100200010,banquetName]);
+    });
+    try {
+      assert.equal(schemaPreflight(await facts()).status,'prepared');
+      await source.transaction(async manager=>{
+        await new Activation().down(manager.queryRunner);
+        await manager.query('DELETE FROM migrations WHERE name=$1',[migration.name]);
+      });
+      const pendingActivation=schemaPreflight(await facts());
+      assert.equal(pendingActivation.status,'plan_requires_review');assert.deepEqual(pendingActivation.pending,[migration.name]);
+      await source.transaction(async manager=>{
+        await new Activation().up(manager.queryRunner);
+        await manager.query('INSERT INTO migrations("timestamp",name) VALUES ($1,$2)',[migration.timestamp,migration.name]);
+      });
+      assert.equal(schemaPreflight(await facts()).status,'prepared');
+    } finally {
+      await source.transaction(async manager=>{
+        await new Banquet().down(manager.queryRunner);
+        await manager.query('DELETE FROM migrations WHERE name=ANY($1::text[])',[[banquetName,migration.name]]);
+        await manager.query('INSERT INTO migrations(id,"timestamp",name) VALUES ($1,$2,$3)',[migration.id,migration.timestamp,migration.name]);
+      });
+    }
+    assert.deepEqual(await snapshots(),baseline);
+
     const existing=(await source.query('SELECT table_id FROM public.table_map_identities ORDER BY table_id LIMIT 1'))[0];
     if(existing)tableId=existing.table_id;
     else{

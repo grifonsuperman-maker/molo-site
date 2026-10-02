@@ -1,15 +1,19 @@
 import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { SyrveSettingsSnapshot, SyrveSettingsStore, settingsVersion, staleSyrveSettings } from './syrve-settings.store';
 import { createSyrveTableSyncState, getSyrveOrderIdsToObserve, reduceSyrveOrderState, reduceSyrveStaffAction,
-  SyrveOrderObservationBatch, SyrveStateScope, SyrveTableSyncState, SyrveTransition } from './syrve-state-reducer';
+  syrveTableStatusEvent, SyrveOrderObservationBatch, SyrveStateScope, SyrveTableSyncState, SyrveTransition } from './syrve-state-reducer';
+import { isVerifiedLoadedProbe } from './syrve-client';
 
-export type SyrveStateCapture = { linkId: string; state: SyrveTableSyncState; orderIds: string[][] };
+export type SyrveStateCapture = { linkId: string; state: SyrveTableSyncState; orderIds: string[][]; physicalVersion: string };
+export const syrveCaptureContext = (leaseId: string, captured: SyrveStateCapture) =>
+  leaseId + ':' + captured.state.localRevision + ':' + captured.physicalVersion;
 
 // Internal adapter, not a provider/export or controller API. Only the staff
-// coordinator uses it at runtime; the prepared worker and POS read source stay disabled.
+// coordinator and the consented worker use it at runtime. Ordinary observations
+// cannot supply a POS visibility receipt.
 export class SyrveStateStore {
   constructor(private readonly dataSource: DataSource, private readonly settings: SyrveSettingsStore) {}
 
@@ -33,8 +37,12 @@ export class SyrveStateStore {
     if (!schema.prepared) throw new ServiceUnavailableException('Постійне зберігання стану Syrve ще не підготовлено.');
     // Same order as the staff hook: settings -> physical table -> link
     // -> snapshot. All competing instances use the settings transaction fence.
-    const physical = await manager.query('SELECT "id" FROM ' + this.table('tables') + ' WHERE "id"=$1 FOR UPDATE', [moloTableId]);
+    const physical = await manager.query('SELECT "id","status","updated_at"::text AS physical_updated_at FROM '
+      + this.table('tables') + ' WHERE "id"=$1 FOR UPDATE', [moloTableId]);
     if (physical.length !== 1) throw staleSyrveSettings();
+    // PostgreSQL text retains microseconds; Date would truncate the timestamp.
+    // This also fences direct booking/transfer writers without changing them.
+    const physicalVersion = createHash('sha256').update(JSON.stringify([physical[0].status, physical[0].physical_updated_at])).digest('hex');
     const [link] = await manager.query('SELECT * FROM ' + this.table('syrve_table_links') + ' WHERE "molo_table_id"=$1 FOR UPDATE', [moloTableId]);
     if (!link || link.integration_id !== entity.id
       || ((!staff || entity.organizationId) && link.organization_id !== entity.organizationId)) throw staleSyrveSettings();
@@ -70,7 +78,7 @@ export class SyrveStateStore {
       state.localRevision = randomUUID();
       await this.persist(manager, link.id, state);
     }
-    return { linkId: link.id as string, state };
+    return { linkId: link.id as string, state, physicalVersion };
   }
 
   private async persist(manager: EntityManager, linkId: string, state: SyrveTableSyncState) {
@@ -106,15 +114,39 @@ export class SyrveStateStore {
 
   async applyObservationInTransaction(manager: EntityManager, current: SyrveSettingsSnapshot,
     captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[]): Promise<SyrveTransition> {
+    return this.applyLockedObservation(manager, current, captured, batches);
+  }
+
+  async applyWorkerObservationInTransaction(manager: EntityManager, current: SyrveSettingsSnapshot,
+    captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[], leaseId: string): Promise<SyrveTransition> {
+    return this.applyLockedObservation(manager, current, captured, batches, syrveCaptureContext(leaseId, captured));
+  }
+
+  private async applyLockedObservation(manager: EntityManager, current: SyrveSettingsSnapshot,
+    captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[], context?: string): Promise<SyrveTransition> {
     if (!manager.queryRunner?.isTransactionActive) throw new ServiceUnavailableException('Стан Syrve потребує активної транзакції.');
     const expected = captured.state.scope;
     const value = await this.lockedState(manager, current, expected.moloTableId);
     if (value.linkId !== captured.linkId) throw staleSyrveSettings();
+    if (value.physicalVersion !== captured.physicalVersion) {
+      return { state: value.state, changed: false, diagnostics: ['local_revision_changed'] };
+    }
     // Only the freshly locked state is authoritative. A modified/replayed
     // capture cannot supply membership, watermarks, next revision or POS proof.
     const result = reduceSyrveOrderState(value.state, { expectedScope: expected, expectedRevision: captured.state.localRevision,
-      currentScope: value.state.scope, nextRevision: randomUUID(), probe: batches, visibilityVerified: false });
-    if (result.changed) await this.persist(manager, value.linkId, result.state);
+      currentScope: value.state.scope, nextRevision: randomUUID(), probe: batches,
+      visibilityVerified: Boolean(context && batches.length && batches.every(batch => isVerifiedLoadedProbe(batch.probe, context,
+        expected.organizationId, expected.syrveTableId))) });
+    if (result.changed) {
+      await this.persist(manager, value.linkId, result.state);
+      const status = syrveTableStatusEvent(value.state, result);
+      if (status) {
+        // The physical UUID is already locked. Do not inspect manual status,
+        // bookings or banquet membership, and never create/rename a table.
+        await manager.query('UPDATE ' + this.table('tables')
+          + ' SET "status"=$2,"updated_at"=clock_timestamp() WHERE "id"=$1', [expected.moloTableId, status]);
+      }
+    }
     return result;
   }
 

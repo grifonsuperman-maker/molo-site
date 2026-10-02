@@ -30,6 +30,7 @@ function harness(api = {}) {
     requestVersion: { current: 0 }, syrveApi: api,
     setCatalogPreview: (value) => state.preview = value, setBusy: (value) => state.busy = value,
     setLoadingTables: (value) => state.loadingTables = value,
+    setChangingAutoStatus: (value) => state.changingAutoStatus = value,
     setError: (value) => state.error = value, setNotice: (value) => state.notice = value,
     setApiLogin: (value) => state.login = value, setOrganizationId: (value) => state.organization = value,
     setOpen: (value) => state.open = value, setStep: (value) => state.step = value,

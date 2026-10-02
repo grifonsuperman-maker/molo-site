@@ -59,6 +59,18 @@ For today, preserve this priority:
 
 Future dates show booking state only.
 
+## Syrve table status rule (confirmed by the user on 2026-10-02)
+
+- Syrve has exactly two table actions: a newly opened bill marks its mapped physical table `occupied` (`Зайнятий`); confirmed closure of its last active bill marks that same table `free` (`Вільний`).
+- Both events apply regardless of the previous manual status. Manual `occupied`, `cleaning`, reservation or banquet marks must not block a new Syrve event.
+- Apply each confirmed opening/closure once, atomically with its durable Syrve version. Repeated polls, bill updates and stale responses must not reapply an old event over a later staff action.
+- Staff manage MOLO statuses, reservations and banquets independently. Syrve must not infer, cancel, complete or propagate their actions, and must not write any action back to the POS.
+- A banquet on tables 1, 2 and 3 with a Syrve bill on table 1 changes only table 1. Tables 2 and 3 keep their manual statuses unless they have their own Syrve bill events.
+- Syrve reads must not continuously overlay occupancy on MOLO's stored physical status. All roles read the same persisted status; existing booking-window and future-date rules remain intact.
+- Empty, failed, incomplete or uncertain reads do not prove closure. Keep scope/version fences, atomic writes and the exact 15-second polling interval.
+- Fence every captured physical table by status and the full PostgreSQL `updated_at` value before applying a Syrve event. Booking/transfer writers may bypass the Syrve staff hook; a changed physical version must reject the delayed observation without consuming its order event.
+- Do not restore the former rule that Syrve only adds occupied or that a manually occupied table cannot be released by confirmed Syrve closure.
+
 ## Guest booking invariants
 
 - A raw `guestDeviceId` may exist only in the browser.

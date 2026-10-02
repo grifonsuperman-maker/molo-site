@@ -1,13 +1,44 @@
 # Syrve: audit, safety boundaries and staged implementation
 
+## Authoritative table rule — user confirmation, 2026-10-02
+
+Syrve performs exactly two actions in MOLO: a newly opened bill marks only its
+mapped physical table `occupied` (`Зайнятий`); confirmed closure of its last
+active bill marks that same table `free` (`Вільний`). These events apply even
+when staff previously set occupied, cleaning, pending or reserved manually.
+Staff manage all other statuses, bookings and banquets independently. Syrve
+does not interpret or propagate those actions and never writes them to the POS.
+For a manually marked banquet on tables 1, 2 and 3 with a bill on table 1,
+only table 1 changes. No related booking or banquet record is changed.
+
+Persist each new lifecycle event together with its durable order version in one
+short transaction. Repeated polls and same-state bill updates do not overwrite
+later manual actions. Delayed responses remain fenced and failures, incomplete
+reads or empty lists never establish closure. Multiple bills keep the table
+occupied until the last confirmed bill closes. All role/map readers use the
+stored physical status; future dates and booking-window rules keep their existing
+behavior. Turning synchronization off preserves the current physical statuses.
+
+The capture includes a fingerprint of the physical status and PostgreSQL's full
+`updated_at` text, retaining microseconds. Apply rechecks it under the same physical
+row lock. A booking/transfer write during HTTP rejects the delayed observation
+even without a Syrve staff hook, and leaves its bill event unconsumed for a fresh
+capture. The private transport receipt is bound to this physical version as well
+as the lease and local Syrve revision. Booking and waiter workflows are unchanged.
+
+This rule supersedes the historical add-only POS projection and manual override
+policy described in earlier implementation stages below. Their retained pure
+compatibility helpers and stored suppression IDs must not govern runtime statuses.
+The required rule is also recorded in the root `AGENTS.md` for future sessions.
+
 Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
 PR 10a starts from fresh main `814d3bf3e1a19bd0a5736e3efeab41d8f7d6905d` (2026-10-01),
 after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270, #271, #272, #273, #274 and #275. Client diagnostics, link schema preparation,
 read-only catalog preview, explicit UUID confirmation, internal rename preparation and read-only order observation are implemented.
-The transition adapter is used only by transactional staff hooks. Common role/date projection is wired behind a hard-disabled read source;
-a prepared background runner is now wired behind a hard-disabled scheduler gate.
-Automatic observation and effective POS status application stay off. Real Syrve is not connected or
-queried during development; tests use synthetic credentials and mocked fetch.
+The transition adapter is used by transactional staff hooks and, after explicit Director consent, the background worker.
+Automatic observation and effective POS status projection default off. Migration-only activation storage,
+a purpose-separated one-use confirmation and fresh command-confirmed table loading are required to enable them.
+Real Syrve is not connected or queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
 ## Confirmed wiring and current behavior
@@ -1185,3 +1216,70 @@ preservation. Development performs no production/Neon writes, live restaurant
 requests, environment edits or deployment. Protected maps, photos, geometry,
 numbers, booking/waiter behavior, status colors and exact 15-second polling stay
 unchanged.
+
+
+### Director activation and current runtime (after PR #282)
+
+This task starts from fresh main `b4f5e70ef8b422070cee50abbfd819696aafacad`.
+The Director can preview only the saved table bindings, acknowledge recurring table-state
+loading and explicitly enable automatic occupancy. The activation HMAC purpose differs
+from manual loading and catalog confirmation. Actor/session, configuration, complete
+local/manual fingerprint, exact upstream groups/tables/POS versions and five-minute
+expiry are checked before a revision/lease claim. Accepted attempts consume that revision
+across instances and restarts, including failures. Only confirmed commands plus a fresh
+complete read can commit durable consent; no initial table status/booking/ledger is overwritten.
+
+`CreateSyrveActivation2026100200070` creates `syrve_sync_activation` with default-off
+consent, a configuration revision, binding fingerprint, server-derived loading plan,
+actor hash and consent time. Rollback refuses every saved receipt, including disabled
+ones. It runs automatically only in the guarded disposable schema reference. Production
+adoption needs a newly reviewed backup/audit/rehearsal/application plan for this seventh
+migration. The earlier approved six-migration application does not cover it. Existing
+six catalog fingerprints are unchanged; the seventh is frozen against PostgreSQL 17.5
+and must match the real PostgreSQL 17 CI reference. No production migration, activation,
+credential change, deployment or real restaurant request is performed in this task.
+
+A saved receipt binds credentials, organization, UUID bindings and physical numbers,
+while manual status/revision and the cumulative ledger remain independent. Settings
+revision changes invalidate consent. Changing/rechecking a live connection or manually
+loading tables requires disabling auto-status first; disconnecting invalidates it directly.
+An ordinary table rename/delete or an invalid saved plan makes consent ineffective
+without breaking public map/manual status reads or the Director's revision/status
+read. New preview, repair and explicit disable remain available; an old binding can
+never authorize worker commands or occupancy while it differs from the saved scope.
+Disabling uses the common settings transaction fence and rotates the configuration.
+Every in-flight runner loses write/command permission, while an unresolved bounded
+lease stays until release/expiry so another instance cannot overlap it.
+The runtime transport reports command start and terminal Success/Error internally.
+An unresolved initialization (pending, expired, timed out or revoked before status
+confirmation) retains its ninety-second lease; retry/backoff cannot release that
+exclusion early. Read-only failures and confirmed terminal commands release normally.
+
+Each worker observation revalidates the consented POS group/version/table, calls scoped
+`init_by_table`, confirms `commands/status`, then performs full table and saved-ID reads.
+A private WeakMap transport receipt binds the exact returned probe to the lease/local
+revision and deadline; copied, serialized, mutated, foreign or expired probes cannot
+certify visibility. Ordinary read-only observations and manual loading still cannot
+supply it. Every restored saved-ID scope, including active/suppressed/unresolved sets
+over 2000 IDs, must succeed before the reducer applies any part. The reducer keeps
+its whole-ledger unknown/conflict/tombstone fence and permits explicit closure only
+with fresh receipts for every scope. Missing responses never imply closure.
+
+The 15-second scheduler, 45-second cycle deadline, 90-second PostgreSQL lease, 32-link
+fair cursor and persistent bounded backoff remain. Each individual read/load stays
+limited to 25 requests; the cycle additionally shares an 800-request budget across
+all nested authentication/load/read calls. Larger/slow observations fail closed,
+retain the last confirmed occupancy and continue through the fair cursor later.
+The worker applies newly observed opening/closure events to the physical table
+status atomically with its version ledger. Manual suppression IDs do not veto
+these events. Role/map reads use the persisted physical status and never query
+Syrve storage or replay occupancy. Booking priority, visibility and future-date
+rules retain their existing behavior; booking and banquet records are unchanged.
+
+The Director UI exposes only table numbers, conditions and enable/disable actions.
+Opening it reads local settings only. Explicit preparation never enables or initializes;
+acknowledgement and a separate enable action are required. Proofs clear on submission,
+scope changes and close; late responses are discarded, duplicate clicks are blocked,
+and accepted attempts refresh the consumed saved revision before sibling actions unlock.
+No order/menu/customer/payment interface is added. Maps, photographs, geometry, table
+numbers, click zones, status colors, waiter buttons and existing polling stay unchanged.

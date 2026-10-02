@@ -45,7 +45,7 @@ export async function runSyrveTableLoadingValidation(env = process.env) {
     assert.notEqual(await revision(),oldRevision);assert.equal((await job()).lease_id,first.leaseId);
     assert.equal((await job()).last_success_at,null);assert.equal((await job()).last_attempt_at,null);
     assert.deepEqual(await physical(),beforePhysical);assert.deepEqual(await links(),beforeLinks);
-    assert.equal((await new SyrveWorkerStore(other,new SyrveSettingsStore(other)).claim()).status,'busy');
+    assert.equal((await new SyrveWorkerStore(other,new SyrveSettingsStore(other)).claim()).status,'disabled');
     await assert.rejects(store().claim(await store().capture(await revision())),e=>e.getStatus()===409);
     await source.destroy();source=new DataSource(options);await source.initialize();
     await assert.rejects(store().capture(oldRevision),e=>e.getStatus()===409); // Replay remains consumed after restart.
@@ -76,7 +76,7 @@ export async function runSyrveTableLoadingValidation(env = process.env) {
       initializeTables:async(base,login,plan,controls)=>{
         commands++;assert.equal(plan.organizationId,org);assert.deepEqual(plan.groups[0].tableIds,[provider]);await controls.beforeCommand();
         assert.equal(Number((await other.query("SELECT count(*) AS count FROM pg_stat_activity WHERE application_name='syrve-loading-ci' AND state='idle in transaction'"))[0].count),0);
-        assert.equal((await new SyrveWorkerStore(other,new SyrveSettingsStore(other)).claim()).status,'busy');
+        assert.equal((await new SyrveWorkerStore(other,new SyrveSettingsStore(other)).claim()).status,'disabled');
         if(fail)throw new SyrveClientException('SYRVE_COMMAND_IN_PROGRESS');return {completedGroups:1};}};
     const app=()=>new SyrveTableLoadingService(store(),client);
     const beforeLoad=await physical(),beforeLoadLinks=await links();

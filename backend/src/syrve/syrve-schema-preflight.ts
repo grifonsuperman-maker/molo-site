@@ -65,13 +65,16 @@ export function schemaPreflight(facts: SyrveSchemaFacts, reference = SYRVE_SCHEM
   const base = [...(baseline ? ['InitialSchemaBaseline2026081300000'] : []), ...SYRVE_EXISTING_HISTORY,
     ...(push ? ['CreateGuestPushSubscriptions2026092000010'] : [])];
   const tail = names.slice(base.length);
-  const suffix = tail.slice(0, Math.min(tail.length, SYRVE_SCHEMA_STEPS.length));
-  const followup = tail.slice(SYRVE_SCHEMA_STEPS.length);
+  const isFollowup = (name: string) => SYRVE_ALLOWED_FOLLOWUP_HISTORY.some(allowed => allowed === name);
+  const suffix = tail.filter(name => !isFollowup(name));
+  const followup = tail.filter(isFollowup);
+  const preparedPrefix = SYRVE_SCHEMA_STEPS.findIndex(step => step.name === 'CreateSyrveWorkerState2026100100060') + 1;
   const followupValid = followup.length <= SYRVE_ALLOWED_FOLLOWUP_HISTORY.length
-    && (followup.length === 0 || suffix.length === SYRVE_SCHEMA_STEPS.length)
-    && followup.every((name, i) => name === SYRVE_ALLOWED_FOLLOWUP_HISTORY[i]);
+    && followup.every((name, i) => name === SYRVE_ALLOWED_FOLLOWUP_HISTORY[i]
+      && tail.slice(0, tail.indexOf(name)).filter(item => !isFollowup(item)).length >= preparedPrefix);
   const historyValid = facts.history !== null && history.length <= 1000
     && tail.length <= SYRVE_SCHEMA_STEPS.length + SYRVE_ALLOWED_FOLLOWUP_HISTORY.length
+    && suffix.length <= SYRVE_SCHEMA_STEPS.length
     && JSON.stringify(names.slice(0, base.length)) === JSON.stringify(base)
     && suffix.every((name, i) => name === SYRVE_SCHEMA_STEPS[i].name)
     && followupValid
@@ -132,7 +135,7 @@ async function readFacts(manager: EntityManager): Promise<SyrveSchemaFacts> {
   const jobs = await manager.query('SELECT * FROM public.syrve_worker_state ORDER BY integration_id');
   facts.data.workerRecords = jobs.length;
   facts.data.snapshot = preflightFingerprint({physical, entities, links, identities, states, versions, jobs});
-  let unobserved = false;
+  let unobserved = false, stale = false;
   for (const link of links) {
     const saved = states.find(row => row.link_id === link.id);
     if (!saved) {
@@ -141,10 +144,11 @@ async function readFacts(manager: EntityManager): Promise<SyrveSchemaFacts> {
       }
       unobserved = true; continue;
     }
-    if (!entity || saved.integration_id !== entity.id || saved.configuration_revision !== entity.configuration_revision
+    if (!entity || saved.integration_id !== entity.id
       || saved.organization_id !== link.organization_id || saved.molo_table_id !== link.molo_table_id || saved.syrve_table_id !== link.syrve_table_id) {
-      facts.data.state = 'stale'; return facts;
+      facts.data.state = 'invalid'; return facts;
     }
+    if (saved.configuration_revision !== entity.configuration_revision) stale = true;
     try {
       getSyrveOrderIdsToObserve({ scope: { integrationId: saved.integration_id, configurationRevision: saved.configuration_revision,
         organizationId: saved.organization_id, moloTableId: saved.molo_table_id, syrveTableId: saved.syrve_table_id },
@@ -153,7 +157,7 @@ async function readFacts(manager: EntityManager): Promise<SyrveSchemaFacts> {
           .map(row => ({ id: row.order_id, timestamp: Number(row.timestamp), state: row.state, fingerprint: row.fingerprint })) });
     } catch { facts.data.state = 'invalid'; return facts; }
   }
-  facts.data.state = unobserved || !links.length ? 'unobserved' : 'valid';
+  facts.data.state = stale ? 'stale' : unobserved || !links.length ? 'unobserved' : 'valid';
   return facts;
 }
 

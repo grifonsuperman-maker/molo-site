@@ -56,10 +56,10 @@ async function roleStatuses(services, date = TODAY) {
   return { waiter, full, guest, window };
 }
 
-test('the production read gate stays off without any storage calls even with an environment flag', async () => {
+test('the production read gate stays off without prepared storage even with an environment flag', async () => {
   const before = process.env.SYRVE_SYNC_ENABLED; process.env.SYRVE_SYNC_ENABLED = 'true';
   try {
-    const source = new SyrveStatusReadService({ options: { type: 'postgres' }, transaction: async () => assert.fail('storage called') });
+    const source = new SyrveStatusReadService(require('./helpers/disabled-table-statuses.js').disabledSource());
     for (const ids of [[], [id(100)], [id(100), id(101)]]) {
       assert.deepEqual(await source.snapshot(ids), disabledSyrveStatus());
     }
@@ -72,7 +72,7 @@ test('real Nest projection module resolves the shared engine with a DataSource a
   // The global TypeORM provider is supplied by AppModule in production.
   const { Module, Global } = require('@nestjs/common');
   class Database {}
-  Global()(Database); Module({ providers: [{ provide: DataSource, useValue: {} }], exports: [DataSource] })(Database);
+  Global()(Database); Module({ providers: [{ provide: DataSource, useValue: require('./helpers/disabled-table-statuses.js').disabledSource() }], exports: [DataSource] })(Database);
   const actual = await Test.createTestingModule({ imports: [Database, TableStatusProjectionModule] }).compile();
   try {
     assert.deepEqual(await actual.get(TableStatusProjectionService).capture([table()]), disabledSyrveStatus());
@@ -114,8 +114,8 @@ test('disabled flat and nested maps preserve status, UUID, geometry, identity an
   }
 });
 
-test('one saved POS snapshot contributes occupied across waiter, director, admin and guest reads by physical UUID', async () => {
-  const physical = table(), saved = snapshot(physical), before = structuredClone(saved);
+test('a persisted occupied event is shared across waiter, director, admin and guest reads by physical UUID', async () => {
+  const physical = table('occupied'), saved = snapshot(physical), before = structuredClone(saved);
   const projection = new TableStatusProjectionService({ snapshot: async () => saved });
   const result = await roleStatuses(cohort(physical, projection));
   for (const value of [result.waiter, result.full.tables[0], result.guest.tables[0],
@@ -125,18 +125,18 @@ test('one saved POS snapshot contributes occupied across waiter, director, admin
   assert.doesNotMatch(JSON.stringify(result), /orderVersions|activeSyrve|manuallyFreed|configurationRevision|syrveTableId|apiLogin|accessToken/);
 });
 
-test('manual free suppresses existing orders; a different new order can contribute occupied', () => {
+test('POS snapshots cannot replay either existing or newly observed occupancy from a read', () => {
   const physical = table(), original = state(physical);
   const suppressed = reduceSyrveStaffAction(original, { action: 'manual_free', expectedScope: original.scope,
     currentScope: original.scope, expectedRevision: original.localRevision, nextRevision: randomUUID() }).state;
   const projection = new TableStatusProjectionService({});
   assert.equal(projection.physical([physical], snapshot(physical, suppressed))[0].status, 'free');
   const next = state(physical, [id(10), id(11)], [id(10)]);
-  assert.equal(projection.physical([physical], snapshot(physical, next))[0].status, 'occupied');
+  assert.equal(projection.physical([physical], snapshot(physical, next))[0].status, 'free');
   assert.deepEqual(next.manuallyFreedSyrveOrderIds, [id(10)]);
 });
 
-test('removing POS occupancy never clears manual occupied, cleaning or MOLO reservations', () => {
+test('reading a closed POS snapshot never replays closure over a newer manual status', () => {
   const projection = new TableStatusProjectionService({});
   for (const manual of ['free', 'occupied', 'cleaning', 'reserved', 'pending', 'closed']) {
     const physical = table(manual);
@@ -169,14 +169,14 @@ test('future dates skip the source and retain only the selected booking window',
   assert.equal(result.statuses['12'].reason, null);
 });
 
-test('booking conflict details and the cleanup boundary stay unchanged while today adds POS occupied', async () => {
+test('booking conflict details and the cleanup boundary use the persisted physical status', async () => {
   const physical = table();
   const booking = { id: id(200), table: physical, status: 'pending', bookingTime: '18:00:00', durationMinutes: 60 };
   for (const enabled of [false, true]) {
     const projection = enabled ? new TableStatusProjectionService({ snapshot: async () => snapshot(physical) }) : disabledTableStatuses();
     const services = cohort(physical, projection, [booking]);
     const result = await services.bookings.getTableStatuses({ bookingDate: TODAY, bookingTime: '19:00', durationMinutes: 60 });
-    assert.equal(result.statuses['12'].status, enabled ? 'occupied' : 'pending');
+    assert.equal(result.statuses['12'].status, 'pending');
     assert.deepEqual(result.statuses['12'].conflict, { bookingId: booking.id, status: 'pending', tableNumber: '12',
       bookedFrom: '18:00:00', bookedTo: '19:00:00', availableFrom: '19:15:00', bookedFromLabel: '18:00',
       bookedToLabel: '19:00', availableFromLabel: '19:15' });
@@ -188,7 +188,7 @@ test('booking conflict details and the cleanup boundary stay unchanged while tod
 });
 
 test('existing availability blocks still overlay the common status result as closed', async () => {
-  const physical = table(), projection = new TableStatusProjectionService({ snapshot: async () => snapshot(physical) });
+  const physical = table('occupied'), projection = new TableStatusProjectionService({ snapshot: async () => snapshot(physical) });
   const payload = await cohort(physical, projection).bookings.getTableStatuses({ bookingDate: TODAY, bookingTime: '19:00' });
   const block = { id: id(300), table: physical, blockDate: TODAY, startTime: '18:00', endTime: '22:00', reason: 'CI' };
   const blocks = new AvailabilityBlocksService({}, { find: async () => [block] }, {}, {}, { find: async () => [physical] }, {}, {}, {});
@@ -247,8 +247,8 @@ test('map consistency checks include zone UUID and table visibility and use the 
   const nested = { ...physical, zone: { ...physical.zone, isClosed: true } };
   const visibleParent = { ...physical.zone, tables: [nested] };
   const consistent = await projection.captureMap([physical], [visibleParent]);
-  assert.equal(consistent.tables.size, 1);
-  assert.equal(projection.zones([visibleParent], consistent)[0].tables[0].status, 'occupied',
+  assert.equal(consistent.tables.size, 0);
+  assert.equal(projection.zones([visibleParent], consistent)[0].tables[0].status, 'free',
     'Nested projection and capture must use the same authoritative parent context.');
   for (const parent of [{ ...visibleParent, id: id(999) },
     { ...visibleParent, tables: [{ ...nested, isVisible: false }] }]) {
@@ -267,6 +267,13 @@ test('foreign scopes and unlinked UUIDs never affect another physical table or c
   }
   assert.equal(projection.physical([{ ...physical, id: id(999) }], snapshot(physical))[0].status, 'free');
 });
+test('all table and map reads use persisted status even when Syrve storage is unavailable',async()=>{
+  const physical=table('occupied'),projection=new TableStatusProjectionService({snapshot:async()=>assert.fail('table reads must not query Syrve')});
+  assert.deepEqual(await projection.capture([physical]),disabledSyrveStatus());
+  assert.deepEqual(await projection.captureMap([physical],[{...physical.zone,tables:[physical]}]),disabledSyrveStatus());
+  const result=await roleStatuses(cohort(physical,projection));
+  for(const value of [result.waiter,result.full.tables[0],result.guest.tables[0],result.window.statuses['12']])assert.equal(value.status,'occupied');
+});
 
 function readerHarness() {
   const physical = table(), saved = state(physical), queries = [];
@@ -276,10 +283,15 @@ function readerHarness() {
   const durable = { link_id: link.id, integration_id: saved.scope.integrationId, configuration_revision: saved.scope.configurationRevision,
     organization_id: saved.scope.organizationId, molo_table_id: physical.id, syrve_table_id: saved.scope.syrveTableId, local_revision: saved.localRevision };
   const data = { prepared: true, settings: { prepared: true, entity: { id: saved.scope.integrationId,
-    configurationRevision: saved.scope.configurationRevision, organizationId: saved.scope.organizationId, status: 'connected' }, links: [link] },
+    configurationRevision: saved.scope.configurationRevision, organizationId: saved.scope.organizationId, status: 'connected',apiBaseUrl:'https://api-eu.syrve.live',apiLoginEncrypted:'synthetic',apiLoginIv:'synthetic',apiLoginAuthTag:'synthetic' }, links: [link] },
   rows: [durable], versions: saved.orderVersions.map((v) => ({ link_id: link.id, order_id: v.id, ...v })), physical };
+  const {activationBindings}=require('../dist/syrve/syrve-activation.js');
+  const consent={enabled:true,configuration_revision:saved.scope.configurationRevision,actor_hash:'a'.repeat(64),consented_at:new Date(),
+    bindings_fingerprint:activationBindings(data.settings,[physical]),loading_plan:{organizationId:saved.scope.organizationId,
+      groups:[{terminalGroupId:id(1),posVersion:'7.7.1',tableIds:[link.syrveTableId]}]}};
   const manager = { query: async (sql) => {
     queries.push(sql);
+    if(sql.includes('syrve_sync_activation')&&!sql.includes('to_regclass'))return [structuredClone(consent)];
     assert.doesNotMatch(sql, /FOR UPDATE|INSERT|UPDATE|DELETE|advisory/i);
     if (sql.includes('to_regclass')) return [{ prepared: data.prepared }];
     if (sql.includes('FROM "public"."syrve_table_sync_states"')) return structuredClone(data.rows);

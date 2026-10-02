@@ -5,6 +5,7 @@ import { TableEntity } from '../tables/entities/table.entity';
 import { savedSyrveFingerprint } from './syrve-saved-scope';
 import { settingsVersion, staleSyrveSettings, SyrveSettingsStore, type SyrveSettingsSnapshot } from './syrve-settings.store';
 import { LOADING_MAX_TABLES } from './syrve-table-loading';
+import { SyrveActivationStore } from './syrve-activation.store';
 
 export type TableLoadingCapture = { snapshot: SyrveSettingsSnapshot; tables: TableEntity[]; fingerprint: string };
 export type TableLoadingLease = TableLoadingCapture & { leaseId: string };
@@ -47,6 +48,7 @@ export class SyrveTableLoadingStore {
   }
   claim(captured: TableLoadingCapture): Promise<TableLoadingLease> {
     return this.settings.transaction(settingsVersion(captured.snapshot), async (manager, snapshot) => {
+      await new SyrveActivationStore(this.source, this.settings).requireDisabled(snapshot, manager);
       // The common settings lock precedes physical rows, as in staff actions.
       // These short locks end before authentication or commands start.
       await manager.query('LOCK TABLE ' + this.table('tables') + ' IN SHARE ROW EXCLUSIVE MODE');

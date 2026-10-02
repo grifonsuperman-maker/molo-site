@@ -151,7 +151,7 @@ export async function buildSyrveApplicationPlan(input, now = Date.now()) {
   const build = assertReviewedBuild(context?.sourceCommit, loadedArtifactFingerprint);
   const facts = applicationFacts(audit), report = schemaPreflight(facts);
   check(['plan_requires_review','prepared'].includes(report.status), 'Target schema, history or data require a separate audit.');
-  check(reference && keys.every(key => Array.isArray(reference[key])) && SYRVE_SCHEMA_STEPS.every(step => schemaReference(reference)[step.name] === SYRVE_SCHEMA_REFERENCE[step.name]), 'Prepared catalog must match all six frozen references.');
+  check(reference && keys.every(key => Array.isArray(reference[key])) && SYRVE_SCHEMA_STEPS.every(step => schemaReference(reference)[step.name] === SYRVE_SCHEMA_REFERENCE[step.name]), 'Prepared catalog must match all frozen references.');
   const { target, expiresAt } = assertApplicationContext(context, audit, now);
   const prefix = SYRVE_SCHEMA_STEPS.length - report.pending.length;
   const pending = SYRVE_SCHEMA_STEPS.slice(prefix);
