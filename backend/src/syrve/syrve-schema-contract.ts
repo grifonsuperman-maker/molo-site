@@ -18,6 +18,13 @@ export const SYRVE_SCHEMA_STEPS = [
   { name: 'CreateSyrveDurableState2026093000050', tables: ['syrve_table_sync_states', 'syrve_order_versions'] },
   { name: 'CreateSyrveWorkerState2026100100060', tables: ['syrve_worker_state'] },
 ] as const;
+
+// Known migrations that may be appended only after all frozen Syrve steps.
+// They are not owned, applied or audited as Syrve schema by this module.
+export const SYRVE_ALLOWED_FOLLOWUP_HISTORY = [
+  'CreateBookingTableAssignments2026100200010',
+] as const;
+
 export const SYRVE_EXISTING_HISTORY = ['CreateStaffPinAttempts2026081400010', 'UpgradeStaffPinAttemptsPerAttempt2026081400020',
   'CreateWaiterCalls2026081500010', 'AddWaiterCallAssignmentActive2026081500015', 'CloseInactiveWaiterCalls2026081500020',
   'AddGuestReviewArchive2026082200010', 'AddLogArchive2026082400010', 'AddManualBookingGuestName2026082400020'];

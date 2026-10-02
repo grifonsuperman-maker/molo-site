@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { canonicalTableNumber } from '../tables/table-map-slots';
 import { getSyrveOrderIdsToObserve } from './syrve-state-reducer';
-import { SYRVE_EXISTING_HISTORY, SYRVE_SCHEMA_REFERENCE, SYRVE_SCHEMA_STEPS } from './syrve-schema-contract';
+import { SYRVE_ALLOWED_FOLLOWUP_HISTORY, SYRVE_EXISTING_HISTORY, SYRVE_SCHEMA_REFERENCE, SYRVE_SCHEMA_STEPS } from './syrve-schema-contract';
 
 type Row = Record<string, any>;
 export type SyrveSchemaFacts = { tables: Row[]; columns: Row[]; constraints: Row[]; indexes: Row[]; functions: Row[]; triggers: Row[];
@@ -64,10 +64,17 @@ export function schemaPreflight(facts: SyrveSchemaFacts, reference = SYRVE_SCHEM
   const push = names[offset + SYRVE_EXISTING_HISTORY.length] === 'CreateGuestPushSubscriptions2026092000010';
   const base = [...(baseline ? ['InitialSchemaBaseline2026081300000'] : []), ...SYRVE_EXISTING_HISTORY,
     ...(push ? ['CreateGuestPushSubscriptions2026092000010'] : [])];
-  const suffix = names.slice(base.length);
-  const historyValid = facts.history !== null && history.length <= 1000 && suffix.length <= SYRVE_SCHEMA_STEPS.length
+  const tail = names.slice(base.length);
+  const suffix = tail.slice(0, Math.min(tail.length, SYRVE_SCHEMA_STEPS.length));
+  const followup = tail.slice(SYRVE_SCHEMA_STEPS.length);
+  const followupValid = followup.length <= SYRVE_ALLOWED_FOLLOWUP_HISTORY.length
+    && (followup.length === 0 || suffix.length === SYRVE_SCHEMA_STEPS.length)
+    && followup.every((name, i) => name === SYRVE_ALLOWED_FOLLOWUP_HISTORY[i]);
+  const historyValid = facts.history !== null && history.length <= 1000
+    && tail.length <= SYRVE_SCHEMA_STEPS.length + SYRVE_ALLOWED_FOLLOWUP_HISTORY.length
     && JSON.stringify(names.slice(0, base.length)) === JSON.stringify(base)
     && suffix.every((name, i) => name === SYRVE_SCHEMA_STEPS[i].name)
+    && followupValid
     && history.every((row, i) => Number(row.timestamp) === Number(String(row.name).match(/\d{13}$/)?.[0])
       && Number.isSafeInteger(Number(row.id)) && Number(row.id) > (i ? Number(history[i - 1].id) : 0));
   const steps = SYRVE_SCHEMA_STEPS.map((step, i) => {

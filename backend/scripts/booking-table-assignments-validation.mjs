@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
+import { assertBookingTableAssignmentsSchema } from './booking-table-assignments-migration-operator.mjs';
 import { assertFreshSchemaReferenceTarget } from './fresh-schema-reference.mjs';
 
 const ROLLBACK = new Error('BOOKING_TABLE_ASSIGNMENTS_CI_ROLLBACK');
@@ -42,10 +43,7 @@ export async function runBookingTableAssignmentsValidation(env = process.env) {
   await source.initialize();
 
   try {
-    const initialTable = await source.query(
-      `SELECT to_regclass('public.booking_table_assignments')::text AS table_name`,
-    );
-    assert.equal(initialTable[0]?.table_name, null);
+    await assertBookingTableAssignmentsSchema(source, false);
 
     await assert.rejects(
       source.transaction('READ COMMITTED', async (manager) => {
@@ -74,6 +72,7 @@ export async function runBookingTableAssignmentsValidation(env = process.env) {
         };
 
         await migration.up(runner);
+        await assertBookingTableAssignmentsSchema(manager, true);
 
         const assignments = await manager.query(
           `SELECT booking_id, table_id, is_primary
@@ -145,6 +144,7 @@ export async function runBookingTableAssignmentsValidation(env = process.env) {
       };
 
       await migration.up(runner);
+      await assertBookingTableAssignmentsSchema(manager, true);
       await migration.down(runner);
 
       const afterSafeDown = await manager.query(
