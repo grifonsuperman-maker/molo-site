@@ -110,6 +110,8 @@ jobs:
         run: node backend/scripts/syrve-application-build.mjs --build
       - name: Validate reviewed Syrve application plans and preservation for every prefix
         run: node backend/scripts/syrve-schema-application-validation.mjs
+      - name: Validate isolated banquet table assignment migration
+        run: node backend/scripts/booking-table-assignments-validation.mjs
       - name: Capture fresh schema audit
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline

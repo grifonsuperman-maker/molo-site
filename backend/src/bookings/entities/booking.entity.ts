@@ -6,6 +6,7 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -13,6 +14,7 @@ import {
 import { Client } from '../../clients/entities/client.entity';
 import { Staff } from '../../staff/entities/staff.entity';
 import { TableEntity } from '../../tables/entities/table.entity';
+import { BookingTableAssignment } from './booking-table-assignment.entity';
 
 export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
 export type BookingSource = 'mini_app' | 'phone' | 'admin_manual';
@@ -59,6 +61,9 @@ export class Booking {
   })
   @JoinColumn({ name: 'table_id' })
   table: TableEntity | null;
+
+  @OneToMany(() => BookingTableAssignment, (assignment) => assignment.booking)
+  tableAssignments: BookingTableAssignment[];
 
   @ManyToOne(() => Client, (client) => client.bookings, {
     nullable: true,
