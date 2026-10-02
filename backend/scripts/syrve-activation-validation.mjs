@@ -105,15 +105,20 @@ export async function runSyrveActivationValidation(env=process.env){
     await worker.onModuleDestroy();
 
     // A final receipt-write failure rolls back consent, never the one-use claim.
+    const next=await service().preview({configurationRevision:await revision()},actor);
     await source.query("CREATE FUNCTION syrve_activation_ci_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic receipt failure'; END; $$");
-    await source.query('CREATE TRIGGER syrve_activation_ci_fail BEFORE INSERT OR UPDATE ON syrve_sync_activation FOR EACH ROW EXECUTE FUNCTION syrve_activation_ci_fail()');trigger=true;
-    const next=await service().preview({configurationRevision:await revision()},actor),failed=await service().enable({configurationRevision:next.configurationRevision,confirmationProof:next.confirmation.proof,confirmed:true},actor);
+    // Install the fault during mocked HTTP, after the genuine schema preflight.
+    // Installing it beforehand correctly makes readiness reject catalog drift.
+    hold=async()=>{await other.query('CREATE TRIGGER syrve_activation_ci_fail BEFORE INSERT OR UPDATE ON syrve_sync_activation FOR EACH ROW EXECUTE FUNCTION syrve_activation_ci_fail()');trigger=true;hold=null;};
+    const failed=await service().enable({configurationRevision:next.configurationRevision,confirmationProof:next.confirmation.proof,confirmed:true},actor);
+    assert.equal(trigger,true);
     assert.equal(failed.syncEnabled,false);assert.equal(failed.code,'SYRVE_UNAVAILABLE');assert.notEqual(failed.configurationRevision,next.configurationRevision);
     assert.equal((await activation().read(await settings().read())).enabled,false);assert.deepEqual(await physical(),beforePhysical);assert.deepEqual(await saved(),atDisable);
     assert.ok((await job()).lease_id);assert.equal((await job()).last_success_at,null);
   }finally{
     try{
-      if(trigger){await source.query('DROP TRIGGER IF EXISTS syrve_activation_ci_fail ON syrve_sync_activation');await source.query('DROP FUNCTION IF EXISTS syrve_activation_ci_fail()');}
+      if(trigger)await source.query('DROP TRIGGER IF EXISTS syrve_activation_ci_fail ON syrve_sync_activation');
+      await source.query('DROP FUNCTION IF EXISTS syrve_activation_ci_fail()');
       if(integrationId)await source.query('DELETE FROM syrve_integrations WHERE id=$1',[integrationId]);
       if(created)await source.query('DELETE FROM tables WHERE id=$1',[tableId]);
       else if(original)await source.query('UPDATE tables SET status=$2,updated_at=$3 WHERE id=$1',[tableId,original.status,original.updated_at]);
