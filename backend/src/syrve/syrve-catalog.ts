@@ -1,6 +1,8 @@
+import { normalizeSyrvePosVersion } from './syrve-pos-version';
+
 export class SyrveCatalogValidationError extends Error {}
 
-type TerminalGroup = { id: string; name: string };
+type TerminalGroup = { id: string; name: string; posVersion?: string | null };
 export type SyrveCatalogTable = {
   id: string;
   number: number;
@@ -39,7 +41,7 @@ function name(value: unknown): string {
   return value.trim();
 }
 
-export function parseTerminalGroups(payload: unknown, organizationId: string) {
+export function parseTerminalGroups(payload: unknown, organizationId: string, includePosVersions = false) {
   const data = record(payload);
   const seen = new Set<string>();
   function groups(value: unknown): TerminalGroup[] {
@@ -52,7 +54,8 @@ export function parseTerminalGroups(payload: unknown, organizationId: string) {
         if (uuid(group.organizationId) !== organizationId || seen.has(id)) throw new SyrveCatalogValidationError();
         seen.add(id);
         if (seen.size > 100) throw new SyrveCatalogValidationError();
-        return { id, name: name(group.name) || 'Група без назви' };
+        return { id, name: name(group.name) || 'Група без назви',
+          ...(includePosVersions ? { posVersion: normalizeSyrvePosVersion(group.posVersion) } : {}) };
       });
     });
   }
@@ -141,7 +144,7 @@ export function buildSyrveCatalogPreview(catalog: SyrveCatalog, moloRows: MoloTa
   });
   const warnings: string[] = [
     'Отримано лише секції, доступні для бронювання через Syrve API. Повноту всіх столів ресторану ще не підтверджено.',
-    'Доступ до замовлень ще не перевірено. Синхронізацію не ввімкнено.',
+    'Читання стану столів ще не перевірено. Синхронізацію не ввімкнено.',
   ];
   if (catalog.terminalGroups.sleeping.length) warnings.push('Частина касових груп Syrve неактивна; їхні столи не перевірено.');
   if (!catalog.terminalGroups.active.length) warnings.push('У вибраній організації немає активних касових груп.');

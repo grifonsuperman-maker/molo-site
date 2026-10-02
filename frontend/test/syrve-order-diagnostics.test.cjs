@@ -13,9 +13,10 @@ function report(version = VERSION) {
     startedAt: '2026-10-02T07:00:00Z', checkedAt: '2026-10-02T07:00:01Z',
     checks: ['connection', 'terminalGroups', 'restaurantSections', 'posAvailability', 'ordersByTable', 'ordersById']
       .map(key => ({ key, status: key === 'ordersById' ? 'not_checked' : 'ok', code: null })),
-    summary: { linkedTables: 2, tablesWithOpenOrders: 1, unknownTables: 1, observedOrders: 2,
-      openOrders: 1, explicitlyClosedOrders: 1, unknownOrders: 0, unresolvedKnownOrders: 0,
+    summary: { linkedTables: 2, tablesWithOccupancy: 1, unknownTables: 1,
       terminalGroups: { alive: 1, sleeping: 0, offline: 0, unknown: 0 } },
+    posVersions: { read: { supported: 0, unsupported: 0, unknown: 2 },
+      initialization: { supported: 0, unsupported: 0, unknown: 2 } },
     diagnostics: { complete: false, posOrderVisibility: 'not_verified', posVersion: 'not_verified', initializationPerformed: false },
     syncEnabled: false, activationAvailable: false, statusesApplied: false, renamingApplied: false };
 }
@@ -170,9 +171,12 @@ test('malformed, inconsistent or activation-like responses cannot become success
     r => r.checkedAt = '2026-10-01T00:00:00Z', r => r.checks.pop(), r => r.checks[0] = r.checks[1],
     r => r.checks[0].key = 'constructor', r => r.checks[0].status = 'unexpected',
     r => r.checks[0].code = 'secret-error', r => Object.assign(r.checks[0], { status: 'error', code: 'secret-error' }),
-    r => r.summary.linkedTables = 3, r => r.summary.unknownTables = -1, r => r.summary.openOrders = 1.5,
+    r => r.summary.linkedTables = 3, r => r.summary.unknownTables = -1, r => r.summary.tablesWithOccupancy = 1.5,
     r => r.summary.terminalGroups.alive = NaN, r => r.summary.unknownTables = 0,
-    r => r.summary.observedOrders = 10, r => Object.assign(r.checks[4], { status: 'error', code: 'SYRVE_ACCESS_DENIED' })];
+    r => r.posVersions = null, r => r.posVersions.read.supported = NaN,
+    r => r.posVersions.initialization.unknown = -1, r => r.posVersions.read.unknown = 1,
+    r => Object.assign(r.posVersions.initialization, { supported: 2, unknown: 0 }),
+    r => Object.assign(r.checks[4], { status: 'error', code: 'SYRVE_ACCESS_DENIED' })];
   for (const mutate of mutations) { const value = report(); mutate(value); assert.throws(() => validateOrderDiagnostics(value, scope()), /Недійсний/); }
 });
 
@@ -185,22 +189,66 @@ test('unknown payload properties are not retained and the view never exposes ide
   const { validateOrderDiagnostics, SyrveOrderDiagnosticsView } = load();
   const input = report(); input.privatePayload = 'secret-credential'; input.checks[0].upstreamBody = 'secret-credential';
   input.summary.customer = 'secret-credential'; input.diagnostics.token = 'secret-credential';
+  for (const key of ['observedOrders', 'openOrders', 'explicitlyClosedOrders', 'unknownOrders', 'unresolvedKnownOrders']) input.summary[key] = 12345;
+  input.posVersions.read.providerVersion = 'secret-credential';
   const checked = validateOrderDiagnostics(input, scope()); assert.ok(!JSON.stringify(checked).includes('secret-credential'));
+  assert.ok(!JSON.stringify(checked).includes('12345'));
   const html = renderToStaticMarkup(React.createElement(SyrveOrderDiagnosticsView, { report: checked }));
-  for (const text of ['Замовлення за столами', 'Явно закриті замовлення', 'Порожня відповідь', 'не підтверджує вільний стіл', 'Синхронізація залишається вимкненою']) assert.ok(html.includes(text), text);
-  assert.doesNotMatch(html, /secret-credential|<button|configurationRevision|apiLogin|orderIds/);
+  for (const text of ['Читання стану столів', 'Столи з ознаками зайнятості', 'Порожня відповідь', 'що стіл вільний', 'Синхронізація залишається вимкненою']) assert.ok(html.includes(text), text);
+  assert.doesNotMatch(html, /secret-credential|<button|configurationRevision|apiLogin|orderIds|[Зз]амовлен|12345/);
   assert.ok(!html.includes(VERSION)); assert.ok(!html.includes(ORG));
 });
 
 test('permission failure and sleeping or offline registers retain unknown tables and no positive closure', () => {
   const { validateOrderDiagnostics, SyrveOrderDiagnosticsView } = load();
   const value = report(); Object.assign(value.checks[4], { status: 'error', code: 'SYRVE_ACCESS_DENIED' });
-  Object.assign(value.summary, { tablesWithOpenOrders: 0, unknownTables: 2, observedOrders: 0, openOrders: 0, explicitlyClosedOrders: 0 });
+  Object.assign(value.summary, { tablesWithOccupancy: 0, unknownTables: 2 });
   value.summary.terminalGroups = { alive: 0, sleeping: 1, offline: 1, unknown: 0 };
   const checked = validateOrderDiagnostics(value, scope());
   const html = renderToStaticMarkup(React.createElement(SyrveOrderDiagnosticsView, { report: checked }));
   assert.match(html, /Syrve не надав потрібного дозволу/); assert.match(html, /Сплячі касові групи: 1/);
   assert.match(html, /Недоступні: 1/); assert.equal(checked.summary.unknownTables, 2);
+});
+
+test('verified POS compatibility is table evidence and never makes synchronization or complete status available', () => {
+  const { validateOrderDiagnostics, SyrveOrderDiagnosticsView } = load();
+  const value = report();
+  value.posVersions = { read: { supported: 2, unsupported: 0, unknown: 0 },
+    initialization: { supported: 2, unsupported: 0, unknown: 0 } };
+  value.diagnostics.posVersion = 'verified';
+  const checked = validateOrderDiagnostics(value, scope());
+  const html = renderToStaticMarkup(React.createElement(SyrveOrderDiagnosticsView, { report: checked }));
+  assert.match(html, /Версія каси підтримує читання стану столів/);
+  assert.match(html, /Повноту стану столів ще не підтверджено/);
+  assert.match(html, /Синхронізація залишається вимкненою/);
+  assert.equal(checked.diagnostics.complete, false); assert.equal(checked.activationAvailable, false);
+  assert.doesNotMatch(html, /[Зз]амовлен|<button/);
+});
+
+test('unsupported and mixed POS versions give fixed actionable table diagnostics', () => {
+  const { validateOrderDiagnostics, SyrveOrderDiagnosticsView } = load();
+  for (const read of [{ supported: 0, unsupported: 2, unknown: 0 }, { supported: 1, unsupported: 1, unknown: 0 }]) {
+    const value = report(); value.posVersions = { read, initialization: { ...read } }; value.diagnostics.posVersion = 'unsupported';
+    const html = renderToStaticMarkup(React.createElement(SyrveOrderDiagnosticsView, { report: validateOrderDiagnostics(value, scope()) }));
+    assert.match(html, /версії 7.4.6/); assert.match(html, /версії 7.7.1/); assert.match(html, /Оновіть несумісні каси/);
+    assert.match(html, /Синхронізація залишається вимкненою/);
+  }
+  const value = report(); value.posVersions = { read: { supported: 2, unsupported: 0, unknown: 0 },
+    initialization: { supported: 0, unsupported: 2, unknown: 0 } }; value.diagnostics.posVersion = 'verified';
+  const html = renderToStaticMarkup(React.createElement(SyrveOrderDiagnosticsView, { report: validateOrderDiagnostics(value, scope()) }));
+  assert.match(html, /Версія каси підтримує читання/); assert.match(html, /версії 7.7.1/);
+});
+
+test('missing, inconsistent or failed-scope version evidence cannot be reused as verified support', () => {
+  const { validateOrderDiagnostics } = load();
+  const mutations = [r => delete r.posVersions, r => r.diagnostics.posVersion = 'unexpected',
+    r => r.posVersions.read.unknown = 3, r => r.posVersions.initialization.unknown = 1,
+    r => { r.posVersions = { read: { supported: 2, unsupported: 0, unknown: 0 },
+      initialization: { supported: 2, unsupported: 0, unknown: 0 } }; r.diagnostics.posVersion = 'verified';
+      r.checks[2].status = 'not_checked'; r.summary.tablesWithOccupancy = 0; r.summary.unknownTables = 2; },
+    r => { r.posVersions = { read: { supported: 0, unsupported: 2, unknown: 0 },
+      initialization: { supported: 2, unsupported: 0, unknown: 0 } }; r.diagnostics.posVersion = 'unsupported'; }];
+  for (const mutate of mutations) { const value = report(); mutate(value); assert.throws(() => validateOrderDiagnostics(value, scope()), /Недійсний/); }
 });
 
 test('actual dock opens saved diagnostics separately from credential and organization drafts', async () => {

@@ -46,12 +46,12 @@ export type SyrveOrderDiagnostics = {
   checkedAt: string;
   checks: { key: SyrveOrderCheckKey; status: 'ok' | 'error' | 'not_checked'; code: string | null }[];
   summary: {
-    linkedTables: number; tablesWithOpenOrders: number; unknownTables: number;
-    observedOrders: number; openOrders: number; explicitlyClosedOrders: number;
-    unknownOrders: number; unresolvedKnownOrders: number;
+    linkedTables: number; tablesWithOccupancy: number; unknownTables: number;
     terminalGroups: { alive: number; sleeping: number; offline: number; unknown: number };
   };
-  diagnostics: { complete: false; posOrderVisibility: 'not_verified'; posVersion: 'not_verified'; initializationPerformed: false };
+  posVersions: { read: { supported: number; unsupported: number; unknown: number };
+    initialization: { supported: number; unsupported: number; unknown: number } };
+  diagnostics: { complete: false; posOrderVisibility: 'not_verified'; posVersion: 'verified' | 'unsupported' | 'not_verified'; initializationPerformed: false };
   activationAvailable: false;
   syncEnabled: false;
   statusesApplied: false;
