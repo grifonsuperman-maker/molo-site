@@ -100,6 +100,17 @@ export async function runBookingTableAssignmentsValidation(env = process.env) {
         );
         await manager.query('ROLLBACK TO SAVEPOINT malformed_booking_fk');
 
+        await manager.query('SAVEPOINT wrong_index_owner');
+        await manager.query('DROP INDEX public."UQ_booking_table_assignments_booking_table"');
+        await manager.query(
+          'CREATE UNIQUE INDEX "UQ_booking_table_assignments_booking_table" ON public.bookings (id, table_id)',
+        );
+        await assert.rejects(
+          assertBookingTableAssignmentsSchema(manager, true),
+          /constraints or indexes/,
+        );
+        await manager.query('ROLLBACK TO SAVEPOINT wrong_index_owner');
+
         const assignments = await manager.query(
           `SELECT booking_id, table_id, is_primary
            FROM public.booking_table_assignments

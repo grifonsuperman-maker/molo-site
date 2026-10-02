@@ -257,18 +257,21 @@ export async function assertBookingTableAssignmentsSchema(queryRunner, after = f
       EXISTS (
         SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
         WHERE c.oid=to_regclass('public."UQ_booking_table_assignments_booking_table"')
+          AND i.indrelid='public.booking_table_assignments'::regclass
           AND i.indisunique AND i.indisvalid AND i.indisready AND i.indpred IS NULL
           AND pg_get_indexdef(c.oid) LIKE '%(booking_id, table_id)'
       ) AS "pairIndex",
       EXISTS (
         SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
         WHERE c.oid=to_regclass('public."UQ_booking_table_assignments_primary_booking"')
+          AND i.indrelid='public.booking_table_assignments'::regclass
           AND i.indisunique AND i.indisvalid AND i.indisready AND i.indpred IS NOT NULL
           AND pg_get_indexdef(c.oid) LIKE '%(booking_id) WHERE (is_primary = true)'
       ) AS "primaryIndex",
       EXISTS (
         SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
         WHERE c.oid=to_regclass('public."IDX_booking_table_assignments_table"')
+          AND i.indrelid='public.booking_table_assignments'::regclass
           AND NOT i.indisunique AND i.indisvalid AND i.indisready AND i.indpred IS NULL
           AND pg_get_indexdef(c.oid) LIKE '%(table_id)'
       ) AS "tableIndex"
