@@ -6,6 +6,12 @@ export class CreateBookingTableAssignments2026100200010
   name = 'CreateBookingTableAssignments2026100200010';
 
   async up(queryRunner: QueryRunner): Promise<void> {
+    if (!queryRunner.isTransactionActive) {
+      throw new Error(
+        'Booking table assignment migration requires an active transaction',
+      );
+    }
+
     // Keep the one-time backfill stable while the relation is created.
     await queryRunner.query('LOCK TABLE "bookings" IN SHARE ROW EXCLUSIVE MODE');
 

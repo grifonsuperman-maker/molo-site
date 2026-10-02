@@ -7,11 +7,21 @@ const {
   CreateBookingTableAssignments2026100200010,
 } = require('../dist/migrations/2026100200010-CreateBookingTableAssignments.js');
 
+test('booking table assignment up requires one transaction for the lock and backfill', async () => {
+  const migration = new CreateBookingTableAssignments2026100200010();
+
+  await assert.rejects(
+    () => migration.up({ isTransactionActive: false, query: async () => [] }),
+    /requires an active transaction/,
+  );
+});
+
 test('booking table assignment migration creates a normalized multi-table relation and backfills legacy primary tables', async () => {
   const queries = [];
   const migration = new CreateBookingTableAssignments2026100200010();
 
   await migration.up({
+    isTransactionActive: true,
     query: async (sql) => {
       queries.push(sql);
       return [];
