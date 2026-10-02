@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
+import { assertBookingTableAssignmentsSchema } from './booking-table-assignments-migration-operator.mjs';
 import { assertFreshSchemaReferenceTarget } from './fresh-schema-reference.mjs';
 
 const ROLLBACK = new Error('BOOKING_TABLE_ASSIGNMENTS_CI_ROLLBACK');
@@ -42,10 +43,7 @@ export async function runBookingTableAssignmentsValidation(env = process.env) {
   await source.initialize();
 
   try {
-    const initialTable = await source.query(
-      `SELECT to_regclass('public.booking_table_assignments')::text AS table_name`,
-    );
-    assert.equal(initialTable[0]?.table_name, null);
+    await assertBookingTableAssignmentsSchema(source, false);
 
     await assert.rejects(
       source.transaction('READ COMMITTED', async (manager) => {
@@ -74,6 +72,44 @@ export async function runBookingTableAssignmentsValidation(env = process.env) {
         };
 
         await migration.up(runner);
+        await assertBookingTableAssignmentsSchema(manager, true);
+
+        await manager.query('SAVEPOINT malformed_primary_key');
+        await manager.query(
+          'ALTER TABLE public.booking_table_assignments DROP CONSTRAINT "PK_booking_table_assignments"',
+        );
+        await manager.query(
+          'ALTER TABLE public.booking_table_assignments ADD CONSTRAINT "PK_booking_table_assignments" PRIMARY KEY (booking_id)',
+        );
+        await assert.rejects(
+          assertBookingTableAssignmentsSchema(manager, true),
+          /constraints or indexes/,
+        );
+        await manager.query('ROLLBACK TO SAVEPOINT malformed_primary_key');
+
+        await manager.query('SAVEPOINT malformed_booking_fk');
+        await manager.query(
+          'ALTER TABLE public.booking_table_assignments DROP CONSTRAINT "FK_booking_table_assignments_booking"',
+        );
+        await manager.query(
+          'ALTER TABLE public.booking_table_assignments ADD CONSTRAINT "FK_booking_table_assignments_booking" FOREIGN KEY (table_id) REFERENCES public.bookings(id) ON DELETE CASCADE NOT VALID',
+        );
+        await assert.rejects(
+          assertBookingTableAssignmentsSchema(manager, true),
+          /constraints or indexes/,
+        );
+        await manager.query('ROLLBACK TO SAVEPOINT malformed_booking_fk');
+
+        await manager.query('SAVEPOINT wrong_index_owner');
+        await manager.query('DROP INDEX public."UQ_booking_table_assignments_booking_table"');
+        await manager.query(
+          'CREATE UNIQUE INDEX "UQ_booking_table_assignments_booking_table" ON public.bookings (id, table_id)',
+        );
+        await assert.rejects(
+          assertBookingTableAssignmentsSchema(manager, true),
+          /constraints or indexes/,
+        );
+        await manager.query('ROLLBACK TO SAVEPOINT wrong_index_owner');
 
         const assignments = await manager.query(
           `SELECT booking_id, table_id, is_primary
@@ -145,6 +181,7 @@ export async function runBookingTableAssignmentsValidation(env = process.env) {
       };
 
       await migration.up(runner);
+      await assertBookingTableAssignmentsSchema(manager, true);
       await migration.down(runner);
 
       const afterSafeDown = await manager.query(

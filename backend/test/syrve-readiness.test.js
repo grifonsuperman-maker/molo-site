@@ -3,7 +3,7 @@ const test=require('node:test');
 const {readFileSync}=require('node:fs');
 const {resolve}=require('node:path');
 const {schemaPreflight,schemaReference,readSyrveSchemaPreflight,preflightFingerprint}=require('../dist/syrve/syrve-schema-preflight.js');
-const {SYRVE_SCHEMA_STEPS,SYRVE_EXISTING_HISTORY,SYRVE_SCHEMA_REFERENCE}=require('../dist/syrve/syrve-schema-contract.js');
+const {SYRVE_ALLOWED_FOLLOWUP_HISTORY,SYRVE_SCHEMA_STEPS,SYRVE_EXISTING_HISTORY,SYRVE_SCHEMA_REFERENCE}=require('../dist/syrve/syrve-schema-contract.js');
 const {SyrveReadinessService,readinessResponse}=require('../dist/syrve/syrve-readiness.service.js');
 const history=names=>names.map((name,i)=>({id:i+1,timestamp:Number(name.match(/\d{13}$/)[0]),name}));
 test('the committed PostgreSQL catalog contract contains all six frozen migration references',()=>{
@@ -42,6 +42,22 @@ for(const mutate of [f=>f.columns[0].notNull=false,f=>f.constraints[0].validated
     assert.equal(schemaPreflight(f,reference).status,'requires_audit');
   });
 }
+test('known post-Syrve banquet migration history remains prepared without joining the frozen Syrve schema',()=>{
+  const f=facts(),reference=schemaReference(f);
+  f.history=history([...f.history.map(row=>row.name),...SYRVE_ALLOWED_FOLLOWUP_HISTORY]);
+  const report=schemaPreflight(f,reference);
+  assert.equal(report.status,'prepared');assert.equal(report.historyValid,true);assert.deepEqual(report.pending,[]);
+});
+test('unknown or early post-Syrve history still requires an audit',()=>{
+  const reference=schemaReference(facts());
+  const unknown=facts();
+  unknown.history=history([...unknown.history.map(row=>row.name),'UnknownFollowup2026100200999']);
+  assert.equal(schemaPreflight(unknown,reference).status,'requires_audit');
+  const early=facts(),names=early.history.map(row=>row.name);
+  names.splice(names.length-1,0,SYRVE_ALLOWED_FOLLOWUP_HISTORY[0]);
+  early.history=history(names);
+  assert.equal(schemaPreflight(early,reference).status,'requires_audit');
+});
 test('partial objects and applied-but-missing objects cannot be interpreted as pending DDL',()=>{
   const f=facts(),reference=schemaReference(f);f.tables=f.tables.filter(row=>row.table!=='syrve_worker_state');
   assert.equal(schemaPreflight(f,reference).steps.at(-1).status,'drift');
