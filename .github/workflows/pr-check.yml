@@ -104,6 +104,8 @@ jobs:
         run: node backend/scripts/syrve-status-projection-validation.mjs
       - name: Validate disabled Syrve worker, leases, retries and delayed responses
         run: node backend/scripts/syrve-worker-validation.mjs
+      - name: Validate explicit table loading, one-use confirmation and cross-instance leases
+        run: node backend/scripts/syrve-table-loading-validation.mjs
       - name: Validate read-only Syrve readiness and schema preflight
         run: node backend/scripts/syrve-readiness-validation.mjs
       - name: Rebuild and bind Syrve application artifacts to the clean checkout

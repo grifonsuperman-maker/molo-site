@@ -22,10 +22,12 @@ import {
   type SyrveIntegrationStatus,
   type SyrveOrganization,
   type SyrveCatalogPreview,
+  type SyrveTableLoadingResult,
 } from '../api/syrve';
 import SyrveCatalogPreviewPanel from './SyrveCatalogPreviewPanel';
 import SyrveReadinessPanel from './SyrveReadinessPanel';
 import SyrveOrderDiagnosticsPanel from './SyrveOrderDiagnosticsPanel';
+import SyrveTableLoadingPanel from './SyrveTableLoadingPanel';
 
 type Step = 1 | 2 | 3;
 
@@ -73,6 +75,7 @@ export default function SyrveIntegrationDock() {
   const [mappingAcknowledged, setMappingAcknowledged] = useState(false);
   const requestVersion = useRef(0);
   const [busy, setBusy] = useState(false);
+  const [loadingTables, setLoadingTables] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -90,6 +93,25 @@ export default function SyrveIntegrationDock() {
     }
   }
 
+  async function finishTableLoading(result: SyrveTableLoadingResult | null) {
+    const version = requestVersion.current;
+    await load();
+    if (version !== requestVersion.current) return;
+    setLoadingTables(false);
+    setNotice(result?.readCompleted
+      ? 'Syrve підтвердив завантаження стану столів. Синхронізація ще вимкнена.'
+      : 'Завантаження не підтверджено. Перевірте підключення перед новою спробою. Синхронізація вимкнена.');
+  }
+
+  async function openSavedConnection() {
+    const version = ++requestVersion.current;
+    setOpen(true); setBusy(true); setNotice(null); setError(null);
+    // A confirmed operation may continue after the dialog was closed. Fetch
+    // the saved revision on reopen; never resubmit the old loading proof.
+    await load();
+    if (version === requestVersion.current) setBusy(false);
+  }
+
   useEffect(() => {
     void load();
   }, []);
@@ -98,6 +120,7 @@ export default function SyrveIntegrationDock() {
     requestVersion.current++;
     setEditingConnection(true);
     setBusy(false);
+    setLoadingTables(false);
     setCatalogPreview(null);
     setMappingAcknowledged(false);
     setShowLogin(false);
@@ -121,6 +144,7 @@ export default function SyrveIntegrationDock() {
     requestVersion.current++;
     setEditingConnection(false);
     setBusy(false);
+    setLoadingTables(false);
     setCatalogPreview(null);
     setMappingAcknowledged(false);
     setApiLogin('');
@@ -286,7 +310,7 @@ export default function SyrveIntegrationDock() {
         type="button"
         title={connected ? `Syrve підключено · ${status.organizationName || 'організація'}` : 'Налаштувати підключення Syrve'}
         aria-label={connected ? 'Syrve підключено. Відкрити налаштування' : 'Підключити Syrve'}
-        onClick={() => status.hasCredentials ? setOpen(true) : start()}
+        onClick={() => status.hasCredentials ? void openSavedConnection() : start()}
         className={`fixed bottom-24 right-3 z-50 grid h-14 w-14 place-items-center rounded-2xl border bg-black/85 backdrop-blur-2xl transition active:scale-[0.95] sm:right-5 ${tone}`}
       >
         <Cloud size={24} className={connected ? 'text-emerald-100' : status.status === 'error' ? 'text-red-100' : 'text-cyan-100'} />
@@ -364,13 +388,17 @@ export default function SyrveIntegrationDock() {
             {!editingConnection && status.hasCredentials && step !== 3 && (
               <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-white/35">Поточне підключення</p><h2 className="mt-1 text-xl font-black">{status.displayName}</h2><p className="mt-2 text-sm text-white/45">{status.organizationName} · {status.apiLoginMasked}</p><p className="mt-1 text-xs text-white/30">Перевірено: {dateTime(status.lastCheckedAt)}</p></div><span className="rounded-full border border-emerald-200/35 bg-emerald-400/10 px-3 py-1 text-xs font-black text-emerald-100">{connected ? 'Підключено' : 'Потребує перевірки'}</span></div>
-                <div className="mt-4 grid gap-2 sm:grid-cols-3"><button type="button" disabled={busy} onClick={() => void recheck()} className="rounded-2xl border border-cyan-200/35 bg-cyan-400/10 p-3 text-sm font-black text-cyan-100 disabled:opacity-40">Перевірити</button><button type="button" disabled={busy} onClick={() => start(true)} className="rounded-2xl border border-amber-200/35 bg-amber-300/10 p-3 text-sm font-black text-amber-100 disabled:opacity-40">Змінити дані</button><button type="button" disabled={busy} onClick={() => void disconnect()} className="flex items-center justify-center gap-2 rounded-2xl border border-red-200/35 bg-red-500/10 p-3 text-sm font-black text-red-100 disabled:opacity-40"><Unplug size={16} />Відключити</button></div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-3"><button type="button" disabled={busy || loadingTables} onClick={() => void recheck()} className="rounded-2xl border border-cyan-200/35 bg-cyan-400/10 p-3 text-sm font-black text-cyan-100 disabled:opacity-40">Перевірити</button><button type="button" disabled={busy || loadingTables} onClick={() => start(true)} className="rounded-2xl border border-amber-200/35 bg-amber-300/10 p-3 text-sm font-black text-amber-100 disabled:opacity-40">Змінити дані</button><button type="button" disabled={busy || loadingTables} onClick={() => void disconnect()} className="flex items-center justify-center gap-2 rounded-2xl border border-red-200/35 bg-red-500/10 p-3 text-sm font-black text-red-100 disabled:opacity-40"><Unplug size={16} />Відключити</button></div>
               </section>
             )}
-            {!editingConnection && <SyrveReadinessPanel configurationRevision={status.configurationRevision} />}
+            {!editingConnection && <SyrveReadinessPanel key={`${status.configurationRevision}:${busy}:${loadingTables}`} configurationRevision={status.configurationRevision} />}
             {!editingConnection && <SyrveOrderDiagnosticsPanel configurationRevision={status.configurationRevision}
               organizationId={status.organizationId} linkedTables={status.confirmedLinks}
-              connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy} />}
+              connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy || loadingTables} />}
+            {!editingConnection && <SyrveTableLoadingPanel configurationRevision={status.configurationRevision}
+              organizationId={status.organizationId} linkedTables={status.confirmedLinks}
+              connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy}
+              onBusyChange={setLoadingTables} onFinished={finishTableLoading} />}
           </main>
         </div>
       )}

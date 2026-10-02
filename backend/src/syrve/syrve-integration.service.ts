@@ -3,11 +3,10 @@ import {
   InternalServerErrorException, Logger, ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
+import { createCipheriv, randomBytes } from 'crypto';
 import { Repository } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
-import { isProductionRuntime } from '../config/runtime-secrets';
 import { LogsService } from '../logs/logs.service';
 import { TableEntity } from '../tables/entities/table.entity';
 import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisionDto,
@@ -22,6 +21,8 @@ import { buildSyrveOrderObservation } from './syrve-order-observer';
 import { directorOrderDiagnostics } from './syrve-order-diagnostics';
 import { diagnoseSyrvePosVersions } from './syrve-pos-version';
 import type { SyrveStateCapture } from './syrve-state.store';
+import { savedSyrveFingerprint } from './syrve-saved-scope';
+import { decryptSyrveCredentials, syrveCredentialsKey } from './syrve-credentials';
 
 type EncryptedValue = { encrypted: string; iv: string; authTag: string };
 
@@ -77,25 +78,12 @@ export class SyrveIntegrationService {
     const localTables = () => this.tablesRepo.find({ select: { id: true, tableNumber: true, status: true, updatedAt: true } });
     const tables = await localTables();
     if (snapshot.links.some((link) => !tables.some((table) => table.id === link.moloTableId))) throw staleSyrveSettings();
-    const fingerprint = (current: SyrveSettingsSnapshot, rows: TableEntity[]) => createHash('sha256').update(JSON.stringify({
-      version: settingsVersion(current), prepared: current.prepared,
-      connection: current.entity && [current.entity.status, current.entity.organizationId, current.entity.apiBaseUrl,
-        current.entity.apiLoginEncrypted, current.entity.apiLoginIv, current.entity.apiLoginAuthTag],
-      // Include observed sets and overrides: a reply fetched before a staff action is stale.
-      links: current.links.map((link) => [link.id, link.integrationId, link.organizationId, link.moloTableId, link.syrveTableId,
-        link.lastKnownNumber, link.lastSeenAt, link.lastSyncedAt, link.lastSyrveState,
-        [...link.activeSyrveOrderIds].sort(), [...link.manuallyFreedSyrveOrderIds].sort(), link.updatedAt])
-        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-      tables: rows.filter((table) => current.links.some((link) => link.moloTableId === table.id))
-        .map((table) => [table.id, table.tableNumber, table.status, table.updatedAt] as const)
-        .sort((a, b) => a[0].localeCompare(b[0])),
-    })).digest('hex');
-    const before = fingerprint(snapshot, tables);
+    const before = savedSyrveFingerprint(snapshot, tables);
     const probe = await this.client.probeOrders(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId,
       snapshot.links.map((link) => link.syrveTableId), [...new Set(snapshot.links.flatMap((link) => link.activeSyrveOrderIds))]);
     // No transaction/lock spans HTTP, and even failures do not write settings/logs/state.
     const current = await this.settings.read();
-    if (before !== fingerprint(current, await localTables())) throw staleSyrveSettings();
+    if (before !== savedSyrveFingerprint(current, await localTables())) throw staleSyrveSettings();
     return { observation: { ...buildSyrveOrderObservation(probe, snapshot.links), configurationRevision: entity.configurationRevision },
       posVersions: diagnoseSyrvePosVersions(probe, snapshot.links) };
   }
@@ -126,14 +114,7 @@ export class SyrveIntegrationService {
     catch { this.logger.warn('Не вдалося записати журнал дії Syrve'); }
   }
   private encryptionKey() {
-    const secret = process.env.SYRVE_CREDENTIALS_SECRET ||
-      (!isProductionRuntime() ? process.env.JWT_SECRET : undefined);
-    if (!secret || secret.length < 16) {
-      throw new InternalServerErrorException(
-        'На сервері не налаштовано SYRVE_CREDENTIALS_SECRET',
-      );
-    }
-    return createHash('sha256').update(secret).digest();
+    return syrveCredentialsKey();
   }
 
   private encrypt(value: string): EncryptedValue {
@@ -148,24 +129,7 @@ export class SyrveIntegrationService {
   }
 
   private decrypt(entity: SyrveIntegration) {
-    if (!entity.apiLoginEncrypted || !entity.apiLoginIv || !entity.apiLoginAuthTag) {
-      throw new BadRequestException('Дані доступу Syrve ще не збережені');
-    }
-
-    try {
-      const decipher = createDecipheriv(
-        'aes-256-gcm',
-        this.encryptionKey(),
-        Buffer.from(entity.apiLoginIv, 'base64'),
-      );
-      decipher.setAuthTag(Buffer.from(entity.apiLoginAuthTag, 'base64'));
-      return Buffer.concat([
-        decipher.update(Buffer.from(entity.apiLoginEncrypted, 'base64')),
-        decipher.final(),
-      ]).toString('utf8');
-    } catch {
-      throw new InternalServerErrorException('Не вдалося розшифрувати дані доступу Syrve');
-    }
+    return decryptSyrveCredentials(entity);
   }
 
   async test(dto: TestSyrveConnectionDto) {
