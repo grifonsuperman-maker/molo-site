@@ -143,7 +143,7 @@ export async function runSyrveActivationValidation(env=process.env){
     const failed=await service().enable({configurationRevision:next.configurationRevision,confirmationProof:next.confirmation.proof,confirmed:true},actor);
     assert.equal(trigger,true);
     assert.equal(failed.syncEnabled,false);assert.equal(failed.code,'SYRVE_UNAVAILABLE');assert.notEqual(failed.configurationRevision,next.configurationRevision);
-    assert.equal((await activation().read(await settings().read())).enabled,false);assert.deepEqual(await physical(),beforePhysical);assert.deepEqual(await saved(),atDisable);
+    assert.equal((await activation().read(await settings().read())).enabled,false);assert.deepEqual(await physical(),closedPhysical);assert.deepEqual(await saved(),atDisable);
     assert.ok((await job()).lease_id);assert.equal((await job()).last_success_at,null);
   }finally{
     try{
