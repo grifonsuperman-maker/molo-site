@@ -99,7 +99,7 @@ export default function SyrveIntegrationDock() {
 
   async function finishTableLoading(result: SyrveTableLoadingResult | null) {
     const version = requestVersion.current;
-    await load(true);
+    await load();
     if (version !== requestVersion.current) return;
     setLoadingTables(false);
     setNotice(result?.readCompleted
@@ -271,7 +271,7 @@ export default function SyrveIntegrationDock() {
     } catch (cause: any) {
       if (version !== requestVersion.current) return;
       setError(cause?.message || 'Не вдалося перевірити Syrve');
-      await load(true);
+      await load();
     } finally {
       if (version === requestVersion.current) setBusy(false);
     }
@@ -295,7 +295,7 @@ export default function SyrveIntegrationDock() {
     } catch (cause: any) {
       if (version !== requestVersion.current) return;
       setError(cause?.message || 'Не вдалося відключити Syrve');
-      await load(true);
+      await load();
     } finally {
       if (version === requestVersion.current) setBusy(false);
     }
