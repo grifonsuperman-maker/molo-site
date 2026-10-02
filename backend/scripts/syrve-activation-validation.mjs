@@ -47,8 +47,8 @@ export async function runSyrveActivationValidation(env=process.env){
   const physical=()=>source.query('SELECT * FROM tables WHERE id=$1',[tableId]);
   const saved=async()=>({links:await source.query('SELECT * FROM syrve_table_links ORDER BY id'),states:await source.query('SELECT * FROM syrve_table_sync_states ORDER BY link_id'),
     versions:await source.query('SELECT * FROM syrve_order_versions ORDER BY link_id,order_id'),bookings:await source.query('SELECT * FROM bookings ORDER BY id')});
-  const status=async()=>{const table=await source.getRepository(TableEntity).findOneByOrFail({id:tableId});
-    return (await new TableStatusProjectionService(new SyrveStatusReadService(source)).capture([table])).tables.get(tableId)?.state;};
+  const status=async()=>{
+    return (await new SyrveStatusReadService(source).snapshot([tableId])).tables.get(tableId)?.state;};
   globalThis.fetch=async(url,request)=>{
     const path=new URL(url).pathname,body=JSON.parse(request.body);
     const name=caller.getStore()||options.extra.application_name;
