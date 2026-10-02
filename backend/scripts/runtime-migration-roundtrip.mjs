@@ -19,9 +19,11 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'ProtectCanonicalTableNumbers2026093000040',
   'CreateSyrveDurableState2026093000050',
   'CreateSyrveWorkerState2026100100060',
+  'CreateSyrveActivation2026100200070',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  15: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   14: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   13: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   12: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },

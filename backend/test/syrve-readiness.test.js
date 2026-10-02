@@ -6,7 +6,7 @@ const {schemaPreflight,schemaReference,readSyrveSchemaPreflight,preflightFingerp
 const {SYRVE_SCHEMA_STEPS,SYRVE_EXISTING_HISTORY,SYRVE_SCHEMA_REFERENCE}=require('../dist/syrve/syrve-schema-contract.js');
 const {SyrveReadinessService,readinessResponse}=require('../dist/syrve/syrve-readiness.service.js');
 const history=names=>names.map((name,i)=>({id:i+1,timestamp:Number(name.match(/\d{13}$/)[0]),name}));
-test('the committed PostgreSQL catalog contract contains all six frozen migration references',()=>{
+test('the committed PostgreSQL catalog contract contains all seven frozen migration references',()=>{
   assert.deepEqual(Object.keys(SYRVE_SCHEMA_REFERENCE),SYRVE_SCHEMA_STEPS.map(step=>step.name));
   for(const value of Object.values(SYRVE_SCHEMA_REFERENCE))assert.match(value,/^[0-9a-f]{64}$/);
   assert.doesNotMatch(readFileSync(resolve(__dirname,'../scripts/syrve-readiness-validation.mjs'),'utf8'),/return 'captured'/);
@@ -44,12 +44,12 @@ for(const mutate of [f=>f.columns[0].notNull=false,f=>f.constraints[0].validated
 }
 test('partial objects and applied-but-missing objects cannot be interpreted as pending DDL',()=>{
   const f=facts(),reference=schemaReference(f);f.tables=f.tables.filter(row=>row.table!=='syrve_worker_state');
-  assert.equal(schemaPreflight(f,reference).steps.at(-1).status,'drift');
+  assert.equal(schemaPreflight(f,reference).steps.find(step=>step.name==='CreateSyrveWorkerState2026100100060').status,'drift');
   f.constraints=f.constraints.filter(row=>row.table!=='syrve_worker_state');
-  assert.equal(schemaPreflight(f,reference).steps.at(-1).status,'missing');
+  assert.equal(schemaPreflight(f,reference).steps.find(step=>step.name==='CreateSyrveWorkerState2026100100060').status,'missing');
   assert.equal(schemaPreflight(f,reference).status,'requires_audit');
 });
-test('legacy prepared-object-free schema produces six ordered pending steps without adopting a baseline',()=>{
+test('legacy prepared-object-free schema produces seven ordered pending steps without adopting a baseline',()=>{
   const f=facts();for(const key of ['tables','columns','constraints','indexes','functions','triggers']) f[key]=[];
   f.history=history(SYRVE_EXISTING_HISTORY);
   const result=schemaPreflight(f);assert.equal(result.status,'plan_requires_review');
@@ -98,8 +98,10 @@ test('standalone target intent rejects application, missing target, drifted endp
 });
 test('preflight introduces no schema migration, production registration, worker activation or entity synchronization',()=>{
   const read=p=>readFileSync(resolve(__dirname,'../src',p),'utf8');
-  assert.match(read('syrve/syrve-worker.service.ts'),/private enabled\(\): boolean \{ return false; \}/);
-  assert.match(read('syrve/syrve-status-read.service.ts'),/return false/);
+  assert.doesNotMatch(read('syrve/syrve-worker.service.ts'),/SYRVE_SYNC_ENABLED|process.env/);
+  assert.match(read('syrve/syrve-worker.store.ts'),/activation.read/);
+  assert.doesNotMatch(read('syrve/syrve-status-read.service.ts'),/SYRVE_SYNC_ENABLED|process.env/);
+  assert.match(read('syrve/syrve-status-read.store.ts'),/SyrveActivationStore/);
   assert.doesNotMatch(read('app.module.ts'),/SyrveReadiness|SyrveSchema|syrve-schema/);
 });
 test('the destructive PostgreSQL validator rejects unverified or remote targets before connecting',async()=>{

@@ -28,6 +28,7 @@ import SyrveCatalogPreviewPanel from './SyrveCatalogPreviewPanel';
 import SyrveReadinessPanel from './SyrveReadinessPanel';
 import SyrveOrderDiagnosticsPanel from './SyrveOrderDiagnosticsPanel';
 import SyrveTableLoadingPanel from './SyrveTableLoadingPanel';
+import SyrveAutoStatusPanel from './SyrveAutoStatusPanel';
 
 type Step = 1 | 2 | 3;
 
@@ -76,6 +77,7 @@ export default function SyrveIntegrationDock() {
   const requestVersion = useRef(0);
   const [busy, setBusy] = useState(false);
   const [loadingTables, setLoadingTables] = useState(false);
+  const [changingAutoStatus, setChangingAutoStatus] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -103,6 +105,16 @@ export default function SyrveIntegrationDock() {
       : 'Завантаження не підтверджено. Перевірте підключення перед новою спробою. Синхронізація вимкнена.');
   }
 
+  async function finishAutoStatus(result: 'enabled' | 'disabled' | 'failed') {
+    const version = requestVersion.current;
+    await load();
+    if (version !== requestVersion.current) return;
+    setChangingAutoStatus(false);
+    setNotice(result === 'enabled' ? 'Автоматичні статуси столів увімкнено.' : result === 'disabled'
+      ? 'Автоматичні статуси вимкнено. Карта використовує ручні статуси та бронювання.'
+      : 'Увімкнення не підтверджено. Повторіть перевірку перед новою спробою.');
+  }
+
   async function openSavedConnection() {
     const version = ++requestVersion.current;
     setOpen(true); setBusy(true); setNotice(null); setError(null);
@@ -121,6 +133,7 @@ export default function SyrveIntegrationDock() {
     setEditingConnection(true);
     setBusy(false);
     setLoadingTables(false);
+    setChangingAutoStatus(false);
     setCatalogPreview(null);
     setMappingAcknowledged(false);
     setShowLogin(false);
@@ -145,6 +158,7 @@ export default function SyrveIntegrationDock() {
     setEditingConnection(false);
     setBusy(false);
     setLoadingTables(false);
+    setChangingAutoStatus(false);
     setCatalogPreview(null);
     setMappingAcknowledged(false);
     setApiLogin('');
@@ -277,7 +291,7 @@ export default function SyrveIntegrationDock() {
     if (!status.configurationRevision) return setError('Серверна підготовка інтеграції ще не завершена');
     const reason = window.prompt('Причина відключення Syrve', 'Зміна налаштувань');
     if (reason === null) return;
-    if (!window.confirm('Відключити Syrve? Збережені дані доступу буде видалено.')) return;
+    if (!window.confirm('Відключити Syrve? Збережені дані доступу буде видалено, автоматичні статуси буде вимкнено.')) return;
 
     const version = ++requestVersion.current;
     setBusy(true);
@@ -388,17 +402,20 @@ export default function SyrveIntegrationDock() {
             {!editingConnection && status.hasCredentials && step !== 3 && (
               <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-white/35">Поточне підключення</p><h2 className="mt-1 text-xl font-black">{status.displayName}</h2><p className="mt-2 text-sm text-white/45">{status.organizationName} · {status.apiLoginMasked}</p><p className="mt-1 text-xs text-white/30">Перевірено: {dateTime(status.lastCheckedAt)}</p></div><span className="rounded-full border border-emerald-200/35 bg-emerald-400/10 px-3 py-1 text-xs font-black text-emerald-100">{connected ? 'Підключено' : 'Потребує перевірки'}</span></div>
-                <div className="mt-4 grid gap-2 sm:grid-cols-3"><button type="button" disabled={busy || loadingTables} onClick={() => void recheck()} className="rounded-2xl border border-cyan-200/35 bg-cyan-400/10 p-3 text-sm font-black text-cyan-100 disabled:opacity-40">Перевірити</button><button type="button" disabled={busy || loadingTables} onClick={() => start(true)} className="rounded-2xl border border-amber-200/35 bg-amber-300/10 p-3 text-sm font-black text-amber-100 disabled:opacity-40">Змінити дані</button><button type="button" disabled={busy || loadingTables} onClick={() => void disconnect()} className="flex items-center justify-center gap-2 rounded-2xl border border-red-200/35 bg-red-500/10 p-3 text-sm font-black text-red-100 disabled:opacity-40"><Unplug size={16} />Відключити</button></div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-3"><button type="button" disabled={busy || loadingTables || changingAutoStatus || status.syncEnabled} onClick={() => void recheck()} className="rounded-2xl border border-cyan-200/35 bg-cyan-400/10 p-3 text-sm font-black text-cyan-100 disabled:opacity-40">Перевірити</button><button type="button" disabled={busy || loadingTables || changingAutoStatus || status.syncEnabled} onClick={() => start(true)} className="rounded-2xl border border-amber-200/35 bg-amber-300/10 p-3 text-sm font-black text-amber-100 disabled:opacity-40">Змінити дані</button><button type="button" disabled={busy || loadingTables || changingAutoStatus} onClick={() => void disconnect()} className="flex items-center justify-center gap-2 rounded-2xl border border-red-200/35 bg-red-500/10 p-3 text-sm font-black text-red-100 disabled:opacity-40"><Unplug size={16} />Відключити</button></div>
               </section>
             )}
-            {!editingConnection && <SyrveReadinessPanel key={`${status.configurationRevision}:${busy}:${loadingTables}`} configurationRevision={status.configurationRevision} />}
-            {!editingConnection && <SyrveOrderDiagnosticsPanel configurationRevision={status.configurationRevision}
+            {!editingConnection && !status.syncEnabled && <SyrveReadinessPanel key={`${status.configurationRevision}:${busy}:${loadingTables}:${changingAutoStatus}`} configurationRevision={status.configurationRevision} />}
+            {!editingConnection && !status.syncEnabled && <SyrveOrderDiagnosticsPanel configurationRevision={status.configurationRevision}
               organizationId={status.organizationId} linkedTables={status.confirmedLinks}
-              connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy || loadingTables} />}
-            {!editingConnection && <SyrveTableLoadingPanel configurationRevision={status.configurationRevision}
+              connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy || loadingTables || changingAutoStatus} />}
+            {!editingConnection && !status.syncEnabled && <SyrveTableLoadingPanel configurationRevision={status.configurationRevision}
               organizationId={status.organizationId} linkedTables={status.confirmedLinks}
-              connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy}
+              connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy || changingAutoStatus}
               onBusyChange={setLoadingTables} onFinished={finishTableLoading} />}
+            {!editingConnection && <SyrveAutoStatusPanel configurationRevision={status.configurationRevision} organizationId={status.organizationId}
+              linkedTables={status.confirmedLinks} syncEnabled={status.syncEnabled} busy={busy || loadingTables}
+              onBusyChange={setChangingAutoStatus} onFinished={finishAutoStatus} />}
           </main>
         </div>
       )}

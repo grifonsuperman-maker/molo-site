@@ -56,10 +56,10 @@ async function roleStatuses(services, date = TODAY) {
   return { waiter, full, guest, window };
 }
 
-test('the production read gate stays off without any storage calls even with an environment flag', async () => {
+test('the production read gate stays off without prepared storage even with an environment flag', async () => {
   const before = process.env.SYRVE_SYNC_ENABLED; process.env.SYRVE_SYNC_ENABLED = 'true';
   try {
-    const source = new SyrveStatusReadService({ options: { type: 'postgres' }, transaction: async () => assert.fail('storage called') });
+    const source = new SyrveStatusReadService(require('./helpers/disabled-table-statuses.js').disabledSource());
     for (const ids of [[], [id(100)], [id(100), id(101)]]) {
       assert.deepEqual(await source.snapshot(ids), disabledSyrveStatus());
     }
@@ -72,7 +72,7 @@ test('real Nest projection module resolves the shared engine with a DataSource a
   // The global TypeORM provider is supplied by AppModule in production.
   const { Module, Global } = require('@nestjs/common');
   class Database {}
-  Global()(Database); Module({ providers: [{ provide: DataSource, useValue: {} }], exports: [DataSource] })(Database);
+  Global()(Database); Module({ providers: [{ provide: DataSource, useValue: require('./helpers/disabled-table-statuses.js').disabledSource() }], exports: [DataSource] })(Database);
   const actual = await Test.createTestingModule({ imports: [Database, TableStatusProjectionModule] }).compile();
   try {
     assert.deepEqual(await actual.get(TableStatusProjectionService).capture([table()]), disabledSyrveStatus());
@@ -276,10 +276,15 @@ function readerHarness() {
   const durable = { link_id: link.id, integration_id: saved.scope.integrationId, configuration_revision: saved.scope.configurationRevision,
     organization_id: saved.scope.organizationId, molo_table_id: physical.id, syrve_table_id: saved.scope.syrveTableId, local_revision: saved.localRevision };
   const data = { prepared: true, settings: { prepared: true, entity: { id: saved.scope.integrationId,
-    configurationRevision: saved.scope.configurationRevision, organizationId: saved.scope.organizationId, status: 'connected' }, links: [link] },
+    configurationRevision: saved.scope.configurationRevision, organizationId: saved.scope.organizationId, status: 'connected',apiBaseUrl:'https://api-eu.syrve.live',apiLoginEncrypted:'synthetic',apiLoginIv:'synthetic',apiLoginAuthTag:'synthetic' }, links: [link] },
   rows: [durable], versions: saved.orderVersions.map((v) => ({ link_id: link.id, order_id: v.id, ...v })), physical };
+  const {activationBindings}=require('../dist/syrve/syrve-activation.js');
+  const consent={enabled:true,configuration_revision:saved.scope.configurationRevision,actor_hash:'a'.repeat(64),consented_at:new Date(),
+    bindings_fingerprint:activationBindings(data.settings,[physical]),loading_plan:{organizationId:saved.scope.organizationId,
+      groups:[{terminalGroupId:id(1),posVersion:'7.7.1',tableIds:[link.syrveTableId]}]}};
   const manager = { query: async (sql) => {
     queries.push(sql);
+    if(sql.includes('syrve_sync_activation')&&!sql.includes('to_regclass'))return [structuredClone(consent)];
     assert.doesNotMatch(sql, /FOR UPDATE|INSERT|UPDATE|DELETE|advisory/i);
     if (sql.includes('to_regclass')) return [{ prepared: data.prepared }];
     if (sql.includes('FROM "public"."syrve_table_sync_states"')) return structuredClone(data.rows);

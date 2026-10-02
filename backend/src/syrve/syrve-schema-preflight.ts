@@ -125,7 +125,7 @@ async function readFacts(manager: EntityManager): Promise<SyrveSchemaFacts> {
   const jobs = await manager.query('SELECT * FROM public.syrve_worker_state ORDER BY integration_id');
   facts.data.workerRecords = jobs.length;
   facts.data.snapshot = preflightFingerprint({physical, entities, links, identities, states, versions, jobs});
-  let unobserved = false;
+  let unobserved = false, stale = false;
   for (const link of links) {
     const saved = states.find(row => row.link_id === link.id);
     if (!saved) {
@@ -134,10 +134,11 @@ async function readFacts(manager: EntityManager): Promise<SyrveSchemaFacts> {
       }
       unobserved = true; continue;
     }
-    if (!entity || saved.integration_id !== entity.id || saved.configuration_revision !== entity.configuration_revision
+    if (!entity || saved.integration_id !== entity.id
       || saved.organization_id !== link.organization_id || saved.molo_table_id !== link.molo_table_id || saved.syrve_table_id !== link.syrve_table_id) {
-      facts.data.state = 'stale'; return facts;
+      facts.data.state = 'invalid'; return facts;
     }
+    if (saved.configuration_revision !== entity.configuration_revision) stale = true;
     try {
       getSyrveOrderIdsToObserve({ scope: { integrationId: saved.integration_id, configurationRevision: saved.configuration_revision,
         organizationId: saved.organization_id, moloTableId: saved.molo_table_id, syrveTableId: saved.syrve_table_id },
@@ -146,7 +147,7 @@ async function readFacts(manager: EntityManager): Promise<SyrveSchemaFacts> {
           .map(row => ({ id: row.order_id, timestamp: Number(row.timestamp), state: row.state, fingerprint: row.fingerprint })) });
     } catch { facts.data.state = 'invalid'; return facts; }
   }
-  facts.data.state = unobserved || !links.length ? 'unobserved' : 'valid';
+  facts.data.state = stale ? 'stale' : unobserved || !links.length ? 'unobserved' : 'valid';
   return facts;
 }
 

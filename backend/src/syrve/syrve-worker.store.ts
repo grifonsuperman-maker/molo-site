@@ -4,13 +4,18 @@ import { SyrveSettingsStore, settingsVersion, staleSyrveSettings } from './syrve
 import { SyrveStateCapture, SyrveStateStore } from './syrve-state.store';
 import { SyrveOrderObservationBatch } from './syrve-state-reducer';
 import { SYRVE_WORKER_MAX_TABLES, SyrveWorkerError, SyrveWorkerLease, workerBackoff } from './syrve-worker.model';
+import { SyrveActivationStore } from './syrve-activation.store';
+import { ConflictException } from '@nestjs/common';
+import { isVerifiedLoadedProbe, SyrveClientException } from './syrve-client';
 
 // Internal prepared adapter. Short transactions only; no lease transaction is
 // held over HTTP. PostgreSQL time and the random lease token fence every write.
 export class SyrveWorkerStore {
   private readonly states: SyrveStateStore;
+  private readonly activation: SyrveActivationStore;
   constructor(private readonly source: DataSource, private readonly settings: SyrveSettingsStore) {
     this.states = new SyrveStateStore(source, settings);
+    this.activation = new SyrveActivationStore(source, settings);
   }
   private table(name: string) {
     const options = this.source.options;
@@ -18,9 +23,10 @@ export class SyrveWorkerStore {
     return '"' + schema.replace(/"/g, '""') + '"."' + name + '"';
   }
 
-  async claim(): Promise<{ status: 'idle' | 'busy' | 'backoff' } | { status: 'claimed'; lease: SyrveWorkerLease }> {
+  async claim(): Promise<{ status: 'disabled' | 'idle' | 'busy' | 'backoff' } | { status: 'claimed'; lease: SyrveWorkerLease }> {
     return this.settings.localTransaction(async (manager) => {
       const snapshot = await this.settings.read(manager, true), entity = snapshot.entity;
+      if (!(await this.activation.read(snapshot, manager)).enabled) return { status: 'disabled' };
       if (!snapshot.prepared || !entity?.configurationRevision || !entity.organizationId || entity.status !== 'connected'
         || !entity.apiLoginEncrypted || !entity.apiLoginIv || !entity.apiLoginAuthTag || !snapshot.links.length) return { status: 'idle' };
       const links = [...snapshot.links].sort((a, b) => a.id.localeCompare(b.id));
@@ -54,6 +60,26 @@ export class SyrveWorkerStore {
 
   capture(tableId: string) { return this.states.capture(tableId); }
 
+  guard(lease: SyrveWorkerLease, captured: SyrveStateCapture) {
+    return this.settings.transaction(lease.version, async (manager, current) => {
+      await this.lockedLease(manager, lease);
+      const expected = captured.state.scope;
+      if (current.entity?.organizationId !== expected.organizationId || !current.links.some(link => link.id === captured.linkId
+        && link.integrationId === expected.integrationId && link.organizationId === expected.organizationId
+        && link.moloTableId === expected.moloTableId && link.syrveTableId === expected.syrveTableId)) throw staleSyrveSettings();
+      const active = await this.activation.read(current, manager);
+      const [state] = await manager.query('SELECT local_revision FROM ' + this.table('syrve_table_sync_states') + ' WHERE link_id=$1', [captured.linkId]);
+      if (state?.local_revision !== captured.state.localRevision) throw new ConflictException({ statusCode: 409, code: 'SYRVE_LOCAL_STATE_CHANGED',
+        message: 'Стан столу змінився після ручної дії. Запізнілу відповідь каси відхилено.' });
+      if (!active.enabled || !active.plan || current.entity?.status !== 'connected'
+        || expected.integrationId !== lease.version.id || expected.configurationRevision !== lease.version.revision
+        || !lease.links.some(link => link.id === captured.linkId && link.moloTableId === expected.moloTableId && link.syrveTableId === expected.syrveTableId)) throw staleSyrveSettings();
+      const group = active.plan.groups.find(group => group.tableIds.includes(expected.syrveTableId));
+      if (!group) throw staleSyrveSettings();
+      return { organizationId: active.plan.organizationId, groups: [{ ...group, tableIds: [expected.syrveTableId] }] };
+    });
+  }
+
   private async lockedLease(manager: EntityManager, lease: SyrveWorkerLease) {
     const [row] = await manager.query('SELECT *,lease_until > clock_timestamp() AS live FROM ' + this.table('syrve_worker_state')
       + ' WHERE integration_id=$1 FOR UPDATE', [lease.version.id]);
@@ -72,16 +98,19 @@ export class SyrveWorkerStore {
   apply(lease: SyrveWorkerLease, captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[]) {
     return this.settings.transaction(lease.version, async (manager, current) => {
       const row = await this.lockedLease(manager, lease);
+      if (!(await this.activation.read(current, manager)).enabled) throw staleSyrveSettings();
       if (current.entity?.status !== 'connected' || captured.state.scope.integrationId !== lease.version.id
         || captured.state.scope.configurationRevision !== lease.version.revision
         || !lease.links.some((link) => link.id === captured.linkId && link.moloTableId === captured.state.scope.moloTableId
           && link.syrveTableId === captured.state.scope.syrveTableId)) throw staleSyrveSettings();
-      const result = await this.states.applyObservationInTransaction(manager, current, captured, batches);
+      const result = await this.states.applyWorkerObservationInTransaction(manager, current, captured, batches, lease.id);
       // A large restored ledger may take time to write. Expiry before the final
       // bookkeeping write rolls the entire observation transaction back.
       await this.lockedLease(manager, lease);
+      if (batches.some(batch => !isVerifiedLoadedProbe(batch.probe, lease.id + ':' + captured.state.localRevision,
+        captured.state.scope.organizationId, captured.state.scope.syrveTableId))) throw new SyrveClientException('SYRVE_TIMEOUT');
       const stale = result.diagnostics.includes('local_revision_changed') || result.diagnostics.includes('scope_changed');
-      const unknown = result.diagnostics.some((code) => ['observation_unknown', 'unknown_orders', 'conflicting_order_versions'].includes(code));
+      const unknown = result.diagnostics.some((code) => ['observation_unknown', 'unknown_orders', 'conflicting_order_versions', 'visibility_not_verified'].includes(code));
       const code: SyrveWorkerError | null = stale ? 'SYRVE_LOCAL_STATE_CHANGED' : unknown ? 'SYRVE_OBSERVATION_UNKNOWN' : null;
       await this.record(manager, lease, captured.linkId, code ? Math.min(20, row.failure_count + 1) : 0, code);
       return { result, code };
@@ -91,6 +120,7 @@ export class SyrveWorkerStore {
   failure(lease: SyrveWorkerLease, linkId: string, code: SyrveWorkerError) {
     return this.settings.transaction(lease.version, async (manager, current) => {
       if (current.entity?.status !== 'connected') throw staleSyrveSettings();
+      if (!(await this.activation.read(current, manager)).enabled) throw staleSyrveSettings();
       const row = await this.lockedLease(manager, lease);
       await this.record(manager, lease, linkId, Math.min(20, row.failure_count + 1), code);
     });

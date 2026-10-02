@@ -10,7 +10,7 @@ function probe(scope, rows, orderIds = []) {
   return { organizationId: scope.organizationId, startedAt: '2026-10-01T07:00:00Z', completedAt: '2026-10-01T07:00:01Z',
     authentication: 'legacy_v1', checks: Object.fromEntries(['connection', 'terminalGroups', 'restaurantSections',
       'posAvailability', 'ordersByTable', 'ordersById'].map((key) => [key, { status: 'ok', code: null }])),
-    terminalGroups: { active: [{ id: GROUP }], sleeping: [] },
+    terminalGroups: { active: [{ id: GROUP, posVersion: '7.7.1' }], sleeping: [] },
     catalogTables: [{ id: scope.syrveTableId, terminalGroupId: GROUP, isDeleted: false }],
     availability: [{ terminalGroupId: GROUP, isAlive: true }], byTable: orders,
     byId: structuredClone(orders.filter((order) => orderIds.includes(order.id))) };

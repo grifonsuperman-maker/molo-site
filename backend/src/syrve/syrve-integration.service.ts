@@ -13,7 +13,8 @@ import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisi
   TestSyrveConnectionDto, UpdateSyrveConnectionDto } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
 import { SyrveTableLink } from './entities/syrve-table-link.entity';
-import { SyrveClient, SyrveClientException, SyrveProbeControls } from './syrve-client';
+import { SyrveClient, SyrveClientException, SyrveLoadedProbeControls } from './syrve-client';
+import { SyrveActivationStore } from './syrve-activation.store';
 import { buildSyrveMappingPreview } from './syrve-mapping-preview';
 import { credentialFingerprint, issuePreviewProof, previewFingerprint, verifyPreviewProof } from './syrve-preview-proof';
 import { settingsVersion, staleSyrveSettings, SyrveSettingsSnapshot, SyrveSettingsStore } from './syrve-settings.store';
@@ -34,6 +35,7 @@ export class SyrveIntegrationService {
     private readonly logs: LogsService,
     private readonly client: SyrveClient,
     @InjectRepository(TableEntity) private readonly tablesRepo: Repository<TableEntity>,
+    private readonly activation: SyrveActivationStore,
   ) {}
 
   private response(snapshot: SyrveSettingsSnapshot) {
@@ -51,18 +53,22 @@ export class SyrveIntegrationService {
     };
   }
 
-  async getStatus() { return this.response(await this.settings.read()); }
+  async getStatus() {
+    const snapshot = await this.settings.read();
+    return { ...this.response(snapshot), syncEnabled: Boolean((await this.activation?.read(snapshot))?.enabled) };
+  }
 
   // Internal worker bridge only, never a controller route. Credentials are
   // decrypted only after the saved configuration and immutable binding match.
-  async probeWorkerOrders(captured: SyrveStateCapture, orderIds: string[], controls: SyrveProbeControls) {
+  async probeWorkerOrders(captured: SyrveStateCapture, orderIds: string[], controls: SyrveLoadedProbeControls) {
     const snapshot = await this.settings.read(), entity = snapshot.entity, expected = captured.state.scope;
     if (!snapshot.prepared || !entity || entity.status !== 'connected' || entity.id !== expected.integrationId
       || entity.configurationRevision !== expected.configurationRevision || entity.organizationId !== expected.organizationId
       || !snapshot.links.some((link) => link.id === captured.linkId && link.integrationId === entity.id
         && link.organizationId === expected.organizationId && link.moloTableId === expected.moloTableId
         && link.syrveTableId === expected.syrveTableId)) throw staleSyrveSettings();
-    return this.client.probeOrders(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId,
+    if (!this.activation || !(await this.activation.read(snapshot)).enabled) throw staleSyrveSettings();
+    return this.client.probeLoadedOrders(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId,
       [expected.syrveTableId], orderIds, controls);
   }
 
@@ -168,6 +174,7 @@ export class SyrveIntegrationService {
     const catalog = await this.client.getCatalog(baseUrl, apiLogin, dto.organizationId);
     const encrypted = this.encrypt(apiLogin);
     const result = await this.settings.transaction(proof.version, async (manager, current) => {
+      await this.activation?.requireDisabled(current, manager);
       if (proof.expires <= Date.now()) throw staleSyrveSettings();
       if (current.links.some((link) => link.organizationId !== catalog.organization.id)) {
         throw new ConflictException('Збережені зв’язки належать іншому ресторану. Автоматична заміна зв’язків заборонена.');
@@ -217,6 +224,7 @@ export class SyrveIntegrationService {
   async recheck(dto: SyrveRevisionDto, actor?: AuthUser) {
     const snapshot = await this.checkedRevision(dto);
     const entity = snapshot.entity!;
+    await this.activation?.requireDisabled(snapshot);
     const apiLogin = this.decrypt(entity);
     let result: Awaited<ReturnType<SyrveClient['checkOrganizations']>>;
     try {
@@ -228,15 +236,18 @@ export class SyrveIntegrationService {
       const safeError = error instanceof SyrveClientException || error instanceof BadGatewayException
         ? error : new InternalServerErrorException('Не вдалося перевірити підключення Syrve');
       await this.settings.transaction(settingsVersion(snapshot), async (manager, current) => {
+        await this.activation?.requireDisabled(current, manager);
         await this.settings.save(manager, { ...current.entity, status: 'error', lastCheckedAt: new Date(), lastError: safeError.message });
       });
       throw safeError;
     }
-    const updated = await this.settings.transaction(settingsVersion(snapshot), async (manager, current) => ({
-      ...current, entity: await this.settings.save(manager, { ...current.entity, status: 'connected',
+    const updated = await this.settings.transaction(settingsVersion(snapshot), async (manager, current) => {
+      await this.activation?.requireDisabled(current, manager);
+      return { ...current, entity: await this.settings.save(manager, { ...current.entity, status: 'connected',
         lastCheckedAt: new Date(), lastError: null,
         organizationName: result.organizations.find((item) => item.id === entity.organizationId?.toLowerCase())!.name }),
-    }));
+      };
+    });
     await this.audit('Директор перевірив підключення Syrve', { organizationId: entity.organizationId, actorName: actor?.name || null });
     return { message: 'Підключення Syrve працює', integration: this.response(updated) };
   }
@@ -244,12 +255,14 @@ export class SyrveIntegrationService {
   async updateMetadata(dto: UpdateSyrveConnectionDto) {
     const snapshot = await this.checkedRevision(dto);
     const baseUrl = dto.apiBaseUrl === undefined ? undefined : this.client.normalizeBaseUrl(dto.apiBaseUrl);
-    const updated = await this.settings.transaction(settingsVersion(snapshot), async (manager, current) => ({
-      ...current, entity: await this.settings.save(manager, { ...current.entity,
+    const updated = await this.settings.transaction(settingsVersion(snapshot), async (manager, current) => {
+      await this.activation?.requireDisabled(current, manager);
+      return { ...current, entity: await this.settings.save(manager, { ...current.entity,
         ...(dto.displayName !== undefined ? { displayName: dto.displayName.trim() } : {}),
         ...(baseUrl !== undefined ? { apiBaseUrl: baseUrl } : {}),
       }),
-    }));
+      };
+    });
     return this.response(updated);
   }
 

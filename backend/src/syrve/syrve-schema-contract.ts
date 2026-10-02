@@ -8,6 +8,7 @@ export const SYRVE_SCHEMA_REFERENCE: Readonly<Record<string, string>> = {
   ProtectCanonicalTableNumbers2026093000040: '4167ee044a9cfe72419227b92ac8f057f218d7082811d205ed59d57f3202a459',
   CreateSyrveDurableState2026093000050: '09586d78110493eacd6e30c88c38f4973b400f0c9616e56af562ab7b31d3ee50',
   CreateSyrveWorkerState2026100100060: 'ae478dc3ba3c59021d35930e644b93f6a18fb5d0559d8ec785e08cf3323c0ee1',
+  CreateSyrveActivation2026100200070: '186b0752b389824a84b835c1f3cc61fbc9d67217192dcf83f546706cab10f943',
 };
 
 export const SYRVE_SCHEMA_STEPS = [
@@ -17,6 +18,7 @@ export const SYRVE_SCHEMA_STEPS = [
   { name: 'ProtectCanonicalTableNumbers2026093000040', tables: [] },
   { name: 'CreateSyrveDurableState2026093000050', tables: ['syrve_table_sync_states', 'syrve_order_versions'] },
   { name: 'CreateSyrveWorkerState2026100100060', tables: ['syrve_worker_state'] },
+  { name: 'CreateSyrveActivation2026100200070', tables: ['syrve_sync_activation'] },
 ] as const;
 export const SYRVE_EXISTING_HISTORY = ['CreateStaffPinAttempts2026081400010', 'UpgradeStaffPinAttemptsPerAttempt2026081400020',
   'CreateWaiterCalls2026081500010', 'AddWaiterCallAssignmentActive2026081500015', 'CloseInactiveWaiterCalls2026081500020',

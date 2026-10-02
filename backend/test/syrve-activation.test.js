@@ -1,0 +1,131 @@
+const assert=require('node:assert/strict');
+const test=require('node:test');
+const {createCipheriv}=require('node:crypto');
+const {ConflictException}=require('@nestjs/common');
+const {SyrveActivationService}=require('../dist/syrve/syrve-activation.service.js');
+const {SyrveTableLoadingService}=require('../dist/syrve/syrve-table-loading.service.js');
+const {SyrveClient,SyrveClientException,isVerifiedLoadedProbe}=require('../dist/syrve/syrve-client.js');
+const {syrveCredentialsKey}=require('../dist/syrve/syrve-credentials.js');
+const {issueActivationProof,verifyActivationProof,activationBindings,activationPlan}=require('../dist/syrve/syrve-activation.js');
+const {issueLoadingProof,loadingActor,loadingPlanFingerprint,tableLoadingPlan}=require('../dist/syrve/syrve-table-loading.js');
+const {CreateSyrveActivation2026100200070:Migration}=require('../dist/migrations/2026100200070-CreateSyrveActivation.js');
+const {id,row,probe}=require('./helpers/syrve-state-fixtures.js');
+const ORG=id(100),TABLE=id(101),REV=id(102),NEXT=id(103),MOLO=id(104),GROUP=id(1);
+const actor={sub:id(200),role:'owner',directorSessionVersion:2};
+const scope={organizationId:ORG,syrveTableId:TABLE};
+function fixture(t){
+  const old=process.env.SYRVE_CREDENTIALS_SECRET;process.env.SYRVE_CREDENTIALS_SECRET='synthetic-activation-fixture';
+  t.after(()=>old===undefined?delete process.env.SYRVE_CREDENTIALS_SECRET:process.env.SYRVE_CREDENTIALS_SECRET=old);
+  const iv=Buffer.alloc(12,4),cipher=createCipheriv('aes-256-gcm',syrveCredentialsKey(),iv),encrypted=Buffer.concat([cipher.update('synthetic-login'),cipher.final()]);
+  const capture={snapshot:{prepared:true,entity:{id:id(105),configurationRevision:REV,status:'connected',organizationId:ORG,apiBaseUrl:'https://api-eu.syrve.live',
+    apiLoginEncrypted:encrypted.toString('base64'),apiLoginIv:iv.toString('base64'),apiLoginAuthTag:cipher.getAuthTag().toString('base64')},
+    links:[{id:id(106),integrationId:id(105),organizationId:ORG,moloTableId:MOLO,syrveTableId:TABLE,activeSyrveOrderIds:[]}]},
+    tables:[{id:MOLO,tableNumber:'12',status:'free'}],fingerprint:'a'.repeat(64)};
+  let saved=false,available=true,commands=0,reads=0,claims=0,released=0,writeFailure=false,commandFailure=false;
+  const settings={read:async()=>structuredClone(capture.snapshot)};
+  const store={capture:async revision=>{if(revision!==capture.snapshot.entity.configurationRevision)throw new ConflictException();return structuredClone(capture);},
+    assertCurrent:async old=>{if(old.fingerprint!==capture.fingerprint)throw new ConflictException();},
+    claim:async old=>{await store.assertCurrent(old);if(claims)throw new ConflictException();claims++;capture.snapshot.entity.configurationRevision=NEXT;
+      capture.fingerprint='b'.repeat(64);return {...structuredClone(capture),leaseId:id(107)};},
+    guard:async old=>store.assertCurrent(old),release:async()=>released++};
+  const client={probeOrders:async()=>{reads++;return probe(scope,[]);},initializeTables:async(_base,_login,_plan,controls)=>{
+    commands++;await controls.beforeCommand();if(commandFailure)throw new SyrveClientException('SYRVE_COMMAND_FAILED');}};
+  const activation={prepared:async()=>available,requireDisabled:async()=>{if(saved)throw new ConflictException();},
+    read:async()=>({prepared:available,enabled:saved}),enable:async()=>{if(writeFailure)throw new Error('private-database-body');saved=true;},
+    disable:async()=>{saved=false;capture.snapshot.entity.configurationRevision=id(108);return id(108);}};
+  const service=new SyrveActivationService(activation,settings,store,new SyrveTableLoadingService(store,client),client,{read:async()=>({activationAvailable:available})});
+  return {service,capture,activation,client,stats:()=>({saved,commands,reads,claims,released}),setAvailable:v=>available=v,
+    failWrite:()=>writeFailure=true,failCommand:()=>commandFailure=true,dto:p=>({configurationRevision:REV,confirmationProof:p.confirmation.proof,confirmed:true})};
+}
+test('activation proof cannot be exchanged with a manual loading proof and expires in five minutes',()=>{
+  const key=Buffer.alloc(32,8),input={revision:REV,local:'a'.repeat(64),upstream:'b'.repeat(64),actor:loadingActor(actor)},now=10000;
+  const activation=issueActivationProof(key,input,now),manual=issueLoadingProof(key,input,now);
+  assert.equal(verifyActivationProof(key,activation.proof,now).revision,REV);
+  for(const proof of [manual.proof,activation.proof+'x',activation.proof.slice(1),undefined,'a'.repeat(1600)])assert.throws(()=>verifyActivationProof(key,proof,now));
+  assert.throws(()=>verifyActivationProof(key,activation.proof,now+300000));
+});
+test('preview is read-only; explicit consent is saved only after confirmed commands and a complete fresh read',async t=>{
+  const h=fixture(t),tables=structuredClone(h.capture.tables),p=await h.service.preview({configurationRevision:REV},actor);
+  assert.equal(h.stats().commands,0);assert.equal(p.syncEnabled,false);
+  const value=await h.service.enable(h.dto(p),actor);
+  assert.equal(value.syncEnabled,true);assert.equal(value.configurationRevision,NEXT);assert.equal(value.code,null);
+  assert.deepEqual(h.stats(),{saved:true,commands:1,reads:3,claims:1,released:1});assert.deepEqual(h.capture.tables,tables);
+  assert.doesNotMatch(JSON.stringify([p,value]),/synthetic-login|private-database/);
+  const before=h.stats();await assert.rejects(h.service.enable(h.dto(p),actor));assert.deepEqual(h.stats(),before);
+  assert.equal((await h.service.disable({configurationRevision:NEXT},actor)).syncEnabled,false);
+});
+test('missing preparation never decrypts credentials or requests Syrve',async t=>{
+  const h=fixture(t);h.setAvailable(false);delete process.env.SYRVE_CREDENTIALS_SECRET;
+  await assert.rejects(h.service.preview({configurationRevision:REV},actor));assert.equal(h.stats().commands,0);assert.equal(h.stats().reads,0);
+});
+test('actor, session, manual change, revision and confirmation are checked before consuming a preview',async t=>{
+  const h=fixture(t),p=await h.service.preview({configurationRevision:REV},actor);
+  for(const [who,dto]of [[{...actor,role:'admin'},h.dto(p)],[{...actor,sub:id(201)},h.dto(p)],
+    [{...actor,directorSessionVersion:3},h.dto(p)],[actor,{...h.dto(p),confirmed:false}],[actor,{...h.dto(p),configurationRevision:NEXT}]])await assert.rejects(h.service.enable(dto,who));
+  h.capture.fingerprint='c'.repeat(64);await assert.rejects(h.service.enable(h.dto(p),actor));
+  assert.equal(h.stats().claims,0);assert.equal(h.stats().commands,0);assert.equal(h.stats().reads,1);
+});
+for(const failure of ['command','receipt'])test('failed '+failure+' consumes revision but never enables or releases an uncertain load',async t=>{
+  const h=fixture(t),p=await h.service.preview({configurationRevision:REV},actor);failure==='command'?h.failCommand():h.failWrite();
+  const result=await h.service.enable(h.dto(p),actor);assert.equal(result.syncEnabled,false);assert.equal(result.configurationRevision,NEXT);
+  assert.equal(result.code,failure==='command'?'SYRVE_COMMAND_FAILED':'SYRVE_UNAVAILABLE');assert.equal(h.stats().released,0);
+  assert.equal(h.stats().saved,false);await assert.rejects(h.service.enable(h.dto(p),actor));
+});
+test('consent binds credentials and immutable UUID/number bindings while staff statuses and ledgers stay independent',async t=>{
+  const h=fixture(t),before=activationBindings(h.capture.snapshot,h.capture.tables);
+  h.capture.tables[0].status='occupied';h.capture.tables[0].updatedAt=new Date();h.capture.snapshot.links[0].activeSyrveOrderIds=[id(300)];
+  assert.equal(activationBindings(h.capture.snapshot,h.capture.tables),before);
+  h.capture.snapshot.links[0].syrveTableId=id(301);assert.notEqual(activationBindings(h.capture.snapshot,h.capture.tables),before);
+  const plan=tableLoadingPlan(probe(scope,[]),[TABLE]);assert.throws(()=>activationPlan(plan,h.capture.snapshot));
+});
+test('migration defaults off and refuses to erase any saved Director consent on rollback',async()=>{
+  const sql=[],m=new Migration();await m.up({query:async q=>sql.push(q)});assert.match(sql[0],/DEFAULT false/);
+  assert.doesNotMatch(sql[0],/UPDATE "tables"|INSERT INTO/);
+  await assert.rejects(m.down({isTransactionActive:false}),/active transaction/);
+  await assert.rejects(m.down({isTransactionActive:true,query:async()=>[{present:true}]}),/saved consent/);
+  await m.down({isTransactionActive:true,query:async q=>{sql.push(q);return[{present:false}];}});assert.equal(sql.at(-1),'DROP TABLE "syrve_sync_activation"');
+});
+
+function transport(t,options={}){
+  const oldApp=process.env.SYRVE_APP_ID,oldSecret=process.env.SYRVE_APP_CLIENT_SECRET;
+  delete process.env.SYRVE_APP_ID;delete process.env.SYRVE_APP_CLIENT_SECRET;
+  t.after(()=>{oldApp===undefined?delete process.env.SYRVE_APP_ID:process.env.SYRVE_APP_ID=oldApp;oldSecret===undefined?delete process.env.SYRVE_APP_CLIENT_SECRET:process.env.SYRVE_APP_CLIENT_SECRET=oldSecret;});
+  const calls=[];
+  t.mock.method(globalThis,'fetch',async(url,request)=>{
+    const path=new URL(url).pathname,body=JSON.parse(request.body);calls.push({path,body});
+    const values={
+      '/api/1/access_token':{token:'synthetic-token'},'/api/1/organizations':{organizations:[{id:ORG,name:'Тест'}]},
+      '/api/1/terminal_groups':{terminalGroups:[{organizationId:ORG,items:[{id:GROUP,organizationId:ORG,name:'Каса',posVersion:'7.7.1'}]}],terminalGroupsInSleep:[]},
+      '/api/1/reserve/available_restaurant_sections':{restaurantSections:[{id:id(400),terminalGroupId:GROUP,name:'Зал',tables:[{id:TABLE,number:12,name:'Стіл',isDeleted:false}]}]},
+      '/api/1/terminal_groups/is_alive':{correlationId:id(401),isAliveStatus:[{organizationId:ORG,terminalGroupId:GROUP,isAlive:true}]},
+      '/api/1/order/by_table':{correlationId:id(402),orders:[]},'/api/1/order/by_id':{correlationId:id(403),orders:body.orderIds?.map(value=>row(scope,value,'Closed',200))||[]},
+      '/api/1/order/init_by_table':{correlationId:id(404)},'/api/1/commands/status':{state:'Success'},...options};
+    const value=typeof values[path]==='function'?values[path](body):values[path];assert.ok(value,path);
+    return value instanceof Response?value:Response.json(value);
+  });
+  const controls={deadline:Date.now()+45000,visibilityContext:REV+':'+NEXT,beforeCommand:async()=>{},loadingPlan:tableLoadingPlan(probe(scope,[]),[TABLE])};
+  return {calls,controls,client:new SyrveClient(),read:ids=>new SyrveClient().probeLoadedOrders('https://api-eu.syrve.live','synthetic-login',ORG,[TABLE],ids,controls)};
+}
+test('only real transport completion followed by fresh full reads issues a nonserializable, context-bound receipt',async t=>{
+  const h=transport(t),value=await h.read([id(300)]);
+  assert.equal(isVerifiedLoadedProbe(value,h.controls.visibilityContext,ORG,TABLE),true);
+  assert.equal(isVerifiedLoadedProbe(structuredClone(value),h.controls.visibilityContext,ORG,TABLE),false);
+  assert.equal(isVerifiedLoadedProbe(value,'foreign-lease',ORG,TABLE),false);
+  assert.ok(h.calls.findIndex(c=>c.path.endsWith('init_by_table'))<h.calls.findLastIndex(c=>c.path.endsWith('by_table')));
+  value.byTable.push(value.byId[0]);assert.equal(isVerifiedLoadedProbe(value,h.controls.visibilityContext,ORG,TABLE),false);
+});
+for(const failure of ['command','partial','changed','guard','expired','budget'])test('runtime '+failure+' cannot certify table visibility',async t=>{
+  const h=transport(t,failure==='command'?{'/api/1/commands/status':{state:'Error',exception:'private'}}:failure==='partial'?{'/api/1/order/by_id':Response.json({}, {status:403})}:{});
+  if(failure==='changed')h.controls.loadingPlan.groups[0].posVersion='8.0.0';
+  if(failure==='guard')h.controls.beforeCommand=async()=>{throw new ConflictException();};
+  if(failure==='expired')h.controls.deadline=Date.now()-1;
+  if(failure==='budget')h.controls.requestBudget={remaining:3};
+  await assert.rejects(h.read([id(300)]));
+  if(['changed','guard','expired','budget'].includes(failure))assert.equal(h.calls.filter(c=>c.path.endsWith('init_by_table')).length,0);
+});
+
+test('activation PostgreSQL validation refuses unapproved or remote targets before connection',async()=>{
+  const {runSyrveActivationValidation}=await import('../scripts/syrve-activation-validation.mjs');
+  await assert.rejects(runSyrveActivationValidation({}),/disabled/);
+  await assert.rejects(runSyrveActivationValidation({FRESH_SCHEMA_REFERENCE_ALLOW:'true',DB_URL:'postgres://remote/db'}),/refuses DB_URL/);
+});

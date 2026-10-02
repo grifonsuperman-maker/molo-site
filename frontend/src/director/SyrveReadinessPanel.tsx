@@ -18,16 +18,18 @@ const MESSAGES: Record<string, string> = {
   ORDER_ACCESS_NOT_CHECKED: 'Права на читання стану столів перевіряються окремо після підключення.',
   POS_VISIBILITY_NOT_VERIFIED: 'Повноту даних каси ще не підтверджено. Відсутність даних не означає, що стіл вільний.',
   ACTIVATION_NOT_AVAILABLE: 'Увімкнення стане доступним після завершення підготовки та перевірок.',
+  ACTIVATION_AVAILABLE: 'Можна підготувати та підтвердити автоматичні статуси. Перевірка сама їх не вмикає.',
+  ACTIVATION_ENABLED: 'Автоматичні статуси дозволено Директором. Кожне оновлення окремо перевіряє доступність і повноту даних каси.',
 };
 const CODES: Record<string, readonly string[]> = { schema: ['SCHEMA_VERIFIED','SCHEMA_PENDING','SCHEMA_REQUIRES_AUDIT'],
   connection: ['CONNECTION_SAVED','CONNECTION_REQUIRED'], mapping: ['MAPPING_VALID','MAPPING_REQUIRED'],
   state: ['STATE_VALID','STATE_UNOBSERVED','STATE_REQUIRES_AUDIT'], orders: ['ORDER_ACCESS_NOT_CHECKED'],
-  visibility: ['POS_VISIBILITY_NOT_VERIFIED'], activation: ['ACTIVATION_NOT_AVAILABLE'] };
-const SUCCESS_CODES = ['SCHEMA_VERIFIED','CONNECTION_SAVED','MAPPING_VALID','STATE_VALID'];
+  visibility: ['POS_VISIBILITY_NOT_VERIFIED'], activation: ['ACTIVATION_NOT_AVAILABLE','ACTIVATION_AVAILABLE','ACTIVATION_ENABLED'] };
+const SUCCESS_CODES = ['SCHEMA_VERIFIED','CONNECTION_SAVED','MAPPING_VALID','STATE_VALID','ACTIVATION_AVAILABLE','ACTIVATION_ENABLED'];
 const UNCHECKED_CODES = ['STATE_UNOBSERVED','ORDER_ACCESS_NOT_CHECKED','POS_VISIBILITY_NOT_VERIFIED'];
 
 export function validateReadiness(value: SyrveReadiness): SyrveReadiness {
-  if (!value || value.syncEnabled !== false || value.activationAvailable !== false
+  if (!value || typeof value.syncEnabled !== 'boolean' || typeof value.activationAvailable !== 'boolean'
     || typeof value.checkedAt !== 'string' || !Number.isFinite(Date.parse(value.checkedAt))
     || (value.configurationRevision !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.configurationRevision))
     || !Array.isArray(value.checks) || value.checks.length !== Object.keys(LABELS).length
@@ -36,6 +38,8 @@ export function validateReadiness(value: SyrveReadiness): SyrveReadiness {
       || check.status !== (SUCCESS_CODES.includes(check.code) ? 'ok' : UNCHECKED_CODES.includes(check.code) ? 'not_checked' : 'blocked'))) {
     throw new Error('Недійсний результат перевірки готовності.');
   }
+  const activation = value.checks.find(check => check.key === 'activation')!;
+  if (activation.code !== (value.syncEnabled ? 'ACTIVATION_ENABLED' : value.activationAvailable ? 'ACTIVATION_AVAILABLE' : 'ACTIVATION_NOT_AVAILABLE')) throw new Error('Недійсний стан автостатусів.');
   return value;
 }
 
@@ -65,7 +69,7 @@ export default function SyrveReadinessPanel({ configurationRevision }: { configu
   return <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5" aria-label="Готовність Syrve">
     <div className="flex items-center justify-between gap-3"><h2 className="font-black">Готовність синхронізації</h2>
       <button type="button" disabled={loading} onClick={() => setRefresh(value => value + 1)} className="rounded-xl border border-white/20 px-3 py-2 text-xs font-bold disabled:opacity-40">Оновити перевірку</button></div>
-    <p className="mt-2 text-sm text-white/55">Перевірка збереженого підключення. Синхронізація залишається вимкненою.</p>
+    <p className="mt-2 text-sm text-white/55">Перевірка збереженого підключення. Увімкнення потребує окремого підтвердження Директора.</p>
     {loading && <p className="mt-3 text-sm" role="status">Перевіряємо готовність…</p>}
     {failed && <p className="mt-3 text-sm text-amber-100" role="alert">Перевірку не завершено або налаштування змінилися. Оновіть сторінку та повторіть перевірку.</p>}
     {report && report.configurationRevision === configurationRevision && <SyrveReadinessView report={report} />}

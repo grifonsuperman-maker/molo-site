@@ -24,6 +24,8 @@ export async function runSyrveWorkerValidation(env = process.env) {
   const { SyrveIntegrationService } = require('../dist/syrve/syrve-integration.service.js');
   const { SyrveClientException } = require('../dist/syrve/syrve-client.js');
   const { CreateSyrveWorkerState2026100100060: Migration } = require('../dist/migrations/2026100100060-CreateSyrveWorkerState.js');
+  const {confirmed,consentDatabase}=require('../test/helpers/syrve-confirmed-worker.js');
+  const {SyrveActivationStore}=require('../dist/syrve/syrve-activation.store.js');
   const { id, row, probe } = require('../test/helpers/syrve-state-fixtures.js');
   const options = { type:'postgres',host:env.DB_HOST,port:Number(env.DB_PORT || 5432),username:env.DB_USER || 'postgres',
     password:env.DB_PASSWORD || 'postgres',database:env.DB_NAME,synchronize:false,
@@ -38,11 +40,11 @@ export async function runSyrveWorkerValidation(env = process.env) {
   const store=(db=source)=>new SyrveWorkerStore(db,new SyrveSettingsStore(db));
   const state=()=>new SyrveStateStore(source,new SyrveSettingsStore(source));
   const bridge=()=>new SyrveIntegrationService(new SyrveSettingsStore(source),{},
-    {probeOrders:async(base,login,organization,tables,ids)=>{
+    {probeLoadedOrders:async(base,login,organization,tables,ids,controls)=>{
       assert.equal(login,'synthetic-worker-login'); assert.equal(organization,org); assert.deepEqual(tables,[provider]);
-      reads++; return response((await state().capture(tableId)).state.scope,ids);
-    }},source.getRepository(TableEntity));
-  const runner=(read)=>new SyrveWorkerRunner(store(),read || ((c,ids,controls)=>bridge().probeWorkerOrders(c,ids,controls)));
+      reads++; const capture=await state().capture(tableId); return confirmed(capture,ids,controls,(c,values)=>response(c.state.scope,values));
+    }},source.getRepository(TableEntity),new SyrveActivationStore(source,new SyrveSettingsStore(source)));
+  const runner=(read)=>new SyrveWorkerRunner(store(),read ? ((c,ids,controls)=>confirmed(c,ids,controls,read)) : ((c,ids,controls)=>bridge().probeWorkerOrders(c,ids,controls)));
   const due=()=>source.query('UPDATE "syrve_worker_state" SET next_attempt_at=clock_timestamp()-interval \'1 second\' WHERE integration_id=$1',[integrationId]);
   const saved=async()=>({link:await source.query('SELECT * FROM "syrve_table_links" WHERE id=$1',[linkId]),
     state:await source.query('SELECT * FROM "syrve_table_sync_states" WHERE link_id=$1',[linkId]),
@@ -63,6 +65,7 @@ export async function runSyrveWorkerValidation(env = process.env) {
     const disabled=new SyrveWorkerService(source,new SyrveSettingsStore(source),bridge());
     assert.equal((await disabled.tick()).status,'disabled'); await disabled.onModuleDestroy(); assert.equal(reads,0);
     assert.equal(await job(),undefined);
+    await consentDatabase(source,new SyrveSettingsStore(source));
 
     // Independent pools contend through real row/advisory locks, without HTTP transactions.
     const claims=await Promise.all([store().claim(),store(other).claim()]);
@@ -132,16 +135,18 @@ export async function runSyrveWorkerValidation(env = process.env) {
     const pending=new Promise(yes=>configured=yes), held=new Promise(yes=>finish=yes);
     const late=runner(async(c,ids)=>{configured();await held;const value=probe(c.state.scope,[],ids);return value;}).run();
     await pending; await source.query('UPDATE "syrve_integrations" SET configuration_revision=uuid_generate_v4() WHERE id=$1',[integrationId]);
-    const scopedBefore=await saved(), jobBefore=await job(); assert.equal((await store(other).claim()).status,'busy');
+    const scopedBefore=await saved(), jobBefore=await job(); assert.equal((await store(other).claim()).status,'disabled');
     finish(); assert.equal((await late).status,'stale'); assert.deepEqual(await saved(),scopedBefore);
     assert.deepEqual((await job()).last_success_at,jobBefore.last_success_at);
     assert.equal((await job()).last_error_code,jobBefore.last_error_code);
+    await consentDatabase(source,new SyrveSettingsStore(source));
     const next=(await store(other).claim()).lease; await store(other).release(next);
     assert.equal((await job()).last_success_at,null);
 
     await assert.rejects(source.transaction(m=>new Migration().down(m.queryRunner)),/saved worker state exists/);
     await source.query('DELETE FROM "syrve_integrations" WHERE id=$1',[integrationId]);
-    assert.equal(await job(),undefined); integrationId=null;
+    assert.equal(await job(),undefined);
+    await consentDatabase(source,new SyrveSettingsStore(source)); integrationId=null;
     await source.transaction(async(m)=>{await new Migration().down(m.queryRunner);await new Migration().up(m.queryRunner);});
   } finally {
     try {
@@ -156,6 +161,6 @@ export async function runSyrveWorkerValidation(env = process.env) {
 }
 
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
-  runSyrveWorkerValidation().then(()=>process.stdout.write('Syrve disabled worker PostgreSQL validation passed.\n'))
+  runSyrveWorkerValidation().then(()=>process.stdout.write('Syrve consented worker PostgreSQL validation passed.\n'))
     .catch(error=>{console.error(`Syrve worker validation failed: ${error.message}`);process.exitCode=1;});
 }

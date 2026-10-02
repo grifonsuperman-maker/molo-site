@@ -4,10 +4,10 @@ Initial audit: `e5a9a8cc417cc18f8335546a8d65b9ef5cf85d11` (2026-09-25).
 PR 10a starts from fresh main `814d3bf3e1a19bd0a5736e3efeab41d8f7d6905d` (2026-10-01),
 after manual merges of PRs #261, #264, #265, #266, #267, #268, #269, #270, #271, #272, #273, #274 and #275. Client diagnostics, link schema preparation,
 read-only catalog preview, explicit UUID confirmation, internal rename preparation and read-only order observation are implemented.
-The transition adapter is used only by transactional staff hooks. Common role/date projection is wired behind a hard-disabled read source;
-a prepared background runner is now wired behind a hard-disabled scheduler gate.
-Automatic observation and effective POS status application stay off. Real Syrve is not connected or
-queried during development; tests use synthetic credentials and mocked fetch.
+The transition adapter is used by transactional staff hooks and, after explicit Director consent, the background worker.
+Automatic observation and effective POS status projection default off. Migration-only activation storage,
+a purpose-separated one-use confirmation and fresh command-confirmed table loading are required to enable them.
+Real Syrve is not connected or queried during development; tests use synthetic credentials and mocked fetch.
 Every later PR starts from freshly fetched main after the Director's manual merge.
 
 ## Confirmed wiring and current behavior
@@ -1185,3 +1185,60 @@ preservation. Development performs no production/Neon writes, live restaurant
 requests, environment edits or deployment. Protected maps, photos, geometry,
 numbers, booking/waiter behavior, status colors and exact 15-second polling stay
 unchanged.
+
+
+### Director activation and current runtime (after PR #282)
+
+This task starts from fresh main `b4f5e70ef8b422070cee50abbfd819696aafacad`.
+The Director can preview only the saved table bindings, acknowledge recurring table-state
+loading and explicitly enable automatic occupancy. The activation HMAC purpose differs
+from manual loading and catalog confirmation. Actor/session, configuration, complete
+local/manual fingerprint, exact upstream groups/tables/POS versions and five-minute
+expiry are checked before a revision/lease claim. Accepted attempts consume that revision
+across instances and restarts, including failures. Only confirmed commands plus a fresh
+complete read can commit durable consent; no initial table status/booking/ledger is overwritten.
+
+`CreateSyrveActivation2026100200070` creates `syrve_sync_activation` with default-off
+consent, a configuration revision, binding fingerprint, server-derived loading plan,
+actor hash and consent time. Rollback refuses every saved receipt, including disabled
+ones. It runs automatically only in the guarded disposable schema reference. Production
+adoption needs a newly reviewed backup/audit/rehearsal/application plan for this seventh
+migration. The earlier approved six-migration application does not cover it. Existing
+six catalog fingerprints are unchanged; the seventh is frozen against PostgreSQL 17.5
+and must match the real PostgreSQL 17 CI reference. No production migration, activation,
+credential change, deployment or real restaurant request is performed in this task.
+
+A saved receipt binds credentials, organization, UUID bindings and physical numbers,
+while manual status/revision and the cumulative ledger remain independent. Settings
+revision changes invalidate consent. Changing/rechecking a live connection or manually
+loading tables requires disabling auto-status first; disconnecting invalidates it directly.
+Disabling uses the common settings transaction fence and rotates the configuration.
+Every in-flight runner loses write/command permission, while an unresolved bounded
+lease stays until release/expiry so another instance cannot overlap it.
+
+Each worker observation revalidates the consented POS group/version/table, calls scoped
+`init_by_table`, confirms `commands/status`, then performs full table and saved-ID reads.
+A private WeakMap transport receipt binds the exact returned probe to the lease/local
+revision and deadline; copied, serialized, mutated, foreign or expired probes cannot
+certify visibility. Ordinary read-only observations and manual loading still cannot
+supply it. Every restored saved-ID scope, including active/suppressed/unresolved sets
+over 2000 IDs, must succeed before the reducer applies any part. The reducer keeps
+its whole-ledger unknown/conflict/tombstone fence and permits explicit closure only
+with fresh receipts for every scope. Missing responses never imply closure.
+
+The 15-second scheduler, 45-second cycle deadline, 90-second PostgreSQL lease, 32-link
+fair cursor and persistent bounded backoff remain. Each individual read/load stays
+limited to 25 requests; the cycle additionally shares an 800-request budget across
+all nested authentication/load/read calls. Larger/slow observations fail closed,
+retain the last confirmed occupancy and continue through the fair cursor later.
+The read source checks the same current consent in its repeatable-read, read-only
+physical/ledger frame. POS contributes occupancy only; physical/manual status, booking
+priority, hidden/closed rules, future dates and waiter suppression retain their policies.
+
+The Director UI exposes only table numbers, conditions and enable/disable actions.
+Opening it reads local settings only. Explicit preparation never enables or initializes;
+acknowledgement and a separate enable action are required. Proofs clear on submission,
+scope changes and close; late responses are discarded, duplicate clicks are blocked,
+and accepted attempts refresh the consumed saved revision before sibling actions unlock.
+No order/menu/customer/payment interface is added. Maps, photographs, geometry, table
+numbers, click zones, status colors, waiter buttons and existing polling stay unchanged.

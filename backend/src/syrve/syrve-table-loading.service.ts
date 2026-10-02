@@ -14,7 +14,7 @@ export class SyrveTableLoadingService {
     try { return loadingActor(actor); }
     catch { throw new ConflictException('Сесію Директора не підтверджено. Увійдіть повторно перед перевіркою столів.'); }
   }
-  private async plan(captured: TableLoadingCapture, controls: SyrveProbeControls = {}) {
+  async probePlan(captured: TableLoadingCapture, controls: SyrveProbeControls = {}) {
     const { entity, links } = captured.snapshot;
     const knownIds = [...new Set(links.flatMap(link => link.activeSyrveOrderIds))];
     const probe = await this.client.probeOrders(entity!.apiBaseUrl, decryptSyrveCredentials(entity!), entity!.organizationId!,
@@ -30,7 +30,7 @@ export class SyrveTableLoadingService {
   }
   async preview(dto: SyrveRevisionDto, actor?: AuthUser) {
     const identity = this.identity(actor), key = syrveCredentialsKey();
-    const captured = await this.store.capture(dto.configurationRevision), plan = await this.plan(captured);
+    const captured = await this.store.capture(dto.configurationRevision), plan = await this.probePlan(captured);
     const tableNumbers = captured.snapshot.links.map(link => captured.tables.find(table => table.id === link.moloTableId)!.tableNumber).sort();
     return { configurationRevision: dto.configurationRevision, organizationId: plan.organizationId,
       checkedAt: new Date().toISOString(), linkedTables: tableNumbers.length, terminalGroups: plan.groups.length, tableNumbers,
@@ -47,7 +47,7 @@ export class SyrveTableLoadingService {
     const captured = await this.store.capture(dto.configurationRevision);
     if (captured.fingerprint !== proof.local) throw new ConflictException('Налаштування або столи змінилися. Повторіть перевірку.');
     const controls = { deadline: Date.now() + 45_000, requestBudget: { remaining: 25 } };
-    const plan = await this.plan(captured, controls);
+    const plan = await this.probePlan(captured, controls);
     if (loadingPlanFingerprint(plan) !== proof.upstream || proof.expires <= Date.now()) throw new ConflictException('Склад столів або кас змінився. Повторіть перевірку.');
     // Reserve authentication, one command/status per group, and the complete
     // post-load read. Never consume the one-use proof when even the shortest
@@ -61,7 +61,7 @@ export class SyrveTableLoadingService {
       await this.client.initializeTables(entity.apiBaseUrl, decryptSyrveCredentials(entity), plan,
         { ...controls, beforeCommand: () => this.store.guard(lease) });
       commandsConfirmed = true;
-      const after = await this.plan(lease, controls);
+      const after = await this.probePlan(lease, controls);
       if (loadingPlanFingerprint(after) !== proof.upstream) throw new ConflictException('Склад столів змінився під час завантаження.');
       await this.store.guard(lease);
       if (Date.now() >= controls.deadline) throw new SyrveClientException('SYRVE_TIMEOUT');

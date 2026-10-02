@@ -37,7 +37,7 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
   const reader = () => new SyrveStatusReadStore(source, new SyrveSettingsStore(source));
   // Synthetic dependency injection, never a production activation path.
   const prepared = () => new TableStatusProjectionService({ snapshot: (ids) => reader().read(ids) });
-  const disabled = () => new TableStatusProjectionService(new SyrveStatusReadService(source));
+  const disabled = () => new TableStatusProjectionService({snapshot:async()=>({syncEnabled:false,tables:new Map()})});
   const services = (projection) => {
     const tables = source.getRepository(TableEntity), zones = source.getRepository(Zone), bookings = source.getRepository(Booking);
     const identities = new TableMapIdentityService(source), staff = new SyrveStaffActionsService(source, new SyrveSettingsStore(source));
@@ -81,8 +81,11 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
     assert.equal(Number((await source.query('SELECT count(*) AS count FROM "syrve_integrations"'))[0].count), 0);
     await source.query('INSERT INTO "zones" (id,name,is_visible,is_closed) VALUES ($1,\'Synthetic status CI\',true,false)', [zoneId]);
     await source.query('INSERT INTO "tables" (id,zone_id,table_number,status,x,rotation,photo_url) VALUES ($1,$2,$3,\'free\',17,45,\'/existing-status-ci.jpg\')', [tableId, zoneId, number]);
-    integrationId = (await source.query('INSERT INTO "syrve_integrations" (display_name,organization_id,status) VALUES (\'Synthetic status CI\',$1,\'connected\') RETURNING id', [organizationId]))[0].id;
+    integrationId = (await source.query('INSERT INTO "syrve_integrations" (display_name,organization_id,status,api_login_encrypted,api_login_iv,api_login_auth_tag) VALUES (\'Synthetic status CI\',$1,\'connected\',\'synthetic\',\'synthetic\',\'synthetic\') RETURNING id', [organizationId]))[0].id;
     linkId = (await source.query('INSERT INTO "syrve_table_links" (integration_id,organization_id,molo_table_id,syrve_table_id,last_known_number) VALUES ($1,$2,$3,$4,1) RETURNING id', [integrationId, organizationId, tableId, providerId]))[0].id;
+    assert.equal((await new SyrveStatusReadService(source).snapshot([tableId])).syncEnabled,false);
+    const {consentDatabase}=require('../test/helpers/syrve-confirmed-worker.js');
+    await consentDatabase(source,new SyrveSettingsStore(source));
     await expectToday(prepared(), 'free');
     assert.equal(Number((await source.query('SELECT count(*) AS count FROM "syrve_table_sync_states" WHERE link_id=$1', [linkId]))[0].count), 0);
     const first = await states().capture(tableId);
@@ -169,6 +172,7 @@ export async function runSyrveStatusProjectionValidation(env = process.env) {
     await source.query('UPDATE "syrve_integrations" SET configuration_revision=uuid_generate_v4() WHERE id=$1', [integrationId]);
     const changed = await saved(); assert.equal((await reader().read([tableId])).tables.size, 0); assert.deepEqual(await saved(), changed);
     await services(disabled()).tables.markFree(tableId); // explicit staff action adopts the revision
+    await consentDatabase(source,new SyrveSettingsStore(source));
     const captured = await states().capture(tableId); await observe([row(captured.state.scope, id(12), 'New', 400)]);
     const originalVersion = (await source.query('SELECT * FROM "syrve_order_versions" WHERE link_id=$1 AND order_id=$2', [linkId, id(12)]))[0];
     await source.query('DELETE FROM "syrve_order_versions" WHERE link_id=$1 AND order_id=$2', [linkId, id(12)]);

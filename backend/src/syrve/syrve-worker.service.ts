@@ -16,13 +16,11 @@ export class SyrveWorkerService implements OnModuleDestroy {
     this.runner = new SyrveWorkerRunner(new SyrveWorkerStore(source, settings),
       (capture, ids, controls) => integration.probeWorkerOrders(capture, ids, controls));
   }
-  private enabled(): boolean { return false; }
-
   @Interval('syrve-prepared-worker', SYRVE_WORKER_INTERVAL_MS)
   async tick(): Promise<SyrveWorkerResult> {
-    // Credentials, environment flags and HTTP requests cannot activate this stage.
-    // Return before acquiring a lease, reading settings or contacting Syrve.
-    if (!this.enabled() || this.stopped) return { status: 'disabled', processed: 0 };
+    // The runner claims only a current, explicitly consented configuration.
+    // Missing activation schema/receipt stays off; credentials and flags cannot enable it.
+    if (this.stopped) return { status: 'disabled', processed: 0 };
     const result = await this.runner.run();
     if (result.status === 'failed') this.logger.warn('Фонове спостереження Syrve призупинено: ' + result.code);
     return result;
