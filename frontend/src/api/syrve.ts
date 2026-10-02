@@ -58,6 +58,18 @@ export type SyrveOrderDiagnostics = {
   renamingApplied: false;
 };
 
+type SyrveLoadingFlags = { syncEnabled: false; activationAvailable: false; statusesApplied: false; renamingApplied: false; complete: false };
+export type SyrveTableLoadingPreview = SyrveLoadingFlags & {
+  configurationRevision: string; organizationId: string; checkedAt: string;
+  linkedTables: number; terminalGroups: number; tableNumbers: string[];
+  confirmation: { proof: string; expiresAt: string };
+};
+export type SyrveTableLoadingResult = SyrveLoadingFlags & {
+  requestedRevision: string; configurationRevision: string; organizationId: string; checkedAt: string;
+  linkedTables: number; terminalGroups: number; completedGroups: number;
+  commandsConfirmed: boolean; readCompleted: boolean; code: string | null;
+};
+
 export type SyrveCatalogTable = {
   id: string;
   number: number;
@@ -91,6 +103,10 @@ export const syrveApi = {
   getReadiness: () => api.get<SyrveReadiness>('/syrve-integration/readiness'),
   orderDiagnostics: (configurationRevision: string) =>
     api.post<SyrveOrderDiagnostics>('/syrve-integration/orders-diagnostics', { configurationRevision }),
+  previewTableLoading: (configurationRevision: string) =>
+    api.post<SyrveTableLoadingPreview>('/syrve-integration/table-loading-preview', { configurationRevision }),
+  loadTables: (configurationRevision: string, confirmationProof: string) =>
+    api.post<SyrveTableLoadingResult>('/syrve-integration/table-loading', { configurationRevision, confirmationProof, confirmed: true }),
   test: (payload: SyrveConnectionInput) =>
     api.post<{
       message: string;

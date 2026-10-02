@@ -8,6 +8,8 @@ import {
   IsArray,
   ArrayMaxSize,
   ValidateNested,
+  IsBoolean,
+  Equals,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -64,6 +66,17 @@ export class PreviewSyrveTablesDto extends TestSyrveConnectionDto {
 export class SyrveRevisionDto {
   @IsUUID('all')
   configurationRevision: string;
+}
+
+export class ConfirmSyrveTableLoadingDto extends SyrveRevisionDto {
+  @IsString()
+  @MinLength(40)
+  @MaxLength(1500)
+  confirmationProof: string;
+
+  @IsBoolean()
+  @Equals(true)
+  confirmed: boolean;
 }
 
 export class DisconnectSyrveDto extends SyrveRevisionDto {

@@ -220,6 +220,7 @@ Activation remains unavailable until all prerequisites and mapping confirmation 
 | 10a | Read-only readiness and target-guarded schema adoption preflight (this PR) | schema contracts/catalog reader, Director GET/panel, read-only operator and disposable PostgreSQL checks; no application or activation |
 | 10b1 | Explicit Director diagnostics after the reviewed schema-adoption path (merged #278); stale-response handling, no activation | aggregate diagnostics projection/route, Director API/panel, authorization and read-only/stale-response regression tests |
 | 10b2 | Table-only Director diagnostics and mapped POS version compatibility; no initialization or activation | bounded version parser/counts, saved-scope probe/projection, Director diagnostics/readiness text and regression tests |
+| 10b3 | Explicit Director loading of confirmed table scope with command completion and a fresh read; no activation | purpose-separated one-use confirmation, shared PostgreSQL lease, bounded init/status transport, Director confirmation panel and regression tests |
 | 10b | Final Director activation, complete diagnostics, regression hardening and reviewed schema-adoption path after a fresh production audit | Director dock/API, activation DTO/controller, migration operator/registry, diagnostics, operational documentation and full regression suite |
 
 All paths above are under `backend/` unless prefixed `frontend/`. Boundaries may
@@ -1113,3 +1114,74 @@ state verification; version support alone is never an activation receipt. No
 migration, database operation, deployment, environment change or real Syrve
 request is performed during development. Protected assets, table geometry/numbers,
 waiter behavior, booking flow/status priority and exact 15-second polling are unchanged.
+
+### PR 10b3 explicit loading of confirmed table state
+
+Starts from merged #280, main `4ab8c143ad3867129f0fb900e29228582683634a`.
+The product still exposes table statuses only. The documented POS account-loading
+command is an internal prerequisite, not an order-management feature. The public
+OpenAPI was fetched again on 2026-10-02: `init_by_table` requires organization,
+terminal group and table UUIDs, POS >=7.7.1 and `Orders: loading data`; its UUID
+acknowledgement is not completion. `commands/status` requires `Commands` permission
+and exactly the acknowledged organization/correlation. Only `Success` confirms a
+command; `InProgress`, `Error`, malformed replies and HTTP 410 do not. A 410
+correlation is never polled again. Raw exceptions and error reasons are discarded.
+
+Two owner-only, no-store routes accept only a saved revision for preview, then
+revision, opaque proof and literal boolean confirmation for loading. Scope IDs,
+credentials, caller visibility flags and arbitrary transport destinations are
+forbidden. Both stages fetch the current catalog, POS versions, availability and
+bounded table/tracked-record reads. Every saved table must belong uniquely to a
+nondeleted, active, alive, compatible group. A sleeping, missing, moved, duplicate
+or unrelated group cannot validate a table. The signed five-minute proof binds
+exact table/group/version membership, full saved link/manual/table fingerprint,
+configuration revision and authenticated Director identity/session version, with
+a separate HMAC purpose from mapping proofs. It contains no credentials.
+
+After fresh confirmation checks, a short PostgreSQL transaction locks settings
+then physical rows, checks the fingerprint, advances the saved configuration
+revision and claims the existing worker lease for 90 seconds. This consumes all
+old-revision previews across processes/restarts before the first loading command.
+The same lease excludes another loading operation or future worker runner. Old
+worker success/backoff/cursor metadata is cleared for the new revision; loading
+never records a worker success. No new
+schema/migration is needed. A failed final lease write rolls the revision back.
+No transaction spans HTTP. A replaced, expired or changed-scope lease is refused
+before each command/status query and after the fresh post-load read. Old-token
+release cannot clear a replacement lease. An uncertain outcome retains its bounded
+lease until expiry and requires a fresh manual preview; it is never auto-retried.
+
+The confirmed operation has a shared 45-second/25-request budget including both
+auth sessions, catalog/availability reads, initialization, status polls and fresh
+reads. Each request retains the existing 12-second, 1 MiB, JSON, TLS and no-redirect
+limits. At most 100 saved tables/four groups are prepared. Each group is initialized
+once and its command polled at most six times with 250 ms spacing. The shortest
+remaining successful path must fit the budget before the proof is consumed;
+additional in-progress polls or a large tracked ledger can still exhaust it and
+yield an unknown result. Partial group completion never becomes table-state proof.
+There are no terminal wake, webhook, menu, payment or map-layout calls.
+
+The Ukrainian Director panel starts only on a click, displays the physical table
+numbers, requires a separate acknowledgement and consumes its proof immediately
+on submission. Double clicks, drafts, close/unmount, changed scope, parent actions
+and late replies are fenced. Sibling actions and old diagnostic evidence are
+blocked while loading. Saved settings are refreshed after submission failures and
+on reopening the dialog because an accepted operation can outlive its closed panel.
+Strict decoders retain only bounded counts, timestamps and fixed result codes.
+
+The result is transient command/read evidence only. It does not establish complete
+future POS visibility, create a trusted activation receipt, update table status,
+rename a table, change bookings/overrides, write an order ledger or mark worker
+success. Settings revision and lease are the only writes in the explicitly
+confirmed runtime action. All completeness, synchronization, activation, worker,
+effective POS-read and reducer visibility gates remain false. Final activation
+still requires a reviewed durable visibility contract and end-to-end regression
+checks; this prerequisite alone cannot enable synchronization.
+
+Validation includes mocked actual transport, role/DTO guards, stale/session/proof
+cases, frontend acknowledgement/lifecycle/refresh and disposable PostgreSQL
+cross-instance claims, restarts, lease replacement, atomic rollback and data
+preservation. Development performs no production/Neon writes, live restaurant
+requests, environment edits or deployment. Protected maps, photos, geometry,
+numbers, booking/waiter behavior, status colors and exact 15-second polling stay
+unchanged.

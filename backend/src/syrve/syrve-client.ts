@@ -3,6 +3,8 @@ import { parseRestaurantSections, parseTerminalGroups, SyrveCatalogValidationErr
 import { TABLE_ORDER_BATCH_SIZE, ORDER_ID_BATCH_SIZE, MAX_CATALOG_TABLES, MAX_RESPONSE_ORDERS,
   mergeSyrveOrders, observationIds, parsePosAvailability, parseSyrveOrders, SyrveOrderValidationError,
   type ObservationCheckName, type SyrveObservedOrder, type SyrveOrderProbe } from './syrve-order-observer';
+import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, parseLoadingCommand, parseLoadingCorrelation, SyrveLoadingValidationError, type TableLoadingPlan } from './syrve-table-loading';
+import { assessSyrvePosVersion } from './syrve-pos-version';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -10,7 +12,7 @@ const MAX_RESPONSE_BYTES = 1_048_576;
 const OBSERVATION_TIMEOUT_MS = 45_000;
 const MAX_OBSERVATION_REQUESTS = 25;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export type SyrveProbeControls = { deadline?: number; signal?: AbortSignal };
+export type SyrveProbeControls = { deadline?: number; signal?: AbortSignal; requestBudget?: { remaining: number } };
 
 const ERRORS = {
   SYRVE_AUTH_FAILED: 'Syrve відхилив дані доступу. Перевірте API-ключ і налаштування підключення.',
@@ -22,12 +24,16 @@ const ERRORS = {
   SYRVE_NO_ORGANIZATIONS: 'У доступі Syrve не знайдено активних організацій.',
   SYRVE_ORGANIZATION_UNAVAILABLE: 'Обрана організація більше не доступна у Syrve.',
   SYRVE_OBSERVATION_LIMIT: 'Перевірку зупинено на безпечному ліміті запитів. Збережений стан не змінено.',
+  SYRVE_COMMAND_FAILED: 'Syrve не завершив завантаження стану столів. Синхронізацію не ввімкнено.',
+  SYRVE_COMMAND_IN_PROGRESS: 'Syrve ще завантажує стан столів. Завершення не підтверджено.',
+  SYRVE_COMMAND_EXPIRED: 'Syrve більше не підтверджує цю операцію. Синхронізацію не ввімкнено.',
 } as const;
 
 export class SyrveClientException extends BadGatewayException {
   constructor(code: keyof typeof ERRORS) {
     // Never include an upstream body, URL, token or fetch error in an API error.
-    super({ statusCode: 502, code, message: ERRORS[code] });
+    const safe = Object.prototype.hasOwnProperty.call(ERRORS, code) ? code : 'SYRVE_INVALID_RESPONSE';
+    super({ statusCode: 502, code: safe, message: ERRORS[safe] });
   }
 }
 
@@ -73,9 +79,14 @@ export class SyrveClient {
     return { path: '/api/1/access_token', body: { apiLogin: apiKey }, mode: 'legacy_v1' };
   }
 
-  private async postJson(path: string, body: object, token?: string, deadline?: number, signal?: AbortSignal): Promise<unknown> {
+  private async postJson(path: string, body: object, token?: string, deadline?: number, signal?: AbortSignal,
+    requestBudget?: { remaining: number }): Promise<unknown> {
     const remaining = deadline === undefined ? REQUEST_TIMEOUT_MS : Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now());
     if (remaining <= 0 || signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
+    if (requestBudget) {
+      if (!Number.isSafeInteger(requestBudget.remaining) || requestBudget.remaining <= 0) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
+      requestBudget.remaining--;
+    }
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
@@ -93,7 +104,8 @@ export class SyrveClient {
       });
       if (!response.ok) {
         void response.body?.cancel().catch(() => undefined);
-        const code = response.status === 401 ? 'SYRVE_AUTH_FAILED'
+        const code = response.status === 410 && path === '/api/1/commands/status' ? 'SYRVE_COMMAND_EXPIRED'
+          : response.status === 401 ? 'SYRVE_AUTH_FAILED'
           : response.status === 403 ? 'SYRVE_ACCESS_DENIED'
           : response.status === 429 ? 'SYRVE_RATE_LIMITED'
           : response.status === 408 || response.status === 504 ? 'SYRVE_TIMEOUT'
@@ -137,10 +149,10 @@ export class SyrveClient {
     }
   }
 
-  private async openSession(apiBaseUrl: string, apiLogin: string, deadline?: number, signal?: AbortSignal) {
+  private async openSession(apiBaseUrl: string, apiLogin: string, deadline?: number, signal?: AbortSignal, requestBudget?: { remaining: number }) {
     const baseUrl = this.normalizeBaseUrl(apiBaseUrl);
     const auth = this.authentication(apiLogin);
-    const payload = await this.postJson(auth.path, auth.body, undefined, deadline, signal);
+    const payload = await this.postJson(auth.path, auth.body, undefined, deadline, signal, requestBudget);
     if (!isRecord(payload) || typeof payload.token !== 'string' ||
         !payload.token || payload.token.length > 16_384 || /\s/.test(payload.token)) {
       throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
@@ -150,7 +162,7 @@ export class SyrveClient {
       organizationIds: null,
       returnAdditionalInfo: false,
       includeDisabled: false,
-    }, payload.token, deadline, signal);
+    }, payload.token, deadline, signal, requestBudget);
     if (!isRecord(result) || !Array.isArray(result.organizations)) {
       throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
     }
@@ -246,7 +258,7 @@ export class SyrveClient {
         return null;
       }
     };
-    const session = await check('connection', () => this.openSession(apiBaseUrl, apiLogin, deadline, controls.signal));
+    const session = await check('connection', () => this.openSession(apiBaseUrl, apiLogin, deadline, controls.signal, controls.requestBudget));
     if (!session) return finish();
     probe.authentication = session.diagnostics.authentication.method;
     if (!session.organizations.some((item) => item.id === probe.organizationId)) {
@@ -258,7 +270,7 @@ export class SyrveClient {
       if (Date.now() >= deadline) throw new SyrveClientException('SYRVE_TIMEOUT');
       if (requests >= MAX_OBSERVATION_REQUESTS) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
       requests++;
-      return this.postJson(path, body, session.token, deadline, controls.signal);
+      return this.postJson(path, body, session.token, deadline, controls.signal, controls.requestBudget);
     };
     const groups = await check('terminalGroups', async () => parseTerminalGroups(await post('/api/1/terminal_groups', {
       organizationIds: [probe.organizationId], includeDisabled: false,
@@ -308,5 +320,62 @@ export class SyrveClient {
       probe.byId = await readBatches('ordersById', requestedOrders, ORDER_ID_BATCH_SIZE);
     }
     return finish();
+  }
+
+  // Called only by the explicit Director loading service after its durable
+  // one-use revision/lease claim. Read-only probes never call this method.
+  async initializeTables(apiBaseUrl: string, apiLogin: string, plan: TableLoadingPlan,
+    controls: SyrveProbeControls & { beforeCommand: () => Promise<void> }) {
+    this.normalizeBaseUrl(apiBaseUrl);
+    const ids = Array.isArray(plan?.groups) ? plan.groups.flatMap(group => group?.tableIds || []) : [];
+    const uuid = (value: unknown) => typeof value === 'string' && value.length === 36 && UUID.test(value);
+    if (!plan || !uuid(plan.organizationId) || !Array.isArray(plan.groups) || !plan.groups.length
+      || plan.groups.length > LOADING_MAX_GROUPS || !ids?.length || ids.length > LOADING_MAX_TABLES
+      || new Set(ids).size !== ids.length || new Set(plan.groups.map(group => group?.terminalGroupId)).size !== plan.groups.length
+      || plan.groups.some(group => !group || !uuid(group.terminalGroupId) || !Array.isArray(group.tableIds) || !group.tableIds.length
+        || group.tableIds.some(id => !uuid(id)) || assessSyrvePosVersion(group.posVersion).initialization !== 'supported')
+      || typeof controls.beforeCommand !== 'function') throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+    if (controls.deadline !== undefined && !Number.isFinite(controls.deadline)) throw new SyrveClientException('SYRVE_TIMEOUT');
+    const deadline = Math.min(Date.now() + OBSERVATION_TIMEOUT_MS, controls.deadline ?? Infinity);
+    const budget = controls.requestBudget || { remaining: MAX_OBSERVATION_REQUESTS };
+    if (!Number.isSafeInteger(budget.remaining) || budget.remaining > MAX_OBSERVATION_REQUESTS) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
+    const session = await this.openSession(apiBaseUrl, apiLogin, deadline, controls.signal, budget);
+    if (!session.organizations.some(item => item.id === plan.organizationId)) throw new SyrveClientException('SYRVE_ORGANIZATION_UNAVAILABLE');
+    const correlations = new Set<string>();
+    for (const group of plan.groups) {
+      await controls.beforeCommand();
+      let correlation: string;
+      try {
+        correlation = parseLoadingCorrelation(await this.postJson('/api/1/order/init_by_table', {
+          organizationId: plan.organizationId, terminalGroupId: group.terminalGroupId, tableIds: group.tableIds,
+        }, session.token, deadline, controls.signal, budget));
+      } catch (error) {
+        if (error instanceof SyrveLoadingValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+        throw error;
+      }
+      if (correlations.has(correlation)) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+      correlations.add(correlation);
+      let succeeded = false;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await controls.beforeCommand();
+        let state: ReturnType<typeof parseLoadingCommand>;
+        try {
+          state = parseLoadingCommand(await this.postJson('/api/1/commands/status', {
+            organizationId: plan.organizationId, correlationId: correlation,
+          }, session.token, deadline, controls.signal, budget));
+        } catch (error) {
+          if (error instanceof SyrveLoadingValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+          throw error;
+        }
+        if (state === 'Success') { succeeded = true; break; }
+        if (state === 'Error') throw new SyrveClientException('SYRVE_COMMAND_FAILED');
+        if (attempt < 5) {
+          if (deadline - Date.now() <= 250 || controls.signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
+          await new Promise<void>(resolve => setTimeout(resolve, 250));
+        }
+      }
+      if (!succeeded) throw new SyrveClientException('SYRVE_COMMAND_IN_PROGRESS');
+    }
+    return { completedGroups: plan.groups.length };
   }
 }

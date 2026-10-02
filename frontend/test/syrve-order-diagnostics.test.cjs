@@ -74,6 +74,7 @@ function dock() {
   const states = [], refs = [], effects = []; let stateIndex = 0, refIndex = 0, previous;
   const OrderPanel = () => React.createElement('div', { 'data-order-panel': true });
   const ReadinessPanel = () => React.createElement('div', { 'data-readiness-panel': true });
+  const LoadingPanel = () => React.createElement('div', { 'data-loading-panel': true });
   const hooks = {
     useState(value) { const position = stateIndex++; if (!(position in states)) states[position] = value;
       return [states[position], value => { states[position] = typeof value === 'function' ? value(states[position]) : value; }]; },
@@ -86,11 +87,12 @@ function dock() {
     { exports, require: name => name === 'react' ? hooks : name === '../api/syrve' ? { syrveApi: api }
       : name === './SyrveOrderDiagnosticsPanel' ? { __esModule: true, default: OrderPanel }
       : name === './SyrveReadinessPanel' ? { __esModule: true, default: ReadinessPanel }
+      : name === './SyrveTableLoadingPanel' ? { __esModule: true, default: LoadingPanel }
       : name === './SyrveCatalogPreviewPanel' ? { __esModule: true, default: () => null } : require(name) });
   const render = () => { stateIndex = 0; refIndex = 0; const tree = exports.default(); while (effects.length) effects.shift()(); return tree; };
   const click = predicate => { const target = find(render(), predicate); assert.ok(target, 'actual dock control must exist'); target.props.onClick(); };
   return { render, click, saved, panels: tree => ({ order: find(tree, node => node.type === OrderPanel),
-    readiness: find(tree, node => node.type === ReadinessPanel) }) };
+    readiness: find(tree, node => node.type === ReadinessPanel), loading: find(tree, node => node.type === LoadingPanel) }) };
 }
 
 test('the actual API adapter sends only saved configuration revision to the Director diagnostics route', async () => {
@@ -288,4 +290,25 @@ test('cancel and reopen return to the saved summary instead of exposing the canc
   assert.equal(h.saved.configurationRevision, VERSION);
   h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
   assert.ok(find(h.render(), node => node.type === 'input' && node.props.value === h.saved.displayName));
+});
+
+test('actual dock blocks sibling operations during table loading and refreshes the consumed revision', async () => {
+  const h=dock();h.render();await flush();
+  h.click(node=>node.type==='button'&&node.props['aria-label']?.startsWith('Syrve підключено'));await flush();
+  const panel=h.panels(h.render()).loading;assert.ok(panel);panel.props.onBusyChange(true);
+  let tree=h.render();assert.equal(h.panels(tree).order.props.busy,true);assert.equal(h.panels(tree).loading.props.busy,false);
+  for(const label of ['Перевірити','Змінити дані','Відключити'])assert.equal(find(tree,node=>node.type==='button'&&text(node)===label).props.disabled,true);
+  h.saved.configurationRevision=OTHER;
+  await panel.props.onFinished({readCompleted:true});tree=h.render();
+  assert.equal(h.panels(tree).loading.props.configurationRevision,OTHER);assert.equal(h.panels(tree).order.props.busy,false);
+  assert.ok(text(tree).includes('Syrve підтвердив завантаження стану столів. Синхронізація ще вимкнена.'));
+});
+
+test('actual dock reloads saved revision when an accepted loading operation outlives its closed panel', async () => {
+  const h=dock();h.render();await flush();const cloud=node=>node.type==='button'&&node.props['aria-label']?.startsWith('Syrve підключено');
+  h.click(cloud);await flush();h.panels(h.render()).loading.props.onBusyChange(true);
+  h.click(node=>node.type==='button'&&node.props['aria-label']==='Закрити налаштування Syrve');
+  h.saved.configurationRevision=OTHER;h.click(cloud);await flush();
+  assert.equal(h.panels(h.render()).loading.props.configurationRevision,OTHER);
+  assert.equal(h.panels(h.render()).order.props.busy,false);
 });
