@@ -31,6 +31,7 @@ import { AvailabilityBlock } from './entities/availability-block.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
+import { BookingTableAssignment } from './entities/booking-table-assignment.entity';
 import { Booking } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { GuestBookingsService } from './guest-bookings.service';
@@ -48,6 +49,7 @@ import { TableStatusProjectionModule } from '../tables/table-status-projection.m
       BookingHistory,
       BookingRescheduleRequest,
       BookingTableChangeRequest,
+      BookingTableAssignment,
       GuestReview,
       AvailabilityBlock,
       Client,
