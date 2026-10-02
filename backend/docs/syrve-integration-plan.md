@@ -19,6 +19,13 @@ occupied until the last confirmed bill closes. All role/map readers use the
 stored physical status; future dates and booking-window rules keep their existing
 behavior. Turning synchronization off preserves the current physical statuses.
 
+The capture includes a fingerprint of the physical status and PostgreSQL's full
+`updated_at` text, retaining microseconds. Apply rechecks it under the same physical
+row lock. A booking/transfer write during HTTP rejects the delayed observation
+even without a Syrve staff hook, and leaves its bill event unconsumed for a fresh
+capture. The private transport receipt is bound to this physical version as well
+as the lease and local Syrve revision. Booking and waiter workflows are unchanged.
+
 This rule supersedes the historical add-only POS projection and manual override
 policy described in earlier implementation stages below. Their retained pure
 compatibility helpers and stored suppression IDs must not govern runtime statuses.

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { SyrveSettingsStore, settingsVersion, staleSyrveSettings } from './syrve-settings.store';
-import { SyrveStateCapture, SyrveStateStore } from './syrve-state.store';
+import { syrveCaptureContext, SyrveStateCapture, SyrveStateStore } from './syrve-state.store';
 import { SyrveOrderObservationBatch } from './syrve-state-reducer';
 import { SYRVE_WORKER_MAX_TABLES, SyrveWorkerError, SyrveWorkerLease, workerBackoff } from './syrve-worker.model';
 import { SyrveActivationStore } from './syrve-activation.store';
@@ -107,7 +107,7 @@ export class SyrveWorkerStore {
       // A large restored ledger may take time to write. Expiry before the final
       // bookkeeping write rolls the entire observation transaction back.
       await this.lockedLease(manager, lease);
-      if (batches.some(batch => !isVerifiedLoadedProbe(batch.probe, lease.id + ':' + captured.state.localRevision,
+      if (batches.some(batch => !isVerifiedLoadedProbe(batch.probe, syrveCaptureContext(lease.id, captured),
         captured.state.scope.organizationId, captured.state.scope.syrveTableId))) throw new SyrveClientException('SYRVE_TIMEOUT');
       const stale = result.diagnostics.includes('local_revision_changed') || result.diagnostics.includes('scope_changed');
       const unknown = result.diagnostics.some((code) => ['observation_unknown', 'unknown_orders', 'conflicting_order_versions', 'visibility_not_verified'].includes(code));

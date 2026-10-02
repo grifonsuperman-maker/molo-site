@@ -87,6 +87,24 @@ async function paused(h) {
   const runner=h.runner(async(c,ids) => {arrived.resolve(); await resume.promise; return probe(c.state.scope,[row(c.state.scope,id(10))],ids);});
   const pending=runner.run(); await arrived.promise; return {runner,pending,resume};
 }
+test('direct booking writes during POS HTTP fence the delayed event without a Syrve staff hook',async()=>{
+  for(const manual of ['pending','reserved','free','occupied','cleaning']) {
+    const h=prepared(),p=await paused(h),before=h.saved();
+    h.mutate(db=>{db.physical.status=manual;db.physical.updatedAt=new Date(2_000_000);});
+    assert.equal(h.saved().saved.local_revision,before.saved.local_revision);
+    const current=h.saved();p.resume.resolve();
+    const result=await p.pending;assert.equal(result.status,'stale');assert.equal(result.code,'SYRVE_LOCAL_STATE_CHANGED');
+    for(const key of ['physical','link','saved','versions'])assert.deepEqual(h.saved()[key],current[key]);
+    await observeBills(h,[[id(10),'New',100]]);assert.equal(h.saved().physical.status,'occupied');
+  }
+});
+test('change-and-restore of physical status is fenced by its timestamp',async()=>{
+  const h=prepared(),p=await paused(h);
+  h.mutate(db=>{db.physical.status='reserved';db.physical.updatedAt=new Date(2_000_000);});
+  h.mutate(db=>{db.physical.status='free';db.physical.updatedAt=new Date(2_000_001);});
+  const current=h.saved();p.resume.resolve();assert.equal((await p.pending).code,'SYRVE_LOCAL_STATE_CHANGED');
+  assert.deepEqual(h.saved().physical,current.physical);assert.deepEqual(h.saved().versions,current.versions);
+});
 
 test('saved credentials and an environment flag cannot activate a scheduler without consent', async(t)=>{
   const h=prepared();h.mutate(db=>db.activation=null);

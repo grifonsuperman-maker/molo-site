@@ -47,7 +47,8 @@ function harness() {
       return [];
     }
     if (sql.includes('to_regclass')) return [{ prepared, durable:prepared, configuration_present:configurationPresent }];
-    if (sql.startsWith('SELECT "id"')) return args[0].toLowerCase() === db.physical.id ? [{ id: db.physical.id }] : [];
+    if (sql.startsWith('SELECT "id"')) return args[0].toLowerCase() === db.physical.id
+      ? [{ id: db.physical.id, status: db.physical.status, physical_updated_at:db.physical.updatedAt?.toISOString() || 'initial-fixture-version' }] : [];
     if (sql.startsWith('SELECT *') && sql.includes('syrve_table_links')) return db.link ? [structuredClone(db.link)] : [];
     if (sql.startsWith('SELECT *')) return db.saved ? [structuredClone(db.saved)] : [];
     if (sql.startsWith('SELECT "order_id"')) return db.versions.map((v) => ({ order_id: v.id, timestamp: String(v.timestamp), state: v.state, fingerprint: v.fingerprint }));

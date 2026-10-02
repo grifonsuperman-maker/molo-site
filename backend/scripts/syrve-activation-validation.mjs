@@ -105,9 +105,30 @@ export async function runSyrveActivationValidation(env=process.env){
     await source.destroy();source=new DataSource(options);await source.initialize();await worker.onModuleDestroy();
     assert.equal((await integration().getStatus()).syncEnabled,true);assert.equal((await service().status()).syncEnabled,true);
     worker=new SyrveWorkerService(source,settings(),integration());
+    // A real direct booking-style write does not advance Syrve local_revision.
+    // The captured physical timestamp/status must still fence delayed HTTP.
+    rows=[wrapper(order,'New',100)];let physicalEntered,physicalResume;
+    const physicalArrival=new Promise(yes=>physicalEntered=yes),physicalWaiting=new Promise(yes=>physicalResume=yes);
+    hold=async()=>{physicalEntered();await physicalWaiting;};const delayedPhysical=worker.tick();await physicalArrival;
+    const beforePhysicalWrite=await saved();
+    await other.query("UPDATE tables SET status='reserved',updated_at=clock_timestamp() WHERE id=$1",[tableId]);
+    const manualPhysical=await physical();
+    assert.equal((await saved()).states[0].local_revision,beforePhysicalWrite.states[0].local_revision);
+    physicalResume();const delayedPhysicalResult=await delayedPhysical;hold=null;
+    assert.equal(delayedPhysicalResult.status,'stale');assert.equal(delayedPhysicalResult.code,'SYRVE_LOCAL_STATE_CHANGED');
+    assert.deepEqual(await physical(),manualPhysical);assert.deepEqual(await saved(),beforePhysicalWrite);
+    await due();
     rows=[wrapper(order,'New',100)];assert.equal((await worker.tick()).status,'observed');assert.equal((await status()).lastSyrveState,'open');
     const openedPhysical=await physical();assert.equal(openedPhysical[0].status,'occupied');
     assert.deepEqual(openedPhysical.map(row=>({...row,status:'free',updated_at:beforePhysical[0].updated_at})),beforePhysical);
+    await due();let microEntered,microResume;
+    const microArrival=new Promise(yes=>microEntered=yes),microWaiting=new Promise(yes=>microResume=yes);
+    rows=[wrapper(order,'New',101)];hold=async()=>{microEntered();await microWaiting;};const delayedMicro=worker.tick();await microArrival;
+    const beforeMicroWrite=await saved();
+    await other.query("UPDATE tables SET updated_at=updated_at+interval '1 microsecond' WHERE id=$1",[tableId]);
+    const microPhysical=await physical();microResume();hold=null;
+    assert.equal((await delayedMicro).code,'SYRVE_LOCAL_STATE_CHANGED');
+    assert.deepEqual(await physical(),microPhysical);assert.deepEqual(await saved(),beforeMicroWrite);
     const opened=await saved();
     await due();commandError=true;assert.equal((await worker.tick()).status,'failed');assert.deepEqual(await saved(),opened);commandError=false;
     await due();commandPending=true;assert.equal((await worker.tick()).status,'failed');commandPending=false;

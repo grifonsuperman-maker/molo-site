@@ -4,6 +4,7 @@ import type { SyrveOrderProbe } from './syrve-order-observer';
 import { SyrveStateValidationError } from './syrve-state-reducer';
 import type { SyrveOrderObservationBatch } from './syrve-state-reducer';
 import type { SyrveStateCapture } from './syrve-state.store';
+import { syrveCaptureContext } from './syrve-state.store';
 import { SyrveWorkerStore } from './syrve-worker.store';
 import { SYRVE_WORKER_BUDGET_MS, SyrveWorkerError, SyrveWorkerLease, SyrveWorkerResult, workerError } from './syrve-worker.model';
 
@@ -63,7 +64,7 @@ export class SyrveWorkerRunner {
         for (const orderIds of captured.orderIds) {
           if (this.stopped) return { status: 'stopped', processed };
           const probe = await this.probe(captured, orderIds, { deadline, signal: controller.signal, requestBudget, loadingPlan,
-            visibilityContext: lease.id + ':' + captured.state.localRevision,
+            visibilityContext: syrveCaptureContext(lease.id, captured),
             commandStarted: () => { unresolvedCommands++; },
             commandFinished: () => { unresolvedCommands--; },
             beforeCommand: async () => { await this.store.guard(lease!, captured); } });
