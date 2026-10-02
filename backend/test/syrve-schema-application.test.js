@@ -73,3 +73,20 @@ test('database validation rejects remote/unverified environment before connectin
   await assert.rejects(runSyrveApplicationValidation({}), /disabled/);
   await assert.rejects(runSyrveApplicationValidation({ FRESH_SCHEMA_REFERENCE_ALLOW: 'true', DB_HOST: 'remote.neon.tech', DB_NAME: 'molo_fresh_schema_reference', DB_SYNCHRONIZE: 'true' }), /loopback|localhost/);
 });
+test('reviewed build identity rejects an invented SHA, dirty checkout, stale disk and stale loaded modules', async () => {
+  const { verifyBuildIdentity, artifactFingerprint } = await import('../scripts/syrve-application-build.mjs');
+  const files = { 'syrve/schema.js': '1'.repeat(64), 'migrations/frozen.js': '2'.repeat(64) };
+  const fingerprint = artifactFingerprint(files), commit = 'a'.repeat(40), tree = 'b'.repeat(40);
+  const record = { version: 1, sourceCommit: commit, sourceTree: tree, artifactFingerprint: fingerprint, files };
+  const checkout = { commit, tree, dirty: false };
+  assert.equal(verifyBuildIdentity(commit, record, checkout, files, fingerprint).sourceCommit, commit);
+  for (const args of [
+    ['c'.repeat(40), record, checkout, files, fingerprint],
+    [commit, record, {...checkout, dirty:true}, files, fingerprint],
+    [commit, record, {...checkout, commit:'c'.repeat(40)}, files, fingerprint],
+    [commit, record, {...checkout, tree:'c'.repeat(40)}, files, fingerprint],
+    [commit, record, checkout, {...files, 'migrations/frozen.js':'3'.repeat(64)}, fingerprint],
+    [commit, record, checkout, files, '3'.repeat(64)],
+    [commit, {...record, files:{...files,'stale.js':'4'.repeat(64)}}, checkout, files, fingerprint],
+  ]) assert.throws(() => verifyBuildIdentity(...args));
+});

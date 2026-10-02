@@ -1,7 +1,9 @@
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { artifactHashes, artifactFingerprint, assertReviewedBuild, SyrveBuildIdentityError } from './syrve-application-build.mjs';
 
+const loadedArtifactFingerprint = artifactFingerprint(artifactHashes());
 const require = createRequire(import.meta.url);
 const { SYRVE_CATALOG_QUERIES, schemaParts, schemaReference, schemaPreflight, preflightFingerprint } = require('../dist/syrve/syrve-schema-preflight.js');
 const { SYRVE_SCHEMA_STEPS, SYRVE_SCHEMA_REFERENCE } = require('../dist/syrve/syrve-schema-contract.js');
@@ -146,6 +148,7 @@ export async function compilePendingMigration(step) {
 
 export async function buildSyrveApplicationPlan(input, now = Date.now()) {
   const { audit, inventory, reference, context } = input || {};
+  const build = assertReviewedBuild(context?.sourceCommit, loadedArtifactFingerprint);
   const facts = applicationFacts(audit), report = schemaPreflight(facts);
   check(['plan_requires_review','prepared'].includes(report.status), 'Target schema, history or data require a separate audit.');
   check(reference && keys.every(key => Array.isArray(reference[key])) && SYRVE_SCHEMA_STEPS.every(step => schemaReference(reference)[step.name] === SYRVE_SCHEMA_REFERENCE[step.name]), 'Prepared catalog must match all six frozen references.');
@@ -217,7 +220,7 @@ export async function buildSyrveApplicationPlan(input, now = Date.now()) {
   sqlStatements.push("SELECT true AS schema_verified,true AS original_data_preserved,false AS sync_enabled");
   const request = { project_id: target.projectId, branch_id: target.branchId, database_name: target.database, sql_statements: sqlStatements };
   return { version: 1, applicationAvailable: false, requiresSeparateProductionApproval: true, sourceCommit: context.sourceCommit,
-    target, expiresAt, pending: pendingNames, auditFingerprint: report.fingerprint, planFingerprint: preflightFingerprint(request), request };
+    build, target, expiresAt, pending: pendingNames, auditFingerprint: report.fingerprint, planFingerprint: preflightFingerprint(request), request };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -229,5 +232,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (mode === '--audit') return auditQueries(input.inventory, input.revision === true);
     return buildSyrveApplicationPlan(input);
   }).then(result => process.stdout.write(JSON.stringify(result, null, 2) + '\n'))
-    .catch(error => { console.error(error instanceof SyrveApplicationPlanError ? error.message : 'Syrve plan failed; inspect private input locally.'); process.exitCode = 1; });
+    .catch(error => { console.error(error instanceof SyrveApplicationPlanError || error instanceof SyrveBuildIdentityError ? error.message : 'Syrve plan failed; inspect private input locally.'); process.exitCode = 1; });
 }

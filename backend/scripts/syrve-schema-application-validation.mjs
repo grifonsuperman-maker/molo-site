@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { assertFreshSchemaReferenceTarget } from './fresh-schema-reference.mjs';
+import { readBuildRecord } from './syrve-application-build.mjs';
 import { inventoryQueries, auditQueries, parseAudit, applicationFacts, buildSyrveApplicationPlan } from './syrve-schema-application-plan.mjs';
 
 // Destructive fixtures are confined to the guarded disposable CI database.
@@ -62,7 +63,7 @@ export async function runSyrveApplicationValidation(env = process.env) {
         const preflight = schemaPreflight(applicationFacts(audit));
         assert.notEqual(preflight.status, 'requires_audit', JSON.stringify({ prefix, historyValid: preflight.historyValid,
           steps: preflight.steps.map(({name,status,recorded}) => ({name,status,recorded})), data: applicationFacts(audit).data }));
-        const input = { audit, inventory: audit.inventory, reference, context: { sourceCommit: 'a'.repeat(40),
+        const input = { audit, inventory: audit.inventory, reference, context: { sourceCommit: readBuildRecord().sourceCommit,
           target: { projectId: 'ci-project', branchId: 'br-ci-restored', endpointId: 'ep-ci-test', host: 'ep-ci-test.ci.neon.tech', database: env.DB_NAME, purpose: 'rehearsal' },
           backup: { projectId: 'ci-project', sourceBranchId: 'br-ci-source', branchId: 'br-ci-backup', parentId: 'br-ci-source',
             restoredBranchId: 'br-ci-restored', restoredParentId: 'br-ci-backup', createdAt: audit.identity.audited_at,

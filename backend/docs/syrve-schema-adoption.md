@@ -72,8 +72,14 @@ change. A preflight snapshot may have changed by that time and must be reread.
 ## Build the private transaction plan
 
 `backend/scripts/syrve-schema-application-plan.mjs` is an offline SQL planner.
-It neither opens a connection nor accepts `--apply`. Build the reviewed backend
-first. Keep its inputs and output private; they contain catalog definitions,
+It neither opens a connection nor accepts `--apply`. After installing dependencies
+in a clean checkout of the exact reviewed commit, run
+`node backend/scripts/syrve-application-build.mjs --build`. This removes old
+outputs/incremental state, compiles the backend without starting it, and records
+the clean Git commit/tree and hashes of every emitted artifact. The planner checks
+that record against the actual checkout, current files and modules loaded in its
+process; stale or modified builds cannot claim a different reviewed SHA.
+Keep its inputs and output private; they contain catalog definitions,
 physical UUIDs and data fingerprints, but never raw customer or credential rows.
 
 1. Independently verify the project, branch ID, direct endpoint ID/host and
