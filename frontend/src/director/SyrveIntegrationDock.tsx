@@ -79,7 +79,7 @@ export default function SyrveIntegrationDock() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  async function load() {
+  async function load(preserveSavedStatus = false) {
     const version = requestVersion.current;
     try {
       const value = await syrveApi.getStatus();
@@ -89,13 +89,17 @@ export default function SyrveIntegrationDock() {
       setApiBaseUrl(value.apiBaseUrl || 'https://api-eu.syrve.live');
     } catch {
       if (version !== requestVersion.current) return;
+      if (preserveSavedStatus) {
+        setError('Не вдалося оновити стан Syrve. Показано останні збережені дані — спробуйте перевірити ще раз.');
+        return;
+      }
       setStatus(EMPTY_STATUS);
     }
   }
 
   async function finishTableLoading(result: SyrveTableLoadingResult | null) {
     const version = requestVersion.current;
-    await load();
+    await load(true);
     if (version !== requestVersion.current) return;
     setLoadingTables(false);
     setNotice(result?.readCompleted
@@ -108,7 +112,7 @@ export default function SyrveIntegrationDock() {
     setOpen(true); setBusy(true); setNotice(null); setError(null);
     // A confirmed operation may continue after the dialog was closed. Fetch
     // the saved revision on reopen; never resubmit the old loading proof.
-    await load();
+    await load(true);
     if (version === requestVersion.current) setBusy(false);
   }
 
@@ -267,7 +271,7 @@ export default function SyrveIntegrationDock() {
     } catch (cause: any) {
       if (version !== requestVersion.current) return;
       setError(cause?.message || 'Не вдалося перевірити Syrve');
-      await load();
+      await load(true);
     } finally {
       if (version === requestVersion.current) setBusy(false);
     }
@@ -291,7 +295,7 @@ export default function SyrveIntegrationDock() {
     } catch (cause: any) {
       if (version !== requestVersion.current) return;
       setError(cause?.message || 'Не вдалося відключити Syrve');
-      await load();
+      await load(true);
     } finally {
       if (version === requestVersion.current) setBusy(false);
     }
