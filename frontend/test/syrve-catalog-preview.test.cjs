@@ -36,6 +36,7 @@ function harness(api = {}) {
     setOpen: (value) => state.open = value, setStep: (value) => state.step = value,
     setEditingConnection: (value) => state.editingConnection = value,
     setOrganizations: (value) => state.organizations = value,
+    load: async () => {},
     setShowLogin() {}, setStatus: (value) => state.status = value, setDisplayName() {}, setApiBaseUrl() {} };
   return { state, deps, run: (name) => handler(name, deps) };
 }
@@ -189,6 +190,26 @@ test('closing during confirmation discards the late saved-status response', asyn
   assert.equal(h.state.status, null);
   assert.equal(h.state.open, false);
   assert.equal(h.state.step, 1);
+});
+
+test('failed saved-status reopen keeps the last connection and shows a fixed retry message', async () => {
+  const h = harness({ getStatus: async () => { throw new Error('private-network-detail'); } });
+  const saved = { hasCredentials: true, configurationRevision: ORG, displayName: 'MOLO · Syrve' };
+  h.state.status = saved;
+  await h.run('load')(true);
+  assert.equal(h.state.status, saved);
+  assert.match(h.state.error, /останні збережені дані/);
+  assert.doesNotMatch(h.state.error, /private-network-detail/);
+});
+
+test('reopening a saved connection requests a preserving refresh and keeps the dialog usable', async () => {
+  let preserve;
+  const h = harness();
+  h.deps.load = async (value) => { preserve = value; };
+  await h.run('openSavedConnection')();
+  assert.equal(preserve, true);
+  assert.equal(h.state.open, true);
+  assert.equal(h.state.busy, false);
 });
 
 test('a late initial status load cannot overwrite a new connection dialog', async () => {
