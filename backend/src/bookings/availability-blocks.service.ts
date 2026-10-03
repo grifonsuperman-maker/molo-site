@@ -285,11 +285,23 @@ export class AvailabilityBlocksService {
 
       const start = this.parseTime(booking.bookingTime);
       const end = start + this.bookingDuration(booking) + CLEANUP_MINUTES;
-      const destinationBookings = await manager
+      const assignmentsReady = await this.bookingTableAssignmentsReady(manager);
+      const destinationQuery = manager
         .getRepository(Booking)
         .createQueryBuilder('booking')
-        .leftJoinAndSelect('booking.table', 'table')
-        .where('table.id = :tableId', { tableId: nextTable.id })
+        .leftJoinAndSelect('booking.table', 'table');
+
+      if (assignmentsReady) {
+        destinationQuery
+          .leftJoin('booking.tableAssignments', 'tableAssignment')
+          .leftJoin('tableAssignment.table', 'assignedTable')
+          .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId: nextTable.id })
+          .distinct(true);
+      } else {
+        destinationQuery.where('table.id = :tableId', { tableId: nextTable.id });
+      }
+
+      const destinationBookings = await destinationQuery
         .andWhere('booking.bookingDate = :bookingDate', { bookingDate: booking.bookingDate })
         .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
         .andWhere('booking.id != :bookingId', { bookingId: booking.id })
@@ -391,6 +403,14 @@ export class AvailabilityBlocksService {
       message: `Бронювання перенесено на стіл №${result.newTableNumber}`,
       booking: result.booking,
     };
+  }
+
+  private async bookingTableAssignmentsReady(manager: EntityManager) {
+    if (typeof manager?.query !== 'function') return false;
+    const rows = await manager.query(
+      `SELECT to_regclass('public.booking_table_assignments') IS NOT NULL AS "ready"`,
+    );
+    return Array.isArray(rows) && rows[0]?.ready === true;
   }
 
   private async resolveTable(tableId?: string, tableNumber?: string) {

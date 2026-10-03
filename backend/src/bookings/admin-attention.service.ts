@@ -347,13 +347,33 @@ export class AdminAttentionService {
     }
   }
 
+  private async bookingTableAssignmentsReady(manager: EntityManager) {
+    if (typeof manager?.query !== 'function') return false;
+    const rows = await manager.query(
+      `SELECT to_regclass('public.booking_table_assignments') IS NOT NULL AS "ready"`,
+    );
+    return Array.isArray(rows) && rows[0]?.ready === true;
+  }
+
   private async assertNoConflict(manager: EntityManager, table: TableEntity, booking: Booking) {
     const requestedStart = this.timeToMinutes(booking.bookingTime);
     const requestedAvailableFrom = requestedStart + this.duration(booking) + CLEANUP_MINUTES;
-    const candidates = await manager.getRepository(Booking)
+    const assignmentsReady = await this.bookingTableAssignmentsReady(manager);
+    const query = manager.getRepository(Booking)
       .createQueryBuilder('candidate')
-      .leftJoin('candidate.table', 'table')
-      .where('table.id = :tableId', { tableId: table.id })
+      .leftJoin('candidate.table', 'table');
+
+    if (assignmentsReady) {
+      query
+        .leftJoin('candidate.tableAssignments', 'tableAssignment')
+        .leftJoin('tableAssignment.table', 'assignedTable')
+        .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId: table.id })
+        .distinct(true);
+    } else {
+      query.where('table.id = :tableId', { tableId: table.id });
+    }
+
+    const candidates = await query
       .andWhere('candidate.bookingDate = :bookingDate', { bookingDate: booking.bookingDate })
       .andWhere('candidate.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
       .andWhere('candidate.id != :bookingId', { bookingId: booking.id })
