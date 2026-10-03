@@ -10,6 +10,7 @@ import { BookingArrivalLockService } from './booking-arrival-lock.service';
 import { BookingTableLockService } from './booking-table-lock.service';
 import { BookingsService } from './bookings.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
+import { CreateAdminBanquetBookingDto } from './dto/create-admin-banquet-booking.dto';
 import { CreateAdminManualBookingDto } from './dto/create-admin-manual-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { GuestBookingListDto } from './dto/guest-booking-list.dto';
@@ -72,6 +73,25 @@ export class BookingsController {
     return this.tableLock.withCreateLock(dto, async () => {
       await this.availabilityBlocks.assertBookable(dto);
       return this.service.createManual(dto, request.user);
+    });
+  }
+
+  @Post('admin/banquet')
+  @Roles('admin', 'owner')
+  async createBanquet(
+    @Body() dto: CreateAdminBanquetBookingDto,
+    @Req() request: { user: AuthUser },
+  ) {
+    return this.tableLock.withBanquetCreateLock(dto, async () => {
+      for (const tableId of dto.tableIds) {
+        await this.availabilityBlocks.assertBookable({
+          tableId,
+          bookingDate: dto.bookingDate,
+          bookingTime: dto.bookingTime,
+          durationMinutes: dto.durationMinutes,
+        });
+      }
+      return this.service.createManualBanquet(dto, request.user);
     });
   }
 
