@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { DataSource, EntityManager, In } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { TableEntity } from '../tables/entities/table.entity';
@@ -42,13 +42,15 @@ async function assertNoTimeConflict(
   booking: Booking,
   tableId: string,
 ) {
-  const activeBookings = await manager.getRepository(Booking).find({
-    where: {
-      table: { id: tableId },
-      bookingDate: booking.bookingDate,
-      status: In(['pending', 'approved']),
-    },
-  });
+  const activeBookings = await manager.getRepository(Booking)
+    .createQueryBuilder('other')
+    .leftJoin('other.table', 'table')
+    .leftJoin('other.tableAssignments', 'tableAssignment')
+    .leftJoin('tableAssignment.table', 'assignedTable')
+    .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId })
+    .andWhere('other.bookingDate = :bookingDate', { bookingDate: booking.bookingDate })
+    .andWhere('other.status IN (:...statuses)', { statuses: ['pending', 'approved'] })
+    .getMany();
 
   const requestedStart = operations.getBookingStartMinutes(booking);
   const requestedAvailableFrom = operations.getBookingAvailableFromMinutes(booking);
@@ -81,15 +83,22 @@ async function coordinatedTransition(
       // Acquire it BEFORE locking the booking row, as table transfers do.
       const initial = await bookings.findOne({
         where: { id: bookingId },
-        relations: ['table'],
+        relations: ['table', 'tableAssignments', 'tableAssignments.table'],
       });
       if (!initial) throw new NotFoundException('Бронювання не знайдено');
       if (!initial.table?.id) throw new BadRequestException('Стіл бронювання не знайдено');
 
-      await manager.query(
-        'SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))',
-        [initial.table.id, initial.bookingDate],
-      );
+      const initialTableIds = Array.from(new Set([
+        initial.table.id,
+        ...(initial.tableAssignments || []).map((assignment) => assignment.table?.id).filter(Boolean),
+      ] as string[])).sort();
+
+      for (const tableId of initialTableIds) {
+        await manager.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))',
+          [tableId, initial.bookingDate],
+        );
+      }
       const locked = await bookings.findOne({
         where: { id: bookingId },
         lock: { mode: 'pessimistic_write' },
@@ -100,10 +109,18 @@ async function coordinatedTransition(
       // the nullable side of the booking's LEFT JOINs.
       const booking = await bookings.findOne({
         where: { id: bookingId },
-        relations: ['table', 'client'],
+        relations: ['table', 'client', 'tableAssignments', 'tableAssignments.table'],
       });
       if (!booking) throw new NotFoundException('Бронювання не знайдено');
-      if (booking.table?.id !== initial.table.id || booking.bookingDate !== initial.bookingDate) {
+      const bookingTableIds = Array.from(new Set([
+        booking.table?.id,
+        ...(booking.tableAssignments || []).map((assignment) => assignment.table?.id).filter(Boolean),
+      ].filter(Boolean) as string[])).sort();
+      if (
+        booking.table?.id !== initial.table.id ||
+        booking.bookingDate !== initial.bookingDate ||
+        JSON.stringify(bookingTableIds) !== JSON.stringify(initialTableIds)
+      ) {
         throw new ConflictException('Бронювання змінилося. Оновіть список та повторіть дію');
       }
 
@@ -129,36 +146,40 @@ async function coordinatedTransition(
       }
 
       const tables = manager.getRepository(TableEntity);
-      const table = await tables.findOne({
-        where: { id: initial.table.id },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!table || table.status === 'closed') {
-        throw new BadRequestException('Стіл зараз закритий або недоступний');
-      }
-      const tableWithZone = await tables.findOne({
-        where: { id: table.id },
-        relations: ['zone'],
-      });
-      if (
-        tableWithZone?.isVisible === false ||
-        tableWithZone?.zone?.isClosed ||
-        tableWithZone?.zone?.isVisible === false
-      ) {
-        throw new BadRequestException('Стіл або локація зараз недоступні');
-      }
+      const lockedTables: TableEntity[] = [];
+      for (const tableId of bookingTableIds) {
+        const table = await tables.findOne({
+          where: { id: tableId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!table || table.status === 'closed') {
+          throw new BadRequestException('Стіл зараз закритий або недоступний');
+        }
+        const tableWithZone = await tables.findOne({
+          where: { id: table.id },
+          relations: ['zone'],
+        });
+        if (
+          tableWithZone?.isVisible === false ||
+          tableWithZone?.zone?.isClosed ||
+          tableWithZone?.zone?.isVisible === false
+        ) {
+          throw new BadRequestException('Стіл або локація зараз недоступні');
+        }
 
-      // Approval of a later slot must NOT overwrite the physical occupied/
-      // cleaning status. Arrival, in contrast, cannot take such a table.
-      if (
-        transition === 'checkIn' &&
-        booking.bookingDate === restaurantDateToday() &&
-        (table.status === 'occupied' || table.status === 'cleaning')
-      ) {
-        throw new ConflictException('Стіл зараз зайнятий або прибирається');
-      }
+        // Approval of a later slot must NOT overwrite physical occupied/
+        // cleaning status. Arrival, in contrast, requires every banquet table.
+        if (
+          transition === 'checkIn' &&
+          booking.bookingDate === restaurantDateToday() &&
+          (table.status === 'occupied' || table.status === 'cleaning')
+        ) {
+          throw new ConflictException('Один зі столів зараз зайнятий або прибирається');
+        }
 
-      await assertNoTimeConflict(manager, operations, booking, table.id);
+        await assertNoTimeConflict(manager, operations, booking, table.id);
+        lockedTables.push(table);
+      }
       const previousData = operations.bookingSnapshot(booking);
       booking.status = 'approved';
       booking.approvedAt ??= new Date();
@@ -180,9 +201,11 @@ async function coordinatedTransition(
 
       if (booking.bookingDate === restaurantDateToday()) {
         const nextStatus = transition === 'approve' ? 'reserved' : 'occupied';
-        if (table.status !== nextStatus && table.status !== 'occupied' && table.status !== 'cleaning') {
-          table.status = nextStatus;
-          await tables.save(table);
+        for (const table of lockedTables) {
+          if (table.status !== nextStatus && table.status !== 'occupied' && table.status !== 'cleaning') {
+            table.status = nextStatus;
+            await tables.save(table);
+          }
         }
       }
       changedBooking = booking;

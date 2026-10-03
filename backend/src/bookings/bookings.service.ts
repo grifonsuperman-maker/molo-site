@@ -365,6 +365,32 @@ export class BookingsService {
     await this.setTableStatus(table, status);
   }
 
+  private async getBookingTables(bookingId: string) {
+    const booking = await this.bookings.findOne({
+      where: { id: bookingId },
+      relations: ['table', 'tableAssignments', 'tableAssignments.table'],
+    });
+    if (!booking) return [];
+
+    const tables = [
+      booking.table,
+      ...(booking.tableAssignments || []).map((assignment) => assignment.table),
+    ].filter((table): table is TableEntity => Boolean(table?.id));
+
+    return Array.from(new Map(tables.map((table) => [table.id, table])).values());
+  }
+
+  private async setBookingTablesStatusOnlyForToday(
+    booking: Booking,
+    status: TableEntity['status'],
+    force = false,
+  ) {
+    const tables = await this.getBookingTables(booking.id);
+    for (const table of tables) {
+      await this.setTableStatusOnlyForToday(table, status, booking.bookingDate, force);
+    }
+  }
+
   private async safeLog(action: string, details?: Record<string, unknown>) {
     try {
       await this.logs.create(action, null, details || {});
@@ -1259,7 +1285,7 @@ export class BookingsService {
       lockedBooking.cancellationReason = 'admin_rejected';
     });
     await this.saveHistory(booking, 'booking_rejected', 'admin', previousData, this.bookingSnapshot(booking));
-    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    await this.setBookingTablesStatusOnlyForToday(booking, 'free');
     await this.safeLog('Відхилено бронювання', { bookingId: id });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Бронювання відхилено' };
@@ -1272,7 +1298,7 @@ export class BookingsService {
       lockedBooking.cancellationReason = 'admin_cancelled';
     });
     await this.saveHistory(booking, 'booking_cancelled', 'admin', previousData, this.bookingSnapshot(booking));
-    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    await this.setBookingTablesStatusOnlyForToday(booking, 'free');
     await this.safeLog('Скасовано бронювання', { bookingId: id });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Бронювання скасовано' };
@@ -1294,7 +1320,7 @@ export class BookingsService {
       };
     });
     await this.saveHistory(booking, 'booking_no_show', 'admin', previousData, this.bookingSnapshot(booking), 'no_show');
-    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    await this.setBookingTablesStatusOnlyForToday(booking, 'free');
     await this.safeLog('No-show: гість не прийшов', { bookingId: id, tableNumber: booking.table?.tableNumber || null });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Гість не прийшов. Бронювання знято, стіл вільний.' };
@@ -1341,7 +1367,7 @@ export class BookingsService {
       null,
       actor || null,
     );
-    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate, true);
+    await this.setBookingTablesStatusOnlyForToday(booking, 'free', true);
     await this.safeLog('Стіл звільнено', {
       bookingId: id,
       staffId: actor?.staffId || null,
