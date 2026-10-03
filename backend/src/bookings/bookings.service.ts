@@ -385,6 +385,7 @@ export class BookingsService {
     status: TableEntity['status'],
     force = false,
   ) {
+    if (!this.isBookingToday(booking.bookingDate)) return;
     const tables = await this.getBookingTables(booking.id);
     for (const table of tables) {
       await this.setTableStatusOnlyForToday(table, status, booking.bookingDate, force);

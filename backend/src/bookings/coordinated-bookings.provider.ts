@@ -174,7 +174,11 @@ async function coordinatedTransition(
           booking.bookingDate === restaurantDateToday() &&
           (table.status === 'occupied' || table.status === 'cleaning')
         ) {
-          throw new ConflictException('Один зі столів зараз зайнятий або прибирається');
+          throw new ConflictException(
+            bookingTableIds.length === 1
+              ? 'Стіл зараз зайнятий або прибирається'
+              : 'Один зі столів зараз зайнятий або прибирається',
+          );
         }
 
         await assertNoTimeConflict(manager, operations, booking, table.id);

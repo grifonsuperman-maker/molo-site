@@ -62,6 +62,18 @@ function createHarness({
       calls.push(['booking.find', options]);
       return [booking, ...otherBookings];
     },
+    createQueryBuilder(alias) {
+      calls.push(['booking.createQueryBuilder', alias]);
+      const query = {
+        leftJoin() { return query; },
+        where() { return query; },
+        andWhere() { return query; },
+        async getMany() {
+          return [booking, ...otherBookings];
+        },
+      };
+      return query;
+    },
     async save(value) {
       calls.push(['booking.save', value.status, Boolean(value.checkedInAt)]);
       if (failBookingSave) throw { driverError: { code: '23505' } };
