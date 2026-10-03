@@ -5,6 +5,7 @@ import { In, LessThan, Repository } from 'typeorm';
 
 import { TableEntity, TableStatus } from '../tables/entities/table.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
+import { bookingTableAssignmentsReady } from './booking-table-assignment-transfer';
 
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 const RELEASABLE_TABLE_STATUSES: TableStatus[] = [
@@ -42,15 +43,21 @@ export class BookingExpirationService implements OnModuleInit {
 
     try {
       const today = this.getKyivDate();
+      const assignmentsReady = await bookingTableAssignmentsReady(this.bookings.manager);
 
       const expiredBookings = await this.bookings.find({
         where: {
           bookingDate: LessThan(today),
           status: In(ACTIVE_BOOKING_STATUSES),
         },
-        relations: {
-          table: true,
-        },
+        relations: assignmentsReady
+          ? {
+              table: true,
+              tableAssignments: { table: true },
+            }
+          : {
+              table: true,
+            },
         order: {
           bookingDate: 'ASC',
           bookingTime: 'ASC',
@@ -74,8 +81,11 @@ export class BookingExpirationService implements OnModuleInit {
         booking.status = 'completed';
         booking.completedAt ??= completedAt;
 
-        if (booking.table?.id) {
-          affectedTableIds.add(booking.table.id);
+        if (booking.table?.id) affectedTableIds.add(booking.table.id);
+        if (assignmentsReady) {
+          for (const assignment of booking.tableAssignments || []) {
+            if (assignment.table?.id) affectedTableIds.add(assignment.table.id);
+          }
         }
       }
 
@@ -85,7 +95,11 @@ export class BookingExpirationService implements OnModuleInit {
       let preservedTables = 0;
 
       for (const tableId of affectedTableIds) {
-        const result = await this.synchronizeTableStatus(tableId, today);
+        const result = await this.synchronizeTableStatus(
+          tableId,
+          today,
+          assignmentsReady,
+        );
 
         if (result === 'released') {
           releasedTables += 1;
@@ -117,6 +131,7 @@ export class BookingExpirationService implements OnModuleInit {
   private async synchronizeTableStatus(
     tableId: string,
     today: string,
+    assignmentsReady: boolean,
   ): Promise<'released' | 'preserved' | 'unchanged'> {
     const table = await this.tables.findOne({
       where: {
@@ -140,21 +155,33 @@ export class BookingExpirationService implements OnModuleInit {
       return 'preserved';
     }
 
-    const todaysActiveBookings = await this.bookings.find({
-      where: {
-        table: {
-          id: tableId,
+    const todaysActiveBookings = assignmentsReady
+      ? await this.bookings
+        .createQueryBuilder('booking')
+        .leftJoinAndSelect('booking.table', 'table')
+        .leftJoin('booking.tableAssignments', 'tableAssignment')
+        .leftJoin('tableAssignment.table', 'assignedTable')
+        .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId })
+        .andWhere('booking.bookingDate = :today', { today })
+        .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
+        .distinct(true)
+        .orderBy('booking.bookingTime', 'ASC')
+        .getMany()
+      : await this.bookings.find({
+        where: {
+          table: {
+            id: tableId,
+          },
+          bookingDate: today,
+          status: In(ACTIVE_BOOKING_STATUSES),
         },
-        bookingDate: today,
-        status: In(ACTIVE_BOOKING_STATUSES),
-      },
-      relations: {
-        table: true,
-      },
-      order: {
-        bookingTime: 'ASC',
-      },
-    });
+        relations: {
+          table: true,
+        },
+        order: {
+          bookingTime: 'ASC',
+        },
+      });
 
     /*
      * Если стол сейчас реально occupied, не понижаем его статус,

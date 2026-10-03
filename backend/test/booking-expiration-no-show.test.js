@@ -7,10 +7,15 @@ const {
   BookingExpirationService,
 } = require('../dist/bookings/booking-expiration.service.js');
 
-function createService(expiredBookings) {
+function createService(expiredBookings, { assignmentsReady = false, tableStatuses = {} } = {}) {
   const calls = [];
   let findCalls = 0;
   const bookings = {
+    manager: {
+      async query() {
+        return [{ ready: assignmentsReady }];
+      },
+    },
     async find() {
       findCalls += 1;
       calls.push(['bookings.find', findCalls]);
@@ -20,14 +25,29 @@ function createService(expiredBookings) {
       calls.push(['bookings.save', values.map((value) => value.id)]);
       return values;
     },
+    createQueryBuilder() {
+      const query = {
+        leftJoinAndSelect() { return query; },
+        leftJoin() { return query; },
+        where() { return query; },
+        andWhere() { return query; },
+        distinct() { return query; },
+        orderBy() { return query; },
+        async getMany() { return []; },
+      };
+      return query;
+    },
   };
   const tables = {
-    async findOne() {
-      calls.push(['tables.findOne']);
-      return { id: 'table-1', status: 'reserved' };
+    async findOne({ where }) {
+      calls.push(['tables.findOne', where.id]);
+      return {
+        id: where.id,
+        status: tableStatuses[where.id] || 'reserved',
+      };
     },
     async save(value) {
-      calls.push(['tables.save', value.status]);
+      calls.push(['tables.save', value.id, value.status]);
       return value;
     },
   };
@@ -72,4 +92,33 @@ test('day rollover still completes an approved booking that actually checked in'
   assert.equal(booking.status, 'completed');
   assert.ok(booking.completedAt instanceof Date);
   assert.ok(calls.some((call) => call[0] === 'bookings.save'));
+});
+
+
+test('overnight completion releases every banquet table assignment', async () => {
+  const booking = {
+    id: 'banquet-visited',
+    bookingDate: '2026-08-27',
+    bookingTime: '22:30',
+    status: 'approved',
+    checkedInAt: new Date('2026-08-27T19:30:00.000Z'),
+    completedAt: null,
+    table: { id: 'table-1' },
+    tableAssignments: [
+      { table: { id: 'table-1' }, isPrimary: true },
+      { table: { id: 'table-2' }, isPrimary: false },
+    ],
+  };
+  const { service, calls } = createService([booking], {
+    assignmentsReady: true,
+  });
+
+  await service.completeExpiredBookings();
+
+  assert.equal(booking.status, 'completed');
+  const releasedIds = calls
+    .filter((call) => call[0] === 'tables.save' && call[2] === 'free')
+    .map((call) => call[1])
+    .sort();
+  assert.deepEqual(releasedIds, ['table-1', 'table-2']);
 });

@@ -191,8 +191,19 @@ function createServiceHarness({ conflictOnSecond = false, failAssignments = fals
   };
   const clientRepository = {};
   const tableRepository = {
-    async find() {
-      return tables;
+    createQueryBuilder(alias) {
+      assert.equal(alias, 'table');
+      const builder = {
+        leftJoinAndSelect() { return builder; },
+        where() { return builder; },
+        orderBy() { return builder; },
+        setLock(mode, version, aliases) {
+          writes.tableLock = { mode, version, aliases };
+          return builder;
+        },
+        async getMany() { return tables; },
+      };
+      return builder;
     },
     async save(value) {
       writes.tableStatuses.push({ id: value.id, status: value.status });
@@ -265,6 +276,11 @@ test('banquet creation commits one booking with primary plus all assignments and
     name: 'Admin',
   });
 
+  assert.deepEqual(writes.tableLock, {
+    mode: 'pessimistic_write',
+    version: undefined,
+    aliases: ['table'],
+  });
   assert.equal(writes.bookings.length, 1);
   assert.equal(writes.bookings[0].table.id, TABLE_A);
   assert.equal(writes.bookings[0].status, 'approved');

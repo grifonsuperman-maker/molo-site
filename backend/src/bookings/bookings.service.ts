@@ -934,10 +934,13 @@ export class BookingsService {
           ? await this.assertNoActivePhoneBooking(bookingDate, phone, bookings)
           : null;
 
-        const foundTables = await tables.find({
-          where: { id: In(uniqueTableIds) },
-          relations: ['zone'],
-        });
+        const foundTables = await tables
+          .createQueryBuilder('table')
+          .leftJoinAndSelect('table.zone', 'zone')
+          .where('table.id IN (:...tableIds)', { tableIds: [...uniqueTableIds].sort() })
+          .orderBy('table.id', 'ASC')
+          .setLock('pessimistic_write', undefined, ['table'])
+          .getMany();
         if (foundTables.length !== uniqueTableIds.length) {
           throw new NotFoundException('Один або кілька столів не знайдено');
         }
@@ -1296,6 +1299,13 @@ export class BookingsService {
   private async updateBookingStatusWithLock(
     id: string,
     update: (booking: Booking) => void,
+    history: {
+      action: string;
+      actorRole: string;
+      reason?: string | null;
+      actor?: AuthUser | null;
+      forceTableRelease?: boolean;
+    },
   ) {
     return this.bookings.manager.transaction(async (manager) => {
       const repository = manager.getRepository(Booking);
@@ -1311,53 +1321,108 @@ export class BookingsService {
       const previousData = this.bookingSnapshot(booking);
       update(booking);
       await repository.save(booking);
+
+      await manager.getRepository(BookingHistory).save(
+        manager.getRepository(BookingHistory).create({
+          booking,
+          action: history.action,
+          actorRole: history.actorRole,
+          actorStaffId: history.actor?.staffId || null,
+          actorName: history.actor?.name || null,
+          previousData,
+          newData: this.bookingSnapshot(booking),
+          reason: history.reason || null,
+          isManualMode: false,
+        }),
+      );
+
+      if (this.isBookingToday(booking.bookingDate)) {
+        const assignmentsReady = await this.bookingTableAssignmentsReady(repository);
+        const tableIds = new Set<string>();
+        if (booking.table?.id) tableIds.add(booking.table.id);
+
+        if (assignmentsReady) {
+          const assignments = await manager.getRepository(BookingTableAssignment).find({
+            where: { booking: { id: booking.id } } as any,
+            relations: ['table'],
+          });
+          for (const assignment of assignments) {
+            if (assignment.table?.id) tableIds.add(assignment.table.id);
+          }
+        }
+
+        const tableRepository = manager.getRepository(TableEntity);
+        for (const tableId of [...tableIds].sort()) {
+          const table = await tableRepository
+            .createQueryBuilder('table')
+            .where('table.id = :tableId', { tableId })
+            .setLock('pessimistic_write', undefined, ['table'])
+            .getOne();
+          if (!table || table.status === 'closed') continue;
+          if (
+            !history.forceTableRelease &&
+            (table.status === 'occupied' || table.status === 'cleaning')
+          ) {
+            continue;
+          }
+          table.status = 'free';
+          await tableRepository.save(table);
+        }
+      }
+
       return { booking, previousData };
     });
   }
 
   async reject(id: string) {
-    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
-      lockedBooking.status = 'rejected';
-      lockedBooking.rejectedAt = new Date();
-      lockedBooking.cancellationReason = 'admin_rejected';
-    });
-    await this.saveHistory(booking, 'booking_rejected', 'admin', previousData, this.bookingSnapshot(booking));
-    await this.setBookingTablesStatusOnlyForToday(booking, 'free');
+    const { booking } = await this.updateBookingStatusWithLock(
+      id,
+      (lockedBooking) => {
+        lockedBooking.status = 'rejected';
+        lockedBooking.rejectedAt = new Date();
+        lockedBooking.cancellationReason = 'admin_rejected';
+      },
+      { action: 'booking_rejected', actorRole: 'admin' },
+    );
     await this.safeLog('Відхилено бронювання', { bookingId: id });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Бронювання відхилено' };
   }
 
   async cancel(id: string) {
-    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
-      lockedBooking.status = 'cancelled';
-      lockedBooking.cancelledAt = new Date();
-      lockedBooking.cancellationReason = 'admin_cancelled';
-    });
-    await this.saveHistory(booking, 'booking_cancelled', 'admin', previousData, this.bookingSnapshot(booking));
-    await this.setBookingTablesStatusOnlyForToday(booking, 'free');
+    const { booking } = await this.updateBookingStatusWithLock(
+      id,
+      (lockedBooking) => {
+        lockedBooking.status = 'cancelled';
+        lockedBooking.cancelledAt = new Date();
+        lockedBooking.cancellationReason = 'admin_cancelled';
+      },
+      { action: 'booking_cancelled', actorRole: 'admin' },
+    );
     await this.safeLog('Скасовано бронювання', { bookingId: id });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Бронювання скасовано' };
   }
 
   async noShow(id: string) {
-    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
-      if (lockedBooking.checkedInAt) {
-        throw new BadRequestException('Гість уже відмічений як присутній');
-      }
-      lockedBooking.status = 'cancelled';
-      lockedBooking.cancelledAt = new Date();
-      lockedBooking.cancellationReason = 'no_show';
-      lockedBooking.wishes = this.markNoShowInWishes(lockedBooking);
-      lockedBooking.guestNotification = {
-        type: 'no_show',
-        title: 'Бронювання завершено через неявку',
-        createdAt: new Date().toISOString(),
-      };
-    });
-    await this.saveHistory(booking, 'booking_no_show', 'admin', previousData, this.bookingSnapshot(booking), 'no_show');
-    await this.setBookingTablesStatusOnlyForToday(booking, 'free');
+    const { booking } = await this.updateBookingStatusWithLock(
+      id,
+      (lockedBooking) => {
+        if (lockedBooking.checkedInAt) {
+          throw new BadRequestException('Гість уже відмічений як присутній');
+        }
+        lockedBooking.status = 'cancelled';
+        lockedBooking.cancelledAt = new Date();
+        lockedBooking.cancellationReason = 'no_show';
+        lockedBooking.wishes = this.markNoShowInWishes(lockedBooking);
+        lockedBooking.guestNotification = {
+          type: 'no_show',
+          title: 'Бронювання завершено через неявку',
+          createdAt: new Date().toISOString(),
+        };
+      },
+      { action: 'booking_no_show', actorRole: 'admin', reason: 'no_show' },
+    );
     await this.safeLog('No-show: гість не прийшов', { bookingId: id, tableNumber: booking.table?.tableNumber || null });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Гість не прийшов. Бронювання знято, стіл вільний.' };
@@ -1391,20 +1456,19 @@ export class BookingsService {
   }
 
   async complete(id: string, actor?: AuthUser) {
-    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
-      lockedBooking.status = 'completed';
-      lockedBooking.completedAt = new Date();
-    });
-    await this.saveHistory(
-      booking,
-      'booking_completed',
-      actor?.role || 'admin',
-      previousData,
-      this.bookingSnapshot(booking),
-      null,
-      actor || null,
+    const { booking } = await this.updateBookingStatusWithLock(
+      id,
+      (lockedBooking) => {
+        lockedBooking.status = 'completed';
+        lockedBooking.completedAt = new Date();
+      },
+      {
+        action: 'booking_completed',
+        actorRole: actor?.role || 'admin',
+        actor: actor || null,
+        forceTableRelease: true,
+      },
     );
-    await this.setBookingTablesStatusOnlyForToday(booking, 'free', true);
     await this.safeLog('Стіл звільнено', {
       bookingId: id,
       staffId: actor?.staffId || null,

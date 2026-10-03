@@ -4,6 +4,7 @@ import { DataSource, In } from 'typeorm';
 import { BookingHistory } from '../bookings/entities/booking-history.entity';
 import { BookingRescheduleRequest } from '../bookings/entities/booking-reschedule-request.entity';
 import { Booking } from '../bookings/entities/booking.entity';
+import { bookingTableAssignmentsReady } from '../bookings/booking-table-assignment-transfer';
 import { LogsService } from '../logs/logs.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TableEntity, type TableStatus } from '../tables/entities/table.entity';
@@ -80,9 +81,12 @@ export class AutomaticNoShowService {
       });
       if (pendingTimeChange) return null;
 
+      const assignmentsReady = await bookingTableAssignmentsReady(manager);
       const withRelations = await bookings.findOne({
         where: { id: locked.id },
-        relations: ['table', 'client'],
+        relations: assignmentsReady
+          ? ['table', 'client', 'tableAssignments', 'tableAssignments.table']
+          : ['table', 'client'],
       });
       if (!withRelations) return null;
 
@@ -131,11 +135,20 @@ export class AutomaticNoShowService {
         }),
       );
 
-      if (withRelations.table?.id) {
+      const affectedTableIds = new Set<string>();
+      if (withRelations.table?.id) affectedTableIds.add(withRelations.table.id);
+      if (assignmentsReady) {
+        for (const assignment of withRelations.tableAssignments || []) {
+          if (assignment.table?.id) affectedTableIds.add(assignment.table.id);
+        }
+      }
+
+      for (const tableId of [...affectedTableIds].sort()) {
         await this.synchronizeTableForDate(
           manager,
-          withRelations.table.id,
+          tableId,
           today,
+          assignmentsReady,
         );
       }
 
@@ -172,6 +185,7 @@ export class AutomaticNoShowService {
     manager: DataSource['manager'],
     tableId: string,
     bookingDate: string,
+    assignmentsReady: boolean,
   ) {
     const tableRepository = manager.getRepository(TableEntity);
     const table = await tableRepository
@@ -185,13 +199,25 @@ export class AutomaticNoShowService {
       return;
     }
 
-    const active = await manager.getRepository(Booking).find({
-      where: {
-        table: { id: tableId },
-        bookingDate,
-        status: In(['pending', 'approved']),
-      } as any,
-    });
+    const bookingRepository = manager.getRepository(Booking);
+    const active = assignmentsReady
+      ? await bookingRepository
+        .createQueryBuilder('booking')
+        .leftJoin('booking.table', 'table')
+        .leftJoin('booking.tableAssignments', 'tableAssignment')
+        .leftJoin('tableAssignment.table', 'assignedTable')
+        .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId })
+        .andWhere('booking.bookingDate = :bookingDate', { bookingDate })
+        .andWhere('booking.status IN (:...statuses)', { statuses: ['pending', 'approved'] })
+        .distinct(true)
+        .getMany()
+      : await bookingRepository.find({
+        where: {
+          table: { id: tableId },
+          bookingDate,
+          status: In(['pending', 'approved']),
+        } as any,
+      });
 
     let nextStatus: TableStatus = 'free';
     if (active.some((booking) => booking.status === 'approved')) nextStatus = 'reserved';
