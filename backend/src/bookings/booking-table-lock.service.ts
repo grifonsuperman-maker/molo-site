@@ -14,8 +14,16 @@ import {
 } from './guest-contact-validation';
 
 type AdvisoryLock = readonly [key: string, scope: string];
-type CreateLockDto = Pick<CreateBookingDto, 'tableId' | 'tableNumber' | 'bookingDate'> & {
+type GuestIdentityLockDto = Pick<CreateBookingDto, 'bookingDate'> & {
   phone?: string;
+};
+
+type CreateLockDto = GuestIdentityLockDto &
+  Pick<CreateBookingDto, 'tableId' | 'tableNumber'>;
+
+type BanquetCreateLockDto = GuestIdentityLockDto & {
+  tableIds: string[];
+  primaryTableId: string;
 };
 
 @Injectable()
@@ -39,6 +47,32 @@ export class BookingTableLockService {
     await this.alignPhoneWithLegacyIdentity(dto);
     const tableKey = await this.resolveTableKey(dto.tableId, dto.tableNumber);
     return this.withLocks([[tableKey, dto.bookingDate]], work);
+  }
+
+  async withBanquetCreateLock<T>(
+    dto: BanquetCreateLockDto,
+    work: () => Promise<T>,
+  ) {
+    await this.alignPhoneWithLegacyIdentity(dto);
+
+    const normalizedIds = dto.tableIds.map((value) => String(value || '').trim());
+    if (normalizedIds.length < 2 || new Set(normalizedIds).size !== normalizedIds.length) {
+      throw new BadRequestException('Оберіть щонайменше два різні столи для банкету');
+    }
+
+    const primaryTableId = String(dto.primaryTableId || '').trim();
+    if (!normalizedIds.includes(primaryTableId)) {
+      throw new BadRequestException('Основний стіл має входити до банкету');
+    }
+
+    const tableKeys = (
+      await Promise.all(normalizedIds.map((tableId) => this.resolveTableKey(tableId, null)))
+    ).sort();
+
+    return this.withLocks(
+      tableKeys.map((tableKey) => [tableKey, dto.bookingDate] as const),
+      work,
+    );
   }
 
   async withAvailabilityBlockLock<T>(
@@ -119,7 +153,7 @@ export class BookingTableLockService {
    * 0501234567 або +380501234567. Перед існуючими blacklist/duplicate/client
    * перевірками підбираємо вже збережене представлення тієї самої особи.
    */
-  private async alignPhoneWithLegacyIdentity(dto: CreateLockDto) {
+  private async alignPhoneWithLegacyIdentity(dto: GuestIdentityLockDto) {
     const phone = String(dto.phone || '').trim();
     const canonicalPhone = normalizeLegacyUkrainePhone(phone);
     if (!phone || !canonicalPhone) return;

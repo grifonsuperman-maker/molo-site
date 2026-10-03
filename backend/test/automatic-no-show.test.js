@@ -13,6 +13,8 @@ function createHarness({
   bookingDate = '2026-08-27',
   bookingTime = '19:20',
   activeBookings = [],
+  assignmentsReady = false,
+  secondaryTables = [],
 } = {}) {
   const calls = [];
   const lockedBooking = {
@@ -31,6 +33,7 @@ function createHarness({
     ...lockedBooking,
     table,
     client: { id: 'client-1', fullName: 'Гість' },
+    tableAssignments: secondaryTables.map((secondary) => ({ table: secondary })),
   };
 
   let bookingFindOneCalls = 0;
@@ -49,6 +52,19 @@ function createHarness({
       calls.push(['booking.find.active', options]);
       return activeBookings;
     },
+    createQueryBuilder() {
+      const query = {
+        leftJoin() { return query; },
+        where() { return query; },
+        andWhere() { return query; },
+        distinct() { return query; },
+        async getMany() {
+          calls.push(['booking.query.active']);
+          return activeBookings;
+        },
+      };
+      return query;
+    },
   };
   const rescheduleRepo = {
     async findOne() {
@@ -66,15 +82,20 @@ function createHarness({
       return value;
     },
   };
+  const allTables = new Map([[table.id, table], ...secondaryTables.map((item) => [item.id, item])]);
   const tableRepo = {
     createQueryBuilder() {
+      let requestedId = table.id;
       return {
-        where() { return this; },
-        setLock(mode) {
-          calls.push(['table.lock', mode]);
+        where(_sql, params) {
+          requestedId = params?.tableId || requestedId;
           return this;
         },
-        async getOne() { return table; },
+        setLock(mode) {
+          calls.push(['table.lock', mode, requestedId]);
+          return this;
+        },
+        async getOne() { return allTables.get(requestedId) || null; },
       };
     },
     async save(value) {
@@ -84,6 +105,9 @@ function createHarness({
   };
 
   const manager = {
+    async query() {
+      return [{ ready: assignmentsReady }];
+    },
     getRepository(entity) {
       if (entity.name === 'Booking') return bookingRepo;
       if (entity.name === 'BookingRescheduleRequest') return rescheduleRepo;
@@ -201,4 +225,24 @@ test('cross-midnight no-show preserves a reservation for the new Kyiv date', asy
   assert.equal(result, true);
   assert.equal(table.status, 'reserved');
   assert.ok(!calls.some((call) => call[0] === 'table.save' && call[1] === 'free'));
+});
+
+
+test('auto no-show releases every reserved table assigned to a banquet', async () => {
+  const secondary = { id: 'table-9', tableNumber: '9', status: 'reserved' };
+  const { service, table, calls } = createHarness({
+    assignmentsReady: true,
+    secondaryTables: [secondary],
+  });
+
+  const result = await service.cancelIfDue('booking-1', '2026-08-27', 19 * 60 + 50);
+
+  assert.equal(result, true);
+  assert.equal(table.status, 'free');
+  assert.equal(secondary.status, 'free');
+  const lockedIds = calls
+    .filter((call) => call[0] === 'table.lock')
+    .map((call) => call[2])
+    .sort();
+  assert.deepEqual(lockedIds, ['table-8', 'table-9']);
 });

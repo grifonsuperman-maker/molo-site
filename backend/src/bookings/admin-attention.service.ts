@@ -16,6 +16,8 @@ import { BookingHistory } from './entities/booking-history.entity';
 import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
+import { syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
+import { synchronizeBookingTableStatusForDate } from './booking-table-status';
 
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 const DEFAULT_DURATION_MINUTES = 120;
@@ -145,6 +147,8 @@ export class AdminAttentionService {
 
       const oldTable = await this.findTableForUpdate(manager, booking.table.id);
       if (!oldTable) throw new NotFoundException('Поточний стіл не знайдено');
+
+      await syncSingleTableTransferAssignment(manager, booking, nextTable);
 
       const previousData = this.bookingSnapshot(booking);
       booking.table = nextTable;
@@ -347,13 +351,33 @@ export class AdminAttentionService {
     }
   }
 
+  private async bookingTableAssignmentsReady(manager: EntityManager) {
+    if (typeof manager?.query !== 'function') return false;
+    const rows = await manager.query(
+      `SELECT to_regclass('public.booking_table_assignments') IS NOT NULL AS "ready"`,
+    );
+    return Array.isArray(rows) && rows[0]?.ready === true;
+  }
+
   private async assertNoConflict(manager: EntityManager, table: TableEntity, booking: Booking) {
     const requestedStart = this.timeToMinutes(booking.bookingTime);
     const requestedAvailableFrom = requestedStart + this.duration(booking) + CLEANUP_MINUTES;
-    const candidates = await manager.getRepository(Booking)
+    const assignmentsReady = await this.bookingTableAssignmentsReady(manager);
+    const query = manager.getRepository(Booking)
       .createQueryBuilder('candidate')
-      .leftJoin('candidate.table', 'table')
-      .where('table.id = :tableId', { tableId: table.id })
+      .leftJoin('candidate.table', 'table');
+
+    if (assignmentsReady) {
+      query
+        .leftJoin('candidate.tableAssignments', 'tableAssignment')
+        .leftJoin('tableAssignment.table', 'assignedTable')
+        .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId: table.id })
+        .distinct(true);
+    } else {
+      query.where('table.id = :tableId', { tableId: table.id });
+    }
+
+    const candidates = await query
       .andWhere('candidate.bookingDate = :bookingDate', { bookingDate: booking.bookingDate })
       .andWhere('candidate.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
       .andWhere('candidate.id != :bookingId', { bookingId: booking.id })
@@ -391,26 +415,13 @@ export class AdminAttentionService {
 
   private async synchronizeTableForDate(manager: EntityManager, tableId: string, bookingDate: string) {
     if (!this.isToday(bookingDate)) return;
-    const repository = manager.getRepository(TableEntity);
-    const table = await repository.findOne({
-      where: { id: tableId },
-      lock: { mode: 'pessimistic_write' },
-    });
-    if (!table || ['closed', 'cleaning', 'occupied'].includes(table.status)) return;
-
-    const active = await manager.getRepository(Booking).find({
-      where: {
-        table: { id: tableId },
-        bookingDate,
-        status: In(ACTIVE_BOOKING_STATUSES),
-      } as any,
-      relations: ['table'],
-    });
-
-    if (active.some((item) => item.status === 'approved')) table.status = 'reserved';
-    else if (active.some((item) => item.status === 'pending')) table.status = 'pending';
-    else table.status = 'free';
-    await repository.save(table);
+    const assignmentsReady = await this.bookingTableAssignmentsReady(manager);
+    await synchronizeBookingTableStatusForDate(
+      manager,
+      tableId,
+      bookingDate,
+      { assignmentsReady },
+    );
   }
 
   private async applyBookingStatusToTable(

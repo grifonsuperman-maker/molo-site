@@ -50,6 +50,11 @@ test('booking completion history records the real waiter', async () => {
     },
   };
   const transactionalBookings = {
+    manager: {
+      async query() {
+        return [{ ready: false }];
+      },
+    },
     createQueryBuilder(alias) {
       assert.equal(alias, 'booking');
       return lockedQuery;
@@ -58,12 +63,23 @@ test('booking completion history records the real waiter', async () => {
       return value;
     },
   };
+  const transactionalHistories = {
+    create(value) {
+      return value;
+    },
+    async save(value) {
+      savedHistory.push(value);
+      return value;
+    },
+  };
   const bookings = {
     manager: {
       async transaction(run) {
         return run({
-          getRepository() {
-            return transactionalBookings;
+          getRepository(entity) {
+            if (entity.name === 'Booking') return transactionalBookings;
+            if (entity.name === 'BookingHistory') return transactionalHistories;
+            throw new Error(`Unexpected repository ${entity.name}`);
           },
         });
       },
@@ -74,8 +90,7 @@ test('booking completion history records the real waiter', async () => {
       return value;
     },
     async save(value) {
-      savedHistory.push(value);
-      return value;
+      throw new Error('completion history must be saved inside the transaction');
     },
   };
   const tables = {
