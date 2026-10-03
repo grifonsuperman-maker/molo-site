@@ -48,9 +48,9 @@ async function assertNoTimeConflict(
   operations: BookingOperations,
   booking: Booking,
   tableId: string,
+  assignmentsReady: boolean,
 ) {
   const repository = manager.getRepository(Booking);
-  const assignmentsReady = await bookingTableAssignmentsReady(manager);
   const activeBookings = assignmentsReady
     ? await repository
       .createQueryBuilder('other')
@@ -207,7 +207,7 @@ async function coordinatedTransition(
           );
         }
 
-        await assertNoTimeConflict(manager, operations, booking, table.id);
+        await assertNoTimeConflict(manager, operations, booking, table.id, assignmentsReady);
         lockedTables.push(table);
       }
       const previousData = operations.bookingSnapshot(booking);

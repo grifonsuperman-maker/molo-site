@@ -241,8 +241,10 @@ export class BookingsService {
     bookingDate: string,
     excludeBookingId?: string,
     bookings: Repository<Booking> = this.bookings,
+    knownAssignmentsReady?: boolean,
   ) {
-    const assignmentsReady = await this.bookingTableAssignmentsReady(bookings);
+    const assignmentsReady = knownAssignmentsReady ??
+      await this.bookingTableAssignmentsReady(bookings);
     const query = bookings
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.table', 'table')
@@ -386,15 +388,20 @@ export class BookingsService {
   }
 
   private async getBookingTables(bookingId: string) {
+    const assignmentsReady = await this.bookingTableAssignmentsReady();
     const booking = await this.bookings.findOne({
       where: { id: bookingId },
-      relations: ['table', 'tableAssignments', 'tableAssignments.table'],
+      relations: assignmentsReady
+        ? ['table', 'tableAssignments', 'tableAssignments.table']
+        : ['table'],
     });
     if (!booking) return [];
 
     const tables = [
       booking.table,
-      ...(booking.tableAssignments || []).map((assignment) => assignment.table),
+      ...(assignmentsReady
+        ? (booking.tableAssignments || []).map((assignment) => assignment.table)
+        : []),
     ].filter((table): table is TableEntity => Boolean(table?.id));
 
     return Array.from(new Map(tables.map((table) => [table.id, table])).values());
@@ -970,6 +977,7 @@ export class BookingsService {
             bookingDate,
             undefined,
             bookings,
+            true,
           );
           const conflict = this.findConflict(
             activeBookings,

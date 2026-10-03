@@ -189,7 +189,9 @@ test('check-in uses the shared table/date advisory lock and a locked booking row
   assert.ok(booking.checkedInAt instanceof Date);
   assert.equal(table.status, 'occupied');
   assert.deepEqual(calls[0], ['transaction']);
-  const advisoryIndex = calls.findIndex(([name]) => name === 'manager.query');
+  const advisoryIndex = calls.findIndex(([name, sql]) =>
+    name === 'manager.query' && String(sql).includes('pg_advisory_xact_lock'),
+  );
   const bookingLockIndex = calls.findIndex(([name, options]) =>
     name === 'booking.findOne' && options.lock?.mode === 'pessimistic_write',
   );
