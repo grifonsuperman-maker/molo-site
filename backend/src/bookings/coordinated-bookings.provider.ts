@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, In } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { TableEntity } from '../tables/entities/table.entity';
@@ -36,21 +36,38 @@ function restaurantDateToday() {
   return `${year}-${month}-${day}`;
 }
 
+async function bookingTableAssignmentsReady(manager: EntityManager) {
+  const rows = await manager.query(
+    `SELECT to_regclass('public.booking_table_assignments') IS NOT NULL AS "ready"`,
+  );
+  return Array.isArray(rows) && rows[0]?.ready === true;
+}
+
 async function assertNoTimeConflict(
   manager: EntityManager,
   operations: BookingOperations,
   booking: Booking,
   tableId: string,
 ) {
-  const activeBookings = await manager.getRepository(Booking)
-    .createQueryBuilder('other')
-    .leftJoin('other.table', 'table')
-    .leftJoin('other.tableAssignments', 'tableAssignment')
-    .leftJoin('tableAssignment.table', 'assignedTable')
-    .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId })
-    .andWhere('other.bookingDate = :bookingDate', { bookingDate: booking.bookingDate })
-    .andWhere('other.status IN (:...statuses)', { statuses: ['pending', 'approved'] })
-    .getMany();
+  const repository = manager.getRepository(Booking);
+  const assignmentsReady = await bookingTableAssignmentsReady(manager);
+  const activeBookings = assignmentsReady
+    ? await repository
+      .createQueryBuilder('other')
+      .leftJoin('other.table', 'table')
+      .leftJoin('other.tableAssignments', 'tableAssignment')
+      .leftJoin('tableAssignment.table', 'assignedTable')
+      .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId })
+      .andWhere('other.bookingDate = :bookingDate', { bookingDate: booking.bookingDate })
+      .andWhere('other.status IN (:...statuses)', { statuses: ['pending', 'approved'] })
+      .getMany()
+    : await repository.find({
+      where: {
+        table: { id: tableId },
+        bookingDate: booking.bookingDate,
+        status: In(['pending', 'approved']),
+      },
+    });
 
   const requestedStart = operations.getBookingStartMinutes(booking);
   const requestedAvailableFrom = operations.getBookingAvailableFromMinutes(booking);
@@ -81,16 +98,21 @@ async function coordinatedTransition(
       const bookings = manager.getRepository(Booking);
       // Match the advisory table/date lock used by guest booking creation.
       // Acquire it BEFORE locking the booking row, as table transfers do.
+      const assignmentsReady = await bookingTableAssignmentsReady(manager);
       const initial = await bookings.findOne({
         where: { id: bookingId },
-        relations: ['table', 'tableAssignments', 'tableAssignments.table'],
+        relations: assignmentsReady
+          ? ['table', 'tableAssignments', 'tableAssignments.table']
+          : ['table'],
       });
       if (!initial) throw new NotFoundException('Бронювання не знайдено');
       if (!initial.table?.id) throw new BadRequestException('Стіл бронювання не знайдено');
 
       const initialTableIds = Array.from(new Set([
         initial.table.id,
-        ...(initial.tableAssignments || []).map((assignment) => assignment.table?.id).filter(Boolean),
+        ...(assignmentsReady
+          ? (initial.tableAssignments || []).map((assignment) => assignment.table?.id).filter(Boolean)
+          : []),
       ] as string[])).sort();
 
       for (const tableId of initialTableIds) {
@@ -109,12 +131,16 @@ async function coordinatedTransition(
       // the nullable side of the booking's LEFT JOINs.
       const booking = await bookings.findOne({
         where: { id: bookingId },
-        relations: ['table', 'client', 'tableAssignments', 'tableAssignments.table'],
+        relations: assignmentsReady
+          ? ['table', 'client', 'tableAssignments', 'tableAssignments.table']
+          : ['table', 'client'],
       });
       if (!booking) throw new NotFoundException('Бронювання не знайдено');
       const bookingTableIds = Array.from(new Set([
         booking.table?.id,
-        ...(booking.tableAssignments || []).map((assignment) => assignment.table?.id).filter(Boolean),
+        ...(assignmentsReady
+          ? (booking.tableAssignments || []).map((assignment) => assignment.table?.id).filter(Boolean)
+          : []),
       ].filter(Boolean) as string[])).sort();
       if (
         booking.table?.id !== initial.table.id ||

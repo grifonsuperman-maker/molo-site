@@ -225,19 +225,39 @@ export class BookingsService {
     };
   }
 
+  private async bookingTableAssignmentsReady(
+    bookings: Repository<Booking> = this.bookings,
+  ) {
+    const manager = bookings?.manager;
+    if (!manager || typeof manager.query !== 'function') return false;
+    const rows = await manager.query(
+      `SELECT to_regclass('public.booking_table_assignments') IS NOT NULL AS "ready"`,
+    );
+    return Array.isArray(rows) && rows[0]?.ready === true;
+  }
+
   private async getActiveBookingsForTable(
     tableId: string,
     bookingDate: string,
     excludeBookingId?: string,
     bookings: Repository<Booking> = this.bookings,
   ) {
+    const assignmentsReady = await this.bookingTableAssignmentsReady(bookings);
     const query = bookings
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.table', 'table')
-      .leftJoinAndSelect('booking.client', 'client')
-      .leftJoin('booking.tableAssignments', 'tableAssignment')
-      .leftJoin('tableAssignment.table', 'assignedTable')
-      .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId })
+      .leftJoinAndSelect('booking.client', 'client');
+
+    if (assignmentsReady) {
+      query
+        .leftJoin('booking.tableAssignments', 'tableAssignment')
+        .leftJoin('tableAssignment.table', 'assignedTable')
+        .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId });
+    } else {
+      query.where('table.id = :tableId', { tableId });
+    }
+
+    query
       .andWhere('booking.bookingDate = :bookingDate', { bookingDate })
       .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
       .distinct(true)
@@ -585,12 +605,19 @@ export class BookingsService {
 
     const tables = await this.tables.find({ relations: ['zone'], order: { tableNumber: 'ASC' } as any });
 
-    const activeBookings = await this.bookings
+    const assignmentsReady = await this.bookingTableAssignmentsReady();
+    const activeBookingsQuery = this.bookings
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.table', 'table')
-      .leftJoinAndSelect('booking.client', 'client')
-      .leftJoinAndSelect('booking.tableAssignments', 'tableAssignments')
-      .leftJoinAndSelect('tableAssignments.table', 'assignedTable')
+      .leftJoinAndSelect('booking.client', 'client');
+
+    if (assignmentsReady) {
+      activeBookingsQuery
+        .leftJoinAndSelect('booking.tableAssignments', 'tableAssignments')
+        .leftJoinAndSelect('tableAssignments.table', 'assignedTable');
+    }
+
+    const activeBookings = await activeBookingsQuery
       .where('booking.bookingDate = :bookingDate', { bookingDate })
       .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
       .orderBy('booking.bookingTime', 'ASC')
