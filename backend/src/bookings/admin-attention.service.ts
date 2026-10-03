@@ -16,6 +16,7 @@ import { BookingHistory } from './entities/booking-history.entity';
 import { BookingTableChangeRequest } from './entities/booking-table-change-request.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
+import { syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
 
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 const DEFAULT_DURATION_MINUTES = 120;
@@ -145,6 +146,8 @@ export class AdminAttentionService {
 
       const oldTable = await this.findTableForUpdate(manager, booking.table.id);
       if (!oldTable) throw new NotFoundException('Поточний стіл не знайдено');
+
+      await syncSingleTableTransferAssignment(manager, booking, nextTable);
 
       const previousData = this.bookingSnapshot(booking);
       booking.table = nextTable;

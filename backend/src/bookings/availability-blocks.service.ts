@@ -14,6 +14,7 @@ import { TransferFutureBookingDto } from './dto/transfer-future-booking.dto';
 import { AvailabilityBlock } from './entities/availability-block.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { BookingHistory } from './entities/booking-history.entity';
+import { syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
 
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 const DEFAULT_DURATION_MINUTES = 120;
@@ -335,6 +336,12 @@ export class AvailabilityBlocksService {
         bookingTime: booking.bookingTime,
       };
       const reason = String(dto.reason || 'Перенесення через планову недоступність').trim();
+      await syncSingleTableTransferAssignment(
+        manager,
+        booking,
+        nextTable,
+        assignmentsReady,
+      );
       booking.table = nextTable;
       booking.manualChangeReason = reason;
       booking.manuallyChangedAt = new Date();

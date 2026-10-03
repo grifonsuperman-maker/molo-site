@@ -21,6 +21,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { TableStatusProjectionService } from '../tables/table-status-projection.service';
+import { syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
@@ -1451,6 +1452,8 @@ export class BookingsService {
         where: { id: booking.table.id }, lock: { mode: 'pessimistic_write' },
       });
       if (!oldTable) throw new BadRequestException('Попередній стіл не знайдено');
+
+      await syncSingleTableTransferAssignment(manager, booking, nextTable);
 
       const previousData = this.bookingSnapshot(booking);
       const transferredBookingOwnsPhysicalStatus =
