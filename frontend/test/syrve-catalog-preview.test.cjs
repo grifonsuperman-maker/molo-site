@@ -27,7 +27,10 @@ function harness(api = {}) {
   const deps = { displayName: 'MOLO', apiBaseUrl: 'https://api-eu.syrve.live', apiLogin: state.login,
     organizationId: ORG, organizations: [{ id: ORG, name: 'MOLO' }], catalogPreview: null,
     mappingAcknowledged: false, setMappingAcknowledged: (value) => state.acknowledged = value, status: { configurationRevision: ORG },
-    requestVersion: { current: 0 }, syrveApi: api,
+    requestVersion: { current: 0 }, statusRequestVersion: { current: 0 }, syrveApi: api,
+    statusLoadState: 'ready', busy: false, loadingTables: false, changingAutoStatus: false,
+    setStatusLoaded: (value) => state.statusLoaded = value,
+    setStatusLoadState: (value) => { state.statusLoadState = value; deps.statusLoadState = value; },
     setCatalogPreview: (value) => state.preview = value, setBusy: (value) => state.busy = value,
     setLoadingTables: (value) => state.loadingTables = value,
     setChangingAutoStatus: (value) => state.changingAutoStatus = value,
@@ -37,6 +40,7 @@ function harness(api = {}) {
     setEditingConnection: (value) => state.editingConnection = value,
     setOrganizations: (value) => state.organizations = value,
     setShowLogin() {}, setStatus: (value) => state.status = value, setDisplayName() {}, setApiBaseUrl() {} };
+  deps.applyStatus = handler('applyStatus', deps);
   return { state, deps, run: (name) => handler(name, deps) };
 }
 const result = (organizationId = ORG) => ({ organization: { id: organizationId, name: 'MOLO' }, syncEnabled: false,

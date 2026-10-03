@@ -256,6 +256,7 @@ test('missing, inconsistent or failed-scope version evidence cannot be reused as
 
 test('actual dock opens saved diagnostics separately from credential and organization drafts', async () => {
   const h = dock(); h.render(); await flush(); h.click(node => node.type === 'button' && node.props['aria-label']?.startsWith('Syrve підключено'));
+  await flush();
   let tree = h.render(); assert.ok(h.panels(tree).order); assert.ok(h.panels(tree).readiness);
   assert.equal(find(tree, node => node.type === 'input' && node.props.type === 'password'), null);
   h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
@@ -271,6 +272,7 @@ test('actual dock opens saved diagnostics separately from credential and organiz
 
 test('editing the actual dock unmounts a pending saved probe despite an unchanged saved revision', async () => {
   const h = dock(); h.render(); await flush(); h.click(node => node.type === 'button' && node.props['aria-label']?.startsWith('Syrve підключено'));
+  await flush();
   assert.ok(h.panels(h.render()).order);
   const response = deferred(), child = mounted({ orderDiagnostics: () => response.promise }); child.click();
   h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
@@ -281,12 +283,12 @@ test('editing the actual dock unmounts a pending saved probe despite an unchange
 test('cancel and reopen return to the saved summary instead of exposing the cancelled draft', async () => {
   const h = dock(); h.render(); await flush();
   const cloud = node => node.type === 'button' && node.props['aria-label']?.startsWith('Syrve підключено');
-  h.click(cloud); h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
+  h.click(cloud); await flush(); h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
   const draftName = find(h.render(), node => node.type === 'input' && node.props.value === h.saved.displayName);
   assert.ok(draftName); draftName.props.onChange({ target: { value: 'Незбережена чернетка' } });
   assert.equal(h.panels(h.render()).order, null);
   h.click(node => node.type === 'button' && node.props['aria-label'] === 'Закрити налаштування Syrve');
-  h.click(cloud); const tree = h.render(); assert.ok(h.panels(tree).order); assert.ok(h.panels(tree).readiness);
+  h.click(cloud); await flush(); const tree = h.render(); assert.ok(h.panels(tree).order); assert.ok(h.panels(tree).readiness);
   assert.equal(find(tree, node => node.type === 'input' && node.props.type === 'password'), null);
   assert.equal(h.saved.configurationRevision, VERSION);
   h.click(node => node.type === 'button' && text(node) === 'Змінити дані');
