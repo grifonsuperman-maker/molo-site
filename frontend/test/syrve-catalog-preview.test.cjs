@@ -28,6 +28,7 @@ function harness(api = {}) {
     organizationId: ORG, organizations: [{ id: ORG, name: 'MOLO' }], catalogPreview: null,
     mappingAcknowledged: false, setMappingAcknowledged: (value) => state.acknowledged = value, status: { configurationRevision: ORG },
     requestVersion: { current: 0 }, statusRequestVersion: { current: 0 }, syrveApi: api,
+    settledStatusLoadState: { current: 'ready' },
     statusLoadState: 'ready', busy: false, loadingTables: false, changingAutoStatus: false,
     setStatusLoaded: (value) => state.statusLoaded = value,
     setStatusLoadState: (value) => { state.statusLoadState = value; deps.statusLoadState = value; },

@@ -114,6 +114,10 @@ function mounted(reads, commands = {}) {
     html: () => renderToStaticMarkup(render()),
     ready: async () => { render(); await flush(); render(); },
     open: async () => { dock().props.onClick(); await flush(); render(); },
+    close: () => {
+      find(render(), node => node.props?.['aria-label'] === 'Закрити налаштування Syrve').props.onClick();
+      render();
+    },
     click: async label => {
       const control = button(label);
       assert.ok(control, label);
@@ -227,6 +231,109 @@ test('closing and reopening ignores old status successes and failures', async ()
     await flush();
     assert.match(h.html(), /Нове підключення/);
     assert.doesNotMatch(h.html(), /Старе підключення|Не вдалося оновити стан Syrve|private-stale-response/);
+  }
+});
+
+test('cancelling a settings read restores cached ready state immediately and ignores its late result', async () => {
+  for (const fail of [false, true]) {
+    const pending = deferred();
+    const h = mounted([saved(), () => pending.promise]);
+    await h.ready();
+    await h.open();
+    assert.equal(h.dock().props['aria-busy'], true);
+    h.close();
+    assert.equal(h.dock().props['aria-busy'], false);
+    assert.match(h.dock().props['aria-label'], /Syrve підключено/);
+    if (fail) pending.reject(new Error('private-cancelled-read'));
+    else pending.resolve(saved({ organizationName: 'Застаріла організація' }));
+    await flush();
+    assert.equal(h.dock().props['aria-busy'], false);
+    assert.match(h.dock().props.title, /Ресторан MOLO/);
+    assert.doesNotMatch(h.html(), /Застаріла організація|private-cancelled-read/);
+    assert.deepEqual(h.requests, ['getStatus', 'getStatus']);
+  }
+});
+
+test('cancelling a retry restores prior error instead of claiming the cached connection was checked', async () => {
+  for (const fail of [false, true]) {
+    const pending = deferred();
+    const h = mounted([saved(), unavailable, () => pending.promise, saved()]);
+    await h.ready();
+    await h.open();
+    await h.click('Спробувати ще раз');
+    h.close();
+    assert.equal(h.dock().props['aria-busy'], false);
+    assert.match(h.dock().props['aria-label'], /невідомий/);
+    if (fail) pending.reject(new Error('private-cancelled-retry'));
+    else pending.resolve(saved());
+    await flush();
+    assert.equal(h.dock().props['aria-busy'], false);
+    assert.match(h.dock().props['aria-label'], /невідомий/);
+    await h.open();
+    assert.match(h.html(), /Збережене підключення/);
+    assert.doesNotMatch(h.html(), /Не вдалося оновити стан Syrve/);
+  }
+});
+
+test('cancelling the first status read stays unknown without an active loading indicator', async () => {
+  const initial = deferred(), opened = deferred();
+  const h = mounted([() => initial.promise, () => opened.promise]);
+  await h.ready();
+  await h.open();
+  h.close();
+  assert.equal(h.dock().props['aria-busy'], false);
+  assert.match(h.dock().props['aria-label'], /невідомий/);
+  initial.resolve(saved());
+  opened.reject(new Error('private-first-cancelled-read'));
+  await flush();
+  assert.equal(h.dock().props['aria-busy'], false);
+  assert.match(h.dock().props['aria-label'], /невідомий/);
+  assert.doesNotMatch(h.html(), /Підключити Syrve|private-first-cancelled-read/);
+});
+
+test('cancelling a post-operation refresh restores cached state without repeating the operation', async () => {
+  for (const panelName of ['SyrveAutoStatusPanel', 'SyrveTableLoadingPanel']) {
+    for (const fail of [false, true]) {
+      const pending = deferred();
+      const h = mounted([saved(), saved(), () => pending.promise]);
+      await h.ready();
+      await h.open();
+      const panel = h.panel(panelName);
+      panel.props.onBusyChange(true);
+      const refresh = panel.props.onFinished(panelName === 'SyrveAutoStatusPanel' ? 'enabled' : { readCompleted: true });
+      await flush();
+      assert.equal(h.dock().props['aria-busy'], true);
+      h.close();
+      assert.equal(h.dock().props['aria-busy'], false);
+      assert.match(h.dock().props['aria-label'], /Syrve підключено/);
+      if (fail) pending.reject(new Error('private-cancelled-operation-refresh'));
+      else pending.resolve(saved({ syncEnabled: true }));
+      await refresh;
+      assert.equal(h.dock().props['aria-busy'], false);
+      assert.match(h.dock().props['aria-label'], /Syrve підключено/);
+      assert.deepEqual(h.requests, ['getStatus', 'getStatus', 'getStatus']);
+    }
+  }
+});
+
+test('outdated status completion cannot clear the loading indicator of a newer active read', async () => {
+  for (const fail of [false, true]) {
+    const old = deferred(), latest = deferred();
+    const h = mounted([saved(), saved(), () => old.promise, () => latest.promise]);
+    await h.ready();
+    await h.open();
+    const finish = h.panel('SyrveAutoStatusPanel').props.onFinished;
+    const first = finish('failed'), second = finish('failed');
+    if (fail) old.reject(new Error('private-outdated-status'));
+    else old.resolve(saved());
+    await first;
+    assert.equal(h.dock().props['aria-busy'], true);
+    assert.match(h.html(), /Оновлюємо стан Syrve/);
+    latest.resolve(saved({ displayName: 'Актуальний стан' }));
+    await second;
+    assert.equal(h.dock().props['aria-busy'], false);
+    assert.match(h.html(), /Актуальний стан/);
+    assert.doesNotMatch(h.html(), /Не вдалося оновити стан Syrve|private-outdated-status/);
   }
 });
 

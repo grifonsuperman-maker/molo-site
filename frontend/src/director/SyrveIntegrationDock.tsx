@@ -78,6 +78,7 @@ export default function SyrveIntegrationDock() {
   const [mappingAcknowledged, setMappingAcknowledged] = useState(false);
   const requestVersion = useRef(0);
   const statusRequestVersion = useRef(0);
+  const settledStatusLoadState = useRef<'ready' | 'error'>('error');
   const [busy, setBusy] = useState(false);
   const [loadingTables, setLoadingTables] = useState(false);
   const [changingAutoStatus, setChangingAutoStatus] = useState(false);
@@ -87,6 +88,7 @@ export default function SyrveIntegrationDock() {
   function applyStatus(value: SyrveIntegrationStatus) {
     setStatus(value);
     setStatusLoaded(true);
+    settledStatusLoadState.current = 'ready';
     setStatusLoadState('ready');
     setDisplayName(value.displayName || 'MOLO · Syrve');
     setApiBaseUrl(value.apiBaseUrl || 'https://api-eu.syrve.live');
@@ -104,7 +106,10 @@ export default function SyrveIntegrationDock() {
       return value;
     } catch {
       // A failed read says nothing about the saved connection or consent.
-      if (current()) setStatusLoadState('error');
+      if (current()) {
+        settledStatusLoadState.current = 'error';
+        setStatusLoadState('error');
+      }
       return null;
     }
   }
@@ -178,6 +183,9 @@ export default function SyrveIntegrationDock() {
 
   function close() {
     requestVersion.current++;
+    statusRequestVersion.current++;
+    // Cancel this read immediately; its late completion must not settle a newer read.
+    setStatusLoadState(settledStatusLoadState.current);
     setEditingConnection(false);
     setBusy(false);
     setLoadingTables(false);
