@@ -21,7 +21,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { TableStatusProjectionService } from '../tables/table-status-projection.service';
-import { syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
+import { bookingTableAssignmentsReady, syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
+import { remainingBookingStatusForTable, synchronizeBookingTableStatusForDate } from './booking-table-status';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
@@ -1296,45 +1297,6 @@ export class BookingsService {
     return { message: 'Бронювання підтверджено' };
   }
 
-  private async remainingBookingStatusForTable(
-    bookings: Repository<Booking>,
-    tableId: string,
-    bookingDate: string,
-    assignmentsReady: boolean,
-  ): Promise<TableEntity['status']> {
-    const activeBookings = assignmentsReady
-      ? await bookings
-        .createQueryBuilder('activeBooking')
-        .leftJoin('activeBooking.table', 'activeTable')
-        .leftJoin('activeBooking.tableAssignments', 'activeAssignment')
-        .leftJoin('activeAssignment.table', 'activeAssignedTable')
-        .where(
-          '(activeTable.id = :tableId OR activeAssignedTable.id = :tableId)',
-          { tableId },
-        )
-        .andWhere('activeBooking.bookingDate = :bookingDate', { bookingDate })
-        .andWhere('activeBooking.status IN (:...statuses)', {
-          statuses: ACTIVE_BOOKING_STATUSES,
-        })
-        .distinct(true)
-        .getMany()
-      : await bookings.find({
-        where: {
-          table: { id: tableId },
-          bookingDate,
-          status: In(ACTIVE_BOOKING_STATUSES),
-        } as any,
-      });
-
-    if (activeBookings.some((candidate) => candidate.status === 'approved')) {
-      return 'reserved';
-    }
-    if (activeBookings.some((candidate) => candidate.status === 'pending')) {
-      return 'pending';
-    }
-    return 'free';
-  }
-
   private async updateBookingStatusWithLock(
     id: string,
     update: (booking: Booking) => void,
@@ -1405,8 +1367,8 @@ export class BookingsService {
             continue;
           }
 
-          const nextStatus = await this.remainingBookingStatusForTable(
-            repository,
+          const nextStatus = await remainingBookingStatusForTable(
+            manager,
             tableId,
             booking.bookingDate,
             assignmentsReady,
@@ -1565,7 +1527,13 @@ export class BookingsService {
       });
       if (!oldTable) throw new BadRequestException('Попередній стіл не знайдено');
 
-      await syncSingleTableTransferAssignment(manager, booking, nextTable);
+      const assignmentsReady = await bookingTableAssignmentsReady(manager);
+      await syncSingleTableTransferAssignment(
+        manager,
+        booking,
+        nextTable,
+        assignmentsReady,
+      );
 
       const previousData = this.bookingSnapshot(booking);
       const transferredBookingOwnsPhysicalStatus =
@@ -1575,17 +1543,23 @@ export class BookingsService {
       booking.checkedInAt = null;
       await manager.getRepository(Booking).save(booking);
       if (booking.bookingDate === this.restaurantDateToday()) {
-        // Фізичний occupied/cleaning може належати попередньому візиту за
-        // послідовним бронюванням. Звільняємо його лише разом із гостями,
-        // яких фактично пересаджують.
-        if (
-          oldTable.status !== 'closed' &&
-          (transferredBookingOwnsPhysicalStatus || !['occupied', 'cleaning'].includes(oldTable.status))
-        ) {
-          oldTable.status = 'free';
-        }
-        nextTable.status = 'reserved';
-        await manager.getRepository(TableEntity).save([oldTable, nextTable]);
+        // Після перенесення старий стіл не стає автоматично вільним:
+        // він може залишатися secondary-столом іншого банкета сьогодні.
+        await synchronizeBookingTableStatusForDate(
+          manager,
+          oldTable.id,
+          booking.bookingDate,
+          {
+            assignmentsReady,
+            allowPhysicalRelease: transferredBookingOwnsPhysicalStatus,
+          },
+        );
+        await synchronizeBookingTableStatusForDate(
+          manager,
+          nextTable.id,
+          booking.bookingDate,
+          { assignmentsReady },
+        );
       }
       await manager.getRepository(BookingHistory).save(manager.getRepository(BookingHistory).create({
         booking,

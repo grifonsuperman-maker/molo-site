@@ -15,6 +15,7 @@ import { AvailabilityBlock } from './entities/availability-block.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
+import { synchronizeBookingTableStatusForDate } from './booking-table-status';
 
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 const DEFAULT_DURATION_MINUTES = 120;
@@ -373,6 +374,21 @@ export class AvailabilityBlocksService {
           isManualMode: true,
         }),
       );
+
+      if (booking.bookingDate === this.today()) {
+        await synchronizeBookingTableStatusForDate(
+          manager,
+          previousTable.id,
+          booking.bookingDate,
+          { assignmentsReady },
+        );
+        await synchronizeBookingTableStatusForDate(
+          manager,
+          nextTable.id,
+          booking.bookingDate,
+          { assignmentsReady },
+        );
+      }
 
       return {
         booking,

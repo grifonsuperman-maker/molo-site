@@ -17,6 +17,7 @@ import { BookingTableChangeRequest } from './entities/booking-table-change-reque
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { GuestReview } from './entities/guest-review.entity';
 import { syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
+import { synchronizeBookingTableStatusForDate } from './booking-table-status';
 
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'approved'];
 const DEFAULT_DURATION_MINUTES = 120;
@@ -414,26 +415,13 @@ export class AdminAttentionService {
 
   private async synchronizeTableForDate(manager: EntityManager, tableId: string, bookingDate: string) {
     if (!this.isToday(bookingDate)) return;
-    const repository = manager.getRepository(TableEntity);
-    const table = await repository.findOne({
-      where: { id: tableId },
-      lock: { mode: 'pessimistic_write' },
-    });
-    if (!table || ['closed', 'cleaning', 'occupied'].includes(table.status)) return;
-
-    const active = await manager.getRepository(Booking).find({
-      where: {
-        table: { id: tableId },
-        bookingDate,
-        status: In(ACTIVE_BOOKING_STATUSES),
-      } as any,
-      relations: ['table'],
-    });
-
-    if (active.some((item) => item.status === 'approved')) table.status = 'reserved';
-    else if (active.some((item) => item.status === 'pending')) table.status = 'pending';
-    else table.status = 'free';
-    await repository.save(table);
+    const assignmentsReady = await this.bookingTableAssignmentsReady(manager);
+    await synchronizeBookingTableStatusForDate(
+      manager,
+      tableId,
+      bookingDate,
+      { assignmentsReady },
+    );
   }
 
   private async applyBookingStatusToTable(
