@@ -1296,6 +1296,45 @@ export class BookingsService {
     return { message: 'Бронювання підтверджено' };
   }
 
+  private async remainingBookingStatusForTable(
+    bookings: Repository<Booking>,
+    tableId: string,
+    bookingDate: string,
+    assignmentsReady: boolean,
+  ): Promise<TableEntity['status']> {
+    const activeBookings = assignmentsReady
+      ? await bookings
+        .createQueryBuilder('activeBooking')
+        .leftJoin('activeBooking.table', 'activeTable')
+        .leftJoin('activeBooking.tableAssignments', 'activeAssignment')
+        .leftJoin('activeAssignment.table', 'activeAssignedTable')
+        .where(
+          '(activeTable.id = :tableId OR activeAssignedTable.id = :tableId)',
+          { tableId },
+        )
+        .andWhere('activeBooking.bookingDate = :bookingDate', { bookingDate })
+        .andWhere('activeBooking.status IN (:...statuses)', {
+          statuses: ACTIVE_BOOKING_STATUSES,
+        })
+        .distinct(true)
+        .getMany()
+      : await bookings.find({
+        where: {
+          table: { id: tableId },
+          bookingDate,
+          status: In(ACTIVE_BOOKING_STATUSES),
+        } as any,
+      });
+
+    if (activeBookings.some((candidate) => candidate.status === 'approved')) {
+      return 'reserved';
+    }
+    if (activeBookings.some((candidate) => candidate.status === 'pending')) {
+      return 'pending';
+    }
+    return 'free';
+  }
+
   private async updateBookingStatusWithLock(
     id: string,
     update: (booking: Booking) => void,
@@ -1365,8 +1404,17 @@ export class BookingsService {
           ) {
             continue;
           }
-          table.status = 'free';
-          await tableRepository.save(table);
+
+          const nextStatus = await this.remainingBookingStatusForTable(
+            repository,
+            tableId,
+            booking.bookingDate,
+            assignmentsReady,
+          );
+          if (table.status !== nextStatus) {
+            table.status = nextStatus;
+            await tableRepository.save(table);
+          }
         }
       }
 
