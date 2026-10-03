@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, Repository } from 'typeorm';
+import { EntityManager, In, LessThan, Repository } from 'typeorm';
 
 import { TableEntity, TableStatus } from '../tables/entities/table.entity';
 import { Booking, BookingStatus } from './entities/booking.entity';
@@ -43,79 +43,111 @@ export class BookingExpirationService implements OnModuleInit {
 
     try {
       const today = this.getKyivDate();
-      const assignmentsReady = await bookingTableAssignmentsReady(this.bookings.manager);
+      const result = await this.bookings.manager.transaction(async (manager) => {
+        const bookings = manager.getRepository(Booking);
+        const assignmentsReady = await bookingTableAssignmentsReady(manager);
 
-      const expiredBookings = await this.bookings.find({
-        where: {
-          bookingDate: LessThan(today),
-          status: In(ACTIVE_BOOKING_STATUSES),
-        },
-        relations: assignmentsReady
-          ? {
-              table: true,
-              tableAssignments: { table: true },
+        const expiredCandidates = await bookings.find({
+          where: {
+            bookingDate: LessThan(today),
+            status: In(ACTIVE_BOOKING_STATUSES),
+          },
+          order: {
+            bookingDate: 'ASC',
+            bookingTime: 'ASC',
+          },
+        });
+
+        const candidateIds = expiredCandidates
+          .filter((booking) => booking.status === 'pending' || Boolean(booking.checkedInAt))
+          .map((booking) => booking.id)
+          .sort();
+
+        if (candidateIds.length === 0) {
+          return { completed: 0, releasedTables: 0, preservedTables: 0 };
+        }
+
+        const completedAt = new Date();
+        const completableBookings: Booking[] = [];
+        const affectedTableIds = new Set<string>();
+
+        for (const bookingId of candidateIds) {
+          const locked = await bookings.findOne({
+            where: { id: bookingId },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (
+            !locked ||
+            locked.bookingDate >= today ||
+            !ACTIVE_BOOKING_STATUSES.includes(locked.status) ||
+            (locked.status !== 'pending' && !locked.checkedInAt)
+          ) {
+            continue;
+          }
+
+          const booking = await bookings.findOne({
+            where: { id: bookingId },
+            relations: assignmentsReady
+              ? {
+                  table: true,
+                  tableAssignments: { table: true },
+                }
+              : {
+                  table: true,
+                },
+          });
+          if (!booking) continue;
+
+          booking.status = 'completed';
+          booking.completedAt ??= completedAt;
+          completableBookings.push(booking);
+
+          if (booking.table?.id) affectedTableIds.add(booking.table.id);
+          if (assignmentsReady) {
+            for (const assignment of booking.tableAssignments || []) {
+              if (assignment.table?.id) affectedTableIds.add(assignment.table.id);
             }
-          : {
-              table: true,
-            },
-        order: {
-          bookingDate: 'ASC',
-          bookingTime: 'ASC',
-        },
-      });
-
-      const completableBookings = expiredBookings.filter(
-        (booking) => booking.status === 'pending' || Boolean(booking.checkedInAt),
-      );
-
-      // Approved bookings without check-in stay active here so the +30 minute
-      // no-show scheduler can classify them correctly, including after midnight.
-      if (completableBookings.length === 0) {
-        return;
-      }
-
-      const completedAt = new Date();
-      const affectedTableIds = new Set<string>();
-
-      for (const booking of completableBookings) {
-        booking.status = 'completed';
-        booking.completedAt ??= completedAt;
-
-        if (booking.table?.id) affectedTableIds.add(booking.table.id);
-        if (assignmentsReady) {
-          for (const assignment of booking.tableAssignments || []) {
-            if (assignment.table?.id) affectedTableIds.add(assignment.table.id);
           }
         }
-      }
 
-      await this.bookings.save(completableBookings);
-
-      let releasedTables = 0;
-      let preservedTables = 0;
-
-      for (const tableId of affectedTableIds) {
-        const result = await this.synchronizeTableStatus(
-          tableId,
-          today,
-          assignmentsReady,
-        );
-
-        if (result === 'released') {
-          releasedTables += 1;
+        if (completableBookings.length === 0) {
+          return { completed: 0, releasedTables: 0, preservedTables: 0 };
         }
 
-        if (result === 'preserved') {
-          preservedTables += 1;
+        await bookings.save(completableBookings);
+
+        let releasedTables = 0;
+        let preservedTables = 0;
+
+        for (const tableId of [...affectedTableIds].sort()) {
+          const tableResult = await this.synchronizeTableStatus(
+            manager,
+            tableId,
+            today,
+            assignmentsReady,
+          );
+
+          if (tableResult === 'released') releasedTables += 1;
+          if (tableResult === 'preserved') preservedTables += 1;
         }
+
+        return {
+          completed: completableBookings.length,
+          releasedTables,
+          preservedTables,
+        };
+      });
+
+      if (result.completed === 0) {
+        return;
       }
 
       this.logger.log(
         [
-          `Automatically completed ${completableBookings.length} expired booking(s)`,
+          `Automatically completed ${result.completed} expired booking(s)`,
           `before ${today}`,
-          `released tables: ${releasedTables}`,
-          `preserved tables: ${preservedTables}`,
+          `released tables: ${result.releasedTables}`,
+          `preserved tables: ${result.preservedTables}`,
         ].join('; '),
       );
     } catch (error: unknown) {
@@ -129,21 +161,22 @@ export class BookingExpirationService implements OnModuleInit {
   }
 
   private async synchronizeTableStatus(
+    manager: EntityManager,
     tableId: string,
     today: string,
     assignmentsReady: boolean,
   ): Promise<'released' | 'preserved' | 'unchanged'> {
-    const table = await this.tables.findOne({
-      where: {
-        id: tableId,
-      },
+    const tables = manager.getRepository(TableEntity);
+    const bookings = manager.getRepository(Booking);
+    const table = await tables.findOne({
+      where: { id: tableId },
+      lock: { mode: 'pessimistic_write' },
     });
 
     if (!table) {
       this.logger.warn(
         `Could not synchronize table ${tableId}: table was not found`,
       );
-
       return 'unchanged';
     }
 
@@ -156,7 +189,7 @@ export class BookingExpirationService implements OnModuleInit {
     }
 
     const todaysActiveBookings = assignmentsReady
-      ? await this.bookings
+      ? await bookings
         .createQueryBuilder('booking')
         .leftJoinAndSelect('booking.table', 'table')
         .leftJoin('booking.tableAssignments', 'tableAssignment')
@@ -167,7 +200,7 @@ export class BookingExpirationService implements OnModuleInit {
         .distinct(true)
         .orderBy('booking.bookingTime', 'ASC')
         .getMany()
-      : await this.bookings.find({
+      : await bookings.find({
         where: {
           table: {
             id: tableId,
@@ -219,7 +252,7 @@ export class BookingExpirationService implements OnModuleInit {
     }
 
     table.status = nextStatus;
-    await this.tables.save({ id: table.id, status: table.status });
+    await tables.save({ id: table.id, status: table.status });
 
     return nextStatus === 'free' ? 'released' : 'preserved';
   }

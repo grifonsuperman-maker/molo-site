@@ -476,6 +476,7 @@ export class AvailabilityBlocksService {
     startTime: string | null,
     endTime: string | null,
   ) {
+    const assignmentsReady = await this.bookingTableAssignmentsReady(manager);
     const query = manager
       .getRepository(Booking)
       .createQueryBuilder('booking')
@@ -484,8 +485,32 @@ export class AvailabilityBlocksService {
       .leftJoinAndSelect('booking.client', 'client')
       .where('booking.bookingDate = :blockDate', { blockDate })
       .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES });
-    if (tableId) query.andWhere('table.id = :tableId', { tableId });
-    if (zoneId) query.andWhere('zone.id = :zoneId', { zoneId });
+
+    if (assignmentsReady) {
+      query
+        .leftJoin('booking.tableAssignments', 'tableAssignment')
+        .leftJoin('tableAssignment.table', 'assignedTable')
+        .leftJoin('assignedTable.zone', 'assignedZone')
+        .distinct(true);
+    }
+
+    if (tableId) {
+      query.andWhere(
+        assignmentsReady
+          ? '(table.id = :tableId OR assignedTable.id = :tableId)'
+          : 'table.id = :tableId',
+        { tableId },
+      );
+    }
+    if (zoneId) {
+      query.andWhere(
+        assignmentsReady
+          ? '(zone.id = :zoneId OR assignedZone.id = :zoneId)'
+          : 'zone.id = :zoneId',
+        { zoneId },
+      );
+    }
+
     const bookings = await query.orderBy('booking.bookingTime', 'ASC').getMany();
     if (!startTime || !endTime) return bookings;
     const start = this.parseTime(startTime);

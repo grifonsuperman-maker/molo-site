@@ -256,6 +256,27 @@ test('repeated approval and arrival do not write a second history entry or notif
   assert.deepEqual(writes(arrival.calls), []);
 });
 
+test('replayed check-in returns success before validating an already occupied table', async () => {
+  const arrival = createHarness({
+    status: 'approved',
+    checkedInAt: new Date(),
+    tableStatus: 'occupied',
+  });
+
+  const result = await arrival.coordinated.checkIn('booking-1', {
+    role: 'waiter',
+    staffId: 'waiter-1',
+    name: 'Офіціант',
+  });
+
+  assert.deepEqual(result, { message: 'Гості відмічені як присутні' });
+  assert.deepEqual(writes(arrival.calls), []);
+  assert.equal(
+    arrival.calls.some(([name]) => name === 'table.findOne'),
+    false,
+  );
+});
+
 test('overlapping booking blocks approval and arrival without changing the table', async () => {
   for (const action of ['approve', 'checkIn']) {
     const { coordinated, booking, table, calls } = createHarness({
