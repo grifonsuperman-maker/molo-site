@@ -212,3 +212,188 @@ test('old table becomes free only when no active booking remains today', async (
   assert.equal(table.status, 'free');
   assert.deepEqual(saves, ['free']);
 });
+
+
+test('admin approval treats a banquet secondary table as an occupied destination', async () => {
+  const service = new AdminAttentionService({}, {}, {}, {});
+  const calls = [];
+  const conflictBooking = {
+    id: 'banquet-1',
+    bookingDate: '2099-05-01',
+    bookingTime: '18:30:00',
+    durationMinutes: 120,
+    status: 'approved',
+  };
+  const query = {
+    leftJoin(...args) {
+      calls.push(['leftJoin', ...args]);
+      return this;
+    },
+    where(...args) {
+      calls.push(['where', ...args]);
+      return this;
+    },
+    distinct(...args) {
+      calls.push(['distinct', ...args]);
+      return this;
+    },
+    andWhere(...args) {
+      calls.push(['andWhere', ...args]);
+      return this;
+    },
+    orderBy(...args) {
+      calls.push(['orderBy', ...args]);
+      return this;
+    },
+    async getMany() {
+      return [conflictBooking];
+    },
+  };
+  const manager = {
+    async query(sql) {
+      calls.push(['query', sql]);
+      return [{ ready: true }];
+    },
+    getRepository(entity) {
+      assert.equal(entity, Booking);
+      return {
+        createQueryBuilder(alias) {
+          assert.equal(alias, 'candidate');
+          return query;
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => service.assertNoConflict(
+      manager,
+      { id: 'table-secondary' },
+      {
+        id: 'booking-moving',
+        bookingDate: '2099-05-01',
+        bookingTime: '19:00:00',
+        durationMinutes: 120,
+      },
+    ),
+    /Цей стіл має інше бронювання у вибраний час/,
+  );
+
+  assert.ok(calls.some((call) =>
+    call[0] === 'leftJoin' &&
+    call[1] === 'candidate.tableAssignments' &&
+    call[2] === 'tableAssignment'
+  ));
+  assert.ok(calls.some((call) =>
+    call[0] === 'where' &&
+    String(call[1]).includes('assignedTable.id = :tableId')
+  ));
+});
+
+test('admin table-change conflict check keeps legacy primary-table query before banquet schema adoption', async () => {
+  const service = new AdminAttentionService({}, {}, {}, {});
+  const calls = [];
+  const query = {
+    leftJoin(...args) {
+      calls.push(['leftJoin', ...args]);
+      return this;
+    },
+    where(...args) {
+      calls.push(['where', ...args]);
+      return this;
+    },
+    andWhere() { return this; },
+    orderBy() { return this; },
+    async getMany() { return []; },
+  };
+  const manager = {
+    async query() { return [{ ready: false }]; },
+    getRepository() {
+      return { createQueryBuilder: () => query };
+    },
+  };
+
+  await service.assertNoConflict(
+    manager,
+    { id: 'table-legacy' },
+    {
+      id: 'booking-moving',
+      bookingDate: '2099-05-01',
+      bookingTime: '19:00:00',
+      durationMinutes: 120,
+    },
+  );
+
+  assert.ok(calls.some((call) =>
+    call[0] === 'where' &&
+    call[1] === 'table.id = :tableId'
+  ));
+  assert.equal(
+    calls.some((call) => call[0] === 'leftJoin' && call[1] === 'candidate.tableAssignments'),
+    false,
+  );
+});
+
+
+test('old table stays reserved when only a later banquet secondary assignment remains today', async () => {
+  const service = new AdminAttentionService({}, {}, {}, {});
+  const table = { id: 'old-table-secondary', status: 'free' };
+  const saves = [];
+  const calls = [];
+  const tableRepository = {
+    async findOne() { return table; },
+    async save(value) {
+      saves.push(value.status);
+      return value;
+    },
+  };
+  const query = {
+    leftJoin(...args) {
+      calls.push(['leftJoin', ...args]);
+      return this;
+    },
+    where(...args) {
+      calls.push(['where', ...args]);
+      return this;
+    },
+    andWhere(...args) {
+      calls.push(['andWhere', ...args]);
+      return this;
+    },
+    distinct(...args) {
+      calls.push(['distinct', ...args]);
+      return this;
+    },
+    async getMany() {
+      return [{ id: 'banquet-later', status: 'approved' }];
+    },
+  };
+  const bookingRepository = {
+    createQueryBuilder(alias) {
+      assert.equal(alias, 'activeBooking');
+      return query;
+    },
+  };
+  const manager = {
+    async query() { return [{ ready: true }]; },
+    getRepository(entity) {
+      if (entity === TableEntity) return tableRepository;
+      if (entity === Booking) return bookingRepository;
+      throw new Error(`Unexpected repository: ${entity?.name}`);
+    },
+  };
+
+  await service.synchronizeTableForDate(manager, table.id, kyivDate());
+
+  assert.equal(table.status, 'reserved');
+  assert.deepEqual(saves, ['reserved']);
+  assert.ok(calls.some((call) =>
+    call[0] === 'leftJoin' &&
+    call[1] === 'activeBooking.tableAssignments' &&
+    call[2] === 'activeAssignment'
+  ));
+  assert.ok(calls.some((call) =>
+    call[0] === 'where' &&
+    String(call[1]).includes('activeAssignedTable.id = :tableId')
+  ));
+});

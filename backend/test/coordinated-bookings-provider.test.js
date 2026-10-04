@@ -62,6 +62,18 @@ function createHarness({
       calls.push(['booking.find', options]);
       return [booking, ...otherBookings];
     },
+    createQueryBuilder(alias) {
+      calls.push(['booking.createQueryBuilder', alias]);
+      const query = {
+        leftJoin() { return query; },
+        where() { return query; },
+        andWhere() { return query; },
+        async getMany() {
+          return [booking, ...otherBookings];
+        },
+      };
+      return query;
+    },
     async save(value) {
       calls.push(['booking.save', value.status, Boolean(value.checkedInAt)]);
       if (failBookingSave) throw { driverError: { code: '23505' } };
@@ -177,7 +189,9 @@ test('check-in uses the shared table/date advisory lock and a locked booking row
   assert.ok(booking.checkedInAt instanceof Date);
   assert.equal(table.status, 'occupied');
   assert.deepEqual(calls[0], ['transaction']);
-  const advisoryIndex = calls.findIndex(([name]) => name === 'manager.query');
+  const advisoryIndex = calls.findIndex(([name, sql]) =>
+    name === 'manager.query' && String(sql).includes('pg_advisory_xact_lock'),
+  );
   const bookingLockIndex = calls.findIndex(([name, options]) =>
     name === 'booking.findOne' && options.lock?.mode === 'pessimistic_write',
   );
@@ -240,6 +254,27 @@ test('repeated approval and arrival do not write a second history entry or notif
   const arrival = createHarness({ status: 'approved', checkedInAt: new Date() });
   await arrival.coordinated.checkIn('booking-1');
   assert.deepEqual(writes(arrival.calls), []);
+});
+
+test('replayed check-in returns success before validating an already occupied table', async () => {
+  const arrival = createHarness({
+    status: 'approved',
+    checkedInAt: new Date(),
+    tableStatus: 'occupied',
+  });
+
+  const result = await arrival.coordinated.checkIn('booking-1', {
+    role: 'waiter',
+    staffId: 'waiter-1',
+    name: 'Офіціант',
+  });
+
+  assert.deepEqual(result, { message: 'Гості відмічені як присутні' });
+  assert.deepEqual(writes(arrival.calls), []);
+  assert.equal(
+    arrival.calls.some(([name]) => name === 'table.findOne'),
+    false,
+  );
 });
 
 test('overlapping booking blocks approval and arrival without changing the table', async () => {

@@ -1,14 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { BookingHistory } from './entities/booking-history.entity';
+import { BookingTableAssignment } from './entities/booking-table-assignment.entity';
 import { BookingRescheduleRequest } from './entities/booking-reschedule-request.entity';
 import { Client } from '../clients/entities/client.entity';
 import { TableEntity } from '../tables/entities/table.entity';
 import { rethrowTableNumberConflict } from '../tables/table-number-conflict';
 import { Restaurant } from '../restaurant/entities/restaurant.entity';
+import { CreateAdminBanquetBookingDto } from './dto/create-admin-banquet-booking.dto';
 import { CreateAdminManualBookingDto } from './dto/create-admin-manual-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
@@ -19,6 +21,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { WaiterCallsService } from '../waiter-calls/waiter-calls.service';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { TableStatusProjectionService } from '../tables/table-status-projection.service';
+import { bookingTableAssignmentsReady, syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
+import { remainingBookingStatusForTable, synchronizeBookingTableStatusForDate } from './booking-table-status';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
@@ -80,13 +84,17 @@ export class BookingsService {
     }
   }
 
-  private async assertNoActivePhoneBooking(bookingDate: string, phone: string) {
+  private async assertNoActivePhoneBooking(
+    bookingDate: string,
+    phone: string,
+    bookings: Repository<Booking> = this.bookings,
+  ) {
     const normalizedPhone = this.normalizePhone(phone);
     if (!normalizedPhone) {
       throw new BadRequestException('Вкажіть коректний номер телефону');
     }
 
-    const activeBookings = await this.bookings
+    const activeBookings = await bookings
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.client', 'client')
       .addSelect('booking.guestPhoneNormalized')
@@ -219,14 +227,44 @@ export class BookingsService {
     };
   }
 
-  private async getActiveBookingsForTable(tableId: string, bookingDate: string, excludeBookingId?: string) {
-    const query = this.bookings
+  private async bookingTableAssignmentsReady(
+    bookings: Repository<Booking> = this.bookings,
+  ) {
+    const manager = bookings?.manager;
+    if (!manager || typeof manager.query !== 'function') return false;
+    const rows = await manager.query(
+      `SELECT to_regclass('public.booking_table_assignments') IS NOT NULL AS "ready"`,
+    );
+    return Array.isArray(rows) && rows[0]?.ready === true;
+  }
+
+  private async getActiveBookingsForTable(
+    tableId: string,
+    bookingDate: string,
+    excludeBookingId?: string,
+    bookings: Repository<Booking> = this.bookings,
+    knownAssignmentsReady?: boolean,
+  ) {
+    const assignmentsReady = knownAssignmentsReady ??
+      await this.bookingTableAssignmentsReady(bookings);
+    const query = bookings
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.table', 'table')
-      .leftJoinAndSelect('booking.client', 'client')
-      .where('table.id = :tableId', { tableId })
+      .leftJoinAndSelect('booking.client', 'client');
+
+    if (assignmentsReady) {
+      query
+        .leftJoin('booking.tableAssignments', 'tableAssignment')
+        .leftJoin('tableAssignment.table', 'assignedTable')
+        .where('(table.id = :tableId OR assignedTable.id = :tableId)', { tableId });
+    } else {
+      query.where('table.id = :tableId', { tableId });
+    }
+
+    query
       .andWhere('booking.bookingDate = :bookingDate', { bookingDate })
       .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
+      .distinct(true)
       .orderBy('booking.bookingTime', 'ASC');
 
     if (excludeBookingId) query.andWhere('booking.id != :excludeBookingId', { excludeBookingId });
@@ -349,6 +387,38 @@ export class BookingsService {
     if (!force && (table.status === 'occupied' || table.status === 'cleaning')) return;
 
     await this.setTableStatus(table, status);
+  }
+
+  private async getBookingTables(bookingId: string) {
+    const assignmentsReady = await this.bookingTableAssignmentsReady();
+    const booking = await this.bookings.findOne({
+      where: { id: bookingId },
+      relations: assignmentsReady
+        ? ['table', 'tableAssignments', 'tableAssignments.table']
+        : ['table'],
+    });
+    if (!booking) return [];
+
+    const tables = [
+      booking.table,
+      ...(assignmentsReady
+        ? (booking.tableAssignments || []).map((assignment) => assignment.table)
+        : []),
+    ].filter((table): table is TableEntity => Boolean(table?.id));
+
+    return Array.from(new Map(tables.map((table) => [table.id, table])).values());
+  }
+
+  private async setBookingTablesStatusOnlyForToday(
+    booking: Booking,
+    status: TableEntity['status'],
+    force = false,
+  ) {
+    if (!this.isBookingToday(booking.bookingDate)) return;
+    const tables = await this.getBookingTables(booking.id);
+    for (const table of tables) {
+      await this.setTableStatusOnlyForToday(table, status, booking.bookingDate, force);
+    }
   }
 
   private async safeLog(action: string, details?: Record<string, unknown>) {
@@ -544,10 +614,19 @@ export class BookingsService {
 
     const tables = await this.tables.find({ relations: ['zone'], order: { tableNumber: 'ASC' } as any });
 
-    const activeBookings = await this.bookings
+    const assignmentsReady = await this.bookingTableAssignmentsReady();
+    const activeBookingsQuery = this.bookings
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.table', 'table')
-      .leftJoinAndSelect('booking.client', 'client')
+      .leftJoinAndSelect('booking.client', 'client');
+
+    if (assignmentsReady) {
+      activeBookingsQuery
+        .leftJoinAndSelect('booking.tableAssignments', 'tableAssignments')
+        .leftJoinAndSelect('tableAssignments.table', 'assignedTable');
+    }
+
+    const activeBookings = await activeBookingsQuery
       .where('booking.bookingDate = :bookingDate', { bookingDate })
       .andWhere('booking.status IN (:...statuses)', { statuses: ACTIVE_BOOKING_STATUSES })
       .orderBy('booking.bookingTime', 'ASC')
@@ -559,7 +638,10 @@ export class BookingsService {
     for (const table of tables) {
       const tableNumber = String(table.tableNumber);
       const tableBookings = activeBookings.filter(
-        (booking) => booking.table?.id === table.id || String(booking.table?.tableNumber) === tableNumber,
+        (booking) =>
+          booking.table?.id === table.id ||
+          String(booking.table?.tableNumber) === tableNumber ||
+          booking.tableAssignments?.some((assignment) => assignment.table?.id === table.id),
       );
       const conflict = this.findConflict(tableBookings, timeInfo.startMinutes, timeInfo.availableFromMinutes);
       const conflictInfo = conflict ? this.bookingToAvailabilityConflict(conflict) : null;
@@ -814,6 +896,237 @@ export class BookingsService {
     }
   }
 
+
+  async createManualBanquet(dto: CreateAdminBanquetBookingDto, actor?: AuthUser) {
+    const tableIds = dto.tableIds.map((value) => String(value || '').trim());
+    const uniqueTableIds = Array.from(new Set(tableIds));
+    const primaryTableId = String(dto.primaryTableId || '').trim();
+
+    if (uniqueTableIds.length < 2 || uniqueTableIds.length !== tableIds.length) {
+      throw new BadRequestException('Оберіть щонайменше два різні столи для банкету');
+    }
+    if (!uniqueTableIds.includes(primaryTableId)) {
+      throw new BadRequestException('Основний стіл має входити до банкету');
+    }
+
+    let committedBooking: Booking | null = null;
+    let committedTableNumbers: string[] = [];
+
+    try {
+      const result = await this.bookings.manager.transaction(async (manager) => {
+        const [schema] = await manager.query(
+          `SELECT to_regclass('public.booking_table_assignments') IS NOT NULL AS "ready"`,
+        );
+        if (schema?.ready !== true) {
+          throw new BadRequestException('Банкетне бронювання ще не підготовлено в базі даних');
+        }
+
+        const bookingDate = this.normalizeBookingDate(dto.bookingDate);
+        const fullName = String(dto.fullName || '').trim();
+        const phone = String(dto.phone || '').trim();
+
+        const bookings = manager.getRepository(Booking);
+        const histories = manager.getRepository(BookingHistory);
+        const clients = manager.getRepository(Client);
+        const tables = manager.getRepository(TableEntity);
+        const assignments = manager.getRepository(BookingTableAssignment);
+
+        const guestPhoneNormalized = phone
+          ? await this.assertNoActivePhoneBooking(bookingDate, phone, bookings)
+          : null;
+
+        const foundTables = await tables
+          .createQueryBuilder('table')
+          .leftJoinAndSelect('table.zone', 'zone')
+          .where('table.id IN (:...tableIds)', { tableIds: [...uniqueTableIds].sort() })
+          .orderBy('table.id', 'ASC')
+          .setLock('pessimistic_write', undefined, ['table'])
+          .getMany();
+        if (foundTables.length !== uniqueTableIds.length) {
+          throw new NotFoundException('Один або кілька столів не знайдено');
+        }
+
+        const tableById = new Map(foundTables.map((table) => [table.id, table]));
+        const orderedTables = uniqueTableIds.map((tableId) => tableById.get(tableId)!);
+        const primaryTable = tableById.get(primaryTableId);
+        if (!primaryTable) throw new NotFoundException('Основний стіл не знайдено');
+
+        for (const table of orderedTables) {
+          await this.assertTableCanBeBooked(table);
+        }
+
+        let client: Client | null = null;
+        if (phone && guestPhoneNormalized) {
+          const matchingClients = await clients
+            .createQueryBuilder('client')
+            .where(
+              `regexp_replace("client"."phone", '[^0-9]', '', 'g') = :normalizedPhone`,
+              { normalizedPhone: guestPhoneNormalized },
+            )
+            .getMany();
+
+          if (matchingClients.some((candidate) => candidate.isBlacklisted)) {
+            throw new BadRequestException('Бронювання з цього номера недоступне');
+          }
+
+          client = matchingClients[0] || null;
+          if (!client) {
+            client = await clients.save(clients.create({ fullName, phone }));
+          }
+        }
+
+        const timeInfo = this.buildTimeInfo(dto.bookingTime, dto.durationMinutes);
+        for (const table of orderedTables) {
+          const activeBookings = await this.getActiveBookingsForTable(
+            table.id,
+            bookingDate,
+            undefined,
+            bookings,
+            true,
+          );
+          const conflict = this.findConflict(
+            activeBookings,
+            timeInfo.startMinutes,
+            timeInfo.availableFromMinutes,
+          );
+          if (conflict) {
+            const conflictInfo = this.bookingToAvailabilityConflict(conflict);
+            throw new BadRequestException(
+              `Стіл №${table.tableNumber} зайнятий ${conflictInfo.bookedFromLabel} — ${conflictInfo.bookedToLabel}. Вільний з ${conflictInfo.availableFromLabel}`,
+            );
+          }
+        }
+
+        const wishes = [
+          `Банкет: столи ${orderedTables.map((table) => `№${table.tableNumber}`).join(', ')}`,
+          `Час відпочинку: ${timeInfo.durationMinutes} хв (${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel})`,
+          `Підготовка столів після гостей: ${timeInfo.cleanupMinutes} хв, наступний гість з ${timeInfo.availableFromLabel}`,
+          dto.wishes || '',
+        ].filter(Boolean).join('\n');
+
+        const booking = await bookings.save(
+          bookings.create({
+            table: primaryTable,
+            client,
+            guestAccessTokenHash: null,
+            guestDeviceIdHash: null,
+            guestPhoneNormalized,
+            guestName: fullName,
+            bookingDate,
+            bookingTime: timeInfo.bookingTime,
+            durationMinutes: timeInfo.durationMinutes,
+            guestsCount: dto.guestsCount,
+            wishes,
+            status: 'approved',
+            source: 'admin_manual',
+            approvedAt: new Date(),
+          }),
+        );
+
+        await assignments.save(
+          orderedTables.map((table) =>
+            assignments.create({
+              booking,
+              table,
+              isPrimary: table.id === primaryTable.id,
+            }),
+          ),
+        );
+
+        const snapshot = {
+          ...this.bookingSnapshot(booking),
+          banquet: true,
+          tableIds: orderedTables.map((table) => table.id),
+          tableNumbers: orderedTables.map((table) => table.tableNumber),
+        };
+        await histories.save(
+          histories.create({
+            booking,
+            action: 'booking_created',
+            actorRole: actor?.role || 'admin',
+            actorStaffId: actor?.staffId || null,
+            actorName: actor?.name || null,
+            previousData: null,
+            newData: snapshot,
+            reason: null,
+            isManualMode: false,
+          }),
+        );
+
+        if (this.isBookingToday(bookingDate)) {
+          for (const table of orderedTables) {
+            if (
+              table.status !== 'closed' &&
+              table.status !== 'occupied' &&
+              table.status !== 'cleaning'
+            ) {
+              table.status = 'reserved';
+              await tables.save(table);
+            }
+          }
+        }
+
+        committedBooking = booking;
+        committedTableNumbers = orderedTables.map((table) => String(table.tableNumber));
+
+        return {
+          message: 'Банкетне бронювання створено та підтверджено',
+          bookingId: booking.id,
+          status: booking.status,
+          bookingDate,
+          bookingTime: timeInfo.bookingTime,
+          departureTime: timeInfo.departureTime,
+          availableFrom: timeInfo.availableFrom,
+          durationMinutes: timeInfo.durationMinutes,
+          cleanupMinutes: timeInfo.cleanupMinutes,
+          primaryTableId,
+          tableIds: orderedTables.map((table) => table.id),
+          tableNumbers: committedTableNumbers,
+        };
+      });
+
+      await this.safeLog('Створено банкетне бронювання', {
+        bookingId: committedBooking?.id || null,
+        primaryTableId,
+        tableNumbers: committedTableNumbers,
+        tablesCount: committedTableNumbers.length,
+        guestsCount: dto.guestsCount,
+        actorRole: actor?.role || null,
+        actorStaffId: actor?.staffId || null,
+        actorName: actor?.name || null,
+      });
+
+      if (committedBooking) {
+        await this.safeNotify(async () => {
+          const full = await this.bookings.findOne({
+            where: { id: committedBooking!.id },
+            relations: ['table', 'client', 'tableAssignments', 'tableAssignments.table'],
+          });
+          if (full) {
+            await this.notifications.notifyManualBookingCreated(
+              this.withManualGuestDisplayClient(full),
+            );
+          }
+        });
+      }
+
+      return result;
+    } catch (error: any) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
+      if (
+        (error?.code || error?.driverError?.code) === '23505' &&
+        (error?.constraint || error?.driverError?.constraint) ===
+          'UQ_bookings_active_guest_phone_date'
+      ) {
+        throw new BadRequestException('На цю дату вже є активне бронювання з цього номера телефону');
+      }
+      console.error('Banquet booking create failed:', error);
+      throw new BadRequestException(
+        `Не вдалося створити банкетне бронювання: ${error?.message || 'невідома помилка'}`,
+      );
+    }
+  }
+
   async getPublicStatus(id: string) {
     const booking = await this.bookings.findOne({ where: { id }, relations: ['table', 'client'] });
     if (!booking) throw new NotFoundException('Бронювання не знайдено');
@@ -987,6 +1300,13 @@ export class BookingsService {
   private async updateBookingStatusWithLock(
     id: string,
     update: (booking: Booking) => void,
+    history: {
+      action: string;
+      actorRole: string;
+      reason?: string | null;
+      actor?: AuthUser | null;
+      forceTableRelease?: boolean;
+    },
   ) {
     return this.bookings.manager.transaction(async (manager) => {
       const repository = manager.getRepository(Booking);
@@ -1002,53 +1322,117 @@ export class BookingsService {
       const previousData = this.bookingSnapshot(booking);
       update(booking);
       await repository.save(booking);
+
+      await manager.getRepository(BookingHistory).save(
+        manager.getRepository(BookingHistory).create({
+          booking,
+          action: history.action,
+          actorRole: history.actorRole,
+          actorStaffId: history.actor?.staffId || null,
+          actorName: history.actor?.name || null,
+          previousData,
+          newData: this.bookingSnapshot(booking),
+          reason: history.reason || null,
+          isManualMode: false,
+        }),
+      );
+
+      if (this.isBookingToday(booking.bookingDate)) {
+        const assignmentsReady = await this.bookingTableAssignmentsReady(repository);
+        const tableIds = new Set<string>();
+        if (booking.table?.id) tableIds.add(booking.table.id);
+
+        if (assignmentsReady) {
+          const assignments = await manager.getRepository(BookingTableAssignment).find({
+            where: { booking: { id: booking.id } } as any,
+            relations: ['table'],
+          });
+          for (const assignment of assignments) {
+            if (assignment.table?.id) tableIds.add(assignment.table.id);
+          }
+        }
+
+        const tableRepository = manager.getRepository(TableEntity);
+        for (const tableId of [...tableIds].sort()) {
+          const table = await tableRepository
+            .createQueryBuilder('table')
+            .where('table.id = :tableId', { tableId })
+            .setLock('pessimistic_write', undefined, ['table'])
+            .getOne();
+          if (!table || table.status === 'closed') continue;
+          if (
+            !history.forceTableRelease &&
+            (table.status === 'occupied' || table.status === 'cleaning')
+          ) {
+            continue;
+          }
+
+          const nextStatus = await remainingBookingStatusForTable(
+            manager,
+            tableId,
+            booking.bookingDate,
+            assignmentsReady,
+          );
+          if (table.status !== nextStatus) {
+            table.status = nextStatus;
+            await tableRepository.save(table);
+          }
+        }
+      }
+
       return { booking, previousData };
     });
   }
 
   async reject(id: string) {
-    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
-      lockedBooking.status = 'rejected';
-      lockedBooking.rejectedAt = new Date();
-      lockedBooking.cancellationReason = 'admin_rejected';
-    });
-    await this.saveHistory(booking, 'booking_rejected', 'admin', previousData, this.bookingSnapshot(booking));
-    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    const { booking } = await this.updateBookingStatusWithLock(
+      id,
+      (lockedBooking) => {
+        lockedBooking.status = 'rejected';
+        lockedBooking.rejectedAt = new Date();
+        lockedBooking.cancellationReason = 'admin_rejected';
+      },
+      { action: 'booking_rejected', actorRole: 'admin' },
+    );
     await this.safeLog('Відхилено бронювання', { bookingId: id });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Бронювання відхилено' };
   }
 
   async cancel(id: string) {
-    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
-      lockedBooking.status = 'cancelled';
-      lockedBooking.cancelledAt = new Date();
-      lockedBooking.cancellationReason = 'admin_cancelled';
-    });
-    await this.saveHistory(booking, 'booking_cancelled', 'admin', previousData, this.bookingSnapshot(booking));
-    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    const { booking } = await this.updateBookingStatusWithLock(
+      id,
+      (lockedBooking) => {
+        lockedBooking.status = 'cancelled';
+        lockedBooking.cancelledAt = new Date();
+        lockedBooking.cancellationReason = 'admin_cancelled';
+      },
+      { action: 'booking_cancelled', actorRole: 'admin' },
+    );
     await this.safeLog('Скасовано бронювання', { bookingId: id });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Бронювання скасовано' };
   }
 
   async noShow(id: string) {
-    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
-      if (lockedBooking.checkedInAt) {
-        throw new BadRequestException('Гість уже відмічений як присутній');
-      }
-      lockedBooking.status = 'cancelled';
-      lockedBooking.cancelledAt = new Date();
-      lockedBooking.cancellationReason = 'no_show';
-      lockedBooking.wishes = this.markNoShowInWishes(lockedBooking);
-      lockedBooking.guestNotification = {
-        type: 'no_show',
-        title: 'Бронювання завершено через неявку',
-        createdAt: new Date().toISOString(),
-      };
-    });
-    await this.saveHistory(booking, 'booking_no_show', 'admin', previousData, this.bookingSnapshot(booking), 'no_show');
-    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate);
+    const { booking } = await this.updateBookingStatusWithLock(
+      id,
+      (lockedBooking) => {
+        if (lockedBooking.checkedInAt) {
+          throw new BadRequestException('Гість уже відмічений як присутній');
+        }
+        lockedBooking.status = 'cancelled';
+        lockedBooking.cancelledAt = new Date();
+        lockedBooking.cancellationReason = 'no_show';
+        lockedBooking.wishes = this.markNoShowInWishes(lockedBooking);
+        lockedBooking.guestNotification = {
+          type: 'no_show',
+          title: 'Бронювання завершено через неявку',
+          createdAt: new Date().toISOString(),
+        };
+      },
+      { action: 'booking_no_show', actorRole: 'admin', reason: 'no_show' },
+    );
     await this.safeLog('No-show: гість не прийшов', { bookingId: id, tableNumber: booking.table?.tableNumber || null });
     await this.safeNotify(() => this.notifications.notifyBookingCancelled(booking));
     return { message: 'Гість не прийшов. Бронювання знято, стіл вільний.' };
@@ -1082,20 +1466,19 @@ export class BookingsService {
   }
 
   async complete(id: string, actor?: AuthUser) {
-    const { booking, previousData } = await this.updateBookingStatusWithLock(id, (lockedBooking) => {
-      lockedBooking.status = 'completed';
-      lockedBooking.completedAt = new Date();
-    });
-    await this.saveHistory(
-      booking,
-      'booking_completed',
-      actor?.role || 'admin',
-      previousData,
-      this.bookingSnapshot(booking),
-      null,
-      actor || null,
+    const { booking } = await this.updateBookingStatusWithLock(
+      id,
+      (lockedBooking) => {
+        lockedBooking.status = 'completed';
+        lockedBooking.completedAt = new Date();
+      },
+      {
+        action: 'booking_completed',
+        actorRole: actor?.role || 'admin',
+        actor: actor || null,
+        forceTableRelease: true,
+      },
     );
-    await this.setTableStatusOnlyForToday(booking.table, 'free', booking.bookingDate, true);
     await this.safeLog('Стіл звільнено', {
       bookingId: id,
       staffId: actor?.staffId || null,
@@ -1144,6 +1527,14 @@ export class BookingsService {
       });
       if (!oldTable) throw new BadRequestException('Попередній стіл не знайдено');
 
+      const assignmentsReady = await bookingTableAssignmentsReady(manager);
+      await syncSingleTableTransferAssignment(
+        manager,
+        booking,
+        nextTable,
+        assignmentsReady,
+      );
+
       const previousData = this.bookingSnapshot(booking);
       const transferredBookingOwnsPhysicalStatus =
         Boolean(booking.checkedInAt) &&
@@ -1152,17 +1543,23 @@ export class BookingsService {
       booking.checkedInAt = null;
       await manager.getRepository(Booking).save(booking);
       if (booking.bookingDate === this.restaurantDateToday()) {
-        // Фізичний occupied/cleaning може належати попередньому візиту за
-        // послідовним бронюванням. Звільняємо його лише разом із гостями,
-        // яких фактично пересаджують.
-        if (
-          oldTable.status !== 'closed' &&
-          (transferredBookingOwnsPhysicalStatus || !['occupied', 'cleaning'].includes(oldTable.status))
-        ) {
-          oldTable.status = 'free';
-        }
-        nextTable.status = 'reserved';
-        await manager.getRepository(TableEntity).save([oldTable, nextTable]);
+        // Після перенесення старий стіл не стає автоматично вільним:
+        // він може залишатися secondary-столом іншого банкета сьогодні.
+        await synchronizeBookingTableStatusForDate(
+          manager,
+          oldTable.id,
+          booking.bookingDate,
+          {
+            assignmentsReady,
+            allowPhysicalRelease: transferredBookingOwnsPhysicalStatus,
+          },
+        );
+        await synchronizeBookingTableStatusForDate(
+          manager,
+          nextTable.id,
+          booking.bookingDate,
+          { assignmentsReady },
+        );
       }
       await manager.getRepository(BookingHistory).save(manager.getRepository(BookingHistory).create({
         booking,
