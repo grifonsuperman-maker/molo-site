@@ -28,7 +28,9 @@ export async function runSyrveTransferValidation(env = process.env) {
   const originalFetch = globalThis.fetch;
   const zone = randomUUID(), organizationId = randomUUID();
   const numbers = [...Array.from({ length: 50 }, (_, n) => n + 1), ...Array.from({ length: 10 }, (_, n) => n + 100)];
-  const tables = numbers.map(number => ({ number, molo: randomUUID(), syrve: randomUUID() }));
+  // Other validators retain baseline restaurant rows. Use disjoint physical
+  // numbers while testing the provider's 39/108 UUIDs; never alter those rows.
+  const tables = numbers.map(number => ({ number, physicalNumber: String(900_000_000_000 + number), molo: randomUUID(), syrve: randomUUID() }));
   const source = tables.find(table => table.number === 39), destination = tables.find(table => table.number === 108), eight = tables.find(table => table.number === 8);
   const scope = table => ({ organizationId, syrveTableId: table.syrve });
   const tx = batchTransport(organizationId, tables.map(table => table.syrve).sort());
@@ -38,7 +40,7 @@ export async function runSyrveTransferValidation(env = process.env) {
     assert.equal(Number((await db.query('SELECT count(*) AS count FROM syrve_integrations'))[0].count), 0);
     await db.query('INSERT INTO zones(id,name) VALUES ($1,\'Synthetic transfer CI\')', [zone]);
     await db.query('INSERT INTO tables(id,zone_id,table_number,status) SELECT id,$1,number,\'free\''
-      + ' FROM jsonb_to_recordset($2::jsonb) AS v(id uuid,number varchar)', [zone, JSON.stringify(tables.map(table => ({ id: table.molo, number: String(table.number) })))]);
+      + ' FROM jsonb_to_recordset($2::jsonb) AS v(id uuid,number varchar)', [zone, JSON.stringify(tables.map(table => ({ id: table.molo, number: table.physicalNumber })))]);
     const settings = new SyrveSettingsStore(db), activation = new SyrveActivationStore(db, settings);
     const integration = new SyrveIntegrationService(settings, {}, new SyrveClient(), db.getRepository(TableEntity), activation);
     const encrypted = integration.encrypt('synthetic-transfer-login');
@@ -108,7 +110,7 @@ export async function runSyrveTransferValidation(env = process.env) {
     const adopted = await db.query('SELECT link_id,local_revision FROM syrve_table_sync_states ORDER BY link_id');
     assert.equal(adopted.length, 60); assert.ok(adopted.every((state, index) => state.local_revision !== oldRevisions[index].local_revision));
     assert.deepEqual(await ledgers(), beforeFence);
-    assert.deepEqual((await db.query('SELECT table_number FROM tables WHERE zone_id=$1 ORDER BY table_number', [zone])).map(table => table.table_number).sort(), numbers.map(String).sort());
+    assert.deepEqual((await db.query('SELECT table_number FROM tables WHERE zone_id=$1 ORDER BY table_number', [zone])).map(table => table.table_number).sort(), tables.map(table => table.physicalNumber).sort());
   } finally {
     await worker?.onModuleDestroy(); globalThis.fetch = originalFetch;
     for (const [key, value] of Object.entries(originals)) value === undefined ? delete env[key] : env[key] = value;
