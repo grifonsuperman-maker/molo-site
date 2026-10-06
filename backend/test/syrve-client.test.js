@@ -18,8 +18,11 @@ function setup(t, responses) {
     }
   });
   const calls = [];
+  let markStarted;
+  const started = new Promise(resolve => { markStarted = resolve; });
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     calls.push({ url, ...options, body: JSON.parse(options.body) });
+    markStarted();
     const response = responses.shift();
     assert.ok(response, 'unexpected extra Syrve request');
     if (typeof response === 'function') return response(options);
@@ -27,7 +30,7 @@ function setup(t, responses) {
   });
   process.env.SYRVE_APP_ID = '';
   process.env.SYRVE_APP_CLIENT_SECRET = '';
-  return { client: new SyrveClient(), calls };
+  return { client: new SyrveClient(require('./helpers/syrve-test-request-limiter.js')), calls, started };
 }
 
 function success(organizations = [{ id: ORG, name: 'MOLO' }]) {
@@ -44,33 +47,35 @@ function errorCode(code, secrets = [LOGIN, TOKEN]) {
 }
 
 test('worker cancellation aborts a stalled authentication request and removes its listener', async (t) => {
-  const { client, calls } = setup(t, [({ signal }) => new Promise((yes,no) => {
+  const { client, calls, started } = setup(t, [({ signal }) => new Promise((yes,no) => {
     signal.addEventListener('abort', () => no(new DOMException('aborted','AbortError')), { once:true });
   })]);
   const controller=new AbortController(); const remove=t.mock.method(controller.signal,'removeEventListener');
   const pending=client.probeOrders(BASE,LOGIN,ORG,[ORG],[],{signal:controller.signal});
+  await started;
   controller.abort(); const result=await pending;
   assert.equal(result.checks.connection.code,'SYRVE_TIMEOUT'); assert.equal(calls[0].signal.aborted,true);
   assert.ok(remove.mock.callCount()>0); assert.equal(result.byTable,null);
 });
 
 test('worker cancellation covers a stalled response body and preserves no partial orders', async (t) => {
-  const { client }=setup(t,[({signal}) => new Response(new ReadableStream({start(controller){
+  const { client, started }=setup(t,[({signal}) => new Response(new ReadableStream({start(controller){
     signal.addEventListener('abort',()=>controller.error(new DOMException('aborted','AbortError')),{once:true});
   }}),{headers:{'content-type':'application/json'}})]);
   const controller=new AbortController();
   const pending=client.probeOrders(BASE,LOGIN,ORG,[ORG],[],{signal:controller.signal});
-  await Promise.resolve(); await Promise.resolve(); controller.abort();
+  await started; controller.abort();
   const result=await pending; assert.equal(result.checks.connection.code,'SYRVE_TIMEOUT');
   assert.equal(result.byTable,null); assert.equal(result.byId,null);
 });
 
 test('worker shared deadline bounds authentication rather than starting a fresh 45 seconds', async (t) => {
-  const {client,calls}=setup(t,[({signal})=>new Promise((yes,no)=>{
+  const {client,calls,started}=setup(t,[({signal})=>new Promise((yes,no)=>{
     signal.addEventListener('abort',()=>no(new DOMException('aborted','AbortError')),{once:true});
   })]);
   t.mock.timers.enable({apis:['setTimeout','Date'],now:1000});
   const pending=client.probeOrders(BASE,LOGIN,ORG,[ORG],[],{deadline:1050});
+  await started;
   t.mock.timers.tick(49); assert.equal(calls[0].signal.aborted,false);
   t.mock.timers.tick(1); assert.equal((await pending).checks.connection.code,'SYRVE_TIMEOUT');
 });
@@ -162,11 +167,12 @@ test('offline and redirect failures are contained without reflecting fetch error
 });
 
 test('a stalled request is aborted at the existing 12 second deadline', async (t) => {
-  const { client, calls } = setup(t, [({ signal }) => new Promise((resolve, reject) => {
+  const { client, calls, started } = setup(t, [({ signal }) => new Promise((resolve, reject) => {
     signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
   })]);
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const pending = assert.rejects(client.checkOrganizations(BASE, LOGIN), errorCode('SYRVE_TIMEOUT'));
+  await started;
   t.mock.timers.tick(11_999);
   assert.equal(calls[0].signal.aborted, false);
   t.mock.timers.tick(1);
@@ -175,14 +181,14 @@ test('a stalled request is aborted at the existing 12 second deadline', async (t
 });
 
 test('the deadline also covers reading a stalled response body', async (t) => {
-  const { client } = setup(t, [({ signal }) => new Response(new ReadableStream({
+  const { client, started } = setup(t, [({ signal }) => new Response(new ReadableStream({
     start(controller) {
       signal.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')), { once: true });
     },
   }), { headers: { 'content-type': 'application/json' } })]);
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const pending = assert.rejects(client.checkOrganizations(BASE, LOGIN), errorCode('SYRVE_TIMEOUT'));
-  await Promise.resolve();
+  await started;
   t.mock.timers.tick(12_000);
   await pending;
 });

@@ -1,4 +1,5 @@
 import { api } from './client';
+import { syrveOperation } from './syrveOperation';
 
 export type SyrveIntegrationStatus = {
   id: string;
@@ -109,30 +110,30 @@ export const syrveApi = {
   getStatus: () => api.get<SyrveIntegrationStatus>('/syrve-integration'),
   getReadiness: () => api.get<SyrveReadiness>('/syrve-integration/readiness'),
   getAutoStatus: () => api.get<SyrveAutoStatus>('/syrve-integration/auto-status'),
-  previewAutoStatus: (configurationRevision: string) => api.post<SyrveActivationPreview>('/syrve-integration/auto-status-preview', { configurationRevision }),
-  enableAutoStatus: (configurationRevision: string, confirmationProof: string) => api.post<SyrveActivationResult>('/syrve-integration/enable-auto-status', { configurationRevision, confirmationProof, confirmed: true }),
+  previewAutoStatus: (configurationRevision: string) => syrveOperation<SyrveActivationPreview>('/syrve-integration/auto-status-preview', { configurationRevision }),
+  enableAutoStatus: (configurationRevision: string, confirmationProof: string) => syrveOperation<SyrveActivationResult>('/syrve-integration/enable-auto-status', { configurationRevision, confirmationProof, confirmed: true }),
   disableAutoStatus: (configurationRevision: string) => api.post<{ configurationRevision: string; checkedAt: string; syncEnabled: false }>('/syrve-integration/disable-auto-status', { configurationRevision }),
   orderDiagnostics: (configurationRevision: string) =>
-    api.post<SyrveOrderDiagnostics>('/syrve-integration/orders-diagnostics', { configurationRevision }),
+    syrveOperation<SyrveOrderDiagnostics>('/syrve-integration/orders-diagnostics', { configurationRevision }),
   previewTableLoading: (configurationRevision: string) =>
-    api.post<SyrveTableLoadingPreview>('/syrve-integration/table-loading-preview', { configurationRevision }),
+    syrveOperation<SyrveTableLoadingPreview>('/syrve-integration/table-loading-preview', { configurationRevision }),
   loadTables: (configurationRevision: string, confirmationProof: string) =>
-    api.post<SyrveTableLoadingResult>('/syrve-integration/table-loading', { configurationRevision, confirmationProof, confirmed: true }),
+    syrveOperation<SyrveTableLoadingResult>('/syrve-integration/table-loading', { configurationRevision, confirmationProof, confirmed: true }),
   test: (payload: SyrveConnectionInput) =>
-    api.post<{
+    syrveOperation<{
       message: string;
       apiBaseUrl: string;
       organizations: SyrveOrganization[];
     }>('/syrve-integration/test', payload),
   previewTables: (payload: SyrveConnectionInput & { organizationId: string }) =>
-    api.post<SyrveCatalogPreview>('/syrve-integration/tables-preview', payload),
+    syrveOperation<SyrveCatalogPreview>('/syrve-integration/tables-preview', payload),
   connect: (payload: SyrveConnectionInput & { organizationId: string; organizationName: string; confirmationProof: string; pairs: { moloTableId: string; syrveTableId: string }[] }) =>
-    api.post<{ message: string; confirmedPairs: number; integration: SyrveIntegrationStatus }>(
+    syrveOperation<{ message: string; confirmedPairs: number; integration: SyrveIntegrationStatus }>(
       '/syrve-integration/connect',
       payload,
     ),
   recheck: (configurationRevision: string) =>
-    api.post<{ message: string; integration: SyrveIntegrationStatus }>(
+    syrveOperation<{ message: string; integration: SyrveIntegrationStatus }>(
       '/syrve-integration/recheck', { configurationRevision },
     ),
   disconnect: (configurationRevision: string, reason?: string) =>

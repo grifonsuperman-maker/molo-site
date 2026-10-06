@@ -6,6 +6,7 @@ import { SyrveSettingsStore } from './syrve-settings.store';
 import { SyrveWorkerStore } from './syrve-worker.store';
 import { SyrveWorkerRunner } from './syrve-worker.runner';
 import { SYRVE_WORKER_INTERVAL_MS, SyrveWorkerResult } from './syrve-worker.model';
+import { SYRVE_OPERATION_BUDGET_MS } from './syrve-operation-context';
 
 @Injectable()
 export class SyrveWorkerService implements OnModuleDestroy {
@@ -14,7 +15,8 @@ export class SyrveWorkerService implements OnModuleDestroy {
   private stopped = false;
   constructor(source: DataSource, settings: SyrveSettingsStore, integration: SyrveIntegrationService) {
     this.runner = new SyrveWorkerRunner(new SyrveWorkerStore(source, settings),
-      (capture, ids, controls) => integration.probeWorkerOrders(capture, ids, controls));
+      (capture, ids, controls) => integration.probeWorkerOrders(capture, ids, controls),
+      (captures, leaseId, controls) => integration.probeWorkerBatch(captures, leaseId, controls), SYRVE_OPERATION_BUDGET_MS);
   }
   @Interval('syrve-prepared-worker', SYRVE_WORKER_INTERVAL_MS)
   async tick(): Promise<SyrveWorkerResult> {

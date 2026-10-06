@@ -60,6 +60,11 @@ export class SyrveWorkerStore {
 
   capture(tableId: string) { return this.states.capture(tableId); }
 
+  async captureBatch(lease: SyrveWorkerLease) {
+    return lease.links.length === 1 ? [await this.capture(lease.links[0].moloTableId)]
+      : this.states.captureBatch(lease.links.map(link => link.moloTableId), lease.version);
+  }
+
   guard(lease: SyrveWorkerLease, captured: SyrveStateCapture) {
     return this.settings.transaction(lease.version, async (manager, current) => {
       await this.lockedLease(manager, lease);
@@ -77,6 +82,40 @@ export class SyrveWorkerStore {
       const group = active.plan.groups.find(group => group.tableIds.includes(expected.syrveTableId));
       if (!group) throw staleSyrveSettings();
       return { organizationId: active.plan.organizationId, groups: [{ ...group, tableIds: [expected.syrveTableId] }] };
+    });
+  }
+
+  guardBatch(lease: SyrveWorkerLease, captures: SyrveStateCapture[]) {
+    return this.settings.transaction(lease.version, async (manager, current) => {
+      await this.lockedLease(manager, lease);
+      const active = await this.activation.read(current, manager);
+      if (!active.enabled || !active.plan || current.entity?.status !== 'connected' || captures.length !== lease.links.length
+        || new Set(captures.map(capture => capture.linkId)).size !== captures.length) throw staleSyrveSettings();
+      for (const captured of captures) {
+        const expected = captured.state.scope;
+        if (expected.integrationId !== lease.version.id || expected.configurationRevision !== lease.version.revision
+          || current.entity.organizationId !== expected.organizationId
+          || !current.links.some(link => link.id === captured.linkId && link.moloTableId === expected.moloTableId
+            && link.syrveTableId === expected.syrveTableId && link.organizationId === expected.organizationId)
+          || !lease.links.some(link => link.id === captured.linkId && link.moloTableId === expected.moloTableId
+            && link.syrveTableId === expected.syrveTableId)) throw staleSyrveSettings();
+        // Local/physical revisions are checked atomically by apply for this
+        // table. A staff action must not revoke the whole shared HTTP batch.
+      }
+      const ids = new Set(captures.map(capture => capture.state.scope.syrveTableId));
+      const groups = active.plan.groups.map(group => ({ ...group, tableIds: group.tableIds.filter(id => ids.has(id)) }))
+        .filter(group => group.tableIds.length);
+      if (groups.reduce((count, group) => count + group.tableIds.length, 0) !== ids.size) throw staleSyrveSettings();
+      return { organizationId: active.plan.organizationId, groups };
+    });
+  }
+
+  heartbeat(lease: SyrveWorkerLease) {
+    return this.settings.transaction(lease.version, async (manager, current) => {
+      await this.lockedLease(manager, lease);
+      if (!(await this.activation.read(current, manager)).enabled || current.entity?.status !== 'connected') throw staleSyrveSettings();
+      await manager.query('UPDATE ' + this.table('syrve_worker_state') + " SET lease_until=clock_timestamp()+interval '90 seconds'"
+        + ' WHERE integration_id=$1 AND lease_id=$2', [lease.version.id, lease.id]);
     });
   }
 

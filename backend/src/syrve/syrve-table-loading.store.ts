@@ -59,7 +59,7 @@ export class SyrveTableLoadingStore {
       await manager.query('INSERT INTO ' + job + ' (integration_id,configuration_revision) VALUES ($1,$2) ON CONFLICT DO NOTHING',
         [id, snapshot.entity!.configurationRevision]);
       const [row] = await manager.query('SELECT lease_until > clock_timestamp() AS busy FROM ' + job + ' WHERE integration_id=$1 FOR UPDATE', [id]);
-      if (row?.busy) throw new ConflictException('Завантаження або перевірка вже триває. Зачекайте до 90 секунд і повторіть перевірку.');
+      if (row?.busy) throw new ConflictException('Завантаження або перевірка вже триває. Дочекайтеся завершення перед новою спробою.');
       // Advancing the saved revision consumes every preview from the old
       // revision across instances/restarts, even if HTTP fails after commit.
       const entity = await this.settings.save(manager, { ...snapshot.entity });
@@ -77,6 +77,15 @@ export class SyrveTableLoadingStore {
       + ' AND lease_until > clock_timestamp() AS live FROM ' + this.table('syrve_worker_state') + ' WHERE integration_id=$1',
     [lease.snapshot.entity!.id, lease.leaseId, lease.snapshot.entity!.configurationRevision]);
     if (!row?.live) throw staleSyrveSettings();
+  }
+  async renew(lease: TableLoadingLease) {
+    await this.assertCurrent(lease);
+    const renewed = await this.source.manager.query('UPDATE ' + this.table('syrve_worker_state')
+      + " SET lease_until=clock_timestamp()+interval '90 seconds' WHERE integration_id=$1 AND lease_id=$2"
+      + ' AND configuration_revision=$3 AND lease_until>clock_timestamp() RETURNING integration_id',
+    [lease.snapshot.entity!.id, lease.leaseId, lease.snapshot.entity!.configurationRevision]);
+    const [row] = Array.isArray(renewed[0]) ? renewed[0] : renewed;
+    if (!row) throw staleSyrveSettings();
   }
   release(lease: TableLoadingLease) {
     return this.settings.localTransaction(manager => manager.query('UPDATE ' + this.table('syrve_worker_state')

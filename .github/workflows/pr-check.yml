@@ -116,6 +116,12 @@ jobs:
         run: node backend/scripts/syrve-schema-application-validation.mjs
       - name: Validate isolated banquet table assignment migration
         run: node backend/scripts/booking-table-assignments-validation.mjs
+      - name: Validate global Syrve request quota, concurrent instances and restart
+        run: node backend/scripts/syrve-request-limit-validation.mjs
+      - name: Validate independent batched Syrve status application on 60 tables
+        run: node backend/scripts/syrve-batch-validation.mjs
+      - name: Validate asynchronous Director operations and private ownership
+        run: node backend/scripts/syrve-operations-validation.mjs
       - name: Capture fresh schema audit
         run: node backend/scripts/schema-audit.mjs > fresh-schema-audit.json
       - name: Normalize fresh schema baseline

@@ -38,7 +38,7 @@ function setup(t, payloads = [groups(), sections([table(10, 12)])]) {
     assert.ok(response, 'unexpected Syrve request');
     return typeof response === 'function' ? response(options) : response;
   });
-  return { client: new SyrveClient(), calls };
+  return { client: new SyrveClient(require('./helpers/syrve-test-request-limiter.js')), calls };
 }
 const safeError = (code) => (error) => {
   assert.equal(error.getStatus(), 502);

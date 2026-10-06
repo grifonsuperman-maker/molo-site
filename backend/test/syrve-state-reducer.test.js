@@ -496,7 +496,7 @@ for (const count of [2100, 4201]) {
       return Response.json(payloads[path]);
     });
     const state = freeze(largeState(count)), plan = getSyrveOrderIdsToObserve(state);
-    const client = new SyrveClient(), batches = [];
+    const client = new SyrveClient(require('./helpers/syrve-test-request-limiter.js')), batches = [];
     for (const orderIds of plan) {
       const value = await client.probeOrders('https://api-eu.syrve.live', 'state-policy-test-login', ORG, [TABLE], orderIds);
       assert.equal(value.checks.ordersById.status, 'ok', 'every bounded by-ID read must succeed');

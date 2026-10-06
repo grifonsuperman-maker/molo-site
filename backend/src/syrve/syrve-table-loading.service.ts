@@ -1,3 +1,4 @@
+import { syrveObservationDeadline, withSyrveLease } from './syrve-operation-context';
 import { ConflictException, Injectable } from '@nestjs/common';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { ConfirmSyrveTableLoadingDto, SyrveRevisionDto } from './dto/syrve-integration.dto';
@@ -47,7 +48,7 @@ export class SyrveTableLoadingService {
     if (dto.confirmed !== true || proof.actor !== identity || proof.revision !== dto.configurationRevision) throw new ConflictException('Повторіть перевірку та підтвердження завантаження столів.');
     const captured = await this.store.capture(dto.configurationRevision);
     if (captured.fingerprint !== proof.local) throw new ConflictException('Налаштування або столи змінилися. Повторіть перевірку.');
-    const controls = { deadline: Date.now() + 45_000, requestBudget: { remaining: 25 } };
+    const controls = { deadline: syrveObservationDeadline(), requestBudget: { remaining: 25 } };
     const plan = await this.probePlan(captured, controls);
     if (loadingPlanFingerprint(plan) !== proof.upstream || proof.expires <= Date.now()) throw new ConflictException('Склад столів або кас змінився. Повторіть перевірку.');
     // Reserve authentication, one synchronous load per group, and the complete
@@ -59,15 +60,17 @@ export class SyrveTableLoadingService {
     const lease = await this.store.claim(captured), entity = lease.snapshot.entity!;
     let commandsConfirmed = false, readCompleted = false, code: string | null = null;
     try {
-      await this.client.initializeTables(entity.apiBaseUrl, decryptSyrveCredentials(entity), plan,
-        { ...controls, beforeCommand: () => this.store.guard(lease) });
-      commandsConfirmed = true;
-      const after = await this.probePlan(lease, controls);
-      if (loadingPlanFingerprint(after) !== proof.upstream) throw new ConflictException('Склад столів змінився під час завантаження.');
-      await this.store.guard(lease);
-      if (Date.now() >= controls.deadline) throw new SyrveClientException('SYRVE_TIMEOUT');
-      readCompleted = true;
-      await this.store.release(lease);
+      await withSyrveLease(() => this.store.renew(lease), () => this.store.guard(lease), async () => {
+        await this.client.initializeTables(entity.apiBaseUrl, decryptSyrveCredentials(entity), plan,
+          { ...controls, beforeCommand: () => this.store.guard(lease) });
+        commandsConfirmed = true;
+        const after = await this.probePlan(lease, controls);
+        if (loadingPlanFingerprint(after) !== proof.upstream) throw new ConflictException('Склад столів змінився під час завантаження.');
+        await this.store.guard(lease);
+        if (Date.now() >= controls.deadline) throw new SyrveClientException('SYRVE_TIMEOUT');
+        readCompleted = true;
+        await this.store.release(lease);
+      });
     } catch (error) {
       code = error instanceof SyrveClientException ? (error.getResponse() as { code: string }).code
         : error instanceof ConflictException ? 'SYRVE_CONFIGURATION_CHANGED' : 'SYRVE_UNAVAILABLE';

@@ -18,6 +18,12 @@ const CODE_MESSAGES: Readonly<Record<string, string>> = {
 // arbitrary exception text. Exact matches also reject a trusted prefix with
 // appended credentials, URLs, identifiers or database details.
 const PUBLIC_MESSAGES = new Set([
+  'Поетапну перевірку Syrve ще не підготовлено на сервері.',
+  'Перевірка Syrve вже триває. Дочекайтеся її завершення.',
+  'Перевірку Syrve перервано. Повторіть дію з актуальними налаштуваннями.',
+  'Не вдалося завершити перевірку Syrve. Повторіть дію.',
+  'Не вдалося оновити перебіг перевірки Syrve.',
+  'Недійсний перебіг перевірки Syrve.',
   ...Object.values(CODE_MESSAGES),
   'Потрібна авторизація',
   'Недійсний токен авторизації',

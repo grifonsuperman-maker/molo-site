@@ -117,6 +117,13 @@ test('actual frontend API adapter sends preview to MOLO, never to Syrve directly
   let request;
   const exports = {};
   vm.runInNewContext(js, { exports, require: (name) => {
+    if (name === './syrveOperation') {
+      const helper = {};
+      vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../src/api/syrveOperation.ts'), 'utf8'),
+        { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: helper,
+        require: () => ({ api: { post: async (url, payload) => { request = { url, payload }; return result(); } } }) });
+      return helper;
+    }
     assert.equal(name, './client');
     return { api: { post: async (url, payload) => { request = { url, payload }; return result(); } } };
   } });

@@ -405,6 +405,7 @@ export default function SyrveIntegrationDock() {
             {(error || notice) && <div className={`mt-4 rounded-2xl border p-3 text-sm ${error ? 'border-red-300/35 bg-red-500/10 text-red-100' : 'border-emerald-300/35 bg-emerald-400/10 text-emerald-100'}`}>{error || notice}</div>}
 
             {statusLoadState === 'loading' && <p className="mt-4 text-sm text-amber-100" role="status">Оновлюємо стан Syrve…</p>}
+            {busy && <p className="mt-4 text-sm text-amber-100" role="status">Перевірка Syrve триває. Через ліміт підключення зачекайте кілька хвилин.</p>}
             {statusLoadState === 'error' && <div className="mt-4 rounded-2xl border border-amber-200/35 bg-amber-400/10 p-4 text-sm text-amber-100" role="alert">
               <p className="font-bold">Не вдалося оновити стан Syrve.</p>
               <p className="mt-2">{statusLoaded

@@ -3,7 +3,7 @@ import type { AuthUser } from '../auth/types/auth-user.type';
 import type { SyrveOrderProbe } from './syrve-order-observer';
 import { assessSyrvePosVersion } from './syrve-pos-version';
 
-export const LOADING_TTL_MS = 5 * 60_000;
+export const LOADING_TTL_MS = 40 * 60_000;
 export const LOADING_MAX_TABLES = 100;
 export const LOADING_MAX_GROUPS = 4;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;

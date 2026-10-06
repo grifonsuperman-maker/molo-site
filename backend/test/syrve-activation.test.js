@@ -50,7 +50,7 @@ test('activation proof cannot be exchanged with a manual loading proof and expir
   const activation=issueActivationProof(key,input,now),manual=issueLoadingProof(key,input,now);
   assert.equal(verifyActivationProof(key,activation.proof,now).revision,REV);
   for(const proof of [manual.proof,activation.proof+'x',activation.proof.slice(1),undefined,'a'.repeat(1600)])assert.throws(()=>verifyActivationProof(key,proof,now));
-  assert.throws(()=>verifyActivationProof(key,activation.proof,now+300000));
+  assert.throws(()=>verifyActivationProof(key,activation.proof,now+2400000));
 });
 test('preview is read-only; explicit consent is saved only after confirmed commands and a complete fresh read',async t=>{
   const h=fixture(t),tables=structuredClone(h.capture.tables),p=await h.service.preview({configurationRevision:REV},actor);
@@ -70,9 +70,9 @@ test('activation preview timestamps and signed expiry share one server instant',
   };
   t.after(()=>{global.Date=RealDate;});
   const p=await h.service.preview({configurationRevision:REV},actor),issued=Date.parse(p.checkedAt);
-  assert.equal(Date.parse(p.confirmation.expiresAt)-issued,300000);
-  assert.equal(verifyActivationProof(syrveCredentialsKey(),p.confirmation.proof,issued).expires,issued+300000);
-  assert.throws(()=>verifyActivationProof(syrveCredentialsKey(),p.confirmation.proof,issued+300000));
+  assert.equal(Date.parse(p.confirmation.expiresAt)-issued,2400000);
+  assert.equal(verifyActivationProof(syrveCredentialsKey(),p.confirmation.proof,issued).expires,issued+2400000);
+  assert.throws(()=>verifyActivationProof(syrveCredentialsKey(),p.confirmation.proof,issued+2400000));
   assert.equal(h.stats().commands,0);
 });
 test('missing preparation never decrypts credentials or requests Syrve',async t=>{
@@ -142,7 +142,7 @@ function transport(t,options={}){
     return value instanceof Response?value:Response.json(value);
   });
   const controls={deadline:Date.now()+45000,visibilityContext:REV+':'+NEXT,beforeCommand:async()=>{},loadingPlan:tableLoadingPlan(probe(scope,[]),[TABLE])};
-  return {calls,controls,client:new SyrveClient(),read:ids=>new SyrveClient().probeLoadedOrders('https://api-eu.syrve.live','synthetic-login',ORG,[TABLE],ids,controls)};
+  return {calls,controls,client:new SyrveClient(require('./helpers/syrve-test-request-limiter.js')),read:ids=>new SyrveClient(require('./helpers/syrve-test-request-limiter.js')).probeLoadedOrders('https://api-eu.syrve.live','synthetic-login',ORG,[TABLE],ids,controls)};
 }
 for(const complete of [true,false])test('Director activation with real synchronous transport '+(complete?'enables after fresh reads':'rejects a failed post-load read'),async t=>{
   let reads=0;

@@ -28,7 +28,7 @@ function setup(t) {
   const h = settingsHarness();
   const logs = [];
   const service = new SyrveIntegrationService(h.store, { create: async (...args) => logs.push(args) },
-    new SyrveClient(), { find: async () => [] });
+    new SyrveClient(require('./helpers/syrve-test-request-limiter.js')), { find: async () => [] });
   const nativeConnect = service.connect.bind(service);
   service.connect = async (input, actor) => {
     const preview = await service.previewTables(input);

@@ -105,7 +105,7 @@ test('the actual API adapter sends only saved configuration revision to the Dire
   const source = fs.readFileSync(path.resolve(__dirname, '../src/api/syrve.ts'), 'utf8');
   const exports = {}; let request;
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText,
-    { exports, require: () => ({ api: { post: async (url, payload) => { request = { url, payload }; return report(); } } }) });
+    { exports, require: require('./helpers/syrve-operation-fixture.cjs').resolver({ post: async (url, payload) => { request = { url, payload }; return report(); } }) });
   await exports.syrveApi.orderDiagnostics(VERSION);
   assert.deepEqual(JSON.parse(JSON.stringify(request)), { url: '/syrve-integration/orders-diagnostics', payload: { configurationRevision: VERSION } });
 });

@@ -1,4 +1,4 @@
-const MAX_CONFIRMATION_LIFETIME_MS = 5 * 60_000;
+const MAX_CONFIRMATION_LIFETIME_MS = 40 * 60_000;
 
 // Both timestamps belong to the server. Device wall-clock offsets must not
 // invalidate its proof. Count elapsed request/consent time on a monotonic clock.
