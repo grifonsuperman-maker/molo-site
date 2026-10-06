@@ -141,7 +141,7 @@ test('Director panel renders counts, unmatched tables/conflicts and escapes upst
       receivedSections: [{ sectionName: 'Основний зал', terminalGroupName: 'Каса 1', tableNumbers: [1, 2, 3, 7] }] } };
   const html = renderToStaticMarkup(React.createElement(exports.default, { preview }));
   for (const text of ['61', '59', 'Syrve №77', 'MOLO №13', 'однаковий номер', 'ще не збережені', 'не перевірено',
-    'Отримані секції Syrve', 'Основний зал', 'Каса 1', '1–3, 7']) assert.ok(html.includes(text), text);
+    'Отримані секції Syrve', 'Основний зал', 'Каса 1', '1-3, 7']) assert.ok(html.includes(text), text);
   assert.ok(html.includes('&lt;script&gt;'));
   assert.ok(!html.includes('<script>'));
   assert.ok(!html.includes('Увімкнути синхронізацію'));
