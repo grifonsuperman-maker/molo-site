@@ -61,8 +61,9 @@ export async function runSyrveActivationValidation(env=process.env){
     else if(path.endsWith('available_restaurant_sections'))value={restaurantSections:[{id:randomUUID(),terminalGroupId:group,name:'Зал',tables:[{id:provider,number:1,name:'Стіл',isDeleted:false}]}]};
     else if(path.endsWith('is_alive'))value={correlationId:correlation,isAliveStatus:[{organizationId:org,terminalGroupId:group,isAlive:true}]};
     else if(path.endsWith('init_by_table')){commands++;assert.equal(body.organizationId,org);assert.equal(body.terminalGroupId,group);assert.deepEqual(body.tableIds,[provider]);
+      if(commandError)return Response.json({exception:'private-ci-error'},{status:500});
+      if(commandPending)throw new Error('private-ci-network-failure');
       if(hold)await hold();value={correlationId:correlation};}
-    else if(path.endsWith('commands/status'))value=commandError?{state:'Error',exception:'private-ci-error'}:{state:commandPending?'InProgress':'Success'};
     else if(path.endsWith('by_table'))value={correlationId:correlation,orders:rows};
     else if(path.endsWith('by_id'))value={correlationId:correlation,orders:missing?[]:rows.filter(row=>body.orderIds.includes(row.id))};
     else assert.fail('Unexpected Syrve operation '+path);
@@ -131,6 +132,8 @@ export async function runSyrveActivationValidation(env=process.env){
     assert.deepEqual(await physical(),microPhysical);assert.deepEqual(await saved(),beforeMicroWrite);
     const opened=await saved();
     await due();commandError=true;assert.equal((await worker.tick()).status,'failed');assert.deepEqual(await saved(),opened);commandError=false;
+    assert.ok((await job()).lease_id);
+    await source.query("UPDATE syrve_worker_state SET lease_until=clock_timestamp()-interval '1 second' WHERE integration_id=$1",[integrationId]);
     await due();commandPending=true;assert.equal((await worker.tick()).status,'failed');commandPending=false;
     assert.ok((await job()).lease_id);const pendingCommands=commands;assert.equal((await new SyrveWorkerStore(other,settings(other)).claim()).status,'busy');
     assert.equal(commands,pendingCommands);assert.deepEqual(await saved(),opened);

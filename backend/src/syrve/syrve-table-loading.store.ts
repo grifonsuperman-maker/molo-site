@@ -59,7 +59,7 @@ export class SyrveTableLoadingStore {
       await manager.query('INSERT INTO ' + job + ' (integration_id,configuration_revision) VALUES ($1,$2) ON CONFLICT DO NOTHING',
         [id, snapshot.entity!.configurationRevision]);
       const [row] = await manager.query('SELECT lease_until > clock_timestamp() AS busy FROM ' + job + ' WHERE integration_id=$1 FOR UPDATE', [id]);
-      if (row?.busy) throw new ConflictException('Завантаження або перевірка вже триває. Дочекайтеся завершення перед новою спробою.');
+      if (row?.busy) throw new ConflictException('Завантаження або перевірка вже триває. Зачекайте до 90 секунд і повторіть перевірку.');
       // Advancing the saved revision consumes every preview from the old
       // revision across instances/restarts, even if HTTP fails after commit.
       const entity = await this.settings.save(manager, { ...snapshot.entity });

@@ -69,10 +69,3 @@ export function parseLoadingCorrelation(value: unknown): string {
   if (Object.keys(response).length !== 1 || !uuid(response.correlationId)) return invalid();
   return response.correlationId.toLowerCase();
 }
-export function parseLoadingCommand(value: unknown): 'Success' | 'InProgress' | 'Error' {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid();
-  const response = value as Record<string, unknown>;
-  if (response.state === 'Error') return 'Error'; // Deliberately discard exception/errorReason.
-  if (Object.keys(response).length === 1 && (response.state === 'Success' || response.state === 'InProgress')) return response.state;
-  return invalid();
-}

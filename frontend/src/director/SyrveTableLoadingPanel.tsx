@@ -125,7 +125,7 @@ export default function SyrveTableLoadingPanel(props: Props) {
   return <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5" aria-label="Завантаження стану столів Syrve">
     <h2 className="font-black">Завантаження стану столів із каси</h2>
     <p className="mt-2 text-sm text-white/55">Syrve завантажить дані лише для підтверджених столів. Спочатку перевірте перелік, потім підтвердьте дію.</p>
-    <p className="mt-2 text-sm text-white/55">Потрібні доступні каси Syrve POS від версії 7.7.1 та дозволи на завантаження даних і перевірку завершення.</p>
+    <p className="mt-2 text-sm text-white/55">Потрібні доступні каси Syrve POS від версії 7.7.1 та дозволи на завантаження й читання даних столів.</p>
     <button type="button" disabled={!eligible || loading} onClick={() => void prepare()}
       className="mt-3 rounded-xl border border-cyan-200/35 px-4 py-3 text-sm font-bold text-cyan-100 disabled:opacity-40">Підготувати завантаження</button>
     {visible && preview && <div className="mt-4 space-y-3">

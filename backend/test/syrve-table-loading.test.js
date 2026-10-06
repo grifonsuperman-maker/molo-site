@@ -58,21 +58,17 @@ test('loading proofs are purpose-separated, expire and bind actor/session/local/
   for(const bad of [undefined,{...actor,role:'admin'},{...actor,directorSessionVersion:undefined},{...actor,directorSessionVersion:-1},{...actor,sub:''}]) assert.throws(()=>model.loadingActor(bad));
 });
 
-test('command acknowledgement is never completion and raw failure details are discarded', () => {
+test('synchronous loading requires the exact documented correlation response', () => {
   assert.equal(model.parseLoadingCorrelation({correlationId:CORR.toUpperCase()}),CORR);
   for (const value of [null,[],{},{correlationId:'bad'},{correlationId:CORR+'\n'},{correlationId:CORR,token:'private'}]) assert.throws(()=>model.parseLoadingCorrelation(value));
-  assert.equal(model.parseLoadingCommand({state:'InProgress'}),'InProgress');
-  assert.equal(model.parseLoadingCommand({state:'Success'}),'Success');
-  assert.equal(model.parseLoadingCommand({state:'Error',exception:'private',errorReason:'private'}),'Error');
-  for(const value of [null,[],{},'Success',{state:'success'},{state:'Success',errorReason:'private'},{state:'unknown'}]) assert.throws(()=>model.parseLoadingCommand(value));
 });
 
-function transport(t,status=()=>({state:'Success'})) {
+function transport(t,load=body=>({correlationId:body.terminalGroupId===GROUP?CORR:id(31)})) {
   const previous=global.fetch,requests=[];
   global.fetch=async(url,options)=>{
     const path=new URL(url).pathname,body=JSON.parse(options.body);requests.push({path,body,options});
     let result=path.endsWith('/access_token')?{token:'synthetic-token'}:path==='/api/1/organizations'?{organizations:[{id:ORG,name:'Тест'}]}
-      :path==='/api/1/order/init_by_table'?{correlationId:body.terminalGroupId===GROUP?CORR:id(31)}:await status(body,requests);
+      :path==='/api/1/order/init_by_table'?await load(body,requests):new Response('unsupported-request-correlation',{status:410});
     if(result instanceof Response)return result;
     return new Response(JSON.stringify(result),{status:200,headers:{'Content-Type':'application/json'}});
   };
@@ -83,28 +79,41 @@ function transport(t,status=()=>({state:'Success'})) {
   const run=(p=plan(),controls={})=>new SyrveClient().initializeTables('https://api-eu.syrve.live','synthetic-login',p,{beforeCommand:async()=>{},...controls});
   return {requests,run};
 }
-test('actual transport sends only saved organization/group/table scope and polls its exact correlation',async t=>{
-  let polls=0;const h=transport(t,()=>({state:++polls===1?'InProgress':'Success'}));let guards=0;
-  assert.deepEqual(await h.run(plan(),{beforeCommand:async()=>{guards++;}}),{completedGroups:1});
-  assert.deepEqual(h.requests.map(r=>r.path),['/api/1/access_token','/api/1/organizations','/api/1/order/init_by_table','/api/1/commands/status','/api/1/commands/status']);
+test('synchronous initialization succeeds without polling an unsupported command correlation',async t=>{
+  const h=transport(t);let guards=0,started=0,finished=0;
+  assert.deepEqual(await h.run(plan(),{beforeCommand:async()=>{guards++;},commandStarted:()=>started++,commandFinished:()=>finished++}),{completedGroups:1});
+  assert.deepEqual(h.requests.map(r=>r.path),['/api/1/access_token','/api/1/organizations','/api/1/order/init_by_table']);
   assert.deepEqual(h.requests[2].body,{organizationId:ORG,terminalGroupId:GROUP,tableIds:[TABLE,TABLE2]});
-  assert.deepEqual(h.requests[3].body,{organizationId:ORG,correlationId:CORR});assert.equal(guards,3);
+  assert.equal(guards,2);assert.equal(started,1);assert.equal(finished,1);
   assert.ok(h.requests.every(r=>r.options.redirect==='error'));
 });
-for(const [name,response,expected]of [['explicit error',{state:'Error',exception:'private-password',errorReason:'private-password'},'SYRVE_COMMAND_FAILED'],
-  ['ambiguous success',{state:'Success',exception:'private-password'},'SYRVE_INVALID_RESPONSE'],
-  ['unknown state',{state:'Unknown'},'SYRVE_INVALID_RESPONSE'],
-  ['expired',()=>new Response('private-password',{status:410}),'SYRVE_COMMAND_EXPIRED'],
+test('each saved register is loaded and guarded separately without extra status requests',async t=>{
+  const h=transport(t),p=plan();p.groups=[{terminalGroupId:GROUP,tableIds:[TABLE],posVersion:'7.7.1'},
+    {terminalGroupId:GROUP2,tableIds:[TABLE2],posVersion:'8.0.0'}];let guards=0;
+  assert.deepEqual(await h.run(p,{beforeCommand:async()=>guards++}),{completedGroups:2});
+  assert.deepEqual(h.requests.slice(2).map(r=>r.body),p.groups.map(g=>({organizationId:ORG,terminalGroupId:g.terminalGroupId,tableIds:g.tableIds})));
+  assert.equal(guards,4);
+});
+for(const [name,response,expected]of [['unexpected failure body',{state:'Error',exception:'private-password',errorReason:'private-password'},'SYRVE_INVALID_RESPONSE'],
+  ['ambiguous response',{correlationId:CORR,exception:'private-password'},'SYRVE_INVALID_RESPONSE'],
+  ['missing correlation',{},'SYRVE_INVALID_RESPONSE'],
+  ['provider failure',()=>new Response('private-password',{status:500}),'SYRVE_UNAVAILABLE'],
   ['denied',()=>new Response('private-password',{status:403}),'SYRVE_ACCESS_DENIED']])
-  test(`command ${name} stops without another initialization or raw error leaks`,async t=>{
+  test(`loading ${name} stops without another initialization or raw error leaks`,async t=>{
     const h=transport(t,typeof response==='function'?response:()=>response);let error;
     try{await h.run();}catch(e){error=e;}assert.ok(code(expected)(error));assert.ok(!JSON.stringify(error.getResponse()).includes('private-password'));
-    assert.equal(h.requests.filter(r=>r.path==='/api/1/commands/status').length,1);
+    assert.equal(h.requests.filter(r=>r.path==='/api/1/commands/status').length,0);
     assert.equal(h.requests.filter(r=>r.path==='/api/1/order/init_by_table').length,1);
   });
-test('persistent InProgress is bounded and cannot report success',async t=>{
-  const h=transport(t,()=>({state:'InProgress'}));await assert.rejects(h.run(),code('SYRVE_COMMAND_IN_PROGRESS'));
-  assert.equal(h.requests.filter(r=>r.path==='/api/1/commands/status').length,6);
+test('a changed scope after HTTP 200 cannot finish loading or release the unresolved worker exclusion',async t=>{
+  const h=transport(t);let guards=0,finished=0;
+  await assert.rejects(h.run(plan(),{beforeCommand:async()=>{if(++guards===2)throw new ConflictException();},commandFinished:()=>finished++}));
+  assert.equal(finished,0);assert.equal(h.requests.length,3);
+});
+test('a lost loading response remains uncertain without retry or completion',async t=>{
+  const h=transport(t,()=>{throw new Error('private-password');});let started=0,finished=0;
+  await assert.rejects(h.run(plan(),{commandStarted:()=>started++,commandFinished:()=>finished++}),code('SYRVE_UNAVAILABLE'));
+  assert.equal(started,1);assert.equal(finished,0);assert.equal(h.requests.length,3);
 });
 test('shared request budget, deadline and changed local scope stop before an external command',async t=>{
   const h=transport(t);await assert.rejects(h.run(plan(),{requestBudget:{remaining:2}}),code('SYRVE_OBSERVATION_LIMIT'));

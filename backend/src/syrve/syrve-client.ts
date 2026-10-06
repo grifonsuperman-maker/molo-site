@@ -4,7 +4,7 @@ import { parseRestaurantSections, parseTerminalGroups, SyrveCatalogValidationErr
 import { TABLE_ORDER_BATCH_SIZE, ORDER_ID_BATCH_SIZE, MAX_CATALOG_TABLES, MAX_RESPONSE_ORDERS,
   mergeSyrveOrders, observationIds, parsePosAvailability, parseSyrveOrders, SyrveOrderValidationError,
   type ObservationCheckName, type SyrveObservedOrder, type SyrveOrderProbe } from './syrve-order-observer';
-import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, loadingPlanFingerprint, tableLoadingPlan, parseLoadingCommand, parseLoadingCorrelation, SyrveLoadingValidationError, type TableLoadingPlan } from './syrve-table-loading';
+import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, loadingPlanFingerprint, tableLoadingPlan, parseLoadingCorrelation, SyrveLoadingValidationError, type TableLoadingPlan } from './syrve-table-loading';
 import { assessSyrvePosVersion } from './syrve-pos-version';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
@@ -371,26 +371,15 @@ export class SyrveClient {
       }
       if (correlations.has(correlation)) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
       correlations.add(correlation);
-      let succeeded = false;
-      for (let attempt = 0; attempt < 6; attempt++) {
-        await controls.beforeCommand();
-        let state: ReturnType<typeof parseLoadingCommand>;
-        try {
-          state = parseLoadingCommand(await this.postJson('/api/1/commands/status', {
-            organizationId: plan.organizationId, correlationId: correlation,
-          }, session.token, deadline, controls.signal, budget));
-        } catch (error) {
-          if (error instanceof SyrveLoadingValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
-          throw error;
-        }
-        if (state === 'Success') { controls.commandFinished?.(); succeeded = true; break; }
-        if (state === 'Error') { controls.commandFinished?.(); throw new SyrveClientException('SYRVE_COMMAND_FAILED'); }
-        if (attempt < 5) {
-          if (deadline - Date.now() <= 250 || controls.signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
-          await new Promise<void>(resolve => setTimeout(resolve, 250));
-        }
-      }
-      if (!succeeded) throw new SyrveClientException('SYRVE_COMMAND_IN_PROGRESS');
+      // init_by_table is a synchronous loading method in the official OpenAPI,
+      // unlike order/create and other methods explicitly marked as commands.
+      // Its correlationId identifies the request, not an asynchronous command:
+      // polling commands/status for it can return 410 immediately. A valid 200
+      // must still be followed by a current-scope guard and fresh full reads in
+      // the caller; this response alone never certifies occupancy or closure.
+      await controls.beforeCommand();
+      if (Date.now() >= deadline || controls.signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
+      controls.commandFinished?.();
     }
     return { completedGroups: plan.groups.length };
   }

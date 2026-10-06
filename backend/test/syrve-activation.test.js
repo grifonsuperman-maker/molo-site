@@ -137,23 +137,39 @@ function transport(t,options={}){
       '/api/1/reserve/available_restaurant_sections':{restaurantSections:[{id:id(400),terminalGroupId:GROUP,name:'Зал',tables:[{id:TABLE,number:12,name:'Стіл',isDeleted:false}]}]},
       '/api/1/terminal_groups/is_alive':{correlationId:id(401),isAliveStatus:[{organizationId:ORG,terminalGroupId:GROUP,isAlive:true}]},
       '/api/1/order/by_table':{correlationId:id(402),orders:[]},'/api/1/order/by_id':{correlationId:id(403),orders:body.orderIds?.map(value=>row(scope,value,'Closed',200))||[]},
-      '/api/1/order/init_by_table':{correlationId:id(404)},'/api/1/commands/status':{state:'Success'},...options};
+      '/api/1/order/init_by_table':{correlationId:id(404)},'/api/1/commands/status':Response.json({}, {status:410}),...options};
     const value=typeof values[path]==='function'?values[path](body):values[path];assert.ok(value,path);
     return value instanceof Response?value:Response.json(value);
   });
   const controls={deadline:Date.now()+45000,visibilityContext:REV+':'+NEXT,beforeCommand:async()=>{},loadingPlan:tableLoadingPlan(probe(scope,[]),[TABLE])};
   return {calls,controls,client:new SyrveClient(),read:ids=>new SyrveClient().probeLoadedOrders('https://api-eu.syrve.live','synthetic-login',ORG,[TABLE],ids,controls)};
 }
+for(const complete of [true,false])test('Director activation with real synchronous transport '+(complete?'enables after fresh reads':'rejects a failed post-load read'),async t=>{
+  let reads=0;
+  const tx=transport(t,{'/api/1/order/by_table':()=>++reads===3&&!complete
+    ?Response.json({exception:'private-provider-detail'},{status:403}):{correlationId:id(402),orders:[]}}),h=fixture(t);
+  h.client.probeOrders=tx.client.probeOrders.bind(tx.client);
+  h.client.initializeTables=tx.client.initializeTables.bind(tx.client);
+  const before=structuredClone(h.capture.tables),p=await h.service.preview({configurationRevision:REV},actor);
+  assert.equal(tx.calls.filter(c=>c.path.endsWith('init_by_table')).length,0);
+  const result=await h.service.enable(h.dto(p),actor);
+  assert.equal(result.syncEnabled,complete);assert.equal(h.stats().saved,complete);
+  assert.equal(h.stats().released,complete?1:0);assert.equal(result.code,complete?null:'SYRVE_ACCESS_DENIED');
+  assert.equal(reads,3);assert.equal(tx.calls.filter(c=>c.path.endsWith('init_by_table')).length,1);
+  assert.equal(tx.calls.filter(c=>c.path.endsWith('commands/status')).length,0);
+  assert.deepEqual(h.capture.tables,before);assert.doesNotMatch(JSON.stringify(result),/private-provider-detail|synthetic-login/);
+});
 test('only real transport completion followed by fresh full reads issues a nonserializable, context-bound receipt',async t=>{
   const h=transport(t),value=await h.read([id(300)]);
   assert.equal(isVerifiedLoadedProbe(value,h.controls.visibilityContext,ORG,TABLE),true);
   assert.equal(isVerifiedLoadedProbe(structuredClone(value),h.controls.visibilityContext,ORG,TABLE),false);
   assert.equal(isVerifiedLoadedProbe(value,'foreign-lease',ORG,TABLE),false);
   assert.ok(h.calls.findIndex(c=>c.path.endsWith('init_by_table'))<h.calls.findLastIndex(c=>c.path.endsWith('by_table')));
+  assert.equal(h.calls.filter(c=>c.path.endsWith('commands/status')).length,0);
   value.byTable.push(value.byId[0]);assert.equal(isVerifiedLoadedProbe(value,h.controls.visibilityContext,ORG,TABLE),false);
 });
 for(const failure of ['command','partial','changed','guard','expired','budget'])test('runtime '+failure+' cannot certify table visibility',async t=>{
-  const h=transport(t,failure==='command'?{'/api/1/commands/status':{state:'Error',exception:'private'}}:failure==='partial'?{'/api/1/order/by_id':Response.json({}, {status:403})}:{});
+  const h=transport(t,failure==='command'?{'/api/1/order/init_by_table':Response.json({}, {status:500})}:failure==='partial'?{'/api/1/order/by_id':Response.json({}, {status:403})}:{});
   if(failure==='changed')h.controls.loadingPlan.groups[0].posVersion='8.0.0';
   if(failure==='guard')h.controls.beforeCommand=async()=>{throw new ConflictException();};
   if(failure==='expired')h.controls.deadline=Date.now()-1;
@@ -161,14 +177,14 @@ for(const failure of ['command','partial','changed','guard','expired','budget'])
   await assert.rejects(h.read([id(300)]));
   if(['changed','guard','expired','budget'].includes(failure))assert.equal(h.calls.filter(c=>c.path.endsWith('init_by_table')).length,0);
 });
-for(const result of ['InProgress','expired','Error'])test('runtime '+result+' command preserves exclusion until terminal completion or lease expiry',async t=>{
-  const tx=transport(t,{'/api/1/commands/status':result==='expired'?Response.json({}, {status:410}):{state:result}}),h=harness();
+for(const result of ['lost response','malformed response','provider error'])test('runtime loading '+result+' preserves exclusion until lease expiry',async t=>{
+  const tx=transport(t,{'/api/1/order/init_by_table':result==='lost response'?()=>{throw new Error('synthetic-transport-loss');}
+    :result==='malformed response'?{}:Response.json({}, {status:500})}),h=harness();
   Object.assign(h.entity,{organizationId:ORG,apiLoginEncrypted:'synthetic',apiLoginIv:'synthetic',apiLoginAuthTag:'synthetic'});
   h.mutate(db=>{db.link.organization_id=ORG;db.link.syrve_table_id=TABLE;});consent(h);
   const store=new SyrveWorkerStore(h.source,h.settings),runner=new SyrveWorkerRunner(store,(c,ids,controls)=>
     tx.client.probeLoadedOrders('https://api-eu.syrve.live','synthetic-login',ORG,[TABLE],ids,controls));
   assert.equal((await runner.run()).status,'failed');
-  if(result==='Error'){assert.equal(h.saved().worker.lease_id,null);return;}
   const lease=h.saved().worker.lease_id;assert.ok(lease);const calls=tx.calls.length;
   h.advance(15001);assert.equal((await runner.run()).status,'busy');assert.equal(tx.calls.length,calls);
   assert.equal(h.saved().worker.lease_id,lease);h.advance(75000);
