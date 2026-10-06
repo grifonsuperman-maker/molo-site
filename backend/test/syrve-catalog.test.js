@@ -152,6 +152,9 @@ test('unique matching numbers propose existing UUIDs; unknown provider tables on
   assert.equal(result.proposals[0].syrveTableId, id(10));
   assert.equal(result.missingInMolo[0].number, 77);
   assert.deepEqual(result.missingInSyrve, [molo(21, 13)]);
+  assert.deepEqual(result.diagnostics.receivedSections, [{
+    sectionName: 'Зал', terminalGroupName: 'Каса', tableNumbers: [12, 77],
+  }]);
   assert.deepEqual({ input, tables }, before);
 });
 
