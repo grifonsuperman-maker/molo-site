@@ -153,9 +153,18 @@ test('unique matching numbers propose existing UUIDs; unknown provider tables on
   assert.equal(result.missingInMolo[0].number, 77);
   assert.deepEqual(result.missingInSyrve, [molo(21, 13)]);
   assert.deepEqual(result.diagnostics.receivedSections, [{
-    sectionName: 'Зал', terminalGroupName: 'Каса', tableNumbers: [12, 77],
+    sectionName: 'Зал', terminalGroupName: 'Каса', tableNumbers: [12, 77], tableCount: 2,
   }]);
   assert.deepEqual({ input, tables }, before);
+});
+
+test('section diagnostics keep duplicate table numbers compact without undercounting real tables', () => {
+  const result = buildSyrveCatalogPreview(catalog([table(10, 12), table(11, 12)]), [molo(20, 12)]);
+  assert.deepEqual(result.diagnostics.receivedSections, [{
+    sectionName: 'Зал', terminalGroupName: 'Каса', tableNumbers: [12], tableCount: 2,
+  }]);
+  assert.equal(result.summary.syrveTables, 2);
+  assert.ok(result.conflicts.some((conflict) => conflict.code === 'duplicate_syrve_number'));
 });
 
 test('duplicate provider numbers, duplicate IDs and duplicate MOLO numbers never produce an ambiguous pair', () => {
