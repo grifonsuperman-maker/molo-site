@@ -32,10 +32,11 @@ export class SyrveTableLoadingService {
     const identity = this.identity(actor), key = syrveCredentialsKey();
     const captured = await this.store.capture(dto.configurationRevision), plan = await this.probePlan(captured);
     const tableNumbers = captured.snapshot.links.map(link => captured.tables.find(table => table.id === link.moloTableId)!.tableNumber).sort();
+    const checkedAt = Date.now();
     return { configurationRevision: dto.configurationRevision, organizationId: plan.organizationId,
-      checkedAt: new Date().toISOString(), linkedTables: tableNumbers.length, terminalGroups: plan.groups.length, tableNumbers,
+      checkedAt: new Date(checkedAt).toISOString(), linkedTables: tableNumbers.length, terminalGroups: plan.groups.length, tableNumbers,
       confirmation: issueLoadingProof(key, { revision: dto.configurationRevision, local: captured.fingerprint,
-        upstream: loadingPlanFingerprint(plan), actor: identity }), ...FLAGS };
+        upstream: loadingPlanFingerprint(plan), actor: identity }, checkedAt), ...FLAGS };
   }
   async load(dto: ConfirmSyrveTableLoadingDto, actor?: AuthUser) {
     // Reject forged/stale/different-session proofs before decrypting credentials.

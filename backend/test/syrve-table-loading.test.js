@@ -153,6 +153,19 @@ test('preview only reads, explicit confirmation consumes revision, verifies comm
   assert.ok(!JSON.stringify([preview,result]).includes('synthetic-loading-login'));
   const calls=h.stats();await assert.rejects(h.app.load(h.dto(preview),actor));assert.deepEqual(h.stats(),calls);
 });
+test('loading preview timestamps and signed expiry share one server instant',async t=>{
+  const h=service(t),RealDate=Date;let now=RealDate.now();
+  global.Date=class extends RealDate {
+    constructor(...args){super(...(args.length?args:[now++]));}
+    static now(){return now++;}
+  };
+  t.after(()=>{global.Date=RealDate;});
+  const p=await h.app.preview({configurationRevision:REV},actor),issued=Date.parse(p.checkedAt);
+  assert.equal(Date.parse(p.confirmation.expiresAt)-issued,300000);
+  assert.equal(model.verifyLoadingProof(syrveCredentialsKey(),p.confirmation.proof,issued).expires,issued+300000);
+  assert.throws(()=>model.verifyLoadingProof(syrveCredentialsKey(),p.confirmation.proof,issued+300000));
+  assert.equal(h.stats().commands,0);
+});
 test('changed actor/session, proof/revision or manual table fingerprint cannot start loading',async t=>{
   const h=service(t),preview=await h.app.preview({configurationRevision:REV},actor);
   for(const[who,dto]of [[{...actor,sub:id(101)},h.dto(preview)],[{...actor,directorSessionVersion:3},h.dto(preview)],

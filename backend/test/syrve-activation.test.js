@@ -62,6 +62,19 @@ test('preview is read-only; explicit consent is saved only after confirmed comma
   const before=h.stats();await assert.rejects(h.service.enable(h.dto(p),actor));assert.deepEqual(h.stats(),before);
   assert.equal((await h.service.disable({configurationRevision:NEXT},actor)).syncEnabled,false);
 });
+test('activation preview timestamps and signed expiry share one server instant',async t=>{
+  const h=fixture(t),RealDate=Date;let now=RealDate.now();
+  global.Date=class extends RealDate {
+    constructor(...args){super(...(args.length?args:[now++]));}
+    static now(){return now++;}
+  };
+  t.after(()=>{global.Date=RealDate;});
+  const p=await h.service.preview({configurationRevision:REV},actor),issued=Date.parse(p.checkedAt);
+  assert.equal(Date.parse(p.confirmation.expiresAt)-issued,300000);
+  assert.equal(verifyActivationProof(syrveCredentialsKey(),p.confirmation.proof,issued).expires,issued+300000);
+  assert.throws(()=>verifyActivationProof(syrveCredentialsKey(),p.confirmation.proof,issued+300000));
+  assert.equal(h.stats().commands,0);
+});
 test('missing preparation never decrypts credentials or requests Syrve',async t=>{
   const h=fixture(t);h.setAvailable(false);delete process.env.SYRVE_CREDENTIALS_SECRET;
   await assert.rejects(h.service.preview({configurationRevision:REV},actor));assert.equal(h.stats().commands,0);assert.equal(h.stats().reads,0);

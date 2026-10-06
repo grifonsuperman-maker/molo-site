@@ -34,11 +34,12 @@ export class SyrveActivationService {
     const captured = await this.loading.capture(dto.configurationRevision);
     await this.activation.requireDisabled(captured.snapshot);
     const plan = await this.plans.probePlan(captured);
-    return { configurationRevision: dto.configurationRevision, organizationId: plan.organizationId, checkedAt: new Date().toISOString(),
+    const checkedAt = Date.now();
+    return { configurationRevision: dto.configurationRevision, organizationId: plan.organizationId, checkedAt: new Date(checkedAt).toISOString(),
       linkedTables: captured.snapshot.links.length, terminalGroups: plan.groups.length,
       tableNumbers: captured.snapshot.links.map(link => captured.tables.find(table => table.id === link.moloTableId)!.tableNumber).sort(),
       confirmation: issueActivationProof(key, { revision: dto.configurationRevision, local: captured.fingerprint,
-        upstream: loadingPlanFingerprint(plan), actor: identity }), syncEnabled: false };
+        upstream: loadingPlanFingerprint(plan), actor: identity }, checkedAt), syncEnabled: false };
   }
   async enable(dto: ConfirmSyrveTableLoadingDto, actor?: AuthUser) {
     const identity = this.identity(actor);
