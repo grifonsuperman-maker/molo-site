@@ -142,6 +142,14 @@ export function buildSyrveCatalogPreview(catalog: SyrveCatalog, moloRows: MoloTa
     const number = moloNumber(table.tableNumber);
     return number !== null && moloNumbers.get(number)!.length === 1 && !providerNumbers.has(number);
   });
+  const terminalGroupNames = new Map(catalog.terminalGroups.active.map((group) => [group.id, group.name]));
+  const receivedSections = [...by(active, (table) => `${table.terminalGroupId}:${table.sectionId}`).values()]
+    .map((tables) => ({
+      sectionName: tables[0].sectionName || 'Секція без назви',
+      terminalGroupName: terminalGroupNames.get(tables[0].terminalGroupId) || 'Каса без назви',
+      tableNumbers: [...new Set(tables.map((table) => table.number))].sort((a, b) => a - b),
+    }))
+    .sort((a, b) => a.terminalGroupName.localeCompare(b.terminalGroupName) || a.sectionName.localeCompare(b.sectionName));
   const warnings: string[] = [
     'Отримано лише секції, доступні для бронювання через Syrve API. Повноту всіх столів ресторану ще не підтверджено.',
     'Читання стану столів ще не перевірено. Синхронізацію не ввімкнено.',
@@ -156,7 +164,7 @@ export function buildSyrveCatalogPreview(catalog: SyrveCatalog, moloRows: MoloTa
       missingInMolo: missingInMolo.length, missingInSyrve: missingInSyrve.length, conflicts: conflicts.length,
       deletedTables: new Set(deletedTables.map((table) => table.id)).size },
     proposals, missingInMolo, missingInSyrve, conflicts, deletedTables,
-    diagnostics: { terminalGroups: catalog.terminalGroups, sectionsCount: catalog.sectionsCount,
+    diagnostics: { terminalGroups: catalog.terminalGroups, sectionsCount: catalog.sectionsCount, receivedSections,
       catalogScope: 'available_restaurant_sections' as const, orders: 'not_checked' as const, warnings },
     mappingConfirmationAvailable: false as const,
     syncEnabled: false as const,
