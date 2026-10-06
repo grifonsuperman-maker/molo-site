@@ -57,7 +57,7 @@ export class SyrveActivationService {
     if (loadingPlanFingerprint(plan) !== proof.upstream || proof.expires <= Date.now()) throw new ConflictException('Склад столів або кас змінився. Повторіть перевірку.');
     const known = new Set(captured.snapshot.links.flatMap(link => link.activeSyrveOrderIds)).size;
     if (controls.deadline <= Date.now()) throw new SyrveClientException('SYRVE_TIMEOUT');
-    if (controls.requestBudget.remaining < 2 + 2 * plan.groups.length + 6 + Math.ceil(known / 200)) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
+    if (controls.requestBudget.remaining < 2 + plan.groups.length + 6 + Math.ceil(known / 200)) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
     const lease = await this.loading.claim(captured), entity = lease.snapshot.entity!;
     let enabled = false, code: string | null = null;
     try {

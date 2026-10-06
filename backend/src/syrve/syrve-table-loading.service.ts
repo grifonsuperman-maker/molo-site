@@ -50,12 +50,12 @@ export class SyrveTableLoadingService {
     const controls = { deadline: Date.now() + 45_000, requestBudget: { remaining: 25 } };
     const plan = await this.probePlan(captured, controls);
     if (loadingPlanFingerprint(plan) !== proof.upstream || proof.expires <= Date.now()) throw new ConflictException('Склад столів або кас змінився. Повторіть перевірку.');
-    // Reserve authentication, one command/status per group, and the complete
+    // Reserve authentication, one synchronous load per group, and the complete
     // post-load read. Never consume the one-use proof when even the shortest
     // successful path exceeds the remaining shared request/time budget.
     const known = new Set(captured.snapshot.links.flatMap(link => link.activeSyrveOrderIds)).size;
     if (Date.now() >= controls.deadline) throw new SyrveClientException('SYRVE_TIMEOUT');
-    if (controls.requestBudget.remaining < 2 + 2 * plan.groups.length + 6 + Math.ceil(known / 200)) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
+    if (controls.requestBudget.remaining < 2 + plan.groups.length + 6 + Math.ceil(known / 200)) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
     const lease = await this.store.claim(captured), entity = lease.snapshot.entity!;
     let commandsConfirmed = false, readCompleted = false, code: string | null = null;
     try {

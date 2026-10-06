@@ -1148,6 +1148,26 @@ waiter behavior, booking flow/status priority and exact 15-second polling are un
 
 ### PR 10b3 explicit loading of confirmed table state
 
+**2026-10-06 correction:** the completion interpretation below was incorrect for
+`/api/1/order/init_by_table`. The freshly downloaded official OpenAPI at
+https://api-eu.syrve.live/api-docs/docs (SHA-256
+`e7f6671de2f95ce4c6de543e3fcdf096ab22f08466c56544b789f9ef00470b6d`)
+marks asynchronous methods such as `/api/1/order/create` explicitly with
+"This method is a command. Use `api/1/commands/status` method to get the progress
+status." Neither `init_by_table` nor `init_by_posOrder` carries that marker.
+`init_by_table` is the synchronous POS data-loading request; its returned
+`correlationId` is not a status-pollable command ID. Polling it caused the immediate
+HTTP 410 observed in the Director video. The client now validates the synchronous
+HTTP 200 response and current saved scope, then all callers still perform fresh
+full table/tracked-order reads before enabling synchronization or issuing a
+private worker visibility receipt. The extra `Commands` permission and status
+requests are no longer prerequisites for table loading. Missing responses,
+timeouts, malformed data, revoked consent and changed scope still fail closed,
+consume the old proof and retain the bounded exclusion where completion is
+uncertain. Empty reads still do not prove closure; event/version fences and the
+exact 15-second polling interval are unchanged. This correction supersedes the
+historical command-status assumptions in the following implementation notes.
+
 Starts from merged #280, main `4ab8c143ad3867129f0fb900e29228582683634a`.
 The product still exposes table statuses only. The documented POS account-loading
 command is an internal prerequisite, not an order-management feature. The public

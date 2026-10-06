@@ -162,6 +162,7 @@ test('InProgress and failed post-load read never imply synchronization or free t
 });
 test('known preparation failures show the specific server reason without submitting loading',async()=>{
   for(const message of ['Сесію Директора не підтверджено. Увійдіть повторно перед перевіркою столів.',
+    'Завантаження або перевірка вже триває. Зачекайте до 90 секунд і повторіть перевірку.',
     'Для всіх пов’язаних столів потрібні доступні каси Syrve POS від версії 7.7.1 та дозволи читання. Перевірте підключення.',
     'Налаштування або столи змінилися. Повторіть перевірку перед підтвердженням.']) {
     let commands=0;const h=mounted({previewTableLoading:async()=>{throw new Error(message);},loadTables:async()=>commands++});
