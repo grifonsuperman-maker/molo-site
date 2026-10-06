@@ -45,7 +45,7 @@ export default function SyrveCatalogPreviewPanel({ preview }: { preview: SyrveCa
         <ul className="mt-2 max-h-60 space-y-2 overflow-y-auto text-white/65">
           {preview.diagnostics.receivedSections.map((section, index) => <li key={`${section.terminalGroupName}:${section.sectionName}:${index}`}>
             <p><span className="font-bold text-white/80">{section.sectionName || 'Секція без назви'}</span> · {section.terminalGroupName || 'Каса без назви'}</p>
-            <p className="mt-1 text-xs text-white/45">Столи: №{tableNumberRanges(section.tableNumbers)} · всього {section.tableNumbers.length}</p>
+            <p className="mt-1 text-xs text-white/45">Столи: №{tableNumberRanges(section.tableNumbers)} · всього {section.tableCount}</p>
           </li>)}
         </ul>
       </details>}
