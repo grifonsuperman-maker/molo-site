@@ -26,7 +26,8 @@ function batchTransport(organizationId, tableIds, options = {}) {
       organizationId, terminalGroupId: group.terminalGroupId, isAlive: true })) };
     else if (path.endsWith('/init_by_table')) { loads++; value = { correlationId: id(9100 + loads) }; }
     else if (path.endsWith('/by_table')) value = { correlationId: id(9002), orders: rows.filter(row =>
-      row.order?.tableIds.some(table => body.tableIds.includes(table)) || row.creationStatus !== 'Success') };
+      row.creationStatus !== 'Success' || (row.order?.tableIds.some(table => body.tableIds.includes(table))
+        && (!body.statuses || body.statuses.includes(row.order.status)))) };
     else if (path.endsWith('/by_id')) value = { correlationId: id(9003), orders: rows.filter(row => body.orderIds.includes(row.id)) };
     else throw new Error('Unexpected synthetic Syrve path: ' + path);
     return Response.json(value);

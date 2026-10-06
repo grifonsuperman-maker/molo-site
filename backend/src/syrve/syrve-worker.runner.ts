@@ -70,7 +70,7 @@ export class SyrveWorkerRunner {
         }
         const loadingPlan = await this.store.guardBatch(lease, captures);
         const result = await withSyrveOperation({ deadline, signal: controller.signal,
-          beforeRequest: async () => { await this.store.guardBatch(lease!, captures); } }, () => this.batchProbe!(captures, lease!.id, { deadline, signal: controller.signal, requestBudget, loadingPlan,
+          beforeRequest: async () => { await this.store.guardBatch(lease!, captures); } }, () => this.batchProbe!(captures, lease!.id, { deadline, signal: controller.signal, requestBudget, loadingPlan, configurationRevision: lease!.version.revision,
           commandStarted: () => { unresolvedCommands++; }, commandFinished: () => { unresolvedCommands--; },
           beforeCommand: async () => { await this.store.guardBatch(lease!, captures); } }));
         if (!Array.isArray(result) || result.length !== captures.length) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');

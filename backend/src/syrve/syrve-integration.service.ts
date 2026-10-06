@@ -85,7 +85,7 @@ export class SyrveIntegrationService {
     }
     const probes = await this.client.probeLoadedOrderBatch(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!,
       captures.map(captured => ({ tableId: captured.state.scope.syrveTableId, orderIdBatches: captured.orderIds,
-        visibilityContext: syrveCaptureContext(leaseId, captured) })), controls);
+        visibilityContext: syrveCaptureContext(leaseId, captured) })), { ...controls, configurationRevision: entity.configurationRevision });
     return captures.map((captured, index) => probes[index] === null ? null
       : captured.orderIds.map((orderIds, page) => ({ orderIds, probe: probes[index]![page] })));
   }

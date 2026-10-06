@@ -199,9 +199,22 @@ test('a 60-table long operation and concurrent Director check complete under the
   for (let n = 0; n < 55 && !settled; n++) { await new Promise(setImmediate); if (!settled) t.mock.timers.tick(31_000); }
   const [probes, director] = await pending;
   assert.equal(probes.length, 60); assert.equal(director.organizations.length, 1);
-  assert.equal(dispatches.length, 17); assert.ok(dispatches.at(-1) - dispatches[0] > 45_000);
+  assert.equal(dispatches.length, 9); assert.ok(dispatches.at(-1) - dispatches[0] > 45_000);
+  const warmStart = dispatches.length;
+  settled = false;
+  const warm = withSyrveOperation(controls, () => client.probeLoadedOrderBatch(BASE, LOGIN, ORG,
+    tables.map(tableId => ({ tableId, orderIdBatches: [[]], visibilityContext: 'warm-' + tableId })), controls));
+  warm.then(() => settled = true, () => settled = true);
+  for (let n = 0; n < 25 && !settled; n++) { await new Promise(setImmediate); if (!settled) t.mock.timers.tick(31_000); }
+  const warmed = await warm;
+  assert.equal(dispatches.length - warmStart, 3);
+  assert.equal(tx.calls.filter(call => call.path.endsWith('/init_by_table')).length, 2);
   for (const time of dispatches) assert.ok(dispatches.filter(value => value >= time && value < time + 60_000).length <= 2);
   for (const [index, value] of probes.entries()) assert.equal(isVerifiedLoadedProbe(value[0], tables[index], ORG, tables[index]), true);
+  for (const [index, value] of warmed.entries()) {
+    assert.equal(isVerifiedLoadedProbe(value[0], 'warm-' + tables[index], ORG, tables[index]), true);
+    assert.equal(isVerifiedLoadedProbe(value[0], tables[index], ORG, tables[index]), false);
+  }
 });
 
 test('quota migration rollback refuses a live cooldown and requires a transaction', async () => {

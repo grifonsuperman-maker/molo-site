@@ -69,9 +69,12 @@ export async function runSyrveBatchValidation(env = process.env) {
     assert.equal(statuses.find(item => item.id === physical[0]).status, 'cleaning');
     assert.equal(statuses.filter(item => item.status === 'occupied').length, 59);
     const [unconsumed] = await source.query('SELECT count(*)::int AS count FROM syrve_order_versions v JOIN syrve_table_links l ON l.id=v.link_id WHERE l.molo_table_id=$1', [physical[0]]);
-    assert.equal(unconsumed.count, 0); assert.equal(tx.calls.length, 15);
-    await due(); assert.equal((await run()).processed, 60);
-    tx.setRows(orders('Closed')); await due(); assert.equal((await run()).processed, 60);
+    assert.equal(unconsumed.count, 0); assert.equal(tx.calls.length, 7);
+    await due(); const warmStart = tx.calls.length; assert.equal((await run()).processed, 60);
+    assert.equal(tx.calls.length - warmStart, 3);
+    tx.setRows(orders('Closed')); await due(); const closingStart = tx.calls.length; assert.equal((await run()).processed, 60);
+    assert.equal(tx.calls.length - closingStart, 4);
+    assert.equal(tx.calls.filter(call => call.path.endsWith('/by_id')).length, 1);
     assert.equal((await source.query("SELECT count(*)::int AS count FROM tables WHERE id=ANY($1::uuid[]) AND status='free'", [physical]))[0].count, 60);
     assert.deepEqual(await source.query('SELECT * FROM bookings WHERE id=$1', [bookingId]), bookingBefore);
     mixed = true;
