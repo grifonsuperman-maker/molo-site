@@ -93,6 +93,7 @@ function dock() {
       : name === './SyrveReadinessPanel' ? { __esModule: true, default: ReadinessPanel }
       : name === './SyrveTableLoadingPanel' ? { __esModule: true, default: LoadingPanel }
       : name === './SyrveAutoStatusPanel' ? { __esModule: true, default: () => null }
+      : name === './SyrveSavedTablesPanel' ? { __esModule: true, default: () => null }
       : name === './services/syrveOperationErrors' ? operationErrors
       : name === './SyrveCatalogPreviewPanel' ? { __esModule: true, default: () => null } : require(name) });
   const render = () => { stateIndex = 0; refIndex = 0; const tree = exports.default(); while (effects.length) effects.shift()(); return tree; };

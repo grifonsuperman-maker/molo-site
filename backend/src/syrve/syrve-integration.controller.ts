@@ -5,6 +5,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import {
   ConnectSyrveDto,
   ConfirmSyrveTableLoadingDto,
+  ConfirmSavedSyrveTablesDto,
   DisconnectSyrveDto,
   SyrveRevisionDto,
   PreviewSyrveTablesDto,
@@ -71,6 +72,18 @@ export class SyrveIntegrationController {
   @Header('Cache-Control', 'no-store')
   previewTables(@Body() dto: PreviewSyrveTablesDto) {
     return this.service.previewTables(dto);
+  }
+
+  @Post('saved-tables-preview')
+  @Header('Cache-Control', 'no-store')
+  previewSavedTables(@Body() dto: SyrveRevisionDto) {
+    return this.service.previewSavedTables(dto);
+  }
+
+  @Post('confirm-saved-tables')
+  @Header('Cache-Control', 'no-store')
+  confirmSavedTables(@Body() dto: ConfirmSavedSyrveTablesDto, @Req() request: { user?: AuthUser }) {
+    return this.service.confirmSavedTables(dto, request.user);
   }
 
   @Post('orders-observation')

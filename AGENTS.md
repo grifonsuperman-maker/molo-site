@@ -62,6 +62,7 @@ Future dates show booking state only.
 ## Syrve table status rule (confirmed by the user on 2026-10-02)
 
 - Syrve has exactly two table actions: a newly opened bill marks its mapped physical table `occupied` (`Зайнятий`); confirmed closure of its last active bill marks that same table `free` (`Вільний`).
+- Confirmed by the user on 2026-10-06: moving an open bill to another table occupies the destination and releases the source only if no other bill remains. Require a fresh, strictly newer by-ID record proving the changed table UUIDs; missing, partial or ambiguous reads do not prove a transfer. Never rename MOLO tables when a bill is moved.
 - Both events apply regardless of the previous manual status. Manual `occupied`, `cleaning`, reservation or banquet marks must not block a new Syrve event.
 - Apply each confirmed opening/closure once, atomically with its durable Syrve version. Repeated polls, bill updates and stale responses must not reapply an old event over a later staff action.
 - Staff manage MOLO statuses, reservations and banquets independently. Syrve must not infer, cancel, complete or propagate their actions, and must not write any action back to the POS.

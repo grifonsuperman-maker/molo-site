@@ -126,6 +126,11 @@ export const syrveApi = {
     }>('/syrve-integration/test', payload),
   previewTables: (payload: SyrveConnectionInput & { organizationId: string }) =>
     api.post<SyrveCatalogPreview>('/syrve-integration/tables-preview', payload),
+  previewSavedTables: (configurationRevision: string) =>
+    api.post<SyrveCatalogPreview & { configurationRevision: string }>('/syrve-integration/saved-tables-preview', { configurationRevision }),
+  confirmSavedTables: (configurationRevision: string, confirmationProof: string, pairs: { moloTableId: string; syrveTableId: string }[]) =>
+    api.post<{ message: string; confirmedPairs: number; integration: SyrveIntegrationStatus }>('/syrve-integration/confirm-saved-tables',
+      { configurationRevision, confirmationProof, pairs, confirmed: true }),
   connect: (payload: SyrveConnectionInput & { organizationId: string; organizationName: string; confirmationProof: string; pairs: { moloTableId: string; syrveTableId: string }[] }) =>
     api.post<{ message: string; confirmedPairs: number; integration: SyrveIntegrationStatus }>(
       '/syrve-integration/connect',

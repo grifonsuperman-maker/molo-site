@@ -1,5 +1,5 @@
 import { SyrveClientException } from './syrve-client';
-import type { SyrveLoadedProbeControls } from './syrve-client';
+import type { SyrveBatchProbeControls, SyrveLoadedProbeControls } from './syrve-client';
 import type { SyrveOrderProbe } from './syrve-order-observer';
 import { SyrveStateValidationError } from './syrve-state-reducer';
 import type { SyrveOrderObservationBatch } from './syrve-state-reducer';
@@ -9,6 +9,8 @@ import { SyrveWorkerStore } from './syrve-worker.store';
 import { SYRVE_WORKER_BUDGET_MS, SyrveWorkerError, SyrveWorkerLease, SyrveWorkerResult, workerError } from './syrve-worker.model';
 
 export type SyrveWorkerProbe = (capture: SyrveStateCapture, orderIds: string[], controls: SyrveLoadedProbeControls) => Promise<SyrveOrderProbe>;
+export type SyrveWorkerBatchProbe = (captures: SyrveStateCapture[], leaseId: string,
+  controls: SyrveBatchProbeControls) => Promise<SyrveOrderObservationBatch[][]>;
 
 // Internal engine, neither provider nor controller/export. Tests inject mocks;
 // the scheduler owns it only for a saved, explicitly consented configuration.
@@ -16,7 +18,8 @@ export class SyrveWorkerRunner {
   private active: Promise<SyrveWorkerResult> | null = null;
   private stopped = false;
   private abort: AbortController | null = null;
-  constructor(private readonly store: SyrveWorkerStore, private readonly probe: SyrveWorkerProbe) {}
+  constructor(private readonly store: SyrveWorkerStore, private readonly probe: SyrveWorkerProbe,
+    private readonly batchProbe?: SyrveWorkerBatchProbe) {}
 
   run(): Promise<SyrveWorkerResult> {
     if (this.stopped) return Promise.resolve({ status: 'stopped', processed: 0 });
@@ -46,6 +49,34 @@ export class SyrveWorkerRunner {
       const claimed = await this.store.claim();
       if (claimed.status !== 'claimed') return { status: claimed.status, processed };
       lease = claimed.lease;
+      const loaded = new Map<string, { captured: SyrveStateCapture; batches: SyrveOrderObservationBatch[] }>();
+      if (this.batchProbe) {
+        const captures = await this.store.captureBatch(lease);
+        if (captures.length !== lease.links.length) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+        for (const [index, link] of lease.links.entries()) {
+          linkId = link.id;
+          if (this.stopped) return { status: 'stopped', processed };
+          const captured = captures[index], expected = captured.state.scope;
+          if (captured.linkId !== link.id || expected.integrationId !== lease.version.id
+            || expected.configurationRevision !== lease.version.revision || expected.organizationId !== link.organizationId
+            || expected.syrveTableId !== link.syrveTableId) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+        }
+        const loadingPlan = await this.store.guardBatch(lease, captures);
+        const result = await this.batchProbe(captures, lease.id, { deadline, signal: controller.signal, requestBudget, loadingPlan,
+          commandStarted: () => { unresolvedCommands++; }, commandFinished: () => { unresolvedCommands--; },
+          beforeCommand: async () => { await this.store.guardBatch(lease!, captures); } });
+        if (!Array.isArray(result) || result.length !== captures.length) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+        for (const [index, captured] of captures.entries()) {
+          const batches = result[index];
+          if (!Array.isArray(batches) || batches.length !== captured.orderIds.length
+            || batches.some((batch, page) => JSON.stringify(batch.orderIds) !== JSON.stringify(captured.orderIds[page]))) {
+            throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+          }
+          const failed = batches.flatMap(batch => Object.values(batch.probe.checks)).find(check => check.status === 'error');
+          if (failed) throw new SyrveClientException(failed.code as ConstructorParameters<typeof SyrveClientException>[0]);
+          loaded.set(captured.linkId, { captured, batches });
+        }
+      }
       for (const link of lease.links) {
         linkId = link.id;
         if (this.stopped) return { status: 'stopped', processed };
@@ -53,17 +84,17 @@ export class SyrveWorkerRunner {
           if (processed) return { status: 'observed', processed };
           throw new SyrveClientException('SYRVE_TIMEOUT');
         }
-        const captured = await this.store.capture(link.moloTableId);
+        const captured = loaded.get(link.id)?.captured || await this.store.capture(link.moloTableId);
         if (captured.linkId !== link.id || captured.state.scope.integrationId !== lease.version.id
           || captured.state.scope.configurationRevision !== lease.version.revision
           || captured.state.scope.organizationId !== link.organizationId || captured.state.scope.syrveTableId !== link.syrveTableId) {
           return { status: 'stale', processed, code: 'SYRVE_CONFIGURATION_CHANGED' };
         }
-        const batches: SyrveOrderObservationBatch[] = [];
-        const loadingPlan = await this.store.guard(lease, captured);
-        for (const orderIds of captured.orderIds) {
+        const batches: SyrveOrderObservationBatch[] = loaded.get(link.id)?.batches || [];
+        const loadingPlan = loaded.has(link.id) ? null : await this.store.guard(lease, captured);
+        for (const orderIds of loaded.has(link.id) ? [] : captured.orderIds) {
           if (this.stopped) return { status: 'stopped', processed };
-          const probe = await this.probe(captured, orderIds, { deadline, signal: controller.signal, requestBudget, loadingPlan,
+          const probe = await this.probe(captured, orderIds, { deadline, signal: controller.signal, requestBudget, loadingPlan: loadingPlan!,
             visibilityContext: syrveCaptureContext(lease.id, captured),
             commandStarted: () => { unresolvedCommands++; },
             commandFinished: () => { unresolvedCommands--; },

@@ -17,6 +17,8 @@ type RequestBudget = { remaining: number; parent?: RequestBudget };
 export type SyrveProbeControls = { deadline?: number; signal?: AbortSignal; requestBudget?: RequestBudget };
 type SyrveCommandControls = SyrveProbeControls & { beforeCommand: () => Promise<void>; commandStarted?: () => void; commandFinished?: () => void };
 export type SyrveLoadedProbeControls = SyrveCommandControls & { loadingPlan: TableLoadingPlan; visibilityContext: string };
+export type SyrveBatchProbeControls = SyrveCommandControls & { loadingPlan: TableLoadingPlan };
+export type SyrveBatchOrderRequest = { tableId: string; orderIdBatches: string[][]; visibilityContext: string };
 
 // The issuer is private to the transport. Serialized DTOs, a copied/mutated
 // probe and a successful manual load cannot manufacture worker visibility.
@@ -388,6 +390,7 @@ export class SyrveClient {
     tableIds: string[], knownOrderIds: string[], controls: SyrveLoadedProbeControls): Promise<SyrveOrderProbe> {
     if (!controls || typeof controls.beforeCommand !== 'function' || typeof controls.visibilityContext !== 'string'
       || !controls.visibilityContext || controls.visibilityContext.length > 200) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+    if (controls.deadline !== undefined && !Number.isFinite(controls.deadline)) throw new SyrveClientException('SYRVE_TIMEOUT');
     const deadline = Math.min(Date.now() + OBSERVATION_TIMEOUT_MS, controls.deadline ?? Infinity);
     const shared: SyrveProbeControls = { ...controls, deadline, requestBudget: controls.requestBudget || { remaining: 75 } };
     const expected = loadingPlanFingerprint(controls.loadingPlan);
@@ -412,5 +415,77 @@ export class SyrveClient {
     if (Date.now() >= deadline || controls.signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
     loadedProbes.set(probe, { context: controls.visibilityContext, expires: deadline, fingerprint: probeFingerprint(probe), tableIds: [...tableIds] });
     return probe;
+  }
+
+  // One loading operation per cash group, followed by complete shared reads.
+  // Every table keeps its own captured physical/revision fence and private receipt.
+  async probeLoadedOrderBatch(apiBaseUrl: string, apiLogin: string, organizationId: string,
+    requests: SyrveBatchOrderRequest[], controls: SyrveBatchProbeControls): Promise<SyrveOrderProbe[][]> {
+    if (!controls || typeof controls.beforeCommand !== 'function' || !Array.isArray(requests)
+      || !requests.length || requests.length > LOADING_MAX_TABLES) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+    if (controls.deadline !== undefined && !Number.isFinite(controls.deadline)) throw new SyrveClientException('SYRVE_TIMEOUT');
+    let tableIds: string[], allOrderIds: string[];
+    try {
+      tableIds = observationIds(requests.map(request => request.tableId), LOADING_MAX_TABLES);
+      const contexts = new Set<string>();
+      const orders = new Set<string>();
+      for (const request of requests) {
+        if (typeof request.visibilityContext !== 'string' || !request.visibilityContext || request.visibilityContext.length > 200
+          || contexts.has(request.visibilityContext) || !Array.isArray(request.orderIdBatches) || !request.orderIdBatches.length) {
+          throw new SyrveOrderValidationError();
+        }
+        contexts.add(request.visibilityContext);
+        const own = new Set<string>();
+        for (const batch of request.orderIdBatches) {
+          for (const id of observationIds(batch, MAX_RESPONSE_ORDERS)) {
+            if (own.has(id)) throw new SyrveOrderValidationError();
+            own.add(id); orders.add(id);
+          }
+        }
+      }
+      allOrderIds = [...orders].sort();
+    } catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
+    const deadline = Math.min(Date.now() + OBSERVATION_TIMEOUT_MS, controls.deadline ?? Infinity);
+    if (Date.now() >= deadline || controls.signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
+    const shared: SyrveProbeControls = { ...controls, deadline, requestBudget: controls.requestBudget || { remaining: 75 } };
+    const expected = loadingPlanFingerprint(controls.loadingPlan);
+    const checkedPlan = (probe: SyrveOrderProbe) => {
+      const failure = Object.values(probe.checks).find(check => check.status === 'error');
+      if (failure) throw new SyrveClientException(failure.code as keyof typeof ERRORS);
+      let plan: TableLoadingPlan;
+      try { plan = tableLoadingPlan(probe, tableIds); }
+      catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
+      if (probe.organizationId !== organizationId || loadingPlanFingerprint(plan) !== expected) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+      return plan;
+    };
+    await controls.beforeCommand();
+    const plan = checkedPlan(await this.probeOrders(apiBaseUrl, apiLogin, organizationId, tableIds, [], shared));
+    await this.initializeTables(apiBaseUrl, apiLogin, plan, { ...shared, beforeCommand: controls.beforeCommand,
+      commandStarted: controls.commandStarted, commandFinished: controls.commandFinished });
+    const pages = allOrderIds.length ? Array.from({ length: Math.ceil(allOrderIds.length / MAX_RESPONSE_ORDERS) },
+      (_, index) => allOrderIds.slice(index * MAX_RESPONSE_ORDERS, (index + 1) * MAX_RESPONSE_ORDERS)) : [[]];
+    const probes: SyrveOrderProbe[] = [];
+    for (const orderIds of pages) {
+      await controls.beforeCommand();
+      const probe = await this.probeOrders(apiBaseUrl, apiLogin, organizationId, tableIds, orderIds, shared);
+      checkedPlan(probe);
+      if (orderIds.length && probe.checks.ordersById.status !== 'ok') throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+      probes.push(probe);
+    }
+    await controls.beforeCommand();
+    if (Date.now() >= deadline || controls.signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
+    const byTable = mergeSyrveOrders(...probes.map(probe => probe.byTable!));
+    if (byTable.length > MAX_RESPONSE_ORDERS) throw new SyrveClientException('SYRVE_OBSERVATION_LIMIT');
+    const byId = mergeSyrveOrders(...probes.map(probe => probe.byId || []));
+    const last = probes[probes.length - 1];
+    return requests.map(request => request.orderIdBatches.map(orderIds => {
+      const tableId = request.tableId.toLowerCase(), ids = new Set(orderIds.map(id => id.toLowerCase()));
+      const probe: SyrveOrderProbe = { ...last,
+        byTable: byTable.filter(order => order.tableIds.includes(tableId) || (order.state === 'unknown' && !order.tableIds.length)),
+        byId: byId.filter(order => ids.has(order.id)) };
+      loadedProbes.set(probe, { context: request.visibilityContext, expires: deadline,
+        fingerprint: probeFingerprint(probe), tableIds: [tableId] });
+      return probe;
+    }));
   }
 }

@@ -68,6 +68,23 @@ export class SyrveRevisionDto {
   configurationRevision: string;
 }
 
+export class ConfirmSavedSyrveTablesDto extends SyrveRevisionDto {
+  @IsString()
+  @MinLength(40)
+  @MaxLength(2500)
+  confirmationProof: string;
+
+  @IsArray()
+  @ArrayMaxSize(1000)
+  @ValidateNested({ each: true })
+  @Type(() => ConfirmSyrvePairDto)
+  pairs: ConfirmSyrvePairDto[];
+
+  @IsBoolean()
+  @Equals(true)
+  confirmed: boolean;
+}
+
 export class ConfirmSyrveTableLoadingDto extends SyrveRevisionDto {
   @IsString()
   @MinLength(40)

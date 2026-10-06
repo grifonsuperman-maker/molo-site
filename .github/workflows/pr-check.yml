@@ -104,6 +104,8 @@ jobs:
         run: node backend/scripts/syrve-status-projection-validation.mjs
       - name: Validate consented Syrve worker, leases, retries and delayed responses
         run: node backend/scripts/syrve-worker-validation.mjs
+      - name: Validate batched 60-table synchronization and bill transfers
+        run: node backend/scripts/syrve-transfer-validation.mjs
       - name: Validate explicit table loading, one-use confirmation and cross-instance leases
         run: node backend/scripts/syrve-table-loading-validation.mjs
       - name: Validate Director activation, confirmed runtime reads and immediate revocation

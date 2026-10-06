@@ -63,6 +63,61 @@ test('explicit confirmation saves only the reviewed UUID pair and verified resta
   assert.equal(h.tables.length, 1);
 });
 
+test('saved catalogue preview works with autosync on, keeps credentials private and writes nothing', async t => {
+  const h = setup(t); await h.confirm();
+  h.service.activation = { requireDisabled: () => assert.fail('read-only preview must not require disabled sync') };
+  const before = h.snapshot(), writes = h.writes.length;
+  let reads = 0;
+  h.client.getCatalog = async (base, login, organization) => {
+    reads++; assert.equal(login, INPUT.apiLogin); assert.equal(organization, ORG); return structuredClone(h.catalog());
+  };
+  const preview = await h.service.previewSavedTables({ configurationRevision: h.entity().configurationRevision });
+  assert.equal(reads, 1); assert.equal(preview.configurationRevision, h.entity().configurationRevision);
+  assert.equal(preview.confirmedLinks.length, 1);
+  assert.doesNotMatch(JSON.stringify(preview), /synthetic-api-login|apiLoginEncrypted|apiLoginIv|apiLoginAuthTag/);
+  assert.deepEqual(h.snapshot(), before); assert.equal(h.writes.length, writes);
+  assert.ok(Date.parse(preview.confirmation.expiresAt) - Date.parse(preview.checkedAt) <= 300000);
+});
+
+test('saved catalogue adds only reviewed missing links, preserves old IDs and requires another activation', async t => {
+  const h = setup(t); await h.confirm();
+  h.tables.push({ id: OTHER, tableNumber: '77' });
+  const beforeLinks = structuredClone(h.links());
+  const value = await h.service.previewSavedTables({ configurationRevision: h.entity().configurationRevision });
+  assert.equal(value.proposals.length, 1);
+  const dto = { configurationRevision: h.entity().configurationRevision, confirmationProof: value.confirmation.proof,
+    pairs: value.proposals.map(({ moloTableId, syrveTableId }) => ({ moloTableId, syrveTableId })), confirmed: true };
+  const result = await h.service.confirmSavedTables(dto);
+  assert.equal(result.integration.syncEnabled, false); assert.equal(result.confirmedPairs, 1);
+  assert.deepEqual(h.links()[0], beforeLinks[0]); assert.equal(h.links()[1].moloTableId, OTHER);
+  assert.notEqual(result.integration.configurationRevision, dto.configurationRevision);
+  const saved = h.snapshot(); await assert.rejects(h.service.confirmSavedTables(dto), /змінилися/);
+  assert.deepEqual(h.snapshot(), saved);
+});
+
+test('saved link confirmation rejects enabled sync, missing acknowledgement and changed catalogues', async t => {
+  const h = setup(t); await h.confirm(); h.tables.push({ id: OTHER, tableNumber: '77' });
+  const value = await h.service.previewSavedTables({ configurationRevision: h.entity().configurationRevision });
+  const dto = { configurationRevision: h.entity().configurationRevision, confirmationProof: value.confirmation.proof,
+    pairs: [{ moloTableId: OTHER, syrveTableId: OTHER }], confirmed: true };
+  const before = h.snapshot();
+  await assert.rejects(h.service.confirmSavedTables({ ...dto, confirmed: false }), /підтвердьте/);
+  h.service.activation = { requireDisabled: async () => { throw new Error('sync enabled'); } };
+  await assert.rejects(h.service.confirmSavedTables(dto), /sync enabled/);
+  h.service.activation = { requireDisabled: async () => {} };
+  h.catalog().tables[1].number = 78;
+  await assert.rejects(h.service.confirmSavedTables(dto), /змінилися/);
+  assert.deepEqual(h.snapshot(), before);
+});
+
+test('a late saved catalogue cannot issue a usable proof for a new configuration', async t => {
+  const h = setup(t); await h.confirm();
+  const revision = h.entity().configurationRevision;
+  const read = h.client.getCatalog;
+  h.client.getCatalog = async (...args) => { h.entity().configurationRevision = randomUUID(); return read(...args); };
+  await assert.rejects(h.service.previewSavedTables({ configurationRevision: revision }), /змінилися/);
+});
+
 for (const [name, pairs] of [['unknown physical table', [{ moloTableId: OTHER, syrveTableId: SYRVE }]],
   ['unreviewed provider table', [{ moloTableId: MOLO, syrveTableId: OTHER }]],
   ['duplicate selection', [{ moloTableId: MOLO, syrveTableId: SYRVE }, { moloTableId: MOLO, syrveTableId: SYRVE }]]]) {

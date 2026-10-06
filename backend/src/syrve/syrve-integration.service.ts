@@ -9,11 +9,11 @@ import { Repository } from 'typeorm';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { LogsService } from '../logs/logs.service';
 import { TableEntity } from '../tables/entities/table.entity';
-import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisionDto,
+import { ConfirmSavedSyrveTablesDto, ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisionDto,
   TestSyrveConnectionDto, UpdateSyrveConnectionDto } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
 import { SyrveTableLink } from './entities/syrve-table-link.entity';
-import { SyrveClient, SyrveClientException, SyrveLoadedProbeControls } from './syrve-client';
+import { SyrveClient, SyrveClientException, SyrveBatchProbeControls, SyrveLoadedProbeControls } from './syrve-client';
 import { SyrveActivationStore } from './syrve-activation.store';
 import { buildSyrveMappingPreview } from './syrve-mapping-preview';
 import { credentialFingerprint, issuePreviewProof, previewFingerprint, verifyPreviewProof } from './syrve-preview-proof';
@@ -21,7 +21,7 @@ import { settingsVersion, staleSyrveSettings, SyrveSettingsSnapshot, SyrveSettin
 import { buildSyrveOrderObservation } from './syrve-order-observer';
 import { directorOrderDiagnostics } from './syrve-order-diagnostics';
 import { diagnoseSyrvePosVersions } from './syrve-pos-version';
-import type { SyrveStateCapture } from './syrve-state.store';
+import { syrveCaptureContext, type SyrveStateCapture } from './syrve-state.store';
 import { savedSyrveFingerprint } from './syrve-saved-scope';
 import { decryptSyrveCredentials, syrveCredentialsKey } from './syrve-credentials';
 
@@ -70,6 +70,23 @@ export class SyrveIntegrationService {
     if (!this.activation || !(await this.activation.read(snapshot)).enabled) throw staleSyrveSettings();
     return this.client.probeLoadedOrders(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId,
       [expected.syrveTableId], orderIds, controls);
+  }
+
+  async probeWorkerBatch(captures: SyrveStateCapture[], leaseId: string, controls: SyrveBatchProbeControls) {
+    const snapshot = await this.settings.read(), entity = snapshot.entity;
+    if (!snapshot.prepared || !entity || entity.status !== 'connected' || !captures.length
+      || !this.activation || !(await this.activation.read(snapshot)).enabled) throw staleSyrveSettings();
+    for (const captured of captures) {
+      const expected = captured.state.scope;
+      if (entity.id !== expected.integrationId || entity.configurationRevision !== expected.configurationRevision
+        || entity.organizationId !== expected.organizationId || !snapshot.links.some(link => link.id === captured.linkId
+          && link.integrationId === entity.id && link.organizationId === expected.organizationId
+          && link.moloTableId === expected.moloTableId && link.syrveTableId === expected.syrveTableId)) throw staleSyrveSettings();
+    }
+    const probes = await this.client.probeLoadedOrderBatch(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!,
+      captures.map(captured => ({ tableId: captured.state.scope.syrveTableId, orderIdBatches: captured.orderIds,
+        visibilityContext: syrveCaptureContext(leaseId, captured) })), controls);
+    return captures.map((captured, index) => captured.orderIds.map((orderIds, page) => ({ orderIds, probe: probes[index][page] })));
   }
 
   private async probeSavedTables(dto: SyrveRevisionDto) {
@@ -158,9 +175,39 @@ export class SyrveIntegrationService {
       credentials: credentialFingerprint(key, this.client.normalizeBaseUrl(dto.apiBaseUrl), dto.apiLogin.trim()),
       fingerprint: previewFingerprint(catalog, tables, current.links),
     }) : null;
-    return { ...preview, confirmation, mappingConfirmationAvailable: Boolean(confirmation && preview.proposals.length),
+    return { ...preview, checkedAt: new Date().toISOString(), confirmation, mappingConfirmationAvailable: Boolean(confirmation && preview.proposals.length),
       diagnostics: { ...preview.diagnostics, warnings: [...preview.diagnostics.warnings,
         ...(!current.prepared ? ['Підтвердження зв’язків поки недоступне: серверна підготовка інтеграції ще не завершена.'] : [])] } };
+  }
+
+  async previewSavedTables(dto: SyrveRevisionDto) {
+    const snapshot = await this.checkedRevision(dto), entity = snapshot.entity!;
+    if (entity.status !== 'connected' || !entity.organizationId) {
+      throw new BadRequestException('Спочатку збережіть і перевірте підключення Syrve.');
+    }
+    // Read-only catalogue access also works while automatic statuses are on.
+    // The saved API key stays on the server; no commands or status writes occur.
+    const preview = await this.previewTables({ displayName: entity.displayName, apiBaseUrl: entity.apiBaseUrl,
+      apiLogin: this.decrypt(entity), organizationId: entity.organizationId });
+    const current = await this.settings.read();
+    if (JSON.stringify(settingsVersion(snapshot)) !== JSON.stringify(settingsVersion(current))) throw staleSyrveSettings();
+    return { ...preview, checkedAt: new Date().toISOString(), configurationRevision: entity.configurationRevision,
+      diagnostics: { ...preview.diagnostics, warnings: preview.diagnostics.warnings.map(warning =>
+        warning === 'Читання стану столів ще не перевірено. Синхронізацію не ввімкнено.'
+          ? 'Ця перевірка лише читає список столів. Поточний стан автостатусів не змінюється.' : warning) } };
+  }
+
+  async confirmSavedTables(dto: ConfirmSavedSyrveTablesDto, actor?: AuthUser) {
+    const snapshot = await this.checkedRevision(dto), entity = snapshot.entity!;
+    if (entity.status !== 'connected' || !entity.organizationId || dto.confirmed !== true || !dto.pairs?.length) {
+      throw new BadRequestException('Перевірте список та підтвердьте запропоновані зв’язки столів.');
+    }
+    await this.activation?.requireDisabled(snapshot);
+    // Reuse the signed catalogue proof, a fresh catalogue and the existing
+    // atomic append-only mapping validation. Existing UUID links never change.
+    return this.connect({ displayName: entity.displayName, apiBaseUrl: entity.apiBaseUrl, apiLogin: this.decrypt(entity),
+      organizationId: entity.organizationId, organizationName: entity.organizationName || '',
+      confirmationProof: dto.confirmationProof, pairs: dto.pairs }, actor);
   }
 
   async connect(dto: ConnectSyrveDto, actor?: AuthUser) {

@@ -95,13 +95,66 @@ test('unverified visibility cannot release the last known order or clear its man
   assert.deepEqual(trusted.state.manuallyFreedSyrveOrderIds, []);
 });
 
-test('missing, moved and pending orders retain occupancy; partial closure cannot erase either active UUID', () => {
-  for (const unknown of [null, row(ORDER2, 'New', 200, [TABLE2]), pending(ORDER2, 200)]) {
+test('missing and pending orders retain occupancy; partial closure cannot erase either active UUID', () => {
+  for (const unknown of [null, pending(ORDER2, 200)]) {
     const state = opened(row(ORDER), row(ORDER2));
     const result = observe(state, [row(ORDER, 'Closed', 200), ...unknown ? [unknown] : []]);
     assert.deepEqual(result.state.activeSyrveOrderIds, [ORDER, ORDER2]);
     assert.ok(result.diagnostics.includes('unknown_orders')); assert.equal(status(result.state), 'occupied');
   }
+});
+
+test('a newer confirmed by-ID transfer releases only the source and occupies the destination', () => {
+  const moved = row(ORDER, 'New', 200, [TABLE2]);
+  const source = observe(opened(), [], { probe: probe([], { byId: probe([moved]).byId }) });
+  assert.deepEqual(source.state.activeSyrveOrderIds, []);
+  assert.equal(source.state.lastSyrveState, 'closed');
+  const destinationScope = { ...SCOPE, moloTableId: id(23), syrveTableId: TABLE2 };
+  const destination = createSyrveTableSyncState(destinationScope, id(revision++));
+  const occupied = observe(destination, [moved]);
+  assert.deepEqual(occupied.state.activeSyrveOrderIds, [ORDER]);
+  assert.equal(occupied.state.lastSyrveState, 'open');
+  const replay = observe(source.state, [moved]);
+  assert.equal(replay.changed, false);
+  const returned = observe(source.state, [row(ORDER, 'Bill', 201)]);
+  assert.deepEqual(returned.state.activeSyrveOrderIds, [ORDER]);
+  assert.equal(returned.state.lastSyrveState, 'open');
+});
+
+test('moving one bill retains the other and a missing bill postpones releasing the source', () => {
+  const openedBoth = opened(row(ORDER), row(ORDER2));
+  const moved = row(ORDER, 'Bill', 200, [TABLE2]);
+  const remaining = observe(openedBoth, [moved, row(ORDER2, 'New', 200)]);
+  assert.deepEqual(remaining.state.activeSyrveOrderIds, [ORDER2]);
+  assert.equal(remaining.state.lastSyrveState, 'open');
+  const missing = observe(openedBoth, [moved]);
+  assert.deepEqual(missing.state.activeSyrveOrderIds, [ORDER, ORDER2]);
+  // The same already-confirmed transfer can finish after the other bill resolves.
+  const resolved = observe(missing.state, [moved, row(ORDER2, 'Closed', 201)]);
+  assert.deepEqual(resolved.state.activeSyrveOrderIds, []);
+  assert.equal(resolved.state.lastSyrveState, 'closed');
+});
+
+test('unverified, same-version, stale and by-table-only transfers cannot release known occupancy', () => {
+  for (const options of [
+    { visibilityVerified: false },
+    { probe: probe([row(ORDER, 'New', 100, [TABLE2])]) },
+    { probe: probe([row(ORDER, 'New', 99, [TABLE2])]) },
+    { probe: probe([row(ORDER, 'New', 200, [TABLE2])], { byId: [] }) },
+    { probe: probe([row(ORDER, 'New', 200, [TABLE2])], { checks: { ...probe().checks,
+      ordersById: { status: 'error', code: 'SYRVE_RATE_LIMITED' } } }) },
+  ]) {
+    const state = staff(opened()).state, result = observe(state, [row(ORDER, 'New', 200, [TABLE2])], options);
+    assert.deepEqual(result.state.activeSyrveOrderIds, [ORDER]);
+    assert.deepEqual(result.state.manuallyFreedSyrveOrderIds, [ORDER]);
+  }
+});
+
+test('multi-table bill stays associated until a fresh record explicitly removes the source', () => {
+  const state = opened(), both = observe(state, [row(ORDER, 'Bill', 200, [TABLE, TABLE2])]);
+  assert.deepEqual(both.state.activeSyrveOrderIds, [ORDER]);
+  const result = observe(both.state, [row(ORDER, 'Bill', 201, [TABLE2])]);
+  assert.deepEqual(result.state.activeSyrveOrderIds, []);
 });
 
 test('an unassociated pending discovery also blocks closure rather than assuming it belongs elsewhere', () => {

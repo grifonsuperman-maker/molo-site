@@ -186,14 +186,27 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   const associated = orders.filter((order) => order.tableIds.includes(state.scope.syrveTableId));
   const open = new Set(associated.filter((order) => order.state === 'open').map((order) => order.id));
   const closed = new Set(associated.filter((order) => order.state === 'closed').map((order) => order.id));
-  // Missing/moved/ambiguous orders cannot make any partial closure free a table.
-  const unknownOrders = state.activeSyrveOrderIds.some((orderId) => !open.has(orderId) && !closed.has(orderId)) || orders.some((order) =>
+  const byId = probes.flatMap(probe => probe.byId || []);
+  // An explicit newer by-ID record can end this table's association while the
+  // bill remains open elsewhere. An empty read or an unverified move never does.
+  const moved = new Set(orders.filter(order => {
+    const previous = versions.get(order.id);
+    return event.visibilityVerified && active.has(order.id) && previous
+      && (order.timestamp > previous.timestamp || (order.timestamp === previous.timestamp
+        && previous.state === 'closed' && previous.fingerprint === fingerprint(order)))
+      && order.state !== 'unknown' && order.tableIds.length && !order.tableIds.includes(state.scope.syrveTableId)
+      && byId.some(read => read.id === order.id && read.timestamp === order.timestamp && fingerprint(read) === fingerprint(order));
+  }).map(order => order.id));
+  // Missing/ambiguous orders cannot make a partial closure or transfer free a table.
+  const unknownOrders = state.activeSyrveOrderIds.some((orderId) => !open.has(orderId) && !closed.has(orderId) && !moved.has(orderId)) || orders.some((order) =>
     order.state === 'unknown' && (!order.tableIds.length || order.tableIds.includes(state.scope.syrveTableId)));
   const candidates = orders
     .filter((order) => order.tableIds.includes(state.scope.syrveTableId) || active.has(order.id) || versions.has(order.id)
       || (order.state === 'unknown' && !order.tableIds.length))
     .map((order) => ({ order, previous: versions.get(order.id), signature: fingerprint(order),
-      evidenceState: open.has(order.id) ? 'open' as const : closed.has(order.id) ? 'closed' as const
+      evidenceState: open.has(order.id) ? 'open' as const : closed.has(order.id) || moved.has(order.id)
+        || (versions.has(order.id) && order.state !== 'unknown' && order.tableIds.length && !order.tableIds.includes(state.scope.syrveTableId)
+          && !active.has(order.id)) ? 'closed' as const
         : !active.has(order.id) ? order.state : 'unknown' as const }));
   const accepted: typeof candidates = [];
   // Phase one derives the entire prospective ledger without changing membership
@@ -221,7 +234,7 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   // Phase two applies membership only after every prospective outcome is known.
   for (const { order } of accepted) {
     if (open.has(order.id)) active.add(order.id);
-    else if (closed.has(order.id) && canClose) { active.delete(order.id); freed.delete(order.id); }
+    else if ((closed.has(order.id) || moved.has(order.id)) && canClose) { active.delete(order.id); freed.delete(order.id); }
     // Unknown versions advance the high-water mark but retain active IDs/overrides.
   }
 
