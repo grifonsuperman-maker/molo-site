@@ -134,7 +134,7 @@ test('known preparation failures show the specific server reason without submitt
 test('known loading failures retain their reason while consuming proof and refreshing settings',async()=>{
   const message='Syrve не надав права для цієї перевірки.';let refreshed=0;
   const h=mounted({previewTableLoading:async()=>preview(),loadTables:async()=>{throw new Error(message);}},
-    {onFinished:async value=>{assert.equal(value,null);refreshed++;}});
+    {onFinished:async(value,reason)=>{assert.equal(value,null);assert.equal(reason,message);refreshed++;}});
   h.prepare();await flush();h.ack();h.confirm();await flush();
   assert.equal(find(h.render(),n=>n.props?.role==='alert').props.children,message);
   assert.equal(h.states[0],null);assert.equal(h.states[1],false);assert.equal(refreshed,1);

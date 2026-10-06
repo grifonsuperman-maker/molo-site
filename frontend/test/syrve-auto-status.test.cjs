@@ -99,8 +99,10 @@ test('unknown preparation, stale local consent and other operations block all ac
   }
 });
 test('transport loss clears the one-use proof, refreshes and exposes only a fixed Ukrainian message',async()=>{
-  let outcome;const h=mounted({previewAutoStatus:async()=>preview(),enableAutoStatus:async()=>{throw new Error('private-api-secret');}},{onFinished:async value=>outcome=value});
+  let outcome,reason;const h=mounted({previewAutoStatus:async()=>preview(),enableAutoStatus:async()=>{throw new Error('private-api-secret');}},
+    {onFinished:async(value,message)=>{outcome=value;reason=message;}});
   await h.ready();h.prepare();await flush();h.ack();h.enable();await flush();assert.equal(outcome,'failed');assert.equal(h.states[1],null);
+  assert.match(reason,/Операцію не підтверджено/);assert.doesNotMatch(reason,/private-api-secret/);
   const html=renderToStaticMarkup(h.render());assert.match(html,/Операцію не підтверджено/);assert.doesNotMatch(html,/private-api-secret|000000000003|[Зз]амовлен/);
 });
 test('known activation errors show the server reason during consent reads and preview',async()=>{
@@ -114,10 +116,11 @@ test('known activation errors show the server reason during consent reads and pr
   }
 });
 test('known activation operation errors keep their reason and still refresh the consumed proof',async()=>{
-  const message='Syrve не надав права для цієї перевірки.';let outcome;
+  const message='Syrve не надав права для цієї перевірки.';let outcome,reason;
   const h=mounted({previewAutoStatus:async()=>preview(),enableAutoStatus:async()=>{throw new Error(message);}},
-    {onFinished:async value=>outcome=value});await h.ready();h.prepare();await flush();h.ack();h.enable();await flush();
+    {onFinished:async(value,message)=>{outcome=value;reason=message;}});await h.ready();h.prepare();await flush();h.ack();h.enable();await flush();
   assert.equal(find(h.render(),n=>n.props?.role==='alert').props.children,message);
+  assert.equal(reason,message);
   assert.equal(outcome,'failed');assert.equal(h.states[1],null);assert.equal(h.states[2],false);
 });
 test('activation errors reject private details appended to otherwise trusted messages',async()=>{
@@ -135,9 +138,10 @@ test('late activation preview failures cannot show an error for a newer configur
   pending.reject(new Error(message));await flush();assert.equal(find(h.render(),n=>n.props?.role==='alert'),null);
 });
 test('failed activation receipts display their bounded code and leave synchronization off',async()=>{
-  let outcome;const h=mounted({previewAutoStatus:async()=>preview(),enableAutoStatus:async()=>({...result(),syncEnabled:false,
-    code:'SYRVE_ACCESS_DENIED',exception:'private-api-secret'})},{onFinished:async value=>outcome=value});
+  let outcome,reason;const h=mounted({previewAutoStatus:async()=>preview(),enableAutoStatus:async()=>({...result(),syncEnabled:false,
+    code:'SYRVE_ACCESS_DENIED',exception:'private-api-secret'})},{onFinished:async(value,message)=>{outcome=value;reason=message;}});
   await h.ready();h.prepare();await flush();h.ack();h.enable();await flush();assert.equal(outcome,'failed');
+  assert.equal(reason,'Syrve не надав права для цієї перевірки.');
   assert.equal(find(h.render(),n=>n.props?.role==='alert').props.children,'Syrve не надав права для цієї перевірки.');
   assert.doesNotMatch(renderToStaticMarkup(h.render()),/private-api-secret|Автостатуси ввімкнено/);
 });

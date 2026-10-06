@@ -41,7 +41,8 @@ export function validateActivationResult(value: SyrveActivationResult, scope: Sc
     linkedTables: value.linkedTables, checkedAt: value.checkedAt, syncEnabled: value.syncEnabled, code: value.code };
 }
 
-type Props = Scope & { syncEnabled: boolean; busy: boolean; onBusyChange: (busy: boolean) => void; onFinished: (result: 'enabled' | 'disabled' | 'failed') => Promise<void> };
+type Props = Scope & { syncEnabled: boolean; busy: boolean; onBusyChange: (busy: boolean) => void;
+  onFinished: (result: 'enabled' | 'disabled' | 'failed', failureReason?: string) => Promise<void> };
 export default function SyrveAutoStatusPanel(props: Props) {
   const [gate, setGate] = useState<SyrveAutoStatus | null>(null), [preview, setPreview] = useState<SyrveActivationPreview | null>(null);
   const [acknowledged, setAcknowledged] = useState(false), [working, setWorking] = useState(false), [failed, setFailed] = useState(false);
@@ -80,24 +81,29 @@ export default function SyrveAutoStatusPanel(props: Props) {
     }
     const current = version.current, proof = preview?.confirmation.proof;
     let outcome: 'enabled' | 'disabled' | 'failed' = 'failed';
+    let operationFailureReason: string | undefined;
     pending.current = true; setWorking(true); setPreview(null); setAcknowledged(false); setFailed(false); setFailureReason(null); props.onBusyChange(true);
     try {
       if (enable) {
         const result = validateActivationResult(await syrveApi.enableAutoStatus(props.configurationRevision!, proof!), props);
         if (result.syncEnabled) outcome = 'enabled';
-        if (version.current === current && !result.syncEnabled) { setFailed(true); setFailureReason(syrveOperationError(result, FAILURE_MESSAGE)); }
+        else {
+          operationFailureReason = syrveOperationError(result, FAILURE_MESSAGE);
+          if (version.current === current) { setFailed(true); setFailureReason(operationFailureReason); }
+        }
       } else {
         const result = await syrveApi.disableAutoStatus(props.configurationRevision!);
         if (!result || result.syncEnabled !== false || !uuid(result.configurationRevision) || result.configurationRevision === props.configurationRevision || !time(result.checkedAt)) throw new Error('Недійсний результат вимкнення.');
         outcome = 'disabled';
       }
     } catch (cause) {
-      if (version.current === current) { setFailed(true); setFailureReason(syrveOperationError(cause, FAILURE_MESSAGE)); }
+      operationFailureReason = syrveOperationError(cause, FAILURE_MESSAGE);
+      if (version.current === current) { setFailed(true); setFailureReason(operationFailureReason); }
     }
     finally {
       if (version.current === current) {
         // Refresh the consumed revision after success, failure or transport loss.
-        try { await props.onFinished(outcome); } catch (cause) {
+        try { await props.onFinished(outcome, operationFailureReason); } catch (cause) {
           if (version.current === current) { setFailed(true); setFailureReason(previous => previous || syrveOperationError(cause, FAILURE_MESSAGE)); }
         } finally {
           if (version.current === current) { pending.current = false; setWorking(false); props.onBusyChange(false); }

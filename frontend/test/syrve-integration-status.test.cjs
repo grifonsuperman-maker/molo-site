@@ -89,6 +89,11 @@ function mounted(reads, commands = {}) {
     require(name) {
       if (name === 'react') return react;
       if (name === '../api/syrve') return { syrveApi: api };
+      if (name === './services/syrveOperationErrors') {
+        const helpers = {}, helperSource = fs.readFileSync(path.resolve(__dirname, '../src/director/services/syrveOperationErrors.ts'), 'utf8');
+        vm.runInNewContext(ts.transpileModule(helperSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: helpers });
+        return helpers;
+      }
       if (name.startsWith('./Syrve')) {
         const panel = name.slice(2);
         if (!panels.has(panel)) {
@@ -157,6 +162,74 @@ test('failed refresh keeps saved connection visible and blocks actions until ret
   assert.doesNotMatch(html, /Не вдалося оновити стан Syrve/);
   assert.equal(h.button('Перевірити').props.disabled, false);
   assert.equal(h.panel('SyrveAutoStatusPanel').props.configurationRevision, REV);
+});
+
+test('activation failure reason survives the required refresh and replacement panel', async () => {
+  const next = 'a0000000-0000-4000-8000-000000000002', reason = 'Syrve не надав права для цієї перевірки.';
+  const h = mounted([saved(), saved(), saved({ configurationRevision: next })]);
+  await h.ready(); await h.open();
+  await h.panel('SyrveAutoStatusPanel').props.onFinished('failed', reason);
+  assert.match(h.html(), /Syrve не надав права для цієї перевірки/);
+  assert.equal(h.panel('SyrveAutoStatusPanel').props.configurationRevision, next);
+  assert.equal(h.panel('SyrveAutoStatusPanel').props.syncEnabled, false);
+  assert.doesNotMatch(h.html(), /Автоматичні статуси столів увімкнено/);
+});
+
+test('failed loading receipt reason survives the new saved revision', async () => {
+  const next = 'a0000000-0000-4000-8000-000000000002';
+  const h = mounted([saved(), saved(), saved({ configurationRevision: next })]);
+  await h.ready(); await h.open();
+  await h.panel('SyrveTableLoadingPanel').props.onFinished({ readCompleted: false, code: 'SYRVE_ACCESS_DENIED' });
+  assert.match(h.html(), /Syrve не надав права для цієї перевірки/);
+  assert.equal(h.panel('SyrveTableLoadingPanel').props.configurationRevision, next);
+  assert.doesNotMatch(h.html(), /Syrve підтвердив завантаження стану столів/);
+});
+
+test('known operation failure stays visible when the follow-up status read also fails', async () => {
+  for (const panelName of ['SyrveTableLoadingPanel', 'SyrveAutoStatusPanel']) {
+    const h = mounted([saved(), saved(), unavailable]); await h.ready(); await h.open();
+    await h.panel(panelName).props.onFinished(panelName === 'SyrveAutoStatusPanel' ? 'failed' : null,
+      'Syrve не надав права для цієї перевірки.');
+    assert.match(h.html(), /Syrve не надав права для цієї перевірки/);
+    assert.match(h.html(), /Не вдалося оновити стан Syrve/);
+    assert.doesNotMatch(h.html(), /private-network-details|Автоматичні статуси столів увімкнено|Syrve підтвердив завантаження/);
+  }
+});
+
+test('private operation details are never retained by the parent dock', async () => {
+  for (const panelName of ['SyrveTableLoadingPanel', 'SyrveAutoStatusPanel']) {
+    const h = mounted([saved(), saved(), saved()]); await h.ready(); await h.open();
+    await h.panel(panelName).props.onFinished(panelName === 'SyrveAutoStatusPanel' ? 'failed' : null,
+      'Syrve не надав права для цієї перевірки. apiKey=private-api-secret');
+    assert.doesNotMatch(h.html(), /private-api-secret|apiKey/);
+  }
+});
+
+test('starting the next operation clears a previous reason while keeping the saved connection', async () => {
+  for (const panelName of ['SyrveTableLoadingPanel', 'SyrveAutoStatusPanel']) {
+    const h = mounted([saved(), saved(), saved()]); await h.ready(); await h.open();
+    await h.panel(panelName).props.onFinished(panelName === 'SyrveAutoStatusPanel' ? 'failed' : null,
+      'Syrve не надав права для цієї перевірки.');
+    assert.match(h.html(), /Syrve не надав права для цієї перевірки/);
+    h.panel(panelName).props.onBusyChange(true);
+    assert.doesNotMatch(h.html(), /Syrve не надав права для цієї перевірки/);
+    assert.match(h.html(), /Збережене підключення/);
+  }
+});
+
+test('a late operation refresh cannot replace the current failure reason', async () => {
+  for (const panelName of ['SyrveTableLoadingPanel', 'SyrveAutoStatusPanel']) {
+    const old = deferred(), latest = deferred();
+    const h = mounted([saved(), saved(), () => old.promise, () => latest.promise]);
+    await h.ready(); await h.open();
+    const finish = h.panel(panelName).props.onFinished, outcome = panelName === 'SyrveAutoStatusPanel' ? 'failed' : null;
+    const first = finish(outcome, 'Syrve не надав права для цієї перевірки.');
+    const second = finish(outcome, 'Syrve тимчасово обмежив кількість запитів. Спробуйте пізніше.');
+    latest.resolve(saved()); await second;
+    old.reject(new Error('private-outdated-status')); await first;
+    assert.match(h.html(), /Syrve тимчасово обмежив кількість запитів/);
+    assert.doesNotMatch(h.html(), /Syrve не надав права|private-outdated-status/);
+  }
 });
 
 test('first failed read is unknown and cannot open a new connection form', async () => {

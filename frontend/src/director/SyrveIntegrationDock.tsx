@@ -29,6 +29,7 @@ import SyrveReadinessPanel from './SyrveReadinessPanel';
 import SyrveOrderDiagnosticsPanel from './SyrveOrderDiagnosticsPanel';
 import SyrveTableLoadingPanel from './SyrveTableLoadingPanel';
 import SyrveAutoStatusPanel from './SyrveAutoStatusPanel';
+import { syrveOperationError } from './services/syrveOperationErrors';
 
 type Step = 1 | 2 | 3;
 
@@ -114,28 +115,37 @@ export default function SyrveIntegrationDock() {
     }
   }
 
-  async function finishTableLoading(result: SyrveTableLoadingResult | null) {
+  async function finishTableLoading(result: SyrveTableLoadingResult | null, failureReason?: string) {
     const version = requestVersion.current;
-    setNotice(null);
-    const refreshed = await load();
-    if (version !== requestVersion.current) return;
+    setNotice(null); setError(null);
+    const refresh = load(), statusVersion = statusRequestVersion.current;
+    const refreshed = await refresh;
+    if (version !== requestVersion.current || statusVersion !== statusRequestVersion.current) return;
     setLoadingTables(false);
+    if (!result?.readCompleted) {
+      setError(syrveOperationError(result ?? { message: failureReason },
+        'Завантаження не підтверджено. Оновіть підключення перед новою спробою.'));
+      return;
+    }
     if (!refreshed) return;
-    setNotice(result?.readCompleted
-      ? 'Syrve підтвердив завантаження стану столів. Синхронізація ще вимкнена.'
-      : 'Завантаження не підтверджено. Перевірте підключення перед новою спробою. Синхронізація вимкнена.');
+    setNotice('Syrve підтвердив завантаження стану столів. Синхронізація ще вимкнена.');
   }
 
-  async function finishAutoStatus(result: 'enabled' | 'disabled' | 'failed') {
+  async function finishAutoStatus(result: 'enabled' | 'disabled' | 'failed', failureReason?: string) {
     const version = requestVersion.current;
-    setNotice(null);
-    const refreshed = await load();
-    if (version !== requestVersion.current) return;
+    setNotice(null); setError(null);
+    const refresh = load(), statusVersion = statusRequestVersion.current;
+    const refreshed = await refresh;
+    if (version !== requestVersion.current || statusVersion !== statusRequestVersion.current) return;
     setChangingAutoStatus(false);
+    if (result === 'failed') {
+      setError(syrveOperationError({ message: failureReason },
+        'Увімкнення не підтверджено. Повторіть перевірку перед новою спробою.'));
+      return;
+    }
     if (!refreshed) return;
-    setNotice(result === 'enabled' ? 'Автоматичні статуси столів увімкнено.' : result === 'disabled'
-      ? 'Автоматичні статуси вимкнено. Карта використовує ручні статуси та бронювання.'
-      : 'Увімкнення не підтверджено. Повторіть перевірку перед новою спробою.');
+    setNotice(result === 'enabled' ? 'Автоматичні статуси столів увімкнено.'
+      : 'Автоматичні статуси вимкнено. Карта використовує ручні статуси та бронювання.');
   }
 
   async function openSettings() {
@@ -464,10 +474,10 @@ export default function SyrveIntegrationDock() {
             {!editingConnection && !statusUnavailable && !status.syncEnabled && <SyrveTableLoadingPanel configurationRevision={status.configurationRevision}
               organizationId={status.organizationId} linkedTables={status.confirmedLinks}
               connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy || changingAutoStatus}
-              onBusyChange={setLoadingTables} onFinished={finishTableLoading} />}
+              onBusyChange={working => { setLoadingTables(working); if (working) { setError(null); setNotice(null); } }} onFinished={finishTableLoading} />}
             {!editingConnection && !statusUnavailable && <SyrveAutoStatusPanel configurationRevision={status.configurationRevision} organizationId={status.organizationId}
               linkedTables={status.confirmedLinks} syncEnabled={status.syncEnabled} busy={busy || loadingTables}
-              onBusyChange={setChangingAutoStatus} onFinished={finishAutoStatus} />}
+              onBusyChange={working => { setChangingAutoStatus(working); if (working) { setError(null); setNotice(null); } }} onFinished={finishAutoStatus} />}
           </main>
         </div>
       )}

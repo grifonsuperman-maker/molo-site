@@ -51,7 +51,7 @@ export function validateLoadingResult(value: unknown, scope: Scope, groups: numb
 }
 type Props = { configurationRevision: string | null; organizationId: string | null; linkedTables: number;
   connectionReady: boolean; busy: boolean; onBusyChange?: (busy: boolean) => void;
-  onFinished?: (result: SyrveTableLoadingResult | null) => Promise<void> };
+  onFinished?: (result: SyrveTableLoadingResult | null, failureReason?: string) => Promise<void> };
 
 export default function SyrveTableLoadingPanel(props: Props) {
   const [preview, setPreview] = useState<SyrveTableLoadingPreview | null>(null);
@@ -88,24 +88,28 @@ export default function SyrveTableLoadingPanel(props: Props) {
     if (!eligible || request.current.pending || !acknowledged || !preview || !configurationRevision || !organizationId) return;
     if (preview.configurationRevision !== configurationRevision || Date.parse(preview.confirmation.expiresAt) <= Date.now()) {
       setPreview(null); setAcknowledged(false); setFailed(true);
-      setFailureReason('Підтвердження завантаження прострочене. Повторіть підготовку завантаження.'); return;
+      setFailureReason(preview.configurationRevision !== configurationRevision
+        ? 'Налаштування або столи змінилися. Повторіть перевірку перед підтвердженням.'
+        : 'Підтвердження завантаження прострочене. Повторіть підготовку завантаження.'); return;
     }
     const version = ++request.current.version, scope = { configurationRevision, organizationId, linkedTables };
     request.current.pending = true; setLoading(true); setPreview(null); setAcknowledged(false); setResult(null); setFailed(false); setFailureReason(null);
     props.onBusyChange?.(true);
     let validated: SyrveTableLoadingResult | null = null;
+    let operationFailureReason: string | undefined;
     try {
       const value = await syrveApi.loadTables(configurationRevision, preview.confirmation.proof);
       if (version !== request.current.version) return;
       validated = validateLoadingResult(value, scope, preview.terminalGroups); setResult(validated);
     } catch (cause) {
-      if (version === request.current.version) { setFailed(true); setFailureReason(syrveOperationError(cause, FAILURE_MESSAGE)); }
+      operationFailureReason = syrveOperationError(cause, FAILURE_MESSAGE);
+      if (version === request.current.version) { setFailed(true); setFailureReason(operationFailureReason); }
     }
     finally {
       if (version === request.current.version) {
         // The server consumes this revision before sending commands. Refresh
         // saved settings after failures too; an old proof can never be retried.
-        try { await props.onFinished?.(validated); } catch (cause) {
+        try { await props.onFinished?.(validated, operationFailureReason); } catch (cause) {
           if (version === request.current.version) { setFailed(true); setFailureReason(previous => previous || syrveOperationError(cause, FAILURE_MESSAGE)); }
         }
         if (version === request.current.version) { request.current.pending = false; setLoading(false); props.onBusyChange?.(false); }
