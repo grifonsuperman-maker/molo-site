@@ -2,7 +2,7 @@ import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 
-import { SyrveSettingsSnapshot, SyrveSettingsStore, settingsVersion, staleSyrveSettings } from './syrve-settings.store';
+import { SyrveSettingsSnapshot, SyrveSettingsStore, SyrveSettingsVersion, settingsVersion, staleSyrveSettings } from './syrve-settings.store';
 import { createSyrveTableSyncState, getSyrveOrderIdsToObserve, reduceSyrveOrderState, reduceSyrveStaffAction,
   syrveTableStatusEvent, SyrveOrderObservationBatch, SyrveStateScope, SyrveTableSyncState, SyrveTransition } from './syrve-state-reducer';
 import { isVerifiedLoadedProbe } from './syrve-client';
@@ -103,6 +103,61 @@ export class SyrveStateStore {
     return this.settings.transaction(settingsVersion(snapshot), async (manager, current) => {
       const value = await this.lockedState(manager, current, moloTableId);
       return { ...value, orderIds: getSyrveOrderIdsToObserve(value.state) };
+    });
+  }
+
+  captureBatch(tableIds: string[], expected: SyrveSettingsVersion): Promise<SyrveStateCapture[]> {
+    return this.settings.transaction(expected, async (manager, current) => {
+      const entity = this.requireConnection(current);
+      if (!tableIds.length || new Set(tableIds).size !== tableIds.length) throw staleSyrveSettings();
+      const [schema] = await manager.query('SELECT to_regclass($1) IS NOT NULL AND to_regclass($2) IS NOT NULL AS prepared',
+        [this.table('syrve_table_sync_states'), this.table('syrve_order_versions')]);
+      if (!schema.prepared) throw new ServiceUnavailableException('Постійне зберігання стану Syrve ще не підготовлено.');
+      // Preserve settings -> physical -> links -> states lock order, with a
+      // bounded number of round trips rather than a transaction per table.
+      const physical = await manager.query('SELECT id,status,updated_at::text AS physical_updated_at FROM '
+        + this.table('tables') + ' WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE', [tableIds]);
+      const links = await manager.query('SELECT * FROM ' + this.table('syrve_table_links')
+        + ' WHERE molo_table_id=ANY($1::uuid[]) ORDER BY id FOR UPDATE', [tableIds]);
+      if (physical.length !== tableIds.length || links.length !== tableIds.length) throw staleSyrveSettings();
+      const linkIds = links.map(link => link.id);
+      const states = await manager.query('SELECT * FROM ' + this.table('syrve_table_sync_states')
+        + ' WHERE link_id=ANY($1::uuid[]) ORDER BY link_id FOR UPDATE', [linkIds]);
+      const versions = await manager.query('SELECT link_id,order_id,timestamp,state,fingerprint FROM '
+        + this.table('syrve_order_versions') + ' WHERE link_id=ANY($1::uuid[]) ORDER BY link_id,order_id', [linkIds]);
+      const updates: Record<string, unknown>[] = [];
+      const captures = tableIds.map(moloTableId => {
+        const link = links.find(link => link.molo_table_id === moloTableId), saved = states.find(state => state.link_id === link?.id);
+        if (!link || link.integration_id !== entity.id || link.organization_id !== entity.organizationId
+          || (saved && (saved.integration_id !== link.integration_id || saved.organization_id !== link.organization_id
+            || saved.molo_table_id !== link.molo_table_id || saved.syrve_table_id !== link.syrve_table_id))) throw staleSyrveSettings();
+        if (!saved && (link.last_syrve_state !== 'unknown' || link.active_syrve_order_ids.length || link.manually_freed_syrve_order_ids.length)) {
+          throw new ConflictException('Збережені замовлення Syrve потребують перевірки версій перед синхронізацією.');
+        }
+        const scope: SyrveStateScope = { integrationId: entity.id, configurationRevision: entity.configurationRevision,
+          organizationId: link.organization_id, moloTableId, syrveTableId: link.syrve_table_id };
+        const state: SyrveTableSyncState = { scope, localRevision: saved?.local_revision || randomUUID(),
+          lastSyrveState: link.last_syrve_state, activeSyrveOrderIds: link.active_syrve_order_ids,
+          manuallyFreedSyrveOrderIds: link.manually_freed_syrve_order_ids,
+          orderVersions: versions.filter(version => version.link_id === link.id).map(version => ({ id: version.order_id,
+            timestamp: Number(version.timestamp), state: version.state, fingerprint: version.fingerprint })) };
+        const orderIds = getSyrveOrderIdsToObserve(state); // Validate the full ledger before any adoption.
+        if (!saved || saved.configuration_revision !== scope.configurationRevision) {
+          state.localRevision = randomUUID();
+          updates.push({ link_id: link.id, integration_id: entity.id, configuration_revision: scope.configurationRevision,
+            organization_id: scope.organizationId, molo_table_id: moloTableId, syrve_table_id: scope.syrveTableId, local_revision: state.localRevision });
+        }
+        const table = physical.find(table => table.id === moloTableId)!;
+        const physicalVersion = createHash('sha256').update(JSON.stringify([table.status, table.physical_updated_at])).digest('hex');
+        return { linkId: link.id as string, state, orderIds, physicalVersion };
+      });
+      if (updates.length) await manager.query('INSERT INTO ' + this.table('syrve_table_sync_states')
+        + ' (link_id,integration_id,configuration_revision,organization_id,molo_table_id,syrve_table_id,local_revision)'
+        + ' SELECT link_id,integration_id,configuration_revision,organization_id,molo_table_id,syrve_table_id,local_revision'
+        + ' FROM jsonb_to_recordset($1::jsonb) AS v(link_id uuid,integration_id uuid,configuration_revision uuid,organization_id uuid,'
+        + ' molo_table_id uuid,syrve_table_id uuid,local_revision uuid) ON CONFLICT(link_id) DO UPDATE'
+        + ' SET configuration_revision=EXCLUDED.configuration_revision,local_revision=EXCLUDED.local_revision', [JSON.stringify(updates)]);
+      return captures;
     });
   }
 

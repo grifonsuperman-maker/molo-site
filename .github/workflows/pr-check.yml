@@ -108,6 +108,8 @@ jobs:
         run: node backend/scripts/syrve-table-loading-validation.mjs
       - name: Validate Director activation, confirmed runtime reads and immediate revocation
         run: node backend/scripts/syrve-activation-validation.mjs
+      - name: Validate multi-table batches, staff fences and independent cash groups
+        run: node backend/scripts/syrve-batch-validation.mjs
       - name: Validate read-only Syrve readiness and schema preflight
         run: node backend/scripts/syrve-readiness-validation.mjs
       - name: Rebuild and bind Syrve application artifacts to the clean checkout
