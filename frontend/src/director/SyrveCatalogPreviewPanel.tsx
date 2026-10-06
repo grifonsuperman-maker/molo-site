@@ -9,6 +9,19 @@ const CONFLICT_LABELS: Record<SyrveCatalogPreview['conflicts'][number]['code'], 
   unsupported_molo_number: 'Номер MOLO потребує ручної перевірки',
 };
 
+
+function tableNumberRanges(values: number[]) {
+  const numbers = [...new Set(values)].sort((a, b) => a - b);
+  const ranges: string[] = [];
+  for (let start = 0; start < numbers.length;) {
+    let end = start;
+    while (end + 1 < numbers.length && numbers[end + 1] === numbers[end] + 1) end++;
+    ranges.push(start === end ? String(numbers[start]) : `${numbers[start]}-${numbers[end]}`);
+    start = end + 1;
+  }
+  return ranges.join(', ');
+}
+
 export default function SyrveCatalogPreviewPanel({ preview }: { preview: SyrveCatalogPreview }) {
   const { summary } = preview;
   const counts: [string, number][] = [
@@ -27,6 +40,15 @@ export default function SyrveCatalogPreviewPanel({ preview }: { preview: SyrveCa
       <ul className="mt-3 space-y-2 text-sm text-amber-100/80">
         {preview.diagnostics.warnings.map((warning) => <li key={warning}>{warning}</li>)}
       </ul>
+      {!!preview.diagnostics.receivedSections?.length && <details className="mt-3 text-sm" open>
+        <summary className="cursor-pointer font-bold">Отримані секції Syrve ({preview.diagnostics.receivedSections.length})</summary>
+        <ul className="mt-2 max-h-60 space-y-2 overflow-y-auto text-white/65">
+          {preview.diagnostics.receivedSections.map((section, index) => <li key={`${section.terminalGroupName}:${section.sectionName}:${index}`}>
+            <p><span className="font-bold text-white/80">{section.sectionName || 'Секція без назви'}</span> · {section.terminalGroupName || 'Каса без назви'}</p>
+            <p className="mt-1 text-xs text-white/45">Столи: №{tableNumberRanges(section.tableNumbers)} · всього {section.tableCount}</p>
+          </li>)}
+        </ul>
+      </details>}
       {!!preview.confirmedLinks?.length && <details className="mt-3 text-sm" open>
         <summary className="cursor-pointer font-bold">Підтверджені зв’язки ({preview.confirmedLinks.length})</summary>
         <ul className="mt-2 max-h-60 space-y-2 overflow-y-auto text-white/65">
