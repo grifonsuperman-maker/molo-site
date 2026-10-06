@@ -65,7 +65,7 @@ function setup(t, overrides = {}) {
     const value = typeof routes[path] === 'function' ? await routes[path](options) : routes[path];
     return value instanceof Response ? value : Response.json(value);
   });
-  const client = new SyrveClient();
+  const client = new SyrveClient(require('./helpers/syrve-test-request-limiter.js'));
   const observe = async (links = [link()]) => buildSyrveOrderObservation(await client.probeOrders(BASE, LOGIN, ORG,
     links.map((item) => item.syrveTableId), [...new Set(links.flatMap((item) => item.activeSyrveOrderIds))]), links);
   return { client, calls, routes, observe };

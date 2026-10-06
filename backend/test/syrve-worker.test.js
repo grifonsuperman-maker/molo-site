@@ -293,7 +293,7 @@ test('unexpected transport exceptions save only the fixed unavailable diagnostic
 
 test('shutdown aborts a real Syrve fetch, waits for exit and persists no failed observations',async(t)=>{
   process.env.SYRVE_APP_ID=''; process.env.SYRVE_APP_CLIENT_SECRET='';
-  const h=prepared(), arrived=deferred(), client=new SyrveClient();
+  const h=prepared(), arrived=deferred(), client=new SyrveClient(require('./helpers/syrve-test-request-limiter.js'));
   t.mock.method(globalThis,'fetch',async(url,{signal})=>new Promise((yes,no)=>{
     arrived.resolve(); signal.addEventListener('abort',()=>no(new DOMException('aborted','AbortError')),{once:true});
   }));

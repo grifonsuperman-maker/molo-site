@@ -142,7 +142,7 @@ function transport(t,options={}){
     return value instanceof Response?value:Response.json(value);
   });
   const controls={deadline:Date.now()+45000,visibilityContext:REV+':'+NEXT,beforeCommand:async()=>{},loadingPlan:tableLoadingPlan(probe(scope,[]),[TABLE])};
-  return {calls,controls,client:new SyrveClient(),read:ids=>new SyrveClient().probeLoadedOrders('https://api-eu.syrve.live','synthetic-login',ORG,[TABLE],ids,controls)};
+  return {calls,controls,client:new SyrveClient(require('./helpers/syrve-test-request-limiter.js')),read:ids=>new SyrveClient(require('./helpers/syrve-test-request-limiter.js')).probeLoadedOrders('https://api-eu.syrve.live','synthetic-login',ORG,[TABLE],ids,controls)};
 }
 for(const complete of [true,false])test('Director activation with real synchronous transport '+(complete?'enables after fresh reads':'rejects a failed post-load read'),async t=>{
   let reads=0;

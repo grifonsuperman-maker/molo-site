@@ -9,7 +9,7 @@ function consent(h) {
 async function confirmed(capture, ids, controls, response) {
   // Only this injected transport is fake. The production private receipt issuer,
   // scope checks and guards run unchanged; the helper cannot set visibility itself.
-  const value=await response(capture,ids,controls),client=new SyrveClient();
+  const value=await response(capture,ids,controls),client=new SyrveClient(require('./syrve-test-request-limiter.js'));
   client.probeOrders=async()=>value;
   client.initializeTables=async(base,login,plan,options)=>options.beforeCommand();
   return client.probeLoadedOrders('https://api-eu.syrve.live','synthetic-fixture',capture.state.scope.organizationId,

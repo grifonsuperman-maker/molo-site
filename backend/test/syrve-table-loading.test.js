@@ -76,7 +76,7 @@ function transport(t,load=body=>({correlationId:body.terminalGroupId===GROUP?COR
   delete process.env.SYRVE_APP_ID;delete process.env.SYRVE_APP_CLIENT_SECRET;
   t.after(()=>{global.fetch=previous;for(const [key,value]of [['SYRVE_APP_ID',oldApp],['SYRVE_APP_CLIENT_SECRET',oldClient]])
     value===undefined?delete process.env[key]:process.env[key]=value;});
-  const run=(p=plan(),controls={})=>new SyrveClient().initializeTables('https://api-eu.syrve.live','synthetic-login',p,{beforeCommand:async()=>{},...controls});
+  const run=(p=plan(),controls={})=>new SyrveClient(require('./helpers/syrve-test-request-limiter.js')).initializeTables('https://api-eu.syrve.live','synthetic-login',p,{beforeCommand:async()=>{},...controls});
   return {requests,run};
 }
 test('synchronous initialization succeeds without polling an unsupported command correlation',async t=>{
