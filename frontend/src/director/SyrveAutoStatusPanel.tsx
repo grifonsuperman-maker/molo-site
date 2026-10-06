@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { syrveApi, type SyrveAutoStatus, type SyrveActivationPreview, type SyrveActivationResult } from '../api/syrve';
+import { syrveOperationError } from './services/syrveOperationErrors';
+
+const FAILURE_MESSAGE = 'Операцію не підтверджено або налаштування змінилися. Оновіть підключення та повторіть перевірку.';
 
 type Scope = { configurationRevision: string | null; organizationId: string | null; linkedTables: number };
 const uuid = (value: unknown): value is string => typeof value === 'string' && value.length === 36 && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
@@ -38,53 +41,71 @@ export function validateActivationResult(value: SyrveActivationResult, scope: Sc
     linkedTables: value.linkedTables, checkedAt: value.checkedAt, syncEnabled: value.syncEnabled, code: value.code };
 }
 
-type Props = Scope & { syncEnabled: boolean; busy: boolean; onBusyChange: (busy: boolean) => void; onFinished: (result: 'enabled' | 'disabled' | 'failed') => Promise<void> };
+type Props = Scope & { syncEnabled: boolean; busy: boolean; onBusyChange: (busy: boolean) => void;
+  onFinished: (result: 'enabled' | 'disabled' | 'failed', failureReason?: string) => Promise<void> };
 export default function SyrveAutoStatusPanel(props: Props) {
   const [gate, setGate] = useState<SyrveAutoStatus | null>(null), [preview, setPreview] = useState<SyrveActivationPreview | null>(null);
   const [acknowledged, setAcknowledged] = useState(false), [working, setWorking] = useState(false), [failed, setFailed] = useState(false);
+  const [failureReason, setFailureReason] = useState<string | null>(null);
   const version = useRef(0), pending = useRef(false);
   useEffect(() => {
     const current = ++version.current;
-    setGate(null); setPreview(null); setAcknowledged(false); setFailed(false); setWorking(false); pending.current = false;
+    setGate(null); setPreview(null); setAcknowledged(false); setFailed(false); setWorking(false); setFailureReason(null); pending.current = false;
     if (!props.busy) void syrveApi.getAutoStatus().then(value => {
       if (version.current !== current) return;
       const checked = validateAutoStatus(value, props);
       if (checked.syncEnabled !== props.syncEnabled) throw new Error('Налаштування змінилися.');
       setGate(checked);
-    }).catch(() => { if (version.current === current) setFailed(true); });
+    }).catch(cause => {
+      if (version.current === current) { setFailed(true); setFailureReason(syrveOperationError(cause, FAILURE_MESSAGE)); }
+    });
     return () => { version.current++; };
   }, [props.configurationRevision, props.organizationId, props.linkedTables, props.syncEnabled, props.busy]);
   const allowed = !props.busy && !pending.current && uuid(props.configurationRevision) && uuid(props.organizationId);
   async function prepare() {
     if (!allowed || !gate?.activationAvailable || gate.syncEnabled) return;
-    const current = version.current; pending.current = true; setWorking(true); setFailed(false); setPreview(null); setAcknowledged(false); props.onBusyChange(true);
+    const current = version.current; pending.current = true; setWorking(true); setFailed(false); setPreview(null); setAcknowledged(false); setFailureReason(null); props.onBusyChange(true);
     try {
       const checked = validateActivationPreview(await syrveApi.previewAutoStatus(props.configurationRevision!), props);
       if (version.current === current) setPreview(checked);
-    } catch { if (version.current === current) setFailed(true); }
+    } catch (cause) {
+      if (version.current === current) { setFailed(true); setFailureReason(syrveOperationError(cause, FAILURE_MESSAGE)); }
+    }
     finally { if (version.current === current) { pending.current = false; setWorking(false); props.onBusyChange(false); } }
   }
   async function change(enable: boolean) {
     if (!allowed || !gate || (enable ? !preview || !acknowledged || gate.syncEnabled : !gate.syncEnabled)) return;
-    if (enable && Date.parse(preview!.confirmation.expiresAt) <= Date.now()) { setPreview(null); setAcknowledged(false); setFailed(true); return; }
+    if (enable && Date.parse(preview!.confirmation.expiresAt) <= Date.now()) {
+      setPreview(null); setAcknowledged(false); setFailed(true);
+      setFailureReason('Підтвердження автостатусів прострочене. Повторіть перевірку перед увімкненням.'); return;
+    }
     const current = version.current, proof = preview?.confirmation.proof;
     let outcome: 'enabled' | 'disabled' | 'failed' = 'failed';
-    pending.current = true; setWorking(true); setPreview(null); setAcknowledged(false); setFailed(false); props.onBusyChange(true);
+    let operationFailureReason: string | undefined;
+    pending.current = true; setWorking(true); setPreview(null); setAcknowledged(false); setFailed(false); setFailureReason(null); props.onBusyChange(true);
     try {
       if (enable) {
         const result = validateActivationResult(await syrveApi.enableAutoStatus(props.configurationRevision!, proof!), props);
         if (result.syncEnabled) outcome = 'enabled';
-        if (version.current === current && !result.syncEnabled) setFailed(true);
+        else {
+          operationFailureReason = syrveOperationError(result, FAILURE_MESSAGE);
+          if (version.current === current) { setFailed(true); setFailureReason(operationFailureReason); }
+        }
       } else {
         const result = await syrveApi.disableAutoStatus(props.configurationRevision!);
         if (!result || result.syncEnabled !== false || !uuid(result.configurationRevision) || result.configurationRevision === props.configurationRevision || !time(result.checkedAt)) throw new Error('Недійсний результат вимкнення.');
         outcome = 'disabled';
       }
-    } catch { if (version.current === current) setFailed(true); }
+    } catch (cause) {
+      operationFailureReason = syrveOperationError(cause, FAILURE_MESSAGE);
+      if (version.current === current) { setFailed(true); setFailureReason(operationFailureReason); }
+    }
     finally {
       if (version.current === current) {
         // Refresh the consumed revision after success, failure or transport loss.
-        try { await props.onFinished(outcome); } catch { if (version.current === current) setFailed(true); } finally {
+        try { await props.onFinished(outcome, operationFailureReason); } catch (cause) {
+          if (version.current === current) { setFailed(true); setFailureReason(previous => previous || syrveOperationError(cause, FAILURE_MESSAGE)); }
+        } finally {
           if (version.current === current) { pending.current = false; setWorking(false); props.onBusyChange(false); }
         }
       }
@@ -96,7 +117,7 @@ export default function SyrveAutoStatusPanel(props: Props) {
     <p className="mt-2 text-xs text-white/50">Бронювання, банкети та ручні статуси ведуть співробітники. Рахунок на одному столі не змінює інші столи банкету.</p>
     {props.syncEnabled && <p className="mt-2 text-xs text-white/50">Якщо каса недоступна або відповідь неповна, остання підтверджена зайнятість зберігається.</p>}
     {working && <p className="mt-3 text-sm" role="status">Перевіряємо та оновлюємо налаштування…</p>}
-    {failed && <p className="mt-3 text-sm text-amber-100" role="alert">Операцію не підтверджено або налаштування змінилися. Оновіть підключення та повторіть перевірку.</p>}
+    {failed && <p className="mt-3 text-sm text-amber-100" role="alert">{failureReason || FAILURE_MESSAGE}</p>}
     {gate && !gate.activationAvailable && !gate.syncEnabled && <p className="mt-3 text-sm text-amber-100">Спочатку потрібно завершити підготовку бази, зберегти підключення та підтвердити зв’язки столів.</p>}
     {!props.syncEnabled && <button type="button" disabled={!allowed || working || !gate?.activationAvailable} onClick={() => void prepare()} className="mt-4 rounded-2xl border border-cyan-200/35 px-4 py-3 text-sm font-bold disabled:opacity-40">Перевірити перед увімкненням</button>}
     {preview && <div className="mt-4 rounded-2xl border border-amber-200/25 p-4 text-sm">

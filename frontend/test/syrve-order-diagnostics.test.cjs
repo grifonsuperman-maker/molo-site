@@ -82,6 +82,10 @@ function dock() {
     useEffect(effect, deps) { if (JSON.stringify(previous) !== JSON.stringify(deps)) { previous = deps; effects.push(effect); } },
   };
   const source = fs.readFileSync(path.resolve(__dirname, '../src/director/SyrveIntegrationDock.tsx'), 'utf8');
+  const operationErrors = {}, operationErrorSource = fs.readFileSync(path.resolve(__dirname,
+    '../src/director/services/syrveOperationErrors.ts'), 'utf8');
+  vm.runInNewContext(ts.transpileModule(operationErrorSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText,
+    { exports: operationErrors });
   const exports = {};
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText,
     { exports, require: name => name === 'react' ? hooks : name === '../api/syrve' ? { syrveApi: api }
@@ -89,6 +93,7 @@ function dock() {
       : name === './SyrveReadinessPanel' ? { __esModule: true, default: ReadinessPanel }
       : name === './SyrveTableLoadingPanel' ? { __esModule: true, default: LoadingPanel }
       : name === './SyrveAutoStatusPanel' ? { __esModule: true, default: () => null }
+      : name === './services/syrveOperationErrors' ? operationErrors
       : name === './SyrveCatalogPreviewPanel' ? { __esModule: true, default: () => null } : require(name) });
   const render = () => { stateIndex = 0; refIndex = 0; const tree = exports.default(); while (effects.length) effects.shift()(); return tree; };
   const click = predicate => { const target = find(render(), predicate); assert.ok(target, 'actual dock control must exist'); target.props.onClick(); };

@@ -16,7 +16,12 @@ const result=()=>({...scope(),requestedRevision:REV,configurationRevision:NEXT,c
 function load(deps={}) {
   const source=fs.readFileSync(path.resolve(__dirname,'../src/director/SyrveTableLoadingPanel.tsx'),'utf8');
   const exports={};vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,
-    {exports,require:name=>name==='../api/syrve'?{syrveApi:deps.api||{}}:name==='react'?deps.react||React:require(name)});return exports;
+    {exports,require:name=>name==='../api/syrve'?{syrveApi:deps.api||{}}:name==='react'?deps.react||React:
+      name==='./services/syrveOperationErrors'?loadErrors():require(name)});return exports;
+}
+function loadErrors() {
+  const source=fs.readFileSync(path.resolve(__dirname,'../src/director/services/syrveOperationErrors.ts'),'utf8'),exports={};
+  vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports});return exports;
 }
 function find(node,predicate) {
   if(!node||typeof node!=='object')return null;if(predicate(node))return node;
@@ -115,4 +120,43 @@ test('InProgress and failed post-load read never imply synchronization or free t
     assert.doesNotMatch(html,/Повторне читання столів виконано/);assert.match(html,/Порожня відповідь не підтверджує вільний стіл/);
     assert.match(html,/Синхронізація залишається вимкненою/);
   }
+});
+test('known preparation failures show the specific server reason without submitting loading',async()=>{
+  for(const message of ['Сесію Директора не підтверджено. Увійдіть повторно перед перевіркою столів.',
+    'Для всіх пов’язаних столів потрібні доступні каси Syrve POS від версії 7.7.1 та дозволи читання. Перевірте підключення.',
+    'Налаштування або столи змінилися. Повторіть перевірку перед підтвердженням.']) {
+    let commands=0;const h=mounted({previewTableLoading:async()=>{throw new Error(message);},loadTables:async()=>commands++});
+    h.prepare();await flush();const alert=find(h.render(),n=>n.props?.role==='alert');
+    assert.ok(alert);assert.equal(alert.props.children,message);assert.equal(commands,0);
+    assert.equal(find(h.render(),n=>n.type==='input'),null);
+  }
+});
+test('known loading failures retain their reason while consuming proof and refreshing settings',async()=>{
+  const message='Syrve не надав права для цієї перевірки.';let refreshed=0;
+  const h=mounted({previewTableLoading:async()=>preview(),loadTables:async()=>{throw new Error(message);}},
+    {onFinished:async(value,reason)=>{assert.equal(value,null);assert.equal(reason,message);refreshed++;}});
+  h.prepare();await flush();h.ack();h.confirm();await flush();
+  assert.equal(find(h.render(),n=>n.props?.role==='alert').props.children,message);
+  assert.equal(h.states[0],null);assert.equal(h.states[1],false);assert.equal(refreshed,1);
+});
+test('preparation errors with private details use the fixed fallback even with a trusted prefix',async()=>{
+  for(const message of ['private-api-secret https://provider.invalid',
+    'Syrve не надав права для цієї перевірки. apiKey=private-api-secret']) {
+    const h=mounted({previewTableLoading:async()=>{throw new Error(message);}});h.prepare();await flush();
+    const html=renderToStaticMarkup(h.render());assert.match(html,/Завантаження не підтверджено/);
+    assert.doesNotMatch(html,/private-api-secret|provider.invalid|apiKey/);
+  }
+});
+test('late preparation errors cannot replace a newer scope with an old specific failure',async()=>{
+  const pending=deferred(),message='Syrve не надав права для цієї перевірки.';
+  const h=mounted({previewTableLoading:()=>pending.promise});h.prepare();h.render({configurationRevision:NEXT});
+  pending.reject(new Error(message));await flush();assert.equal(find(h.render(),n=>n.props?.role==='alert'),null);
+});
+test('a failed loading receipt displays its safe permission code without implying completion',async()=>{
+  const h=mounted({previewTableLoading:async()=>preview(),loadTables:async()=>({...result(),commandsConfirmed:false,
+    completedGroups:0,readCompleted:false,code:'SYRVE_ACCESS_DENIED',exception:'private-api-secret'})});
+  h.prepare();await flush();h.ack();h.confirm();await flush();const html=renderToStaticMarkup(h.render());
+  assert.match(html,/Syrve не надав права для цієї перевірки/);
+  assert.doesNotMatch(html,/private-api-secret|Повторне читання столів виконано/);
+  assert.match(html,/Синхронізація залишається вимкненою/);
 });
