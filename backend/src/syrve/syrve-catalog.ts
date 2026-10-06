@@ -148,6 +148,7 @@ export function buildSyrveCatalogPreview(catalog: SyrveCatalog, moloRows: MoloTa
       sectionName: tables[0].sectionName || 'Секція без назви',
       terminalGroupName: terminalGroupNames.get(tables[0].terminalGroupId) || 'Каса без назви',
       tableNumbers: [...new Set(tables.map((table) => table.number))].sort((a, b) => a - b),
+      tableCount: new Set(tables.map((table) => table.id)).size,
     }))
     .sort((a, b) => a.terminalGroupName.localeCompare(b.terminalGroupName) || a.sectionName.localeCompare(b.sectionName));
   const warnings: string[] = [
