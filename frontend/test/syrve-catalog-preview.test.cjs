@@ -137,9 +137,11 @@ test('Director panel renders counts, unmatched tables/conflicts and escapes upst
     missingInSyrve: [{ id: 'molo-13', tableNumber: '13' }],
     deletedTables: [{ id: 'syrve-99', number: 99, name: 'Видалений' }],
     conflicts: [{ code: 'duplicate_syrve_number', number: '14', moloTableIds: ['molo-14'], syrveTableIds: ['syrve-a', 'syrve-b'] }],
-    diagnostics: { warnings: ['Доступ до замовлень ще не перевірено.'] } };
+    diagnostics: { warnings: ['Доступ до замовлень ще не перевірено.'],
+      receivedSections: [{ sectionName: 'Основний зал', terminalGroupName: 'Каса 1', tableNumbers: [1, 2, 3, 7] }] } };
   const html = renderToStaticMarkup(React.createElement(exports.default, { preview }));
-  for (const text of ['61', '59', 'Syrve №77', 'MOLO №13', 'однаковий номер', 'ще не збережені', 'не перевірено']) assert.ok(html.includes(text), text);
+  for (const text of ['61', '59', 'Syrve №77', 'MOLO №13', 'однаковий номер', 'ще не збережені', 'не перевірено',
+    'Отримані секції Syrve', 'Основний зал', 'Каса 1', '№1–3, 7']) assert.ok(html.includes(text), text);
   assert.ok(html.includes('&lt;script&gt;'));
   assert.ok(!html.includes('<script>'));
   assert.ok(!html.includes('Увімкнути синхронізацію'));
