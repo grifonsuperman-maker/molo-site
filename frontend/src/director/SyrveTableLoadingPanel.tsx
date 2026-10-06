@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { syrveApi, type SyrveTableLoadingPreview, type SyrveTableLoadingResult } from '../api/syrve';
+import { syrveOperationError } from './services/syrveOperationErrors';
+
+const FAILURE_MESSAGE = 'Завантаження не підтверджено або налаштування змінилися. Оновіть підключення перед новою спробою.';
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const uuid = (value: unknown) => typeof value === 'string' && value.length === 36 && UUID.test(value);
@@ -56,24 +59,27 @@ export default function SyrveTableLoadingPanel(props: Props) {
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [result, setResult] = useState<SyrveTableLoadingResult | null>(null);
+  const [failureReason, setFailureReason] = useState<string | null>(null);
   const request = useRef({ version: 0, pending: false });
   const { configurationRevision, organizationId, linkedTables, connectionReady, busy } = props;
   const eligible = connectionReady && !busy && count(linkedTables) && linkedTables > 0 && linkedTables <= 100
     && uuid(configurationRevision) && uuid(organizationId);
   useEffect(() => {
     request.current.version++; request.current.pending = false;
-    setPreview(null); setAcknowledged(false); setLoading(false); setFailed(false); setResult(null);
+    setPreview(null); setAcknowledged(false); setLoading(false); setFailed(false); setResult(null); setFailureReason(null);
     return () => { request.current.version++; request.current.pending = false; props.onBusyChange?.(false); };
   }, [configurationRevision, organizationId, linkedTables, connectionReady, busy]);
   async function prepare() {
     if (!eligible || request.current.pending || !configurationRevision || !organizationId) return;
     const version = ++request.current.version;
-    request.current.pending = true; setPreview(null); setAcknowledged(false); setResult(null); setFailed(false); setLoading(true);
+    request.current.pending = true; setPreview(null); setAcknowledged(false); setResult(null); setFailed(false); setLoading(true); setFailureReason(null);
     props.onBusyChange?.(true);
     try {
       const value = await syrveApi.previewTableLoading(configurationRevision);
       if (version === request.current.version) setPreview(validateLoadingPreview(value, { configurationRevision, organizationId, linkedTables }));
-    } catch { if (version === request.current.version) setFailed(true); }
+    } catch (cause) {
+      if (version === request.current.version) { setFailed(true); setFailureReason(syrveOperationError(cause, FAILURE_MESSAGE)); }
+    }
     finally {
       if (version === request.current.version) { request.current.pending = false; setLoading(false); props.onBusyChange?.(false); }
     }
@@ -81,22 +87,27 @@ export default function SyrveTableLoadingPanel(props: Props) {
   async function confirm() {
     if (!eligible || request.current.pending || !acknowledged || !preview || !configurationRevision || !organizationId) return;
     if (preview.configurationRevision !== configurationRevision || Date.parse(preview.confirmation.expiresAt) <= Date.now()) {
-      setPreview(null); setAcknowledged(false); setFailed(true); return;
+      setPreview(null); setAcknowledged(false); setFailed(true);
+      setFailureReason('Підтвердження завантаження прострочене. Повторіть підготовку завантаження.'); return;
     }
     const version = ++request.current.version, scope = { configurationRevision, organizationId, linkedTables };
-    request.current.pending = true; setLoading(true); setPreview(null); setAcknowledged(false); setResult(null); setFailed(false);
+    request.current.pending = true; setLoading(true); setPreview(null); setAcknowledged(false); setResult(null); setFailed(false); setFailureReason(null);
     props.onBusyChange?.(true);
     let validated: SyrveTableLoadingResult | null = null;
     try {
       const value = await syrveApi.loadTables(configurationRevision, preview.confirmation.proof);
       if (version !== request.current.version) return;
       validated = validateLoadingResult(value, scope, preview.terminalGroups); setResult(validated);
-    } catch { if (version === request.current.version) setFailed(true); }
+    } catch (cause) {
+      if (version === request.current.version) { setFailed(true); setFailureReason(syrveOperationError(cause, FAILURE_MESSAGE)); }
+    }
     finally {
       if (version === request.current.version) {
         // The server consumes this revision before sending commands. Refresh
         // saved settings after failures too; an old proof can never be retried.
-        try { await props.onFinished?.(validated); } catch { if (version === request.current.version) setFailed(true); }
+        try { await props.onFinished?.(validated); } catch (cause) {
+          if (version === request.current.version) { setFailed(true); setFailureReason(previous => previous || syrveOperationError(cause, FAILURE_MESSAGE)); }
+        }
         if (version === request.current.version) { request.current.pending = false; setLoading(false); props.onBusyChange?.(false); }
       }
     }
@@ -119,11 +130,11 @@ export default function SyrveTableLoadingPanel(props: Props) {
     </div>}
     {!eligible && <p className="mt-3 text-sm text-white/55">Спочатку збережіть підключення, підтвердьте зв’язки столів та завершіть поточну дію.</p>}
     {loading && <p className="mt-3 text-sm" role="status">Перевіряємо столи та завершення операції Syrve…</p>}
-    {failed && <p className="mt-3 text-sm text-amber-100" role="alert">Завантаження не підтверджено або налаштування змінилися. Оновіть підключення перед новою спробою.</p>}
+    {failed && <p className="mt-3 text-sm text-amber-100" role="alert">{failureReason || FAILURE_MESSAGE}</p>}
     {resultVisible && result && <p className="mt-3 text-sm text-amber-100" role="status">{result.readCompleted
       ? 'Syrve підтвердив завершення завантаження. Повторне читання столів виконано.'
       : result.code === 'SYRVE_COMMAND_IN_PROGRESS' ? 'Syrve ще виконує завантаження. Дочекайтеся завершення перед новою перевіркою.'
-        : 'Завершення завантаження та повторне читання не підтверджено.'}</p>}
+        : syrveOperationError(result, 'Завершення завантаження та повторне читання не підтверджено.')}</p>}
     <p className="mt-3 text-sm text-white/55">Статуси на карті ще не застосовуються. Порожня відповідь не підтверджує вільний стіл. Синхронізація залишається вимкненою.</p>
   </section>;
 }
