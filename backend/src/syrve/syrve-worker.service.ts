@@ -14,7 +14,8 @@ export class SyrveWorkerService implements OnModuleDestroy {
   private stopped = false;
   constructor(source: DataSource, settings: SyrveSettingsStore, integration: SyrveIntegrationService) {
     this.runner = new SyrveWorkerRunner(new SyrveWorkerStore(source, settings),
-      (capture, ids, controls) => integration.probeWorkerOrders(capture, ids, controls));
+      (capture, ids, controls) => integration.probeWorkerOrders(capture, ids, controls),
+      (captures, leaseId, controls) => integration.probeWorkerBatch(captures, leaseId, controls));
   }
   @Interval('syrve-prepared-worker', SYRVE_WORKER_INTERVAL_MS)
   async tick(): Promise<SyrveWorkerResult> {

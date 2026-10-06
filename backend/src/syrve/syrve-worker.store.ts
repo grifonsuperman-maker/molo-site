@@ -60,6 +60,11 @@ export class SyrveWorkerStore {
 
   capture(tableId: string) { return this.states.capture(tableId); }
 
+  async captureBatch(lease: SyrveWorkerLease) {
+    return lease.links.length === 1 ? [await this.capture(lease.links[0].moloTableId)]
+      : this.states.captureBatch(lease.links.map(link => link.moloTableId), lease.version);
+  }
+
   guard(lease: SyrveWorkerLease, captured: SyrveStateCapture) {
     return this.settings.transaction(lease.version, async (manager, current) => {
       await this.lockedLease(manager, lease);
@@ -77,6 +82,35 @@ export class SyrveWorkerStore {
       const group = active.plan.groups.find(group => group.tableIds.includes(expected.syrveTableId));
       if (!group) throw staleSyrveSettings();
       return { organizationId: active.plan.organizationId, groups: [{ ...group, tableIds: [expected.syrveTableId] }] };
+    });
+  }
+
+  guardBatch(lease: SyrveWorkerLease, captures: SyrveStateCapture[]) {
+    if (captures.length === 1) return this.guard(lease, captures[0]);
+    return this.settings.transaction(lease.version, async (manager, current) => {
+      await this.lockedLease(manager, lease);
+      const active = await this.activation.read(current, manager);
+      if (!active.enabled || !active.plan || current.entity?.status !== 'connected' || captures.length !== lease.links.length
+        || new Set(captures.map(capture => capture.linkId)).size !== captures.length) throw staleSyrveSettings();
+      const states = await manager.query('SELECT link_id,local_revision FROM ' + this.table('syrve_table_sync_states')
+        + ' WHERE link_id=ANY($1::uuid[])', [captures.map(capture => capture.linkId)]);
+      for (const captured of captures) {
+        const expected = captured.state.scope;
+        if (expected.integrationId !== lease.version.id || expected.configurationRevision !== lease.version.revision
+          || current.entity.organizationId !== expected.organizationId
+          || !current.links.some(link => link.id === captured.linkId && link.moloTableId === expected.moloTableId
+            && link.syrveTableId === expected.syrveTableId && link.organizationId === expected.organizationId)
+          || !lease.links.some(link => link.id === captured.linkId && link.moloTableId === expected.moloTableId
+            && link.syrveTableId === expected.syrveTableId)) throw staleSyrveSettings();
+        if (states.find((state: { link_id: string; local_revision: string }) => state.link_id === captured.linkId)?.local_revision
+          !== captured.state.localRevision) throw new ConflictException({ statusCode: 409, code: 'SYRVE_LOCAL_STATE_CHANGED',
+          message: 'Стан столу змінився після ручної дії. Запізнілу відповідь каси відхилено.' });
+      }
+      const ids = new Set(captures.map(capture => capture.state.scope.syrveTableId));
+      const groups = active.plan.groups.map(group => ({ ...group, tableIds: group.tableIds.filter(id => ids.has(id)) }))
+        .filter(group => group.tableIds.length);
+      if (groups.reduce((count, group) => count + group.tableIds.length, 0) !== ids.size) throw staleSyrveSettings();
+      return { organizationId: active.plan.organizationId, groups };
     });
   }
 

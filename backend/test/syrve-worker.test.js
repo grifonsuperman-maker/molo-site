@@ -314,7 +314,7 @@ test('the shared cycle deadline covers all order scopes, retaining earlier good 
   assert.equal(result.code,'SYRVE_TIMEOUT'); assert.deepEqual(h.saved().versions,before.versions);
 });
 
-test('bounded cycles rotate a durable cursor fairly across more than 32 tables',async()=>{
+test('one cycle covers all 65 linked tables and rotates the cursor after an early failure',async()=>{
   const h=prepared(); const snapshot=h.snapshot(); snapshot.links=Array.from({length:65},(_,n)=>({...snapshot.links[0],id:id(1000+n),moloTableId:id(2000+n),syrveTableId:id(3000+n)}));
   const physical=snapshot.links.map((link,n)=>({id:link.moloTableId,tableNumber:String(n+1)}));
   h.tables.find=async()=>physical;h.settings.read=async()=>snapshot;
@@ -322,9 +322,9 @@ test('bounded cycles rotate a durable cursor fairly across more than 32 tables',
   const {activationBindings}=require('../dist/syrve/syrve-activation.js');
   h.mutate(db=>Object.assign(db.activation,{bindings_fingerprint:activationBindings(snapshot,physical),loading_plan:{organizationId:snapshot.entity.organizationId,
     groups:[{terminalGroupId:id(1),posVersion:'7.7.1',tableIds:snapshot.links.map(link=>link.syrveTableId).sort()}]}}));
-  const first=(await h.worker().claim()).lease; assert.equal(first.links.length,32);
+  const first=(await h.worker().claim()).lease; assert.equal(first.links.length,65);
   await h.worker().failure(first,first.links[31].id,'SYRVE_UNAVAILABLE'); await h.worker().release(first); h.due();
-  const second=(await h.worker().claim()).lease; assert.equal(second.links.length,32);
+  const second=(await h.worker().claim()).lease; assert.equal(second.links.length,65);
   assert.equal(second.links[0].id,id(1032));
   await h.worker().failure(second,second.links[31].id,'SYRVE_UNAVAILABLE'); await h.worker().release(second); h.due();
   const third=(await h.worker().claim()).lease; assert.equal(third.links[0].id,id(1064));
