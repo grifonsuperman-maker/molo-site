@@ -16,7 +16,7 @@ function tableNumberRanges(values: number[]) {
   for (let start = 0; start < numbers.length;) {
     let end = start;
     while (end + 1 < numbers.length && numbers[end + 1] === numbers[end] + 1) end++;
-    ranges.push(start === end ? String(numbers[start]) : `${numbers[start]}–${numbers[end]}`);
+    ranges.push(start === end ? String(numbers[start]) : `${numbers[start]}-${numbers[end]}`);
     start = end + 1;
   }
   return ranges.join(', ');
