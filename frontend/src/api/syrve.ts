@@ -97,7 +97,8 @@ export type SyrveCatalogPreview = {
   conflicts: { code: 'duplicate_syrve_id' | 'duplicate_syrve_number' | 'duplicate_molo_number'
     | 'unsupported_syrve_number' | 'unsupported_molo_number' | 'already_linked'; number: string | null; moloTableIds: string[]; syrveTableIds: string[] }[];
   diagnostics: { terminalGroups: { active: { id: string; name: string }[]; sleeping: { id: string; name: string }[] };
-    sectionsCount: number; catalogScope: 'available_restaurant_sections'; orders: 'not_checked'; warnings: string[] };
+    sectionsCount: number; receivedSections: { sectionName: string; terminalGroupName: string; tableNumbers: number[] }[];
+    catalogScope: 'available_restaurant_sections'; orders: 'not_checked'; warnings: string[] };
   confirmedLinks: { moloTableId: string; syrveTableId: string; organizationId: string; moloTableNumber: string | null; lastKnownNumber: number }[];
   confirmation: { proof: string; expiresAt: string } | null;
   mappingConfirmationAvailable: boolean;
