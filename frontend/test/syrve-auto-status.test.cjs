@@ -9,8 +9,14 @@ const result=()=>({...scope(),requestedRevision:REV,configurationRevision:NEXT,c
 function load(deps={}){
   const source=fs.readFileSync(path.resolve(__dirname,'../src/director/SyrveAutoStatusPanel.tsx'),'utf8'),exports={};
   vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,
-    {exports,require:name=>name==='../api/syrve'?{syrveApi:deps.api||{}}:name==='react'?deps.react||React:
+    {exports,Date:deps.Date||Date,performance:deps.performance||performance,require:name=>name==='../api/syrve'?{syrveApi:deps.api||{}}:name==='react'?deps.react||React:
+      name==='./services/syrveConfirmationTime'?loadConfirmationTime(deps):
       name==='./services/syrveOperationErrors'?loadErrors():require(name)});return exports;
+}
+function loadConfirmationTime(deps){
+  const source=fs.readFileSync(path.resolve(__dirname,'../src/director/services/syrveConfirmationTime.ts'),'utf8'),exports={};
+  vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,
+    {exports,Date:deps.Date||Date,performance:deps.performance||performance});return exports;
 }
 function loadErrors(){
   const source=fs.readFileSync(path.resolve(__dirname,'../src/director/services/syrveOperationErrors.ts'),'utf8'),exports={};
@@ -20,9 +26,9 @@ const flush=async()=>{for(let i=0;i<15;i++)await Promise.resolve();};
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 function find(node,predicate){if(!node||typeof node!=='object')return null;if(predicate(node))return node;
   for(const child of [node.props?.children].flat(Infinity)){const found=find(child,predicate);if(found)return found;}return null;}
-function mounted(api,extra={}){
+function mounted(api,extra={},environment={}){
   const states=[],refs=[],effects=[];let si=0,ri=0,previous,cleanup,props={...scope(),busy:false,syncEnabled:false,onBusyChange:()=>{},onFinished:async()=>{},...extra};
-  const component=load({api:{getAutoStatus:async()=>gate(),...api},react:{useState(value){const i=si++;if(!(i in states))states[i]=value;
+  const component=load({...environment,api:{getAutoStatus:async()=>gate(),...api},react:{useState(value){const i=si++;if(!(i in states))states[i]=value;
     return[states[i],value=>states[i]=typeof value==='function'?value(states[i]):value];},useRef(value){const i=ri++;if(!(i in refs))refs[i]={current:value};return refs[i];},
     useEffect(effect,deps){if(JSON.stringify(previous)!==JSON.stringify(deps)){previous=deps;effects.push(effect);}}}}).default;
   const render=changes=>{props={...props,...changes};si=0;ri=0;const tree=component(props);while(effects.length){cleanup?.();cleanup=effects.shift()();}return tree;};
@@ -73,8 +79,41 @@ test('enabling requires fresh preview plus acknowledgement, submits once and ref
   refresh.resolve();await flush();assert.equal(h.states[3],false);assert.equal(busy.at(-1),false);
 });
 test('expired preview cannot enable and must be checked again',async()=>{
-  let calls=0;const h=mounted({previewAutoStatus:async()=>preview(),enableAutoStatus:async()=>calls++});await h.ready();h.prepare();await flush();
-  h.states[1].confirmation.expiresAt=new Date(Date.now()-1).toISOString();h.ack();h.enable();assert.equal(calls,0);assert.equal(h.states[1],null);assert.equal(h.states[4],true);
+  let calls=0,tick=1000;const h=mounted({previewAutoStatus:async()=>preview(),enableAutoStatus:async()=>calls++},{},
+    {performance:{now:()=>tick}});await h.ready();h.prepare();await flush();
+  tick+=300000;h.ack();h.enable();assert.equal(calls,0);assert.equal(h.states[1],null);assert.equal(h.states[4],true);
+});
+test('activation accepts server confirmation with device clock offsets and ignores later wall-clock changes',async()=>{
+  for(const offset of [-3600000,-1000,0,3600000]){
+    const p=preview(),serverNow=Date.parse(p.checkedAt);p.confirmation.expiresAt=new Date(serverNow+300000).toISOString();
+    let wall=serverNow+offset,tick=1000,calls=0;
+    class DeviceDate extends Date {static now(){return wall;}}
+    const h=mounted({previewAutoStatus:async()=>p,enableAutoStatus:async()=>{calls++;return result();}}, {},
+      {Date:DeviceDate,performance:{now:()=>tick}});
+    await h.ready();h.prepare();await flush();assert.ok(h.states[1],`clock offset ${offset}`);
+    wall+=86400000;tick+=1000;h.ack();h.enable();await flush();assert.equal(calls,1);
+  }
+});
+test('activation counts preview latency and cannot revive expired consent by changing device time',async()=>{
+  const p=preview();p.confirmation.expiresAt=new Date(Date.parse(p.checkedAt)+300000).toISOString();
+  for(const responseDelay of [299000,300000]){
+    const response=deferred();let tick=1000,wall=Date.parse(p.checkedAt),calls=0;
+    class DeviceDate extends Date {static now(){return wall;}}
+    const h=mounted({previewAutoStatus:()=>response.promise,enableAutoStatus:async()=>calls++},{},
+      {Date:DeviceDate,performance:{now:()=>tick}});
+    await h.ready();h.prepare();tick+=responseDelay;response.resolve(p);await flush();
+    if(responseDelay<300000){assert.ok(h.states[1]);tick+=1000;wall-=86400000;h.ack();h.enable();await flush();}
+    assert.equal(calls,0);assert.equal(h.states[1],null);assert.equal(h.states[4],true);
+  }
+});
+test('activation rejects invalid server lifetimes and cannot trust a deadline supplied in a response',()=>{
+  const {validateActivationPreview}=load({performance:{now:()=>1000}});
+  for(const lifetime of [-1,0,300001,Infinity]){
+    const p=preview();p.confirmation.expiresAt=Number.isFinite(lifetime)?new Date(Date.parse(p.checkedAt)+lifetime).toISOString():'invalid';
+    p.confirmationDeadline=999999999;assert.throws(()=>validateActivationPreview(p,scope()));
+  }
+  const p=preview();p.confirmation.expiresAt=new Date(Date.parse(p.checkedAt)+300000).toISOString();p.confirmationDeadline=999999999;
+  assert.equal(validateActivationPreview(p,scope()).confirmationDeadline,301000);
 });
 test('double preview clicks share one request and changed configuration discards a late proof',async()=>{
   const pending=deferred();let calls=0;const h=mounted({previewAutoStatus:()=>{calls++;return pending.promise;}});await h.ready();

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { syrveApi, type SyrveAutoStatus, type SyrveActivationPreview, type SyrveActivationResult } from '../api/syrve';
 import { syrveOperationError } from './services/syrveOperationErrors';
+import { syrveConfirmationDeadline, syrveConfirmationExpired } from './services/syrveConfirmationTime';
 
 const FAILURE_MESSAGE = 'Операцію не підтверджено або налаштування змінилися. Оновіть підключення та повторіть перевірку.';
 
 type Scope = { configurationRevision: string | null; organizationId: string | null; linkedTables: number };
+type TimedActivationPreview = SyrveActivationPreview & { confirmationDeadline: number };
 const uuid = (value: unknown): value is string => typeof value === 'string' && value.length === 36 && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
 const time = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value));
 const tableNumber = (value: unknown): string | null => typeof value === 'string' && /^[0-9]{1,12}$/.test(value.trim()) && Number(value) > 0 ? String(Number(value)) : null;
@@ -18,7 +20,7 @@ export function validateAutoStatus(value: SyrveAutoStatus, scope: Scope): SyrveA
     || ((value.syncEnabled || value.activationAvailable) && (!uuid(value.configurationRevision) || !value.linkedTables))) throw new Error('Недійсний стан автостатусів.');
   return { configurationRevision: value.configurationRevision, checkedAt: value.checkedAt, syncEnabled: value.syncEnabled, activationAvailable: value.activationAvailable, linkedTables: value.linkedTables };
 }
-export function validateActivationPreview(value: SyrveActivationPreview, scope: Scope): SyrveActivationPreview {
+export function validateActivationPreview(value: SyrveActivationPreview, scope: Scope, requestStartedAt = performance.now()): TimedActivationPreview {
   if (!value || !uuid(scope.configurationRevision) || value.configurationRevision !== scope.configurationRevision || value.organizationId !== scope.organizationId
     || !uuid(value.organizationId) || !time(value.checkedAt) || value.syncEnabled !== false || value.linkedTables !== scope.linkedTables
     || !Number.isSafeInteger(value.linkedTables) || value.linkedTables < 1 || value.linkedTables > 100
@@ -27,11 +29,12 @@ export function validateActivationPreview(value: SyrveActivationPreview, scope: 
     || value.tableNumbers.some(number => tableNumber(number) === null)
     || new Set(value.tableNumbers.map(tableNumber)).size !== value.tableNumbers.length
     || !value.confirmation || typeof value.confirmation.proof !== 'string' || value.confirmation.proof.length > 1500
-    || !/^[\w-]{40,}\.[\w-]{43}$/.test(value.confirmation.proof) || !time(value.confirmation.expiresAt)
-    || Date.parse(value.confirmation.expiresAt) <= Date.now() || Date.parse(value.confirmation.expiresAt) > Date.now() + 300000) throw new Error('Недійсна перевірка автостатусів.');
+    || !/^[\w-]{40,}\.[\w-]{43}$/.test(value.confirmation.proof) || !time(value.confirmation.expiresAt)) throw new Error('Недійсна перевірка автостатусів.');
+  const confirmationDeadline = syrveConfirmationDeadline(value.checkedAt, value.confirmation.expiresAt, requestStartedAt);
+  if (confirmationDeadline === null) throw new Error('Недійсна перевірка автостатусів.');
   return { configurationRevision: value.configurationRevision, organizationId: value.organizationId, checkedAt: value.checkedAt, syncEnabled: false,
     linkedTables: value.linkedTables, terminalGroups: value.terminalGroups, tableNumbers: [...value.tableNumbers],
-    confirmation: { proof: value.confirmation.proof, expiresAt: value.confirmation.expiresAt } };
+    confirmation: { proof: value.confirmation.proof, expiresAt: value.confirmation.expiresAt }, confirmationDeadline };
 }
 export function validateActivationResult(value: SyrveActivationResult, scope: Scope): SyrveActivationResult {
   if (!value || value.requestedRevision !== scope.configurationRevision || !uuid(value.configurationRevision) || value.configurationRevision === scope.configurationRevision
@@ -44,7 +47,7 @@ export function validateActivationResult(value: SyrveActivationResult, scope: Sc
 type Props = Scope & { syncEnabled: boolean; busy: boolean; onBusyChange: (busy: boolean) => void;
   onFinished: (result: 'enabled' | 'disabled' | 'failed', failureReason?: string) => Promise<void> };
 export default function SyrveAutoStatusPanel(props: Props) {
-  const [gate, setGate] = useState<SyrveAutoStatus | null>(null), [preview, setPreview] = useState<SyrveActivationPreview | null>(null);
+  const [gate, setGate] = useState<SyrveAutoStatus | null>(null), [preview, setPreview] = useState<TimedActivationPreview | null>(null);
   const [acknowledged, setAcknowledged] = useState(false), [working, setWorking] = useState(false), [failed, setFailed] = useState(false);
   const [failureReason, setFailureReason] = useState<string | null>(null);
   const version = useRef(0), pending = useRef(false);
@@ -66,7 +69,8 @@ export default function SyrveAutoStatusPanel(props: Props) {
     if (!allowed || !gate?.activationAvailable || gate.syncEnabled) return;
     const current = version.current; pending.current = true; setWorking(true); setFailed(false); setPreview(null); setAcknowledged(false); setFailureReason(null); props.onBusyChange(true);
     try {
-      const checked = validateActivationPreview(await syrveApi.previewAutoStatus(props.configurationRevision!), props);
+      const requestStartedAt = performance.now();
+      const checked = validateActivationPreview(await syrveApi.previewAutoStatus(props.configurationRevision!), props, requestStartedAt);
       if (version.current === current) setPreview(checked);
     } catch (cause) {
       if (version.current === current) { setFailed(true); setFailureReason(syrveOperationError(cause, FAILURE_MESSAGE)); }
@@ -75,7 +79,7 @@ export default function SyrveAutoStatusPanel(props: Props) {
   }
   async function change(enable: boolean) {
     if (!allowed || !gate || (enable ? !preview || !acknowledged || gate.syncEnabled : !gate.syncEnabled)) return;
-    if (enable && Date.parse(preview!.confirmation.expiresAt) <= Date.now()) {
+    if (enable && syrveConfirmationExpired(preview!.confirmationDeadline)) {
       setPreview(null); setAcknowledged(false); setFailed(true);
       setFailureReason('Підтвердження автостатусів прострочене. Повторіть перевірку перед увімкненням.'); return;
     }

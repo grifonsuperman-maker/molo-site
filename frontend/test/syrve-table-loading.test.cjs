@@ -16,8 +16,14 @@ const result=()=>({...scope(),requestedRevision:REV,configurationRevision:NEXT,c
 function load(deps={}) {
   const source=fs.readFileSync(path.resolve(__dirname,'../src/director/SyrveTableLoadingPanel.tsx'),'utf8');
   const exports={};vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,
-    {exports,require:name=>name==='../api/syrve'?{syrveApi:deps.api||{}}:name==='react'?deps.react||React:
+    {exports,Date:deps.Date||Date,performance:deps.performance||performance,require:name=>name==='../api/syrve'?{syrveApi:deps.api||{}}:name==='react'?deps.react||React:
+      name==='./services/syrveConfirmationTime'?loadConfirmationTime(deps):
       name==='./services/syrveOperationErrors'?loadErrors():require(name)});return exports;
+}
+function loadConfirmationTime(deps){
+  const source=fs.readFileSync(path.resolve(__dirname,'../src/director/services/syrveConfirmationTime.ts'),'utf8'),exports={};
+  vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,
+    {exports,Date:deps.Date||Date,performance:deps.performance||performance});return exports;
 }
 function loadErrors() {
   const source=fs.readFileSync(path.resolve(__dirname,'../src/director/services/syrveOperationErrors.ts'),'utf8'),exports={};
@@ -29,9 +35,9 @@ function find(node,predicate) {
 }
 const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};}
-function mounted(api,callbacks={}) {
+function mounted(api,callbacks={},environment={}) {
   const states=[],refs=[],effects=[];let stateIndex=0,refIndex=0,previous,cleanup,props={...scope(),connectionReady:true,busy:false,...callbacks};
-  const component=load({api,react:{
+  const component=load({...environment,api,react:{
     useState(value){const i=stateIndex++;if(!(i in states))states[i]=value;return[states[i],value=>states[i]=typeof value==='function'?value(states[i]):value];},
     useRef(value){const i=refIndex++;if(!(i in refs))refs[i]={current:value};return refs[i];},
     useEffect(effect,deps){if(JSON.stringify(previous)!==JSON.stringify(deps)){previous=deps;effects.push(effect);}},
@@ -103,9 +109,42 @@ test('unprepared connection, no links or parent operation cannot prepare or subm
   }
 });
 test('expired preview cannot initialize and requires fresh confirmation',async()=>{
-  let commands=0;const h=mounted({previewTableLoading:async()=>preview(),loadTables:async()=>commands++});
-  h.prepare();await flush();h.states[0].confirmation.expiresAt=new Date(Date.now()-1).toISOString();h.ack();h.confirm();await flush();
+  let commands=0,tick=1000;const h=mounted({previewTableLoading:async()=>preview(),loadTables:async()=>commands++},{},
+    {performance:{now:()=>tick}});
+  h.prepare();await flush();tick+=300000;h.ack();h.confirm();await flush();
   assert.equal(commands,0);assert.equal(h.states[0],null);assert.equal(h.states[1],false);assert.equal(h.states[3],true);
+});
+test('loading accepts the server five-minute window despite device clock offsets and later clock changes',async()=>{
+  for(const offset of [-3600000,-1000,0,3600000]){
+    const p=preview(),serverNow=Date.parse(p.checkedAt);p.confirmation.expiresAt=new Date(serverNow+300000).toISOString();
+    let wall=serverNow+offset,tick=1000,commands=0;
+    class DeviceDate extends Date {static now(){return wall;}}
+    const h=mounted({previewTableLoading:async()=>p,loadTables:async()=>{commands++;return result();}}, {},
+      {Date:DeviceDate,performance:{now:()=>tick}});
+    h.prepare();await flush();assert.ok(h.states[0],`clock offset ${offset}`);
+    wall+=86400000;tick+=1000;h.ack();h.confirm();await flush();assert.equal(commands,1);
+  }
+});
+test('loading counts request time and never extends consent by moving the phone clock backwards',async()=>{
+  const p=preview();p.confirmation.expiresAt=new Date(Date.parse(p.checkedAt)+300000).toISOString();
+  for(const responseDelay of [299000,300000]){
+    const response=deferred();let tick=1000,wall=Date.parse(p.checkedAt),commands=0;
+    class DeviceDate extends Date {static now(){return wall;}}
+    const h=mounted({previewTableLoading:()=>response.promise,loadTables:async()=>commands++},{},
+      {Date:DeviceDate,performance:{now:()=>tick}});
+    h.prepare();tick+=responseDelay;response.resolve(p);await flush();
+    if(responseDelay<300000){assert.ok(h.states[0]);tick+=1000;wall-=86400000;h.ack();h.confirm();await flush();}
+    assert.equal(commands,0);assert.equal(h.states[0],null);assert.equal(h.states[3],true);
+  }
+});
+test('loading rejects invalid server lifetimes and calculates its own bounded deadline',()=>{
+  const {validateLoadingPreview}=load({performance:{now:()=>1000}});
+  for(const lifetime of [-1,0,300001,Infinity]){
+    const p=preview();p.confirmation.expiresAt=Number.isFinite(lifetime)?new Date(Date.parse(p.checkedAt)+lifetime).toISOString():'invalid';
+    p.confirmationDeadline=999999999;assert.throws(()=>validateLoadingPreview(p,scope()));
+  }
+  const p=preview();p.confirmation.expiresAt=new Date(Date.parse(p.checkedAt)+300000).toISOString();p.confirmationDeadline=999999999;
+  assert.equal(validateLoadingPreview(p,scope()).confirmationDeadline,301000);
 });
 test('command failure clears confirmation, refreshes the consumed revision and never exposes raw HTTP errors',async()=>{
   let refreshed=0;const h=mounted({previewTableLoading:async()=>preview(),loadTables:async()=>{throw new Error('private-token-upstream-exception');}},

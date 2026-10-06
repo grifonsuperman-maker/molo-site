@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { syrveApi, type SyrveTableLoadingPreview, type SyrveTableLoadingResult } from '../api/syrve';
 import { syrveOperationError } from './services/syrveOperationErrors';
+import { syrveConfirmationDeadline, syrveConfirmationExpired } from './services/syrveConfirmationTime';
 
 const FAILURE_MESSAGE = 'Завантаження не підтверджено або налаштування змінилися. Оновіть підключення перед новою спробою.';
 
@@ -10,6 +11,7 @@ const ERROR_CODES = ['SYRVE_AUTH_FAILED', 'SYRVE_ACCESS_DENIED', 'SYRVE_RATE_LIM
   'SYRVE_UNAVAILABLE', 'SYRVE_INVALID_RESPONSE', 'SYRVE_NO_ORGANIZATIONS', 'SYRVE_ORGANIZATION_UNAVAILABLE',
   'SYRVE_OBSERVATION_LIMIT', 'SYRVE_COMMAND_FAILED', 'SYRVE_COMMAND_IN_PROGRESS', 'SYRVE_COMMAND_EXPIRED', 'SYRVE_CONFIGURATION_CHANGED'];
 type Scope = { configurationRevision: string; organizationId: string; linkedTables: number };
+type TimedLoadingPreview = SyrveTableLoadingPreview & { confirmationDeadline: number };
 const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 function invalid(): never { throw new Error('Недійсний результат завантаження столів.'); }
 function checked(value: SyrveTableLoadingPreview | SyrveTableLoadingResult, scope: Scope) {
@@ -21,19 +23,19 @@ function checked(value: SyrveTableLoadingPreview | SyrveTableLoadingResult, scop
     || ['syncEnabled', 'activationAvailable', 'statusesApplied', 'renamingApplied', 'complete']
       .some(key => value[key as keyof typeof value] !== false)) invalid();
 }
-export function validateLoadingPreview(value: unknown, scope: Scope, now = Date.now()): SyrveTableLoadingPreview {
+export function validateLoadingPreview(value: unknown, scope: Scope, requestStartedAt = performance.now()): TimedLoadingPreview {
   const preview = value as SyrveTableLoadingPreview; checked(preview, scope);
   const confirmation = preview.confirmation;
   if (preview.configurationRevision !== scope.configurationRevision || !Array.isArray(preview.tableNumbers)
     || preview.tableNumbers.length !== scope.linkedTables || new Set(preview.tableNumbers).size !== scope.linkedTables
     || preview.tableNumbers.some(number => typeof number !== 'string' || number !== number.trim() || !/^[1-9]\d{0,5}$/.test(number))
     || !confirmation || typeof confirmation.proof !== 'string' || confirmation.proof.length > 1500
-    || !/^[\w-]{40,}\.[\w-]{43}$/.test(confirmation.proof) || typeof confirmation.expiresAt !== 'string'
-    || !Number.isFinite(Date.parse(confirmation.expiresAt)) || Date.parse(confirmation.expiresAt) <= now
-    || Date.parse(confirmation.expiresAt) > now + 5 * 60_000) invalid();
+    || !/^[\w-]{40,}\.[\w-]{43}$/.test(confirmation.proof) || typeof confirmation.expiresAt !== 'string') invalid();
+  const confirmationDeadline = syrveConfirmationDeadline(preview.checkedAt, confirmation.expiresAt, requestStartedAt);
+  if (confirmationDeadline === null) invalid();
   return { configurationRevision: preview.configurationRevision, organizationId: preview.organizationId, checkedAt: preview.checkedAt,
     linkedTables: preview.linkedTables, terminalGroups: preview.terminalGroups, tableNumbers: [...preview.tableNumbers],
-    confirmation: { proof: confirmation.proof, expiresAt: confirmation.expiresAt },
+    confirmation: { proof: confirmation.proof, expiresAt: confirmation.expiresAt }, confirmationDeadline,
     syncEnabled: false, activationAvailable: false, statusesApplied: false, renamingApplied: false, complete: false };
 }
 export function validateLoadingResult(value: unknown, scope: Scope, groups: number): SyrveTableLoadingResult {
@@ -54,7 +56,7 @@ type Props = { configurationRevision: string | null; organizationId: string | nu
   onFinished?: (result: SyrveTableLoadingResult | null, failureReason?: string) => Promise<void> };
 
 export default function SyrveTableLoadingPanel(props: Props) {
-  const [preview, setPreview] = useState<SyrveTableLoadingPreview | null>(null);
+  const [preview, setPreview] = useState<TimedLoadingPreview | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -75,8 +77,9 @@ export default function SyrveTableLoadingPanel(props: Props) {
     request.current.pending = true; setPreview(null); setAcknowledged(false); setResult(null); setFailed(false); setLoading(true); setFailureReason(null);
     props.onBusyChange?.(true);
     try {
+      const requestStartedAt = performance.now();
       const value = await syrveApi.previewTableLoading(configurationRevision);
-      if (version === request.current.version) setPreview(validateLoadingPreview(value, { configurationRevision, organizationId, linkedTables }));
+      if (version === request.current.version) setPreview(validateLoadingPreview(value, { configurationRevision, organizationId, linkedTables }, requestStartedAt));
     } catch (cause) {
       if (version === request.current.version) { setFailed(true); setFailureReason(syrveOperationError(cause, FAILURE_MESSAGE)); }
     }
@@ -86,7 +89,7 @@ export default function SyrveTableLoadingPanel(props: Props) {
   }
   async function confirm() {
     if (!eligible || request.current.pending || !acknowledged || !preview || !configurationRevision || !organizationId) return;
-    if (preview.configurationRevision !== configurationRevision || Date.parse(preview.confirmation.expiresAt) <= Date.now()) {
+    if (preview.configurationRevision !== configurationRevision || syrveConfirmationExpired(preview.confirmationDeadline)) {
       setPreview(null); setAcknowledged(false); setFailed(true);
       setFailureReason(preview.configurationRevision !== configurationRevision
         ? 'Налаштування або столи змінилися. Повторіть перевірку перед підтвердженням.'
