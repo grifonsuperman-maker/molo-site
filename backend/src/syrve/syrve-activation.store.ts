@@ -6,6 +6,10 @@ import { savedSyrveFingerprint } from './syrve-saved-scope';
 import { settingsVersion, staleSyrveSettings, SyrveSettingsStore, type SyrveSettingsSnapshot } from './syrve-settings.store';
 import type { TableLoadingLease } from './syrve-table-loading.store';
 import type { TableLoadingPlan } from './syrve-table-loading';
+import { SyrveStateStore, type SyrveStateCapture } from './syrve-state.store';
+import type { SyrveOrderObservationBatch } from './syrve-state-reducer';
+
+export type SyrveInitialObservation = { capture: SyrveStateCapture; batches: SyrveOrderObservationBatch[] };
 
 @Injectable()
 export class SyrveActivationStore {
@@ -43,7 +47,11 @@ export class SyrveActivationStore {
       throw new ConflictException('Спочатку вимкніть автоматичні статуси перед зміною або повторною перевіркою підключення.');
     }
   }
-  enable(lease: TableLoadingLease, plan: TableLoadingPlan, actor: string) {
+  captureTables(lease: TableLoadingLease) {
+    return new SyrveStateStore(this.source, this.settings).captureBatch(
+      lease.snapshot.links.map(link => link.moloTableId), settingsVersion(lease.snapshot));
+  }
+  enable(lease: TableLoadingLease, plan: TableLoadingPlan, actor: string, observations?: SyrveInitialObservation[]) {
     return this.settings.transaction(settingsVersion(lease.snapshot), async (manager, snapshot) => {
       if (!await this.prepared(manager)) throw new ServiceUnavailableException('Підготовку автоматичних статусів у базі ще не завершено.');
       await manager.query('LOCK TABLE ' + this.table('tables') + ' IN SHARE ROW EXCLUSIVE MODE');
@@ -54,6 +62,17 @@ export class SyrveActivationStore {
         + ' FROM ' + this.table('syrve_worker_state') + ' WHERE integration_id=$1 FOR UPDATE', [entity.id, lease.leaseId, entity.configurationRevision]);
       if (!job?.live) throw staleSyrveSettings();
       const savedPlan = activationPlan(plan, snapshot), bindings = activationBindings(snapshot, tables);
+      if (observations) {
+        if (observations.length !== snapshot.links.length || new Set(observations.map(value => value.capture.linkId)).size !== observations.length
+          || observations.some(value => !snapshot.links.some(link => link.id === value.capture.linkId))) throw staleSyrveSettings();
+        const states = new SyrveStateStore(this.source, this.settings);
+        for (const { capture, batches } of observations) {
+          await states.applyActivationObservationInTransaction(manager, snapshot, capture, batches, lease.leaseId);
+        }
+        const [fresh] = await manager.query('SELECT lease_id=$2 AND configuration_revision=$3 AND lease_until > clock_timestamp() AS live'
+          + ' FROM ' + this.table('syrve_worker_state') + ' WHERE integration_id=$1', [entity.id, lease.leaseId, entity.configurationRevision]);
+        if (!fresh?.live) throw staleSyrveSettings();
+      }
       await manager.query('INSERT INTO ' + this.table('syrve_sync_activation')
         + ' (integration_id,configuration_revision,enabled,bindings_fingerprint,loading_plan,actor_hash,consented_at)'
         + ' VALUES ($1,$2,true,$3,$4::jsonb,$5,clock_timestamp()) ON CONFLICT (integration_id) DO UPDATE'

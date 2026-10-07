@@ -13,8 +13,13 @@ export class SyrveLoadingValidationError extends Error {}
 const invalid = (): never => { throw new SyrveLoadingValidationError(); };
 
 export function tableLoadingPlan(probe: SyrveOrderProbe, ids: string[]): TableLoadingPlan {
-  if (['posAvailability', 'ordersByTable'].some(key => probe.checks?.[key as keyof typeof probe.checks]?.status !== 'ok')
+  if (probe.checks?.ordersByTable?.status !== 'ok'
     || !['ok', 'not_checked'].includes(probe.checks?.ordersById?.status)) invalid();
+  return tableLoadingAvailablePlan(probe, ids);
+}
+
+export function tableLoadingAvailablePlan(probe: SyrveOrderProbe, ids: string[]): TableLoadingPlan {
+  if (probe.checks?.posAvailability?.status !== 'ok') invalid();
   const plan = tableLoadingCatalogPlan(probe, ids);
   if (plan.groups.some(group => {
     const alive = (probe.availability || []).filter(item => item.terminalGroupId === group.terminalGroupId);

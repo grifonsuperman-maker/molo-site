@@ -34,7 +34,8 @@ export type SyrveReadiness = {
 
 export type SyrveAutoStatus = { configurationRevision: string | null; checkedAt: string; syncEnabled: boolean; activationAvailable: boolean; linkedTables: number };
 export type SyrveActivationPreview = { configurationRevision: string; organizationId: string; checkedAt: string; syncEnabled: false;
-  linkedTables: number; terminalGroups: number; tableNumbers: string[]; confirmation: { proof: string; expiresAt: string } };
+  linkedTables: number; terminalGroups: number; tableNumbers: string[]; totalTables?: number; unlinkedTableNumbers?: string[];
+  confirmation: { proof: string; expiresAt: string } };
 export type SyrveActivationResult = { requestedRevision: string; configurationRevision: string; organizationId: string; checkedAt: string;
   linkedTables: number; syncEnabled: boolean; code: string | null };
 
@@ -111,7 +112,7 @@ export const syrveApi = {
   getReadiness: () => api.get<SyrveReadiness>('/syrve-integration/readiness'),
   getAutoStatus: () => api.get<SyrveAutoStatus>('/syrve-integration/auto-status'),
   previewAutoStatus: (configurationRevision: string) => syrveOperation<SyrveActivationPreview>('/syrve-integration/auto-status-preview', { configurationRevision }),
-  enableAutoStatus: (configurationRevision: string, confirmationProof: string) => syrveOperation<SyrveActivationResult>('/syrve-integration/enable-auto-status', { configurationRevision, confirmationProof, confirmed: true }),
+  enableAutoStatus: (configurationRevision: string, confirmationProof: string) => syrveOperation<SyrveActivationResult>('/syrve-integration/enable-auto-status', { configurationRevision, confirmationProof, confirmed: true, reconcileOpenTables: true }),
   disableAutoStatus: (configurationRevision: string) => api.post<{ configurationRevision: string; checkedAt: string; syncEnabled: false }>('/syrve-integration/disable-auto-status', { configurationRevision }),
   orderDiagnostics: (configurationRevision: string) =>
     syrveOperation<SyrveOrderDiagnostics>('/syrve-integration/orders-diagnostics', { configurationRevision }),

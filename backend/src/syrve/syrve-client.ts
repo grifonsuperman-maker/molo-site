@@ -368,6 +368,18 @@ export class SyrveClient {
 
   async probeOrders(apiBaseUrl: string, apiLogin: string, organizationId: string,
     tableIds: string[], knownOrderIds: string[], controls: SyrveProbeControls = {}): Promise<SyrveOrderProbe> {
+    return this.readProbe(apiBaseUrl, apiLogin, organizationId, tableIds, knownOrderIds, controls, true);
+  }
+
+  // Preparation needs current UUIDs, POS versions and availability, not bills.
+  // This result cannot certify occupancy or issue a loaded visibility receipt.
+  async probeTablePlan(apiBaseUrl: string, apiLogin: string, organizationId: string,
+    tableIds: string[], controls: SyrveProbeControls = {}): Promise<SyrveOrderProbe> {
+    return this.readProbe(apiBaseUrl, apiLogin, organizationId, tableIds, [], controls, false);
+  }
+
+  private async readProbe(apiBaseUrl: string, apiLogin: string, organizationId: string,
+    tableIds: string[], knownOrderIds: string[], controls: SyrveProbeControls, readOrders: boolean): Promise<SyrveOrderProbe> {
     // Validate scope before authentication; callers cannot expand it with arbitrary IDs.
     this.normalizeBaseUrl(apiBaseUrl);
     if (!UUID.test(organizationId)) throw new BadRequestException('Оберіть коректну організацію Syrve');
@@ -440,6 +452,7 @@ export class SyrveClient {
     }), probe.organizationId, groupIds));
     if (!availability) return finish();
     probe.availability = availability;
+    if (!readOrders) return finish();
     const eligibleTables = requestedTables.filter((id) => sections.some((table) => table.id === id && !table.isDeleted
       && availability.some((group) => group.terminalGroupId === table.terminalGroupId && group.isAlive)));
     if (!eligibleTables.length) return finish();

@@ -36,7 +36,7 @@ function fixture(t){
     claim:async old=>{await store.assertCurrent(old);if(claims)throw new ConflictException();claims++;capture.snapshot.entity.configurationRevision=NEXT;
       capture.fingerprint='b'.repeat(64);return {...structuredClone(capture),leaseId:id(107)};},
     guard:async old=>store.assertCurrent(old),release:async()=>released++};
-  const client={probeOrders:async()=>{reads++;return probe(scope,[]);},initializeTables:async(_base,_login,_plan,controls)=>{
+  const client={probeOrders:async()=>{reads++;return probe(scope,[]);},probeTablePlan:async()=>{reads++;return probe(scope,[]);},initializeTables:async(_base,_login,_plan,controls)=>{
     commands++;await controls.beforeCommand();if(commandFailure)throw new SyrveClientException('SYRVE_COMMAND_FAILED');}};
   const activation={prepared:async()=>available,requireDisabled:async()=>{if(saved)throw new ConflictException();},
     read:async()=>({prepared:available,enabled:saved}),enable:async()=>{if(writeFailure)throw new Error('private-database-body');saved=true;},
@@ -146,16 +146,17 @@ function transport(t,options={}){
 }
 for(const complete of [true,false])test('Director activation with real synchronous transport '+(complete?'enables after fresh reads':'rejects a failed post-load read'),async t=>{
   let reads=0;
-  const tx=transport(t,{'/api/1/order/by_table':()=>++reads===3&&!complete
+  const tx=transport(t,{'/api/1/order/by_table':()=>++reads===1&&!complete
     ?Response.json({exception:'private-provider-detail'},{status:403}):{correlationId:id(402),orders:[]}}),h=fixture(t);
   h.client.probeOrders=tx.client.probeOrders.bind(tx.client);
+  h.client.probeTablePlan=tx.client.probeTablePlan.bind(tx.client);
   h.client.initializeTables=tx.client.initializeTables.bind(tx.client);
   const before=structuredClone(h.capture.tables),p=await h.service.preview({configurationRevision:REV},actor);
   assert.equal(tx.calls.filter(c=>c.path.endsWith('init_by_table')).length,0);
   const result=await h.service.enable(h.dto(p),actor);
   assert.equal(result.syncEnabled,complete);assert.equal(h.stats().saved,complete);
   assert.equal(h.stats().released,complete?1:0);assert.equal(result.code,complete?null:'SYRVE_ACCESS_DENIED');
-  assert.equal(reads,3);assert.equal(tx.calls.filter(c=>c.path.endsWith('init_by_table')).length,1);
+  assert.equal(reads,1);assert.equal(tx.calls.filter(c=>c.path.endsWith('init_by_table')).length,1);
   assert.equal(tx.calls.filter(c=>c.path.endsWith('commands/status')).length,0);
   assert.deepEqual(h.capture.tables,before);assert.doesNotMatch(JSON.stringify(result),/private-provider-detail|synthetic-login/);
 });

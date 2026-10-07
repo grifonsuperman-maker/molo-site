@@ -35,6 +35,7 @@ export async function runSyrveActivationValidation(env=process.env){
   env.SYRVE_CREDENTIALS_SECRET='synthetic-activation-ci-secret';delete env.SYRVE_APP_ID;delete env.SYRVE_APP_CLIENT_SECRET;
   const org=randomUUID(),provider=randomUUID(),group=randomUUID(),order=randomUUID(),correlation=randomUUID(),actor={sub:randomUUID(),role:'owner',directorSessionVersion:1};
   let tableId,integrationId,created=false,original,trigger=false,rows=[],commandError=false,commandPending=false,missing=false,hold=null,commands=0;
+  const calls=[];
   const previousFetch=globalThis.fetch;
   const client=new SyrveClient(require('../test/helpers/syrve-test-request-limiter.js'));
   const settings=(db=source)=>new SyrveSettingsStore(db),activation=(db=source)=>new SyrveActivationStore(db,settings(db));
@@ -50,7 +51,7 @@ export async function runSyrveActivationValidation(env=process.env){
   const status=async()=>{
     return (await new SyrveStatusReadService(source).snapshot([tableId])).tables.get(tableId)?.state;};
   globalThis.fetch=async(url,request)=>{
-    const path=new URL(url).pathname,body=JSON.parse(request.body);
+    const path=new URL(url).pathname,body=JSON.parse(request.body);calls.push(path);
     const name=caller.getStore()||options.extra.application_name;
     idleCaller=Number((await other.query("SELECT count(*) AS count FROM pg_stat_activity WHERE application_name=$1 AND state='idle in transaction'",[name]))[0].count);
     assert.equal(idleCaller,0,'HTTP must not span a transaction in its caller pool');
@@ -85,6 +86,9 @@ export async function runSyrveActivationValidation(env=process.env){
     assert.equal((await worker.tick()).status,'disabled');assert.equal(commands,0);assert.equal((await new SyrveStatusReadService(source).snapshot([tableId])).syncEnabled,false);
     const beforePhysical=await physical(),before=await saved(),p=await service().preview({configurationRevision:await revision()},actor);
     assert.equal(commands,0);assert.deepEqual(await saved(),before);assert.deepEqual(await physical(),beforePhysical);
+    assert.equal(p.totalTables,(await source.query('SELECT count(*)::int AS count FROM tables'))[0].count);
+    assert.equal(p.unlinkedTableNumbers.length,p.totalTables-p.linkedTables);
+    assert.equal(calls.some(path=>path.endsWith('by_table')||path.endsWith('by_id')),false,'Preview must not duplicate the later account read');
     const dto={configurationRevision:p.configurationRevision,confirmationProof:p.confirmation.proof,confirmed:true};
     const race=await Promise.allSettled([caller.run(options.extra.application_name,()=>service().enable(dto,actor)),
       caller.run(other.options.extra.application_name,()=>service(other).enable(dto,actor))]);
@@ -158,17 +162,66 @@ export async function runSyrveActivationValidation(env=process.env){
     // Advance only the disposable lease clock instead of waiting ninety seconds.
     await source.query("UPDATE syrve_worker_state SET lease_until=clock_timestamp()-interval '1 second' WHERE integration_id=$1",[integrationId]);
 
-    // A final receipt-write failure rolls back consent, never the one-use claim.
+    // A final consent-write failure rolls back initial occupancy and ledger too,
+    // while preserving the one-use claim. No POS or production traffic is used.
+    const initialOrder=randomUUID();rows=[wrapper(initialOrder,'New',300)];
     const next=await service().preview({configurationRevision:await revision()},actor);
     await source.query("CREATE FUNCTION syrve_activation_ci_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic receipt failure'; END; $$");
     // Install the fault during mocked HTTP, after the genuine schema preflight.
     // Installing it beforehand correctly makes readiness reject catalog drift.
-    hold=async()=>{await other.query('CREATE TRIGGER syrve_activation_ci_fail BEFORE INSERT OR UPDATE ON syrve_sync_activation FOR EACH ROW EXECUTE FUNCTION syrve_activation_ci_fail()');trigger=true;hold=null;};
-    const failed=await service().enable({configurationRevision:next.configurationRevision,confirmationProof:next.confirmation.proof,confirmed:true},actor);
+    let beforeInitialWrite;
+    hold=async()=>{beforeInitialWrite=await saved();await other.query('CREATE TRIGGER syrve_activation_ci_fail BEFORE INSERT OR UPDATE ON syrve_sync_activation FOR EACH ROW EXECUTE FUNCTION syrve_activation_ci_fail()');trigger=true;hold=null;};
+    const failed=await service().enable({configurationRevision:next.configurationRevision,confirmationProof:next.confirmation.proof,confirmed:true,reconcileOpenTables:true},actor);
     assert.equal(trigger,true);
     assert.equal(failed.syncEnabled,false);assert.equal(failed.code,'SYRVE_UNAVAILABLE');assert.notEqual(failed.configurationRevision,next.configurationRevision);
-    assert.equal((await activation().read(await settings().read())).enabled,false);assert.deepEqual(await physical(),closedPhysical);assert.deepEqual(await saved(),atDisable);
+    assert.equal((await activation().read(await settings().read())).enabled,false);assert.deepEqual(await physical(),closedPhysical);assert.deepEqual(await saved(),beforeInitialWrite);
+    assert.deepEqual((await saved()).versions,atDisable.versions,'A failed initial activation must not consume the open event');
     assert.ok((await job()).lease_id);assert.equal((await job()).last_success_at,null);
+    await source.query('DROP TRIGGER syrve_activation_ci_fail ON syrve_sync_activation');trigger=false;
+    await source.query("UPDATE syrve_worker_state SET lease_until=clock_timestamp()-interval '1 second' WHERE integration_id=$1",[integrationId]);
+
+    const enableInitial=async()=>{
+      const start=calls.length,p=await service().preview({configurationRevision:await revision()},actor);
+      const result=await service().enable({configurationRevision:p.configurationRevision,confirmationProof:p.confirmation.proof,confirmed:true,reconcileOpenTables:true},actor);
+      assert.equal(result.syncEnabled,true,JSON.stringify(result));
+      const dispatched=calls.slice(start);
+      assert.equal(dispatched.filter(path=>path.endsWith('init_by_table')).length,1);
+      assert.equal(dispatched.filter(path=>path.endsWith('/order/by_table')).length,1,'Read accounts once, after loading');
+      assert.equal(dispatched.filter(path=>path.endsWith('by_id')).length,0,'The fresh open UUID already confirms this bill');
+    };
+    const manualFree=async()=>{
+      const snapshot=await settings().read();
+      await settings().transaction({id:snapshot.entity.id,revision:snapshot.entity.configurationRevision},async(manager,current)=>{
+        await new SyrveStateStore(source,settings()).recordStaffActionInTransaction(manager,current,tableId,'manual_free');
+        await manager.query("UPDATE tables SET status='free',updated_at=clock_timestamp() WHERE id=$1",[tableId]);
+      });
+    };
+    await enableInitial();assert.equal((await physical())[0].status,'occupied');
+    assert.deepEqual((await status()).activeSyrveOrderIds,[initialOrder]);
+    await manualFree();const knownVersions=(await saved()).versions,releasedPhysical=await physical();
+    await service().disable({configurationRevision:await revision()},actor);
+    await enableInitial();assert.deepEqual(await physical(),releasedPhysical,'Re-enabling must not replay a consumed opening over manual release');
+    assert.deepEqual((await saved()).versions,knownVersions,'Reconciliation must preserve the known order watermark');
+    assert.deepEqual((await status()).manuallyFreedSyrveOrderIds,[initialOrder]);
+
+    await manualFree();const manualState=await saved(),manualStatus=await physical();
+    worker=new SyrveWorkerService(source,settings(),integration());await due();
+    assert.equal((await worker.tick()).status,'observed');
+    assert.deepEqual(await physical(),manualStatus,'A repeated worker read must preserve the later manual release');
+    assert.deepEqual((await saved()).versions,manualState.versions);
+    const additionalOrder=randomUUID();rows=[wrapper(initialOrder,'New',300),wrapper(additionalOrder,'New',400)];await due();
+    assert.equal((await worker.tick()).status,'observed');assert.equal((await physical())[0].status,'occupied');
+    assert.deepEqual(new Set((await status()).activeSyrveOrderIds),new Set([initialOrder,additionalOrder]));
+    await manualFree();await worker.onModuleDestroy();
+
+    await service().disable({configurationRevision:await revision()},actor);
+    const delayed=await service().preview({configurationRevision:await revision()},actor);let capturedLedger,staffPhysical;
+    hold=async()=>{capturedLedger=await saved();await other.query("UPDATE tables SET updated_at=updated_at+interval '1 microsecond' WHERE id=$1",[tableId]);
+      staffPhysical=await physical();hold=null;};
+    const fenced=await service().enable({configurationRevision:delayed.configurationRevision,confirmationProof:delayed.confirmation.proof,confirmed:true,reconcileOpenTables:true},actor);
+    assert.equal(fenced.syncEnabled,false);assert.equal(fenced.code,'SYRVE_CONFIGURATION_CHANGED');
+    assert.deepEqual(await saved(),capturedLedger);assert.deepEqual(await physical(),staffPhysical);
+    assert.equal((await activation().read(await settings().read())).enabled,false);
   }finally{
     try{
       if(trigger)await source.query('DROP TRIGGER IF EXISTS syrve_activation_ci_fail ON syrve_sync_activation');
