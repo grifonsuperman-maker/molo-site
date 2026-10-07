@@ -254,8 +254,8 @@ export class SyrveClient {
         !payload.token || payload.token.length > 16_384 || /\s/.test(payload.token)) {
       throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
     }
-    // Explicit connection/diagnostic actions still authenticate afresh. A
-    // successful session can seed the private worker cache for subsequent use.
+    // The explicit credential test authenticates afresh. Later connection and
+    // loading steps reuse this bounded session while reading current POS data.
     const result = await this.postJson(rateKey, '/api/1/organizations', {
       organizationIds: null,
       returnAdditionalInfo: false,
@@ -345,7 +345,7 @@ export class SyrveClient {
 
   async getCatalog(apiBaseUrl: string, apiLogin: string, organizationId: string): Promise<SyrveCatalog> {
     if (!UUID.test(organizationId)) throw new BadRequestException('Оберіть коректну організацію Syrve');
-    const session = await this.openSession(apiBaseUrl, apiLogin);
+    const session = await this.batchSession(apiBaseUrl, apiLogin, {});
     const organization = session.organizations.find((item) => item.id === organizationId.toLowerCase());
     if (!organization) throw new BadRequestException('Обрана організація більше не доступна у Syrve');
     try {
@@ -401,7 +401,7 @@ export class SyrveClient {
         return null;
       }
     };
-    const session = await check('connection', () => this.openSession(apiBaseUrl, apiLogin, deadline, controls.signal, controls.requestBudget));
+    const session = await check('connection', () => this.batchSession(apiBaseUrl, apiLogin, { ...controls, deadline }));
     if (!session) return finish();
     probe.authentication = session.diagnostics.authentication.method;
     if (!session.organizations.some((item) => item.id === probe.organizationId)) {
@@ -481,7 +481,7 @@ export class SyrveClient {
     if (controls.deadline !== undefined && !Number.isFinite(controls.deadline)) throw new SyrveClientException('SYRVE_TIMEOUT');
     const deadline = syrveObservationDeadline(controls.deadline);
     const budget: RequestBudget = { remaining: MAX_OBSERVATION_REQUESTS, parent: controls.requestBudget };
-    const session = await this.openSession(apiBaseUrl, apiLogin, deadline, controls.signal, budget);
+    const session = await this.batchSession(apiBaseUrl, apiLogin, { ...controls, deadline, requestBudget: budget });
     if (!session.organizations.some(item => item.id === plan.organizationId)) throw new SyrveClientException('SYRVE_ORGANIZATION_UNAVAILABLE');
     return this.loadGroups(session, plan, controls, deadline, budget);
   }

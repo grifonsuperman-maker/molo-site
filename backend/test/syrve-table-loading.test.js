@@ -87,6 +87,19 @@ test('synchronous initialization succeeds without polling an unsupported command
   assert.equal(guards,2);assert.equal(started,1);assert.equal(finished,1);
   assert.ok(h.requests.every(r=>r.options.redirect==='error'));
 });
+test('loading reuses a tested session and still guards and sends the explicit POS command', async t => {
+  const h = transport(t), client = new SyrveClient(require('./helpers/syrve-test-request-limiter.js'));
+  await client.checkOrganizations('https://api-eu.syrve.live', 'synthetic-login');
+  let guards = 0;
+  assert.deepEqual(await client.initializeTables('https://api-eu.syrve.live', 'synthetic-login', plan(),
+    { beforeCommand: async () => { guards++; } }), { completedGroups: 1 });
+  assert.deepEqual(h.requests.map(({ path }) => path), [
+    '/api/1/access_token', '/api/1/organizations', '/api/1/order/init_by_table',
+  ]);
+  assert.equal(guards, 2);
+  assert.deepEqual(h.requests[2].body.tableIds, [TABLE, TABLE2]);
+});
+
 test('each saved register is loaded and guarded separately without extra status requests',async t=>{
   const h=transport(t),p=plan();p.groups=[{terminalGroupId:GROUP,tableIds:[TABLE],posVersion:'7.7.1'},
     {terminalGroupId:GROUP2,tableIds:[TABLE2],posVersion:'8.0.0'}];let guards=0;
