@@ -11,6 +11,8 @@ const { SyrveIntegrationService } = require('../dist/syrve/syrve-integration.ser
 const { SyrveReadinessService } = require('../dist/syrve/syrve-readiness.service.js');
 const {SyrveActivationService}=require('../dist/syrve/syrve-activation.service.js');
 const { SyrveTableLoadingService } = require('../dist/syrve/syrve-table-loading.service.js');
+const { SyrveOperationsService } = require('../dist/syrve/syrve-operations.service.js');
+const { AuthService } = require('../dist/auth/auth.service.js');
 
 test('real JWT and role guards protect every Syrve route from non-Directors', async (t) => {
   let serviceCalls = 0;
@@ -21,7 +23,9 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     providers: [{ provide: SyrveIntegrationService, useValue: service },
       {provide:SyrveReadinessService,useValue:{read:async()=>{serviceCalls++;return {syncEnabled:false};}}},
       {provide:SyrveActivationService,useValue:{status:service.getStatus,preview:service.getStatus,enable:service.getStatus,disable:service.getStatus}},
-      {provide:SyrveTableLoadingService,useValue:{preview:service.getStatus,load:service.getStatus}}],
+      {provide:SyrveTableLoadingService,useValue:{preview:service.getStatus,load:service.getStatus}},
+      {provide:SyrveOperationsService,useValue:{start:async(actor,kind,action)=>action(),read:service.getStatus}},
+      {provide:AuthService,useValue:{verifyToken:async()=>({role:'owner'})}}],
   }).compile();
   const app = module.createNestApplication({ logger: false });
   const reflector = app.get(Reflector);
@@ -38,7 +42,7 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
   const input = { displayName: 'MOLO', apiBaseUrl: 'https://api-eu.syrve.live', apiLogin: 'test-only-login',
     organizationId: '11111111-2222-4333-8444-555555555555', organizationName: 'MOLO', confirmationProof: 'test-confirmation-proof'.repeat(3), pairs: [] };
   const revision = { configurationRevision: '11111111-2222-4333-8444-555555555555' };
-  const routes = [['GET','/auto-status',null],['POST','/auto-status-preview',revision],
+  const routes = [['GET','/operations/11111111-2222-4333-8444-555555555555',null],['GET','/auto-status',null],['POST','/auto-status-preview',revision],
     ['POST','/enable-auto-status',{...revision,confirmationProof:input.confirmationProof,confirmed:true}],['POST','/disable-auto-status',revision],['GET', '', null], ['GET','/readiness',null], ['POST', '/test', { displayName: input.displayName,
     apiBaseUrl: input.apiBaseUrl, apiLogin: input.apiLogin }], ['POST', '/connect', input],
     ['POST', '/tables-preview', { displayName: input.displayName, apiBaseUrl: input.apiBaseUrl,

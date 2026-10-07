@@ -3,7 +3,7 @@ import type { AuthUser } from '../auth/types/auth-user.type';
 import type { SyrveOrderProbe } from './syrve-order-observer';
 import { assessSyrvePosVersion } from './syrve-pos-version';
 
-export const LOADING_TTL_MS = 5 * 60_000;
+export const LOADING_TTL_MS = 40 * 60_000;
 export const LOADING_MAX_TABLES = 100;
 export const LOADING_MAX_GROUPS = 4;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -13,18 +13,29 @@ export class SyrveLoadingValidationError extends Error {}
 const invalid = (): never => { throw new SyrveLoadingValidationError(); };
 
 export function tableLoadingPlan(probe: SyrveOrderProbe, ids: string[]): TableLoadingPlan {
+  if (['posAvailability', 'ordersByTable'].some(key => probe.checks?.[key as keyof typeof probe.checks]?.status !== 'ok')
+    || !['ok', 'not_checked'].includes(probe.checks?.ordersById?.status)) invalid();
+  const plan = tableLoadingCatalogPlan(probe, ids);
+  if (plan.groups.some(group => {
+    const alive = (probe.availability || []).filter(item => item.terminalGroupId === group.terminalGroupId);
+    return alive.length !== 1 || !alive[0].isAlive;
+  })) invalid();
+  return plan;
+}
+
+// Dictionary/UUID/version validation before POS loading. This deliberately
+// makes no claim about availability, existing orders or completeness.
+export function tableLoadingCatalogPlan(probe: SyrveOrderProbe, ids: string[]): TableLoadingPlan {
   if (!uuid(probe.organizationId) || !ids.length || ids.length > LOADING_MAX_TABLES
     || ids.some(id => !uuid(id)) || new Set(ids).size !== ids.length
-    || ['connection', 'terminalGroups', 'restaurantSections', 'posAvailability', 'ordersByTable']
-      .some(key => probe.checks?.[key as keyof typeof probe.checks]?.status !== 'ok')
-    || !['ok', 'not_checked'].includes(probe.checks?.ordersById?.status)) invalid();
+    || ['connection', 'terminalGroups', 'restaurantSections']
+      .some(key => probe.checks?.[key as keyof typeof probe.checks]?.status !== 'ok')) invalid();
   const groups = new Map<string, TableLoadingPlan['groups'][number]>();
   for (const id of [...ids].sort()) {
     const tables = (probe.catalogTables || []).filter(table => table.id === id);
     const table = tables.length === 1 && !tables[0].isDeleted ? tables[0] : null;
     const active = (probe.terminalGroups?.active || []).filter(group => group.id === table?.terminalGroupId);
-    const alive = (probe.availability || []).filter(group => group.terminalGroupId === table?.terminalGroupId);
-    if (!table || !uuid(table.terminalGroupId) || active.length !== 1 || alive.length !== 1 || !alive[0].isAlive
+    if (!table || !uuid(table.terminalGroupId) || active.length !== 1
       || probe.terminalGroups?.sleeping.some(group => group.id === table.terminalGroupId)
       || assessSyrvePosVersion(active[0].posVersion).initialization !== 'supported') invalid();
     const group = groups.get(table.terminalGroupId) || { terminalGroupId: table.terminalGroupId,

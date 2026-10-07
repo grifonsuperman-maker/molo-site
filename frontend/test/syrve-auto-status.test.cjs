@@ -39,7 +39,7 @@ function mounted(api,extra={},environment={}){
 test('auto-status API sends only revision, proof and explicit confirmation',async()=>{
   const source=fs.readFileSync(path.resolve(__dirname,'../src/api/syrve.ts'),'utf8'),exports={},calls=[];
   vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,
-    {exports,require:()=>({api:{get:async url=>calls.push({url}),post:async(url,body)=>calls.push({url,body})}})});
+    {exports,require:require('./helpers/syrve-operation-fixture.cjs').resolver({get:async url=>calls.push({url}),post:async(url,body)=>calls.push({url,body})})});
   await exports.syrveApi.getAutoStatus();await exports.syrveApi.previewAutoStatus(REV);await exports.syrveApi.enableAutoStatus(REV,'opaque-proof');await exports.syrveApi.disableAutoStatus(REV);
   assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{url:'/syrve-integration/auto-status'},
     {url:'/syrve-integration/auto-status-preview',body:{configurationRevision:REV}},
@@ -108,7 +108,7 @@ test('activation counts preview latency and cannot revive expired consent by cha
 });
 test('activation rejects invalid server lifetimes and cannot trust a deadline supplied in a response',()=>{
   const {validateActivationPreview}=load({performance:{now:()=>1000}});
-  for(const lifetime of [-1,0,300001,Infinity]){
+  for(const lifetime of [-1,0,2400001,Infinity]){
     const p=preview();p.confirmation.expiresAt=Number.isFinite(lifetime)?new Date(Date.parse(p.checkedAt)+lifetime).toISOString():'invalid';
     p.confirmationDeadline=999999999;assert.throws(()=>validateActivationPreview(p,scope()));
   }

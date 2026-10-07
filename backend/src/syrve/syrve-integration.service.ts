@@ -13,7 +13,7 @@ import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisi
   TestSyrveConnectionDto, UpdateSyrveConnectionDto } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
 import { SyrveTableLink } from './entities/syrve-table-link.entity';
-import { SyrveClient, SyrveClientException, SyrveLoadedProbeControls } from './syrve-client';
+import { SyrveClient, SyrveClientException, SyrveBatchProbeControls, SyrveLoadedProbeControls } from './syrve-client';
 import { SyrveActivationStore } from './syrve-activation.store';
 import { buildSyrveMappingPreview } from './syrve-mapping-preview';
 import { credentialFingerprint, issuePreviewProof, previewFingerprint, verifyPreviewProof } from './syrve-preview-proof';
@@ -21,7 +21,7 @@ import { settingsVersion, staleSyrveSettings, SyrveSettingsSnapshot, SyrveSettin
 import { buildSyrveOrderObservation } from './syrve-order-observer';
 import { directorOrderDiagnostics } from './syrve-order-diagnostics';
 import { diagnoseSyrvePosVersions } from './syrve-pos-version';
-import type { SyrveStateCapture } from './syrve-state.store';
+import { syrveCaptureContext, type SyrveStateCapture } from './syrve-state.store';
 import { savedSyrveFingerprint } from './syrve-saved-scope';
 import { decryptSyrveCredentials, syrveCredentialsKey } from './syrve-credentials';
 
@@ -70,6 +70,24 @@ export class SyrveIntegrationService {
     if (!this.activation || !(await this.activation.read(snapshot)).enabled) throw staleSyrveSettings();
     return this.client.probeLoadedOrders(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId,
       [expected.syrveTableId], orderIds, controls);
+  }
+
+  async probeWorkerBatch(captures: SyrveStateCapture[], leaseId: string, controls: SyrveBatchProbeControls) {
+    const snapshot = await this.settings.read(), entity = snapshot.entity;
+    if (!snapshot.prepared || !entity || entity.status !== 'connected' || !captures.length
+      || !this.activation || !(await this.activation.read(snapshot)).enabled) throw staleSyrveSettings();
+    for (const captured of captures) {
+      const expected = captured.state.scope;
+      if (entity.id !== expected.integrationId || entity.configurationRevision !== expected.configurationRevision
+        || entity.organizationId !== expected.organizationId || !snapshot.links.some(link => link.id === captured.linkId
+          && link.integrationId === entity.id && link.organizationId === expected.organizationId
+          && link.moloTableId === expected.moloTableId && link.syrveTableId === expected.syrveTableId)) throw staleSyrveSettings();
+    }
+    const probes = await this.client.probeLoadedOrderBatch(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!,
+      captures.map(captured => ({ tableId: captured.state.scope.syrveTableId, orderIdBatches: captured.orderIds,
+        visibilityContext: syrveCaptureContext(leaseId, captured) })), { ...controls, configurationRevision: entity.configurationRevision });
+    return captures.map((captured, index) => probes[index] === null ? null
+      : captured.orderIds.map((orderIds, page) => ({ orderIds, probe: probes[index]![page] })));
   }
 
   private async probeSavedTables(dto: SyrveRevisionDto) {

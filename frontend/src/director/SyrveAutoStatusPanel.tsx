@@ -120,7 +120,7 @@ export default function SyrveAutoStatusPanel(props: Props) {
     <p className="mt-2 text-sm text-white/60">{props.syncEnabled ? 'Увімкнено Директором. Новий рахунок позначає свій стіл «Зайнятий», підтверджене закриття останнього рахунку — «Вільний».' : 'Для увімкнення перевірте столи та підтвердьте регулярне завантаження їхнього стану із Syrve.'}</p>
     <p className="mt-2 text-xs text-white/50">Бронювання, банкети та ручні статуси ведуть співробітники. Рахунок на одному столі не змінює інші столи банкету.</p>
     {props.syncEnabled && <p className="mt-2 text-xs text-white/50">Якщо каса недоступна або відповідь неповна, остання підтверджена зайнятість зберігається.</p>}
-    {working && <p className="mt-3 text-sm" role="status">Перевіряємо та оновлюємо налаштування…</p>}
+    {working && <p className="mt-3 text-sm" role="status">Перевіряємо та оновлюємо налаштування… Через ліміт підключення це може тривати кілька хвилин.</p>}
     {failed && <p className="mt-3 text-sm text-amber-100" role="alert">{failureReason || FAILURE_MESSAGE}</p>}
     {gate && !gate.activationAvailable && !gate.syncEnabled && <p className="mt-3 text-sm text-amber-100">Спочатку потрібно завершити підготовку бази, зберегти підключення та підтвердити зв’язки столів.</p>}
     {!props.syncEnabled && <button type="button" disabled={!allowed || working || !gate?.activationAvailable} onClick={() => void prepare()} className="mt-4 rounded-2xl border border-cyan-200/35 px-4 py-3 text-sm font-bold disabled:opacity-40">Перевірити перед увімкненням</button>}

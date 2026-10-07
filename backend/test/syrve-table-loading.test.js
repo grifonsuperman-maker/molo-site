@@ -46,12 +46,12 @@ test('loading proofs are purpose-separated, expire and bind actor/session/local/
   const key=Buffer.alloc(32,7),now=1000000;
   const input={revision:REV,local:'a'.repeat(64),upstream:'b'.repeat(64),actor:model.loadingActor(actor)};
   const issued=model.issueLoadingProof(key,input,now);
-  assert.deepEqual(model.verifyLoadingProof(key,issued.proof,now+1),{...input,expires:now+300000});
+  assert.deepEqual(model.verifyLoadingProof(key,issued.proof,now+1),{...input,expires:now+2400000});
   for (const value of [issued.proof+'a',issued.proof.slice(1),'x.y',undefined,'a'.repeat(1600),
     issuePreviewProof(key,{version:{id:ORG,revision:REV},organizationId:ORG,fingerprint:'a'.repeat(64),credentials:'b'.repeat(64)},now).proof])
     assert.throws(()=>model.verifyLoadingProof(key,value,now));
   assert.throws(()=>model.verifyLoadingProof(Buffer.alloc(32,8),issued.proof,now));
-  assert.throws(()=>model.verifyLoadingProof(key,issued.proof,now+300000));
+  assert.throws(()=>model.verifyLoadingProof(key,issued.proof,now+2400000));
   assert.throws(()=>model.verifyLoadingProof(key,issued.proof,now-1));
   assert.notEqual(model.loadingActor(actor),model.loadingActor({...actor,directorSessionVersion:3}));
   assert.notEqual(model.loadingActor(actor),model.loadingActor({...actor,sub:id(101)}));
@@ -76,7 +76,7 @@ function transport(t,load=body=>({correlationId:body.terminalGroupId===GROUP?COR
   delete process.env.SYRVE_APP_ID;delete process.env.SYRVE_APP_CLIENT_SECRET;
   t.after(()=>{global.fetch=previous;for(const [key,value]of [['SYRVE_APP_ID',oldApp],['SYRVE_APP_CLIENT_SECRET',oldClient]])
     value===undefined?delete process.env[key]:process.env[key]=value;});
-  const run=(p=plan(),controls={})=>new SyrveClient().initializeTables('https://api-eu.syrve.live','synthetic-login',p,{beforeCommand:async()=>{},...controls});
+  const run=(p=plan(),controls={})=>new SyrveClient(require('./helpers/syrve-test-request-limiter.js')).initializeTables('https://api-eu.syrve.live','synthetic-login',p,{beforeCommand:async()=>{},...controls});
   return {requests,run};
 }
 test('synchronous initialization succeeds without polling an unsupported command correlation',async t=>{
@@ -170,9 +170,9 @@ test('loading preview timestamps and signed expiry share one server instant',asy
   };
   t.after(()=>{global.Date=RealDate;});
   const p=await h.app.preview({configurationRevision:REV},actor),issued=Date.parse(p.checkedAt);
-  assert.equal(Date.parse(p.confirmation.expiresAt)-issued,300000);
-  assert.equal(model.verifyLoadingProof(syrveCredentialsKey(),p.confirmation.proof,issued).expires,issued+300000);
-  assert.throws(()=>model.verifyLoadingProof(syrveCredentialsKey(),p.confirmation.proof,issued+300000));
+  assert.equal(Date.parse(p.confirmation.expiresAt)-issued,2400000);
+  assert.equal(model.verifyLoadingProof(syrveCredentialsKey(),p.confirmation.proof,issued).expires,issued+2400000);
+  assert.throws(()=>model.verifyLoadingProof(syrveCredentialsKey(),p.confirmation.proof,issued+2400000));
   assert.equal(h.stats().commands,0);
 });
 test('changed actor/session, proof/revision or manual table fingerprint cannot start loading',async t=>{

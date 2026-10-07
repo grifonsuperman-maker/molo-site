@@ -50,7 +50,7 @@ function mounted(api,callbacks={},environment={}) {
 test('actual API adapter sends only saved revision/proof/explicit confirmation, never scope IDs',async()=>{
   const exports={},requests=[];const source=fs.readFileSync(path.resolve(__dirname,'../src/api/syrve.ts'),'utf8');
   vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,
-    {exports,require:()=>({api:{post:async(url,payload)=>{requests.push({url,payload});}}})});
+    {exports,require:require('./helpers/syrve-operation-fixture.cjs').resolver({post:async(url,payload)=>{requests.push({url,payload});}})});
   await exports.syrveApi.previewTableLoading(REV);await exports.syrveApi.loadTables(REV,'opaque-proof');
   assert.deepEqual(JSON.parse(JSON.stringify(requests)),[{url:'/syrve-integration/table-loading-preview',payload:{configurationRevision:REV}},
     {url:'/syrve-integration/table-loading',payload:{configurationRevision:REV,confirmationProof:'opaque-proof',confirmed:true}}]);
@@ -63,7 +63,7 @@ test('preview and command responses reject stale scopes, positive activation fla
   for(const mutate of common){const p=preview(),r=result();mutate(p);mutate(r);assert.throws(()=>vp(p,scope()));assert.throws(()=>vr(r,scope(),1));}
   for(const mutate of [r=>r.configurationRevision=NEXT,r=>r.tableNumbers=['1','1'],r=>r.tableNumbers=['private-phone','2'],r=>r.tableNumbers=['1'],
     r=>r.confirmation=null,r=>r.confirmation.proof='bad',r=>r.confirmation.expiresAt=new Date(Date.now()-1).toISOString(),
-    r=>r.confirmation.expiresAt=new Date(Date.now()+400000).toISOString()]){const p=preview();mutate(p);assert.throws(()=>vp(p,scope()));}
+    r=>r.confirmation.expiresAt=new Date(Date.now()+2400001).toISOString()]){const p=preview();mutate(p);assert.throws(()=>vp(p,scope()));}
   for(const mutate of [r=>r.configurationRevision=REV,r=>r.requestedRevision=NEXT,r=>r.completedGroups=0,r=>r.completedGroups=NaN,
     r=>r.commandsConfirmed=false,r=>r.readCompleted='true',r=>r.code='private-exception',r=>r.readCompleted=false]){const r=result();mutate(r);assert.throws(()=>vr(r,scope(),1));}
 });
@@ -139,7 +139,7 @@ test('loading counts request time and never extends consent by moving the phone 
 });
 test('loading rejects invalid server lifetimes and calculates its own bounded deadline',()=>{
   const {validateLoadingPreview}=load({performance:{now:()=>1000}});
-  for(const lifetime of [-1,0,300001,Infinity]){
+  for(const lifetime of [-1,0,2400001,Infinity]){
     const p=preview();p.confirmation.expiresAt=Number.isFinite(lifetime)?new Date(Date.parse(p.checkedAt)+lifetime).toISOString():'invalid';
     p.confirmationDeadline=999999999;assert.throws(()=>validateLoadingPreview(p,scope()));
   }

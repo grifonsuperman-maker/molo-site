@@ -216,6 +216,46 @@ for(const code of ['SYRVE_AUTH_FAILED','SYRVE_ACCESS_DENIED','SYRVE_RATE_LIMITED
   });
 }
 
+test('partial register outage does not escalate the shared backoff for healthy groups',async()=>{
+  const integrationId=id(700),organizationId=id(701),revision=id(702);
+  const links=[0,1,2].map(n=>({id:id(710+n),integrationId,organizationId,moloTableId:id(720+n),syrveTableId:id(730+n)}));
+  const lease={id:id(740),version:{id:integrationId,revision},links};
+  const captures=links.map(link=>({linkId:link.id,orderIds:[],state:{scope:{integrationId,configurationRevision:revision,
+    organizationId,moloTableId:link.moloTableId,syrveTableId:link.syrveTableId}}}));
+  const calls={apply:[],failure:[],partial:[],release:0};
+  const store={claim:async()=>({status:'claimed',lease}),captureBatch:async()=>captures,
+    guardBatch:async()=>({organizationId,groups:[]}),
+    apply:async(_lease,captured)=>{calls.apply.push(captured.linkId);return {code:null};},
+    failure:async(_lease,linkId,code)=>calls.failure.push([linkId,code]),
+    partialFailure:async(_lease,linkId,code)=>calls.partial.push([linkId,code]),
+    release:async()=>{calls.release++;}};
+  const runner=new SyrveWorkerRunner(store,()=>assert.fail('single-table probe must not run'),async()=>[[],null,null]);
+  assert.deepEqual(await runner.run(),{status:'observed',processed:1,code:'SYRVE_OBSERVATION_UNKNOWN'});
+  assert.deepEqual(calls.apply,[links[0].id]);assert.deepEqual(calls.failure,[]);
+  assert.deepEqual(calls.partial,[[links[1].id,'SYRVE_OBSERVATION_UNKNOWN']]);assert.equal(calls.release,1);
+});
+
+test('batch table-local stale and uncertain results do not stop later healthy tables',async()=>{
+  const integrationId=id(800),organizationId=id(801),revision=id(802);
+  const links=[0,1,2,3].map(n=>({id:id(810+n),integrationId,organizationId,moloTableId:id(820+n),syrveTableId:id(830+n)}));
+  const lease={id:id(840),version:{id:integrationId,revision},links};
+  const captures=links.map(link=>({linkId:link.id,orderIds:[],state:{scope:{integrationId,configurationRevision:revision,
+    organizationId,moloTableId:link.moloTableId,syrveTableId:link.syrveTableId}}}));
+  const calls={apply:[],failure:[],partial:[],release:0};let index=0;
+  const codes=[null,'SYRVE_LOCAL_STATE_CHANGED','SYRVE_OBSERVATION_UNKNOWN',null];
+  const store={claim:async()=>({status:'claimed',lease}),captureBatch:async()=>captures,
+    guardBatch:async()=>({organizationId,groups:[]}),
+    apply:async(_lease,captured)=>{calls.apply.push(captured.linkId);return {code:codes[index++]};},
+    failure:async(_lease,linkId,code)=>calls.failure.push([linkId,code]),
+    partialFailure:async(_lease,linkId,code)=>calls.partial.push([linkId,code]),
+    release:async()=>{calls.release++;}};
+  const runner=new SyrveWorkerRunner(store,()=>assert.fail('single-table probe must not run'),async()=>[[],[],[],[]]);
+  assert.deepEqual(await runner.run(),{status:'observed',processed:2,code:'SYRVE_OBSERVATION_UNKNOWN'});
+  assert.deepEqual(calls.apply,links.map(link=>link.id));assert.deepEqual(calls.failure,[]);
+  assert.deepEqual(calls.partial,[[links[1].id,'SYRVE_LOCAL_STATE_CHANGED'],[links[2].id,'SYRVE_OBSERVATION_UNKNOWN']]);
+  assert.equal(calls.release,1);
+});
+
 test('unknown/offline/missing answers preserve occupancy and manual suppression',async()=>{
   for(const variant of ['offline','missing','unknown']) {
     const h=prepared(); await h.runner().run(); await h.store.recordStaffAction(h.table,'manual_free'); h.due();
@@ -293,7 +333,7 @@ test('unexpected transport exceptions save only the fixed unavailable diagnostic
 
 test('shutdown aborts a real Syrve fetch, waits for exit and persists no failed observations',async(t)=>{
   process.env.SYRVE_APP_ID=''; process.env.SYRVE_APP_CLIENT_SECRET='';
-  const h=prepared(), arrived=deferred(), client=new SyrveClient();
+  const h=prepared(), arrived=deferred(), client=new SyrveClient(require('./helpers/syrve-test-request-limiter.js'));
   t.mock.method(globalThis,'fetch',async(url,{signal})=>new Promise((yes,no)=>{
     arrived.resolve(); signal.addEventListener('abort',()=>no(new DOMException('aborted','AbortError')),{once:true});
   }));
@@ -314,7 +354,7 @@ test('the shared cycle deadline covers all order scopes, retaining earlier good 
   assert.equal(result.code,'SYRVE_TIMEOUT'); assert.deepEqual(h.saved().versions,before.versions);
 });
 
-test('bounded cycles rotate a durable cursor fairly across more than 32 tables',async()=>{
+test('one cycle covers all 65 linked tables and rotates the cursor after an early failure',async()=>{
   const h=prepared(); const snapshot=h.snapshot(); snapshot.links=Array.from({length:65},(_,n)=>({...snapshot.links[0],id:id(1000+n),moloTableId:id(2000+n),syrveTableId:id(3000+n)}));
   const physical=snapshot.links.map((link,n)=>({id:link.moloTableId,tableNumber:String(n+1)}));
   h.tables.find=async()=>physical;h.settings.read=async()=>snapshot;
@@ -322,9 +362,9 @@ test('bounded cycles rotate a durable cursor fairly across more than 32 tables',
   const {activationBindings}=require('../dist/syrve/syrve-activation.js');
   h.mutate(db=>Object.assign(db.activation,{bindings_fingerprint:activationBindings(snapshot,physical),loading_plan:{organizationId:snapshot.entity.organizationId,
     groups:[{terminalGroupId:id(1),posVersion:'7.7.1',tableIds:snapshot.links.map(link=>link.syrveTableId).sort()}]}}));
-  const first=(await h.worker().claim()).lease; assert.equal(first.links.length,32);
+  const first=(await h.worker().claim()).lease; assert.equal(first.links.length,65);
   await h.worker().failure(first,first.links[31].id,'SYRVE_UNAVAILABLE'); await h.worker().release(first); h.due();
-  const second=(await h.worker().claim()).lease; assert.equal(second.links.length,32);
+  const second=(await h.worker().claim()).lease; assert.equal(second.links.length,65);
   assert.equal(second.links[0].id,id(1032));
   await h.worker().failure(second,second.links[31].id,'SYRVE_UNAVAILABLE'); await h.worker().release(second); h.due();
   const third=(await h.worker().claim()).lease; assert.equal(third.links[0].id,id(1064));

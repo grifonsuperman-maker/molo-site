@@ -136,7 +136,7 @@ export default function SyrveTableLoadingPanel(props: Props) {
         className="rounded-xl border border-amber-200/35 px-4 py-3 text-sm font-bold text-amber-100 disabled:opacity-40">Завантажити стан столів</button>
     </div>}
     {!eligible && <p className="mt-3 text-sm text-white/55">Спочатку збережіть підключення, підтвердьте зв’язки столів та завершіть поточну дію.</p>}
-    {loading && <p className="mt-3 text-sm" role="status">Перевіряємо столи та завершення операції Syrve…</p>}
+    {loading && <p className="mt-3 text-sm" role="status">Перевіряємо столи та завершення операції Syrve… Через ліміт підключення це може тривати кілька хвилин.</p>}
     {failed && <p className="mt-3 text-sm text-amber-100" role="alert">{failureReason || FAILURE_MESSAGE}</p>}
     {resultVisible && result && <p className="mt-3 text-sm text-amber-100" role="status">{result.readCompleted
       ? 'Syrve підтвердив завершення завантаження. Повторне читання столів виконано.'

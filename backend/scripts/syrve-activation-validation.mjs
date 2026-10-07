@@ -36,7 +36,7 @@ export async function runSyrveActivationValidation(env=process.env){
   const org=randomUUID(),provider=randomUUID(),group=randomUUID(),order=randomUUID(),correlation=randomUUID(),actor={sub:randomUUID(),role:'owner',directorSessionVersion:1};
   let tableId,integrationId,created=false,original,trigger=false,rows=[],commandError=false,commandPending=false,missing=false,hold=null,commands=0;
   const previousFetch=globalThis.fetch;
-  const client=new SyrveClient();
+  const client=new SyrveClient(require('../test/helpers/syrve-test-request-limiter.js'));
   const settings=(db=source)=>new SyrveSettingsStore(db),activation=(db=source)=>new SyrveActivationStore(db,settings(db));
   const integration=(db=source)=>new SyrveIntegrationService(settings(db),{},client,db.getRepository(TableEntity),activation(db));
   const service=(db=source)=>{const loading=new SyrveTableLoadingStore(db,settings(db));return new SyrveActivationService(activation(db),settings(db),loading,
