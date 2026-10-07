@@ -32,8 +32,14 @@ export function validateActivationPreview(value: SyrveActivationPreview, scope: 
     || !/^[\w-]{40,}\.[\w-]{43}$/.test(value.confirmation.proof) || !time(value.confirmation.expiresAt)) throw new Error('Недійсна перевірка автостатусів.');
   const confirmationDeadline = syrveConfirmationDeadline(value.checkedAt, value.confirmation.expiresAt, requestStartedAt);
   if (confirmationDeadline === null) throw new Error('Недійсна перевірка автостатусів.');
+  if ((value.totalTables !== undefined || value.unlinkedTableNumbers !== undefined)
+    && (!Number.isSafeInteger(value.totalTables) || value.totalTables! < value.linkedTables || value.totalTables! > 1000
+      || !Array.isArray(value.unlinkedTableNumbers) || value.unlinkedTableNumbers.length !== value.totalTables! - value.linkedTables
+      || value.unlinkedTableNumbers.some(number => tableNumber(number) === null)
+      || new Set([...value.tableNumbers, ...value.unlinkedTableNumbers].map(tableNumber)).size !== value.totalTables)) throw new Error('Недійсний склад столів.');
   return { configurationRevision: value.configurationRevision, organizationId: value.organizationId, checkedAt: value.checkedAt, syncEnabled: false,
     linkedTables: value.linkedTables, terminalGroups: value.terminalGroups, tableNumbers: [...value.tableNumbers],
+    ...(value.totalTables !== undefined ? { totalTables: value.totalTables, unlinkedTableNumbers: [...value.unlinkedTableNumbers!] } : {}),
     confirmation: { proof: value.confirmation.proof, expiresAt: value.confirmation.expiresAt }, confirmationDeadline };
 }
 export function validateActivationResult(value: SyrveActivationResult, scope: Scope): SyrveActivationResult {
@@ -125,9 +131,11 @@ export default function SyrveAutoStatusPanel(props: Props) {
     {gate && !gate.activationAvailable && !gate.syncEnabled && <p className="mt-3 text-sm text-amber-100">Спочатку потрібно завершити підготовку бази, зберегти підключення та підтвердити зв’язки столів.</p>}
     {!props.syncEnabled && <button type="button" disabled={!allowed || working || !gate?.activationAvailable} onClick={() => void prepare()} className="mt-4 rounded-2xl border border-cyan-200/35 px-4 py-3 text-sm font-bold disabled:opacity-40">Перевірити перед увімкненням</button>}
     {preview && <div className="mt-4 rounded-2xl border border-amber-200/25 p-4 text-sm">
+      {preview.totalTables !== undefined && <p>Підключено {preview.linkedTables} із {preview.totalTables} столів MOLO.</p>}
+      {!!preview.unlinkedTableNumbers?.length && <p className="mt-2 text-amber-100">Без зв’язку із Syrve: {preview.unlinkedTableNumbers.join(', ')}. Перевірте доступність їхніх секцій через Syrve API та повторіть підтвердження зв’язків.</p>}
       <p>Столи: {preview.tableNumbers.join(', ')}. Касових груп: {preview.terminalGroups}.</p>
       <label className="mt-3 flex gap-3"><input type="checkbox" checked={acknowledged} disabled={working} onChange={event => setAcknowledged(event.target.checked)} />
-        <span>Дозволяю серверу регулярно завантажувати стан цих столів із Syrve та автоматично оновлювати їхню зайнятість.</span></label>
+        <span>Дозволяю разово позначити ці столи з підтвердженими відкритими рахунками «Зайнятий», навіть після ручного звільнення, та увімкнути автостатуси. Подальші ручні дії зберігаються до нової події каси.</span></label>
       <button type="button" disabled={!allowed || working || !acknowledged} onClick={() => void change(true)} className="mt-4 rounded-2xl border border-emerald-200/40 px-4 py-3 font-bold disabled:opacity-40">Увімкнути автостатуси</button>
     </div>}
     {props.syncEnabled && <><p className="mt-3 text-xs text-white/50">Після вимкнення автоматичні зміни зупиняться. Поточні статуси столів збережуться.</p>

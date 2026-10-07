@@ -178,12 +178,13 @@ export class SyrveStateStore {
   }
 
   private async applyLockedObservation(manager: EntityManager, current: SyrveSettingsSnapshot,
-    captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[], context?: string): Promise<SyrveTransition> {
+    captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[], context?: string, reconcileOpen = false): Promise<SyrveTransition> {
     if (!manager.queryRunner?.isTransactionActive) throw new ServiceUnavailableException('Стан Syrve потребує активної транзакції.');
     const expected = captured.state.scope;
     const value = await this.lockedState(manager, current, expected.moloTableId);
     if (value.linkId !== captured.linkId) throw staleSyrveSettings();
     if (value.physicalVersion !== captured.physicalVersion) {
+      if (reconcileOpen) throw staleSyrveSettings();
       return { state: value.state, changed: false, diagnostics: ['local_revision_changed'] };
     }
     // Only the freshly locked state is authoritative. A modified/replayed
@@ -192,9 +193,14 @@ export class SyrveStateStore {
       currentScope: value.state.scope, nextRevision: randomUUID(), probe: batches,
       visibilityVerified: Boolean(context && batches.length && batches.every(batch => isVerifiedLoadedProbe(batch.probe, context,
         expected.organizationId, expected.syrveTableId))) });
+    if (reconcileOpen && result.diagnostics.length) throw new ConflictException('Початкова звірка отримала неповні або застарілі дані. Повторіть перевірку.');
+    const status = reconcileOpen && result.state.activeSyrveOrderIds.length ? 'occupied' : syrveTableStatusEvent(value.state, result);
+    if (reconcileOpen && status === 'occupied') {
+      result.changed = true;
+      result.state = { ...result.state, localRevision: randomUUID(), manuallyFreedSyrveOrderIds: [] };
+    }
     if (result.changed) {
       await this.persist(manager, value.linkId, result.state);
-      const status = syrveTableStatusEvent(value.state, result);
       if (status) {
         // The physical UUID is already locked. Do not inspect manual status,
         // bookings or banquet membership, and never create/rename a table.
@@ -210,6 +216,13 @@ export class SyrveStateStore {
     this.requireConnection(snapshot);
     return this.settings.transaction(settingsVersion(snapshot), (manager, current) =>
       this.recordStaffActionInTransaction(manager, current, moloTableId, action));
+  }
+
+  // Only explicit Director activation calls this path. Subsequent worker reads
+  // keep the event policy and cannot reassert a known bill over staff actions.
+  async applyActivationObservationInTransaction(manager: EntityManager, current: SyrveSettingsSnapshot,
+    captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[], leaseId: string): Promise<SyrveTransition> {
+    return this.applyLockedObservation(manager, current, captured, batches, syrveCaptureContext(leaseId, captured), true);
   }
 
   // The coordinator already holds the settings fence. Never start a second

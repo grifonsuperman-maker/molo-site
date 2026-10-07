@@ -86,6 +86,12 @@ export class DisconnectSyrveDto extends SyrveRevisionDto {
   reason?: string;
 }
 
+export class EnableSyrveAutoStatusDto extends ConfirmSyrveTableLoadingDto {
+  @IsOptional()
+  @IsBoolean()
+  reconcileOpenTables?: boolean;
+}
+
 export class UpdateSyrveConnectionDto extends SyrveRevisionDto {
   @IsOptional()
   @IsString()

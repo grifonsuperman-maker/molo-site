@@ -5,6 +5,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import {
   ConnectSyrveDto,
   ConfirmSyrveTableLoadingDto,
+  EnableSyrveAutoStatusDto,
   DisconnectSyrveDto,
   SyrveRevisionDto,
   PreviewSyrveTablesDto,
@@ -46,7 +47,7 @@ export class SyrveIntegrationController {
   @Post('enable-auto-status')
   @SyrveAsync('enable-auto-status')
   @Header('Cache-Control', 'no-store')
-  enableAutoStatus(@Body() dto: ConfirmSyrveTableLoadingDto, @Req() request: { user?: AuthUser }) {
+  enableAutoStatus(@Body() dto: EnableSyrveAutoStatusDto, @Req() request: { user?: AuthUser }) {
     return this.activation.enable(dto, request.user);
   }
 

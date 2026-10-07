@@ -4,7 +4,7 @@ import type { AuthUser } from '../auth/types/auth-user.type';
 import { ConfirmSyrveTableLoadingDto, SyrveRevisionDto } from './dto/syrve-integration.dto';
 import { SyrveClient, SyrveClientException, type SyrveProbeControls } from './syrve-client';
 import { decryptSyrveCredentials, syrveCredentialsKey } from './syrve-credentials';
-import { issueLoadingProof, loadingActor, loadingPlanFingerprint, tableLoadingPlan, verifyLoadingProof } from './syrve-table-loading';
+import { issueLoadingProof, loadingActor, loadingPlanFingerprint, tableLoadingPlan, tableLoadingAvailablePlan, verifyLoadingProof } from './syrve-table-loading';
 import { SyrveTableLoadingStore, type TableLoadingCapture } from './syrve-table-loading.store';
 
 const FLAGS = { syncEnabled: false, activationAvailable: false, statusesApplied: false, renamingApplied: false, complete: false } as const;
@@ -15,18 +15,20 @@ export class SyrveTableLoadingService {
     try { return loadingActor(actor); }
     catch { throw new ConflictException('Сесію Директора не підтверджено. Увійдіть повторно перед перевіркою столів.'); }
   }
-  async probePlan(captured: TableLoadingCapture, controls: SyrveProbeControls = {}) {
+  async probePlan(captured: TableLoadingCapture, controls: SyrveProbeControls = {}, readOrders = true) {
     const { entity, links } = captured.snapshot;
     const knownIds = [...new Set(links.flatMap(link => link.activeSyrveOrderIds))];
-    const probe = await this.client.probeOrders(entity!.apiBaseUrl, decryptSyrveCredentials(entity!), entity!.organizationId!,
-      links.map(link => link.syrveTableId), knownIds, controls);
+    const ids = links.map(link => link.syrveTableId);
+    const probe = readOrders
+      ? await this.client.probeOrders(entity!.apiBaseUrl, decryptSyrveCredentials(entity!), entity!.organizationId!, ids, knownIds, controls)
+      : await this.client.probeTablePlan(entity!.apiBaseUrl, decryptSyrveCredentials(entity!), entity!.organizationId!, ids, controls);
     await this.store.assertCurrent(captured);
     for (const check of Object.values(probe.checks)) {
       if (check.status === 'error') throw new SyrveClientException(check.code as ConstructorParameters<typeof SyrveClientException>[0]);
     }
     if (probe.organizationId !== entity!.organizationId!.toLowerCase()
-      || knownIds.length && probe.checks.ordersById.status !== 'ok') throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
-    try { return tableLoadingPlan(probe, links.map(link => link.syrveTableId)); }
+      || readOrders && knownIds.length && probe.checks.ordersById.status !== 'ok') throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+    try { return readOrders ? tableLoadingPlan(probe, ids) : tableLoadingAvailablePlan(probe, ids); }
     catch { throw new ConflictException('Для всіх пов’язаних столів потрібні доступні каси Syrve POS від версії 7.7.1 та дозволи читання. Перевірте підключення.'); }
   }
   async preview(dto: SyrveRevisionDto, actor?: AuthUser) {

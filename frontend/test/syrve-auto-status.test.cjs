@@ -36,14 +36,14 @@ function mounted(api,extra={},environment={}){
   return {states,render,ready:async()=>{render();await flush();},prepare:()=>click('Перевірити перед увімкненням'),enable:()=>click('Увімкнути автостатуси'),
     disable:()=>click('Вимкнути автостатуси'),ack:()=>find(render(),n=>n.type==='input').props.onChange({target:{checked:true}}),unmount:()=>cleanup?.()};
 }
-test('auto-status API sends only revision, proof and explicit confirmation',async()=>{
+test('auto-status API sends revision, proof and explicit initial reconciliation consent',async()=>{
   const source=fs.readFileSync(path.resolve(__dirname,'../src/api/syrve.ts'),'utf8'),exports={},calls=[];
   vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,
     {exports,require:require('./helpers/syrve-operation-fixture.cjs').resolver({get:async url=>calls.push({url}),post:async(url,body)=>calls.push({url,body})})});
   await exports.syrveApi.getAutoStatus();await exports.syrveApi.previewAutoStatus(REV);await exports.syrveApi.enableAutoStatus(REV,'opaque-proof');await exports.syrveApi.disableAutoStatus(REV);
   assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{url:'/syrve-integration/auto-status'},
     {url:'/syrve-integration/auto-status-preview',body:{configurationRevision:REV}},
-    {url:'/syrve-integration/enable-auto-status',body:{configurationRevision:REV,confirmationProof:'opaque-proof',confirmed:true}},
+    {url:'/syrve-integration/enable-auto-status',body:{configurationRevision:REV,confirmationProof:'opaque-proof',confirmed:true,reconcileOpenTables:true}},
     {url:'/syrve-integration/disable-auto-status',body:{configurationRevision:REV}}]);
 });
 test('decoders reject stale or contradictory receipts and retain no raw details',()=>{
@@ -68,6 +68,25 @@ test('activation accepts server-valid numbers and rejects canonical duplicates o
     const value=preview();value.tableNumbers=numbers;
     assert.throws(()=>validateActivationPreview(value,scope()));
   }
+});
+test('coverage lists every unlinked physical table and rejects contradictory or duplicate numbers',()=>{
+  const {validateActivationPreview}=load();
+  const p={...preview(),totalTables:4,unlinkedTableNumbers:['37','100']};
+  const checked=validateActivationPreview(p,scope());assert.equal(checked.totalTables,4);
+  assert.deepEqual(Array.from(checked.unlinkedTableNumbers),['37','100']);
+  for(const mutate of [v=>delete v.totalTables,v=>delete v.unlinkedTableNumbers,v=>v.totalTables=3,
+    v=>v.totalTables=NaN,v=>v.unlinkedTableNumbers=['37','037'],v=>v.unlinkedTableNumbers=['01','100'],
+    v=>v.unlinkedTableNumbers=['0','100'],v=>v.unlinkedTableNumbers=['37','private-api-secret']]){
+    const value=structuredClone(p);mutate(value);assert.throws(()=>validateActivationPreview(value,scope()));
+  }
+});
+test('initial reconciliation consent describes the one-time status change and shows incomplete coverage',async()=>{
+  const h=mounted({previewAutoStatus:async()=>({...preview(),totalTables:4,unlinkedTableNumbers:['37','100']})});
+  await h.ready();h.prepare();await flush();const html=renderToStaticMarkup(h.render());
+  assert.match(html,/Підключено 2 із 4 столів MOLO/);assert.match(html,/37, 100/);
+  assert.match(html,/разово позначити/);assert.match(html,/навіть після ручного звільнення/);
+  assert.match(html,/Подальші ручні дії зберігаються/);
+  assert.equal(find(h.render(),n=>n.type==='input').props.checked,false);
 });
 test('enabling requires fresh preview plus acknowledgement, submits once and refreshes before unlock',async()=>{
   const command=deferred(),refresh=deferred();let calls=0,finished=0;const busy=[];
