@@ -131,7 +131,7 @@ test('a delayed database response cannot dispatch a stale permit', async t => {
 
 test('every auth, organization, catalog and section request uses the same quota', async t => {
   const admitted = [], noop = require('./helpers/syrve-test-request-limiter.js');
-  const limiter = { acquire: async key => { admitted.push(key); return noop.acquire(); }, cooldown: noop.cooldown };
+  const limiter = { acquire: async (key, controls) => { admitted.push(key); return noop.acquire(key, controls); }, cooldown: noop.cooldown };
   const { client, calls } = transport(t, limiter, url => {
     const path = new URL(url).pathname;
     return Response.json(path.endsWith('access_token') ? { token: 'synthetic-token' }
@@ -164,13 +164,61 @@ test('real pacing keeps the 45-second probe safe but cannot complete its multi-r
 
 test('initialization rechecks settings after waiting and does not mark an unsent command started', async t => {
   const noop = require('./helpers/syrve-test-request-limiter.js'); let admitted = 0, started = 0, revoked = false;
-  const limiter = { acquire: async () => { if (++admitted === 3) revoked = true; return noop.acquire(); }, cooldown: noop.cooldown };
+  const limiter = { acquire: async (key, controls) => { if (++admitted === 3) revoked = true; return noop.acquire(key, controls); }, cooldown: noop.cooldown };
   const { client, calls } = transport(t, limiter, url => Response.json(new URL(url).pathname.endsWith('access_token')
     ? { token: 'synthetic-token' } : { organizations: [{ id: ORG, name: 'MOLO' }] }));
   const { ConflictException } = require('@nestjs/common');
   await assert.rejects(client.initializeTables(BASE, LOGIN, { organizationId: ORG, groups: [{ terminalGroupId: GROUP, posVersion: '7.7.1', tableIds: [TABLE] }] },
     { beforeCommand: async () => { if (revoked) throw new ConflictException('Налаштування змінилися'); }, commandStarted: () => started++ }), e => e.getStatus() === 409);
   assert.equal(started, 0); assert.equal(calls.length, 2);
+});
+
+test('slow local authorization does not age the HTTP permit or exceed the rolling quota', async t => {
+  const { withSyrveOperation } = require('../dist/syrve/syrve-operation-context.js');
+  const db = database();
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
+  Object.defineProperty(db.state, 'now', { get: () => Date.now() - 1_000 });
+  t.mock.method(performance, 'now', () => Date.now() - 1_000);
+  const sentAt = [], checkedAt = [];
+  const { client, calls } = transport(t, db.limiter(), url => {
+    sentAt.push(Date.now());
+    return Response.json(new URL(url).pathname.endsWith('/access_token')
+      ? { token: 'synthetic-token' } : { organizations: [{ id: ORG, name: 'MOLO' }] });
+  });
+  let settled = false;
+  const pending = withSyrveOperation({ deadline: 46_000, signal: new AbortController().signal,
+    beforeRequest: async () => { t.mock.timers.tick(1_500); checkedAt.push(Date.now()); } },
+  () => client.checkOrganizations(BASE, LOGIN));
+  void pending.then(() => { settled = true; }, () => { settled = true; });
+  for (let tick = 0; !settled && tick < 60; tick++) {
+    await new Promise(setImmediate);
+    if (!settled) t.mock.timers.tick(1_000);
+  }
+  const result = await pending;
+  assert.equal(result.organizations.length, 1);
+  assert.deepEqual(calls, ['/api/1/access_token', '/api/1/organizations']);
+  assert.ok(sentAt.every(time => checkedAt.includes(time)));
+  assert.ok(sentAt[1] - sentAt[0] >= SYRVE_REQUEST_GAP_MS);
+});
+
+test('revocation during quota waiting is rechecked before claiming another slot', async t => {
+  const { withSyrveOperation } = require('../dist/syrve/syrve-operation-context.js');
+  const { ConflictException } = require('@nestjs/common');
+  const db = database();
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
+  Object.defineProperty(db.state, 'now', { get: () => Date.now() - 1_000 });
+  t.mock.method(performance, 'now', () => Date.now() - 1_000);
+  const { client, calls } = transport(t, db.limiter());
+  let revoked = false;
+  const pending = withSyrveOperation({ deadline: 90_000, signal: new AbortController().signal,
+    beforeRequest: async () => { if (revoked) throw new ConflictException('Налаштування змінилися'); } },
+  () => client.checkOrganizations(BASE, LOGIN));
+  const rejected = assert.rejects(pending, e => e.getStatus() === 409);
+  while (!db.statements.some(q => q.sql.startsWith('SELECT '))) await new Promise(setImmediate);
+  revoked = true; t.mock.timers.tick(SYRVE_REQUEST_GAP_MS);
+  await rejected;
+  assert.deepEqual(calls, ['/api/1/access_token']);
+  assert.equal(db.rows.get(KEY), SYRVE_REQUEST_GAP_MS);
 });
 
 test('a 60-table long operation and concurrent Director check complete under the same real rolling quota', async t => {

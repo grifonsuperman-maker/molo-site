@@ -143,6 +143,52 @@ test('worker bridge uses existing AES-GCM credentials only after exact saved sco
   await assert.rejects(service.probeWorkerOrders(c,[],controls),e=>e.getStatus()===409);assert.equal(calls.length,1);
 });
 
+test('batch transport diagnostics distinguish empty and unavailable reads without exposing order data',async(t)=>{
+  const h=prepared(),capture=await h.store.capture(h.table),snapshot=h.snapshot();
+  snapshot.links[0].lastKnownNumber=8;
+  const rows=['open','closed','unknown'].map((state,n)=>({id:id(10+n),state,
+    privateData:'private-order-body',tableIds:[capture.state.scope.syrveTableId]}));
+  let responses=[[{byTable:rows,byId:rows},{byTable:rows,byId:rows}]];
+  const entries=[],service=new SyrveIntegrationService({read:async()=>snapshot},{},
+    {probeLoadedOrderBatch:async()=>responses},{},{read:async()=>({enabled:true})});
+  t.mock.method(service,'decrypt',()=> 'private-api-login');
+  t.mock.method(service.logger,'log',message=>entries.push(message));
+  const captured={...capture,orderIds:[[id(10)],[id(11)]]},leaseId=id(99),controls={};
+  assert.equal((await service.probeWorkerBatch([captured],leaseId,controls))[0].length,2);
+  const read=JSON.parse(entries[0].slice(entries[0].indexOf('[')));
+  assert.deepEqual(read,[{tableNumber:8,readCompleted:true,
+    byTable:{open:1,closed:1,unknown:1},byId:{open:1,closed:1,unknown:1}}]);
+  responses=[[{byTable:[],byId:[]},{byTable:[],byId:[]}]];
+  await service.probeWorkerBatch([captured],leaseId,controls);
+  assert.deepEqual(JSON.parse(entries[1].slice(entries[1].indexOf('['))),[{tableNumber:8,readCompleted:true,
+    byTable:{open:0,closed:0,unknown:0},byId:{open:0,closed:0,unknown:0}}]);
+  responses=[null];
+  assert.deepEqual(await service.probeWorkerBatch([captured],leaseId,controls),[null]);
+  assert.deepEqual(JSON.parse(entries[2].slice(entries[2].indexOf('['))),[{tableNumber:8,readCompleted:false}]);
+  for(const secret of [leaseId,capture.state.scope.syrveTableId,id(10),'private-api-login','private-order-body']) {
+    assert.ok(!JSON.stringify(entries).includes(secret));
+  }
+  snapshot.entity.configurationRevision=randomUUID();
+  await assert.rejects(service.probeWorkerBatch([captured],leaseId,controls),e=>e.getStatus()===409);
+  assert.equal(entries.length,3);
+});
+
+test('worker diagnostics report committed changes and table-local fences but never rolled-back observations',async(t)=>{
+  const { Logger }=require('@nestjs/common'),entries=[];
+  t.mock.method(Logger.prototype,'log',message=>entries.push(message));
+  const h=prepared();await observeBills(h,[[id(10),'New',100]]);
+  assert.deepEqual(JSON.parse(entries[0].slice(entries[0].indexOf('{'))),
+    {ledgerChanged:true,code:null,diagnostics:[]});
+  h.due();const p=await paused(h);h.mutate(db=>{db.physical.status='cleaning';db.physical.updatedAt=new Date(2_000_000);});
+  p.resume.resolve();await p.pending;
+  assert.deepEqual(JSON.parse(entries[1].slice(entries[1].indexOf('{'))),
+    {ledgerChanged:false,code:'SYRVE_LOCAL_STATE_CHANGED',diagnostics:['local_revision_changed']});
+  h.failPhysical();h.due();
+  const failed=await h.runner((c,ids)=>probe(c.state.scope,[row(c.state.scope,id(11),'New',200)],ids)).run();
+  assert.equal(failed.status,'failed');assert.equal(entries.length,2);
+  for(const secret of [id(10),id(11),h.table,h.entity.organizationId]) assert.ok(!JSON.stringify(entries).includes(secret));
+});
+
 for(const change of [(h)=>h.unprepare(),(h)=>h.unprepareSettings(),(h)=>h.entity.status='disconnected',
   (h)=>h.entity.apiLoginEncrypted=null,(h)=>h.mutate(db=>db.link=null)]) {
   test('missing preparation, connection, credentials or links cannot create a lease or call upstream',async()=>{

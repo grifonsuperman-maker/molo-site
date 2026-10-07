@@ -17,6 +17,10 @@ export class SyrveRequestLimitError extends Error {
   }
 }
 
+export class SyrveRequestGuardError extends Error {
+  constructor(readonly guardError: unknown) { super('Syrve request validation failed'); }
+}
+
 export function syrveRequestKey(apiLogin: string): string {
   // Do not use settings revision, token, organization or process identity:
   // all operations for one login must retain the same quota after reconfiguration.
@@ -81,13 +85,20 @@ export class SyrveRequestLimiter {
     });
   }
 
-  async acquire(key: string, controls: { deadline?: number; signal?: AbortSignal } = {}): Promise<SyrveRequestPermit> {
+  async acquire(key: string, controls: { deadline?: number; signal?: AbortSignal; beforeClaim?: () => Promise<void> } = {}): Promise<SyrveRequestPermit> {
     if (controls.deadline !== undefined && !Number.isFinite(controls.deadline)) throw new SyrveRequestLimitError('cancelled');
     const remaining = controls.deadline === undefined ? MAX_WAIT_MS : Math.min(MAX_WAIT_MS, controls.deadline - Date.now());
     const until = performance.now() + Math.max(0, remaining);
     // Waiting never holds a PostgreSQL connection or transaction. Independent
     // instances arbitrate through the same durable row on each attempt.
     for (let attempt = 0; attempt < 8; attempt++) {
+      if (controls.signal?.aborted) throw new SyrveRequestLimitError('cancelled');
+      if (performance.now() >= until) throw new SyrveRequestLimitError('limited');
+      // Revalidate after each quota wait, before starting the one-second permit.
+      // Slow authorization/lease SQL must not consume its dispatch lifetime.
+      // The callback holds no quota transaction or PostgreSQL connection.
+      try { await controls.beforeClaim?.(); }
+      catch (error) { throw new SyrveRequestGuardError(error); }
       if (controls.signal?.aborted) throw new SyrveRequestLimitError('cancelled');
       if (performance.now() >= until) throw new SyrveRequestLimitError('limited');
       const started = performance.now(), delay = await this.claim(key);
