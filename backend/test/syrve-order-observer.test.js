@@ -91,6 +91,22 @@ function serviceSetup(t, overrides = {}) {
   return { ...h, state, tables, service, writes, reads: () => reads, dto: () => ({ configurationRevision: state.entity.configurationRevision }) };
 }
 
+test('repeated diagnostics reuse authentication while reading fresh catalog, availability and order versions', async (t) => {
+  let current = wrapper();
+  const h = setup(t, { '/api/1/order/by_table': () => orders(current) });
+  const first = await h.client.probeOrders(BASE, LOGIN, ORG, [TABLE], []);
+  current = wrapper(ORDER, 'Closed', [TABLE], 101);
+  const before = h.calls.length;
+  const next = await h.client.probeOrders(BASE, LOGIN, ORG, [TABLE], []);
+  assert.equal(first.byTable[0].state, 'open');
+  assert.equal(next.byTable[0].state, 'closed');
+  assert.deepEqual(h.calls.slice(before).map(({ path }) => path), [
+    '/api/1/terminal_groups', '/api/1/reserve/available_restaurant_sections',
+    '/api/1/terminal_groups/is_alive', '/api/1/order/by_table',
+  ]);
+  assert.equal(h.calls.filter(({ path }) => path.endsWith('/access_token')).length, 1);
+});
+
 test('Director diagnostics expose counts for multiple orders and tables, preserve state and exclude private evidence', async (t) => {
   const h = serviceSetup(t, {
     '/api/1/reserve/available_restaurant_sections': sections([{ id: TABLE, group: GROUP, isDeleted: false }, { id: TABLE2, group: GROUP, isDeleted: false }]),

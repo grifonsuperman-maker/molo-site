@@ -61,6 +61,41 @@ test('catalog uses only official read methods, scoped organization/group IDs and
   assert.ok(!JSON.stringify(result).includes(TOKEN));
 });
 
+test('connection steps reuse the tested session but fetch a fresh catalog each time', async (t) => {
+  const h = setup(t, [groups(), sections([table(10, 12)]), groups(), sections([table(11, 37)])]);
+  await h.client.checkOrganizations(INPUT.apiBaseUrl, LOGIN);
+  const first = await h.client.getCatalog(INPUT.apiBaseUrl, LOGIN, ORG);
+  const next = await h.client.getCatalog(INPUT.apiBaseUrl, LOGIN, ORG);
+  assert.deepEqual(first.tables, [table(10, 12)]);
+  assert.deepEqual(next.tables, [table(11, 37)]);
+  assert.deepEqual(h.calls.map(({ url }) => new URL(url).pathname), [
+    '/api/1/access_token', '/api/1/organizations',
+    '/api/1/terminal_groups', '/api/1/reserve/available_restaurant_sections',
+    '/api/1/terminal_groups', '/api/1/reserve/available_restaurant_sections',
+  ]);
+  assert.ok(!JSON.stringify(next).includes(TOKEN));
+});
+
+test('denied cached access fails once and requires fresh authentication on the next explicit action', async (t) => {
+  const h = setup(t, [Response.json({}, { status: 401 }),
+    Response.json({ token: TOKEN }), Response.json({ organizations: [{ id: ORG, name: 'MOLO' }] }),
+    groups(), sections([table(10, 12)])]);
+  await h.client.checkOrganizations(INPUT.apiBaseUrl, LOGIN);
+  await assert.rejects(h.client.getCatalog(INPUT.apiBaseUrl, LOGIN, ORG), safeError('SYRVE_AUTH_FAILED'));
+  assert.equal(h.calls.length, 3, 'no automatic retry or fallback after denial');
+  assert.equal((await h.client.getCatalog(INPUT.apiBaseUrl, LOGIN, ORG)).tables.length, 1);
+  assert.equal(h.calls.filter(({ url }) => url.endsWith('/access_token')).length, 2);
+});
+
+test('the explicit credential test still authenticates afresh after a cached success', async (t) => {
+  const h = setup(t, [Response.json({ token: TOKEN }),
+    Response.json({ organizations: [{ id: ORG, name: 'MOLO' }] })]);
+  await h.client.checkOrganizations(INPUT.apiBaseUrl, LOGIN);
+  await h.client.checkOrganizations(INPUT.apiBaseUrl, LOGIN);
+  assert.equal(h.calls.length, 4);
+  assert.equal(h.calls.filter(({ url }) => url.endsWith('/access_token')).length, 2);
+});
+
 test('v2 catalog retains server-only app authentication with no token in projections', async (t) => {
   const h = setup(t);
   process.env.SYRVE_APP_ID = id(98);
