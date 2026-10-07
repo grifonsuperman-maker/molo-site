@@ -5,12 +5,13 @@ import { syrveCaptureContext, SyrveStateCapture, SyrveStateStore } from './syrve
 import { SyrveOrderObservationBatch } from './syrve-state-reducer';
 import { SYRVE_WORKER_MAX_TABLES, SyrveWorkerError, SyrveWorkerLease, workerBackoff } from './syrve-worker.model';
 import { SyrveActivationStore } from './syrve-activation.store';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
 import { isVerifiedLoadedProbe, SyrveClientException } from './syrve-client';
 
 // Internal prepared adapter. Short transactions only; no lease transaction is
 // held over HTTP. PostgreSQL time and the random lease token fence every write.
 export class SyrveWorkerStore {
+  private readonly logger = new Logger(SyrveWorkerStore.name);
   private readonly states: SyrveStateStore;
   private readonly activation: SyrveActivationStore;
   constructor(private readonly source: DataSource, private readonly settings: SyrveSettingsStore) {
@@ -134,8 +135,8 @@ export class SyrveWorkerStore {
       + ' WHERE integration_id=$1 AND lease_id=$2', [lease.version.id, lease.id, linkId, failures, code, delay]);
   }
 
-  apply(lease: SyrveWorkerLease, captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[]) {
-    return this.settings.transaction(lease.version, async (manager, current) => {
+  async apply(lease: SyrveWorkerLease, captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[]) {
+    const applied = await this.settings.transaction(lease.version, async (manager, current) => {
       const row = await this.lockedLease(manager, lease);
       if (!(await this.activation.read(current, manager)).enabled) throw staleSyrveSettings();
       if (current.entity?.status !== 'connected' || captured.state.scope.integrationId !== lease.version.id
@@ -154,6 +155,14 @@ export class SyrveWorkerStore {
       await this.record(manager, lease, captured.linkId, code ? Math.min(20, row.failure_count + 1) : 0, code);
       return { result, code };
     });
+    // Only report committed results. A rollback must never look like a
+    // successful table update, and a table-local fence must remain diagnosable
+    // even when the next healthy table resets the shared worker error.
+    if (applied.result.changed || applied.code) this.logger.log('Застосування Syrve: ' + JSON.stringify({
+      tableNumber: lease.links.find(link => link.id === captured.linkId)?.lastKnownNumber,
+      ledgerChanged: applied.result.changed, code: applied.code, diagnostics: applied.result.diagnostics,
+    }));
+    return applied;
   }
 
   failure(lease: SyrveWorkerLease, linkId: string, code: SyrveWorkerError) {

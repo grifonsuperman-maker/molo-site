@@ -277,9 +277,9 @@ test('a mutated receipt cannot corrupt private cached dictionaries or expose cre
   assert.ok(!/synthetic-login|synthetic-batch-token/.test(JSON.stringify(second)));
 });
 
-test('a guard revoked after quota admission blocks every warm fetch despite cached access and dictionaries', async t => {
+test('a guard revoked during quota waiting blocks every warm fetch despite cached access and dictionaries', async t => {
   const noop = require('./helpers/syrve-test-request-limiter.js'); let revoke = false, revoked = false;
-  const h = fixture(t, 2, { limiter: { acquire: async () => { if (revoke) revoked = true; return noop.acquire(); }, cooldown: noop.cooldown } });
+  const h = fixture(t, 2, { limiter: { acquire: async (key, controls) => { if (revoke) revoked = true; return noop.acquire(key, controls); }, cooldown: noop.cooldown } });
   h.controls.beforeCommand = async () => { if (revoked) throw new Error('scope changed during quota wait'); };
   await h.read(); const before = h.calls.length; revoke = true;
   await assert.rejects(h.read(), /scope changed/); assert.equal(h.calls.length, before);

@@ -8,7 +8,7 @@ import { TABLE_ORDER_BATCH_SIZE, ORDER_ID_BATCH_SIZE, MAX_CATALOG_TABLES, MAX_RE
 import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, loadingPlanFingerprint, tableLoadingPlan, tableLoadingCatalogPlan, parseLoadingCorrelation, SyrveLoadingValidationError, type TableLoadingPlan } from './syrve-table-loading';
 import { assessSyrvePosVersion } from './syrve-pos-version';
 import { currentSyrveOperation, syrveObservationDeadline } from './syrve-operation-context';
-import { SyrveRequestLimiter, SyrveRequestLimitError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs } from './syrve-request-limiter';
+import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs } from './syrve-request-limiter';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -144,8 +144,12 @@ export class SyrveClient {
     }
     let permit;
     try {
-      permit = await this.requestLimiter.acquire(rateKey, { deadline, signal });
+      permit = await this.requestLimiter.acquire(rateKey, { deadline, signal, beforeClaim: async () => {
+        await operation?.beforeRequest?.();
+        if (beforeSend) await beforeSend();
+      } });
     } catch (error) {
+      if (error instanceof SyrveRequestGuardError) throw error.guardError;
       if (!(error instanceof SyrveRequestLimitError)) {
         throw new SyrveClientException('SYRVE_RATE_GUARD_UNAVAILABLE');
       }
@@ -154,8 +158,6 @@ export class SyrveClient {
         error.reason === 'limited' ? error.retryAfterMs : undefined);
     }
     if (signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
-    await operation?.beforeRequest?.();
-    if (beforeSend) await beforeSend();
     if (!isFreshSyrvePermit(permit)) throw new SyrveClientException('SYRVE_RATE_LIMITED', 31_000);
     const remaining = deadline === undefined ? REQUEST_TIMEOUT_MS : Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now());
     if (remaining <= 0 || signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');

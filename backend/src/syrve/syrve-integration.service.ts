@@ -86,6 +86,18 @@ export class SyrveIntegrationService {
     const probes = await this.client.probeLoadedOrderBatch(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!,
       captures.map(captured => ({ tableId: captured.state.scope.syrveTableId, orderIdBatches: captured.orderIds,
         visibilityContext: syrveCaptureContext(leaseId, captured) })), { ...controls, configurationRevision: entity.configurationRevision });
+    // Transport diagnostics only: a completed/empty read is not an applied
+    // status. Log bounded counts and informational numbers, never UUIDs,
+    // credentials, versions, order bodies or customer data.
+    const observed = captures.map((captured, index) => {
+      const tableNumber = snapshot.links.find(link => link.id === captured.linkId)?.lastKnownNumber;
+      const own = probes[index];
+      if (own === null) return { tableNumber, readCompleted: false };
+      const counts = (channel: 'byTable' | 'byId') => Object.fromEntries(['open', 'closed', 'unknown'].map(state =>
+        [state, new Set(own.flatMap(probe => probe[channel] || []).filter(order => order.state === state).map(order => order.id)).size]));
+      return { tableNumber, readCompleted: true, byTable: counts('byTable'), byId: counts('byId') };
+    });
+    this.logger.log('Спостереження Syrve: ' + JSON.stringify(observed));
     return captures.map((captured, index) => probes[index] === null ? null
       : captured.orderIds.map((orderIds, page) => ({ orderIds, probe: probes[index]![page] })));
   }
