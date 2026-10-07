@@ -1,5 +1,6 @@
 import { ConflictException, HttpException, Injectable, NotFoundException, OnApplicationShutdown, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { Interval } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { loadingActor } from './syrve-table-loading';
@@ -24,6 +25,16 @@ export class SyrveOperationsService implements OnApplicationShutdown {
   private async expire(owner: string) {
     await this.source.query('UPDATE ' + this.table() + " SET status='failed',completed_at=clock_timestamp(),error=$2::jsonb"
       + " WHERE owner_hash=$1 AND status='running' AND (live_until<=clock_timestamp() OR expires_at<=clock_timestamp())", [owner, JSON.stringify(INTERRUPTED)]);
+  }
+  @Interval('syrve-operation-retention', 60 * 60_000)
+  async cleanupRetention() {
+    if (this.stopped) return;
+    try {
+      await this.source.query('UPDATE ' + this.table() + " SET status='failed',completed_at=clock_timestamp(),error=$1::jsonb"
+        + " WHERE status='running' AND (live_until<=clock_timestamp() OR expires_at<=clock_timestamp())", [JSON.stringify(INTERRUPTED)]);
+      await this.source.query('DELETE FROM ' + this.table()
+        + " WHERE status<>'running' AND completed_at<clock_timestamp()-interval '1 day'");
+    } catch { /* Best-effort retention is retried by the scheduler; request paths remain fail-closed. */ }
   }
   async start(actor: AuthUser | undefined, kind: string, action: () => Promise<unknown>, authorize: () => Promise<AuthUser>) {
     if (this.stopped) throw new ServiceUnavailableException('Перевірку Syrve перервано. Повторіть дію пізніше.');

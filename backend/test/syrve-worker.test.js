@@ -235,6 +235,27 @@ test('partial register outage does not escalate the shared backoff for healthy g
   assert.deepEqual(calls.partial,[[links[1].id,'SYRVE_OBSERVATION_UNKNOWN']]);assert.equal(calls.release,1);
 });
 
+test('batch table-local stale and uncertain results do not stop later healthy tables',async()=>{
+  const integrationId=id(800),organizationId=id(801),revision=id(802);
+  const links=[0,1,2,3].map(n=>({id:id(810+n),integrationId,organizationId,moloTableId:id(820+n),syrveTableId:id(830+n)}));
+  const lease={id:id(840),version:{id:integrationId,revision},links};
+  const captures=links.map(link=>({linkId:link.id,orderIds:[],state:{scope:{integrationId,configurationRevision:revision,
+    organizationId,moloTableId:link.moloTableId,syrveTableId:link.syrveTableId}}}));
+  const calls={apply:[],failure:[],partial:[],release:0};let index=0;
+  const codes=[null,'SYRVE_LOCAL_STATE_CHANGED','SYRVE_OBSERVATION_UNKNOWN',null];
+  const store={claim:async()=>({status:'claimed',lease}),captureBatch:async()=>captures,
+    guardBatch:async()=>({organizationId,groups:[]}),
+    apply:async(_lease,captured)=>{calls.apply.push(captured.linkId);return {code:codes[index++]};},
+    failure:async(_lease,linkId,code)=>calls.failure.push([linkId,code]),
+    partialFailure:async(_lease,linkId,code)=>calls.partial.push([linkId,code]),
+    release:async()=>{calls.release++;}};
+  const runner=new SyrveWorkerRunner(store,()=>assert.fail('single-table probe must not run'),async()=>[[],[],[],[]]);
+  assert.deepEqual(await runner.run(),{status:'observed',processed:2,code:'SYRVE_OBSERVATION_UNKNOWN'});
+  assert.deepEqual(calls.apply,links.map(link=>link.id));assert.deepEqual(calls.failure,[]);
+  assert.deepEqual(calls.partial,[[links[1].id,'SYRVE_LOCAL_STATE_CHANGED'],[links[2].id,'SYRVE_OBSERVATION_UNKNOWN']]);
+  assert.equal(calls.release,1);
+});
+
 test('unknown/offline/missing answers preserve occupancy and manual suppression',async()=>{
   for(const variant of ['offline','missing','unknown']) {
     const h=prepared(); await h.runner().run(); await h.store.recordStaffAction(h.table,'manual_free'); h.due();

@@ -94,3 +94,18 @@ test('concurrent operation contexts keep their signals and deadlines separate', 
   assert.deepEqual(values, [10, 20]); assert.equal(currentSyrveOperation(), undefined);
   assert.equal(SYRVE_OPERATION_BUDGET_MS, 1_800_000);
 });
+
+
+test('retention cleanup expires abandoned operations and deletes old completed rows without another Director action', async () => {
+  const calls = [];
+  const service = new SyrveOperationsService({ options: { type: 'postgres' }, query: async (sql, p) => { calls.push({ sql, p }); return []; } });
+  await service.cleanupRetention();
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].sql, /WHERE status='running'/);
+  assert.doesNotMatch(calls[0].sql, /owner_hash/);
+  assert.equal(calls[0].p.length, 1);
+  assert.match(calls[1].sql, /status<>'running'/);
+  assert.match(calls[1].sql, /interval '1 day'/);
+  assert.doesNotMatch(calls[1].sql, /owner_hash/);
+  await service.onApplicationShutdown();
+});

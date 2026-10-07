@@ -126,7 +126,13 @@ export class SyrveWorkerRunner {
           batches.push({ orderIds, probe });
         }
         const applied = await this.store.apply(lease, captured, batches);
-        if (applied.code === 'SYRVE_LOCAL_STATE_CHANGED' && this.batchProbe) { skipped = applied.code; continue; }
+        if (this.batchProbe && ['SYRVE_LOCAL_STATE_CHANGED','SYRVE_OBSERVATION_UNKNOWN'].includes(applied.code || '')) {
+          skipped = applied.code!;
+          // apply() records the table-local diagnostic first; reset the shared
+          // failure counter before continuing so healthy groups keep polling.
+          await this.store.partialFailure(lease, link.id, applied.code!);
+          continue;
+        }
         if (applied.code) return { status: applied.code === 'SYRVE_LOCAL_STATE_CHANGED' ? 'stale' : 'failed', processed, code: applied.code };
         processed++;
       }
