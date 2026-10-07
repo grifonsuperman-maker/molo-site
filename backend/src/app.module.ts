@@ -32,6 +32,8 @@ import { ProtectCanonicalTableNumbers2026093000040 } from './migrations/20260930
 import { CreateSyrveDurableState2026093000050 } from './migrations/2026093000050-CreateSyrveDurableState';
 import { CreateSyrveWorkerState2026100100060 } from './migrations/2026100100060-CreateSyrveWorkerState';
 import { CreateSyrveActivation2026100200070 } from './migrations/2026100200070-CreateSyrveActivation';
+import { CreateSyrveRequestLimits2026100600080 } from './migrations/2026100600080-CreateSyrveRequestLimits';
+import { CreateSyrveOperations2026100700010 } from './migrations/2026100700010-CreateSyrveOperations';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -95,6 +97,8 @@ const staffPinMigrationOptions = {
                 CreateSyrveDurableState2026093000050,
                 CreateSyrveWorkerState2026100100060,
                 CreateSyrveActivation2026100200070,
+                CreateSyrveRequestLimits2026100600080,
+                CreateSyrveOperations2026100700010,
               ]
             : staffPinMigrationOptions.migrations,
         };

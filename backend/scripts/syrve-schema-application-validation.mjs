@@ -93,6 +93,6 @@ export async function runSyrveApplicationValidation(env = process.env) {
   } finally { globalThis.fetch = previousFetch; await source.destroy(); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runSyrveApplicationValidation().then(() => process.stdout.write('Syrve application PostgreSQL validation passed for all seven prefixes.\n'))
+  runSyrveApplicationValidation().then(() => process.stdout.write('Syrve application PostgreSQL validation passed for every migration prefix.\n'))
     .catch(error => { console.error(`Application validation failed: ${error.message}`); process.exitCode = 1; });
 }
