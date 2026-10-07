@@ -80,12 +80,13 @@ test('coverage lists every unlinked physical table and rejects contradictory or 
     const value=structuredClone(p);mutate(value);assert.throws(()=>validateActivationPreview(value,scope()));
   }
 });
-test('initial reconciliation consent describes the one-time status change and shows incomplete coverage',async()=>{
+test('initial reconciliation consent preserves staff actions on re-enabling and shows incomplete coverage',async()=>{
   const h=mounted({previewAutoStatus:async()=>({...preview(),totalTables:4,unlinkedTableNumbers:['37','100']})});
   await h.ready();h.prepare();await flush();const html=renderToStaticMarkup(h.render());
   assert.match(html,/Підключено 2 із 4 столів MOLO/);assert.match(html,/37, 100/);
-  assert.match(html,/разово позначити/);assert.match(html,/навіть після ручного звільнення/);
-  assert.match(html,/Подальші ручні дії зберігаються/);
+  assert.match(html,/звірити вже відкриті рахунки/);
+  assert.match(html,/Повторне ввімкнення зберігає ручні зміни/);
+  assert.doesNotMatch(html,/навіть після ручного звільнення/);
   assert.equal(find(h.render(),n=>n.type==='input').props.checked,false);
 });
 test('enabling requires fresh preview plus acknowledgement, submits once and refreshes before unlock',async()=>{

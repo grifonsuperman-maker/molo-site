@@ -198,17 +198,21 @@ export async function runSyrveActivationValidation(env=process.env){
     };
     await enableInitial();assert.equal((await physical())[0].status,'occupied');
     assert.deepEqual((await status()).activeSyrveOrderIds,[initialOrder]);
-    await manualFree();const knownVersions=(await saved()).versions;
+    await manualFree();const knownVersions=(await saved()).versions,releasedPhysical=await physical();
     await service().disable({configurationRevision:await revision()},actor);
-    await enableInitial();assert.equal((await physical())[0].status,'occupied');
+    await enableInitial();assert.deepEqual(await physical(),releasedPhysical,'Re-enabling must not replay a consumed opening over manual release');
     assert.deepEqual((await saved()).versions,knownVersions,'Reconciliation must preserve the known order watermark');
-    assert.deepEqual((await status()).manuallyFreedSyrveOrderIds,[]);
+    assert.deepEqual((await status()).manuallyFreedSyrveOrderIds,[initialOrder]);
 
     await manualFree();const manualState=await saved(),manualStatus=await physical();
     worker=new SyrveWorkerService(source,settings(),integration());await due();
     assert.equal((await worker.tick()).status,'observed');
     assert.deepEqual(await physical(),manualStatus,'A repeated worker read must preserve the later manual release');
-    assert.deepEqual((await saved()).versions,manualState.versions);await worker.onModuleDestroy();
+    assert.deepEqual((await saved()).versions,manualState.versions);
+    const additionalOrder=randomUUID();rows=[wrapper(initialOrder,'New',300),wrapper(additionalOrder,'New',400)];await due();
+    assert.equal((await worker.tick()).status,'observed');assert.equal((await physical())[0].status,'occupied');
+    assert.deepEqual(new Set((await status()).activeSyrveOrderIds),new Set([initialOrder,additionalOrder]));
+    await manualFree();await worker.onModuleDestroy();
 
     await service().disable({configurationRevision:await revision()},actor);
     const delayed=await service().preview({configurationRevision:await revision()},actor);let capturedLedger,staffPhysical;

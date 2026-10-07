@@ -135,7 +135,7 @@ export default function SyrveAutoStatusPanel(props: Props) {
       {!!preview.unlinkedTableNumbers?.length && <p className="mt-2 text-amber-100">Без зв’язку із Syrve: {preview.unlinkedTableNumbers.join(', ')}. Перевірте доступність їхніх секцій через Syrve API та повторіть підтвердження зв’язків.</p>}
       <p>Столи: {preview.tableNumbers.join(', ')}. Касових груп: {preview.terminalGroups}.</p>
       <label className="mt-3 flex gap-3"><input type="checkbox" checked={acknowledged} disabled={working} onChange={event => setAcknowledged(event.target.checked)} />
-        <span>Дозволяю разово позначити ці столи з підтвердженими відкритими рахунками «Зайнятий», навіть після ручного звільнення, та увімкнути автостатуси. Подальші ручні дії зберігаються до нової події каси.</span></label>
+        <span>Дозволяю звірити вже відкриті рахунки та увімкнути автостатуси. Повторне ввімкнення зберігає ручні зміни, зроблені після врахованого відкриття рахунку.</span></label>
       <button type="button" disabled={!allowed || working || !acknowledged} onClick={() => void change(true)} className="mt-4 rounded-2xl border border-emerald-200/40 px-4 py-3 font-bold disabled:opacity-40">Увімкнути автостатуси</button>
     </div>}
     {props.syncEnabled && <><p className="mt-3 text-xs text-white/50">Після вимкнення автоматичні зміни зупиняться. Поточні статуси столів збережуться.</p>

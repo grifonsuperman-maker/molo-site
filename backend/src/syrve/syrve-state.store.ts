@@ -178,13 +178,13 @@ export class SyrveStateStore {
   }
 
   private async applyLockedObservation(manager: EntityManager, current: SyrveSettingsSnapshot,
-    captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[], context?: string, reconcileOpen = false): Promise<SyrveTransition> {
+    captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[], context?: string, strictActivation = false): Promise<SyrveTransition> {
     if (!manager.queryRunner?.isTransactionActive) throw new ServiceUnavailableException('Стан Syrve потребує активної транзакції.');
     const expected = captured.state.scope;
     const value = await this.lockedState(manager, current, expected.moloTableId);
     if (value.linkId !== captured.linkId) throw staleSyrveSettings();
     if (value.physicalVersion !== captured.physicalVersion) {
-      if (reconcileOpen) throw staleSyrveSettings();
+      if (strictActivation) throw staleSyrveSettings();
       return { state: value.state, changed: false, diagnostics: ['local_revision_changed'] };
     }
     // Only the freshly locked state is authoritative. A modified/replayed
@@ -193,12 +193,8 @@ export class SyrveStateStore {
       currentScope: value.state.scope, nextRevision: randomUUID(), probe: batches,
       visibilityVerified: Boolean(context && batches.length && batches.every(batch => isVerifiedLoadedProbe(batch.probe, context,
         expected.organizationId, expected.syrveTableId))) });
-    if (reconcileOpen && result.diagnostics.length) throw new ConflictException('Початкова звірка отримала неповні або застарілі дані. Повторіть перевірку.');
-    const status = reconcileOpen && result.state.activeSyrveOrderIds.length ? 'occupied' : syrveTableStatusEvent(value.state, result);
-    if (reconcileOpen && status === 'occupied') {
-      result.changed = true;
-      result.state = { ...result.state, localRevision: randomUUID(), manuallyFreedSyrveOrderIds: [] };
-    }
+    if (strictActivation && result.diagnostics.length) throw new ConflictException('Початкова звірка отримала неповні або застарілі дані. Повторіть перевірку.');
+    const status = syrveTableStatusEvent(value.state, result);
     if (result.changed) {
       await this.persist(manager, value.linkId, result.state);
       if (status) {
@@ -218,8 +214,8 @@ export class SyrveStateStore {
       this.recordStaffActionInTransaction(manager, current, moloTableId, action));
   }
 
-  // Only explicit Director activation calls this path. Subsequent worker reads
-  // keep the event policy and cannot reassert a known bill over staff actions.
+  // Activation uses the same once-per-event policy as worker reads. Its stricter
+  // failure policy rolls back all tables and consent on any uncertain result.
   async applyActivationObservationInTransaction(manager: EntityManager, current: SyrveSettingsSnapshot,
     captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[], leaseId: string): Promise<SyrveTransition> {
     return this.applyLockedObservation(manager, current, captured, batches, syrveCaptureContext(leaseId, captured), true);
