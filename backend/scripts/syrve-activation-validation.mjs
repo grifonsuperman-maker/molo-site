@@ -186,7 +186,7 @@ export async function runSyrveActivationValidation(env=process.env){
       assert.equal(result.syncEnabled,true,JSON.stringify(result));
       const dispatched=calls.slice(start);
       assert.equal(dispatched.filter(path=>path.endsWith('init_by_table')).length,1);
-      assert.equal(dispatched.filter(path=>path.endsWith('by_table')).length,1,'Read accounts once, after loading');
+      assert.equal(dispatched.filter(path=>path.endsWith('/order/by_table')).length,1,'Read accounts once, after loading');
       assert.equal(dispatched.filter(path=>path.endsWith('by_id')).length,0,'The fresh open UUID already confirms this bill');
     };
     const manualFree=async()=>{
