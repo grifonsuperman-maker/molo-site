@@ -20,9 +20,13 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'CreateSyrveDurableState2026093000050',
   'CreateSyrveWorkerState2026100100060',
   'CreateSyrveActivation2026100200070',
+  'CreateSyrveRequestLimits2026100600080',
+  'CreateSyrveOperations2026100700010',
 ];
 
 const EXPECTED_REWIND_STATE = {
+  17: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
+  16: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   15: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   14: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
   13: { guestNameColumn: true, logArchiveTable: true, reviewArchiveTable: true },
@@ -158,6 +162,8 @@ function loadRuntimeMigrations(require) {
   const { CreateSyrveDurableState2026093000050 } = require('../dist/migrations/2026093000050-CreateSyrveDurableState.js');
   const { CreateSyrveWorkerState2026100100060 } = require('../dist/migrations/2026100100060-CreateSyrveWorkerState.js');
   const { CreateSyrveActivation2026100200070 } = require('../dist/migrations/2026100200070-CreateSyrveActivation.js');
+  const { CreateSyrveRequestLimits2026100600080 } = require('../dist/migrations/2026100600080-CreateSyrveRequestLimits.js');
+  const { CreateSyrveOperations2026100700010 } = require('../dist/migrations/2026100700010-CreateSyrveOperations.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -176,6 +182,8 @@ function loadRuntimeMigrations(require) {
     CreateSyrveDurableState2026093000050,
     CreateSyrveWorkerState2026100100060,
     CreateSyrveActivation2026100200070,
+    CreateSyrveRequestLimits2026100600080,
+    CreateSyrveOperations2026100700010,
   ];
 }
 
@@ -199,6 +207,8 @@ async function readRewindState(dataSource) {
       to_regclass('public.syrve_order_versions') IS NOT NULL AS "syrveOrderVersionsTable",
       to_regclass('public.syrve_worker_state') IS NOT NULL AS "syrveWorkerStateTable",
       to_regclass('public.syrve_sync_activation') IS NOT NULL AS "syrveActivationTable",
+      to_regclass('public.syrve_request_limits') IS NOT NULL AS "syrveRequestLimitsTable",
+      to_regclass('public.syrve_operations') IS NOT NULL AS "syrveOperationsTable",
       to_regclass('public.table_map_identities') IS NOT NULL AS "tableMapIdentitiesTable",
       to_regclass('public."UQ_tables_canonical_number"') IS NOT NULL AS "tableNumberUniqueIndex",
       to_regprocedure('public.molo_canonical_table_number(text)') IS NOT NULL AS "tableNumberFunction",
@@ -300,6 +310,8 @@ async function assertRewindCheckpoint(dataSource, remainingMigrationCount) {
       syrveOrderVersionsTable: remainingMigrationCount >= 14,
       syrveWorkerStateTable: remainingMigrationCount >= 15,
       syrveActivationTable: remainingMigrationCount >= 16,
+      syrveRequestLimitsTable: remainingMigrationCount >= 17,
+      syrveOperationsTable: remainingMigrationCount >= 18,
       syrveConfigurationRevision: remainingMigrationCount >= 11,
       tableMapIdentitiesTable: remainingMigrationCount >= 12,
       tableMapIdentityTrigger: remainingMigrationCount >= 12,
@@ -353,6 +365,8 @@ export async function runRuntimeMigrationRoundtripStep(
         syrveSyncStatesTable: true,
         syrveOrderVersionsTable: true,
         syrveWorkerStateTable: true,
+        syrveRequestLimitsTable: true,
+        syrveOperationsTable: true,
         syrveConfigurationRevision: true,
         tableMapIdentitiesTable: true,
         tableMapIdentityTrigger: true,
@@ -385,6 +399,8 @@ export async function runRuntimeMigrationRoundtripStep(
       syrveSyncStatesTable: true,
       syrveOrderVersionsTable: true,
       syrveWorkerStateTable: true,
+      syrveRequestLimitsTable: true,
+      syrveOperationsTable: true,
       syrveConfigurationRevision: true,
       tableMapIdentitiesTable: true,
       tableMapIdentityTrigger: true,

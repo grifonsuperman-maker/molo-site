@@ -9,6 +9,8 @@ export const SYRVE_SCHEMA_REFERENCE: Readonly<Record<string, string>> = {
   CreateSyrveDurableState2026093000050: '09586d78110493eacd6e30c88c38f4973b400f0c9616e56af562ab7b31d3ee50',
   CreateSyrveWorkerState2026100100060: 'ae478dc3ba3c59021d35930e644b93f6a18fb5d0559d8ec785e08cf3323c0ee1',
   CreateSyrveActivation2026100200070: '186b0752b389824a84b835c1f3cc61fbc9d67217192dcf83f546706cab10f943',
+  CreateSyrveRequestLimits2026100600080: 'da0dba49c215d58cd955e9581b0072f7847265c66461bc36a8fca443bfa499a0',
+  CreateSyrveOperations2026100700010: '24fbef3509b2ba2fb066bf81babd26f53178c914271b7d1b823851c64969c109',
 };
 
 export const SYRVE_SCHEMA_STEPS = [
@@ -19,10 +21,12 @@ export const SYRVE_SCHEMA_STEPS = [
   { name: 'CreateSyrveDurableState2026093000050', tables: ['syrve_table_sync_states', 'syrve_order_versions'] },
   { name: 'CreateSyrveWorkerState2026100100060', tables: ['syrve_worker_state'] },
   { name: 'CreateSyrveActivation2026100200070', tables: ['syrve_sync_activation'] },
+  { name: 'CreateSyrveRequestLimits2026100600080', tables: ['syrve_request_limits'] },
+  { name: 'CreateSyrveOperations2026100700010', tables: ['syrve_operations'] },
 ] as const;
 
 // Known migrations that may follow the original six prepared Syrve steps,
-// either before or after the later activation migration.
+// either before or after the later activation, quota and operation migrations.
 // They are not owned, applied or audited as Syrve schema by this module.
 export const SYRVE_ALLOWED_FOLLOWUP_HISTORY = [
   'CreateBookingTableAssignments2026100200010',

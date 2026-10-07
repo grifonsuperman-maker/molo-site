@@ -25,13 +25,16 @@ export async function runSyrveReadinessValidation(env=process.env){
   const snapshots=async()=>{
     const result={};for(const [table,key]of [['tables','id'],['zones','id'],['bookings','id'],['table_map_identities','table_id'],
       ['syrve_integrations','id'],['syrve_table_links','id'],['syrve_table_sync_states','link_id'],['syrve_order_versions','link_id,order_id'],
-      ['syrve_worker_state','integration_id'],['migrations','id']])result[table]=await source.query(`SELECT * FROM public."${table}" ORDER BY ${key}`);
+      ['syrve_worker_state','integration_id'],['syrve_sync_activation','integration_id'],
+      ['syrve_request_limits','key_hash'],['syrve_operations','id'],['migrations','id']])result[table]=await source.query(`SELECT * FROM public."${table}" ORDER BY ${key}`);
     return result;
   };
   try{
     const original=await facts(),reference=schemaReference(original);
     assert.deepEqual(reference,SYRVE_SCHEMA_REFERENCE);
     assert.equal(schemaPreflight(original).status,'prepared');
+    const installed={...original,history:original.history.filter(row=>!['InitialSchemaBaseline2026081300000','CreateGuestPushSubscriptions2026092000010'].includes(row.name))};
+    assert.equal(installed.history.length,17);assert.equal(schemaPreflight(installed).status,'prepared');
     const baseline=await snapshots();
     const report=readinessResponse(await facts());assert.equal(report.activationAvailable,false);assert.equal(report.syncEnabled,false);
     assert.equal(report.checks.find(c=>c.key==='schema').status,'ok');assert.deepEqual(await snapshots(),baseline);
@@ -53,6 +56,18 @@ export async function runSyrveReadinessValidation(env=process.env){
     await source.query('ALTER TABLE public.syrve_worker_state ALTER COLUMN failure_count DROP NOT NULL');
     assert.equal(schemaPreflight(await facts()).status,'requires_audit');
     await source.query('ALTER TABLE public.syrve_worker_state ALTER COLUMN failure_count SET NOT NULL');
+    await source.query('ALTER TABLE public.syrve_request_limits ALTER COLUMN next_request_at DROP NOT NULL');
+    assert.equal(schemaPreflight(await facts()).status,'requires_audit');
+    await source.query('ALTER TABLE public.syrve_request_limits ALTER COLUMN next_request_at SET NOT NULL');
+    await source.query('ALTER TABLE public.syrve_request_limits DROP CONSTRAINT "CHK_syrve_request_key_hash"');
+    assert.equal(schemaPreflight(await facts()).status,'requires_audit');
+    await source.query(`ALTER TABLE public.syrve_request_limits ADD CONSTRAINT "CHK_syrve_request_key_hash" CHECK (key_hash ~ '^[0-9a-f]{64}$')`);
+    await source.query('ALTER TABLE public.syrve_operations ALTER COLUMN live_until DROP NOT NULL');
+    assert.equal(schemaPreflight(await facts()).status,'requires_audit');
+    await source.query('ALTER TABLE public.syrve_operations ALTER COLUMN live_until SET NOT NULL');
+    await source.query('DROP INDEX public."UQ_syrve_running_operation"');
+    assert.equal(schemaPreflight(await facts()).status,'requires_audit');
+    await source.query(`CREATE UNIQUE INDEX "UQ_syrve_running_operation" ON public.syrve_operations(owner_hash) WHERE status='running'`);
     await source.query('CREATE INDEX syrve_readiness_ci_extra ON public.syrve_order_versions(order_id)');
     assert.equal(schemaPreflight(await facts()).status,'requires_audit');await source.query('DROP INDEX public.syrve_readiness_ci_extra');
     await source.query('ALTER TABLE public.table_map_identities DISABLE TRIGGER "TRG_table_map_identities_immutable"');
@@ -64,17 +79,23 @@ export async function runSyrveReadinessValidation(env=process.env){
     await source.query('ALTER TABLE public.tables DISABLE TRIGGER ALL');
     assert.equal(schemaPreflight(await facts()).status,'requires_audit');
     await source.query('ALTER TABLE public.tables ENABLE TRIGGER ALL');
-    const migration=baseline.migrations.find(row=>row.name===SYRVE_SCHEMA_STEPS.at(-1).name);
-    await source.query('DELETE FROM public.migrations WHERE id=$1',[migration.id]);
-    assert.equal(schemaPreflight(await facts()).status,'requires_audit');
-    await source.query('INSERT INTO public.migrations(id,"timestamp",name) VALUES ($1,$2,$3)',[migration.id,migration.timestamp,migration.name]);
+    for(const step of SYRVE_SCHEMA_STEPS.slice(6)) {
+      const migration=baseline.migrations.find(row=>row.name===step.name);
+      await source.query('DELETE FROM public.migrations WHERE id=$1',[migration.id]);
+      assert.equal(schemaPreflight(await facts()).status,'requires_audit');
+      await source.query('INSERT INTO public.migrations(id,"timestamp",name) VALUES ($1,$2,$3)',[migration.id,migration.timestamp,migration.name]);
+    }
     assert.equal(schemaPreflight(await facts()).status,'prepared');assert.deepEqual(await snapshots(),baseline);
 
     // Exercise both real installation orders: six Syrve migrations -> banquet
-    // -> activation, and seven Syrve migrations -> banquet. Restore the exact
+    // -> later Syrve migrations, and all Syrve migrations -> banquet. Restore the exact
     // original history before the existing roundtrip below.
     const {CreateBookingTableAssignments2026100200010:Banquet}=require('../dist/migrations/2026100200010-CreateBookingTableAssignments.js');
-    const {CreateSyrveActivation2026100200070:Activation}=require('../dist/migrations/2026100200070-CreateSyrveActivation.js');
+    const later=SYRVE_SCHEMA_STEPS.slice(6).map(({name})=>{
+      const [,prefix,timestamp]=name.match(/^(.*?)(\d{13})$/);
+      return {Migration:require(`../dist/migrations/${timestamp}-${prefix}.js`)[name],row:baseline.migrations.find(row=>row.name===name)};
+    });
+    const laterNames=later.map(({row})=>row.name);
     const banquetName='CreateBookingTableAssignments2026100200010';
     await source.transaction(async manager=>{
       await new Banquet().up(manager.queryRunner);
@@ -83,21 +104,23 @@ export async function runSyrveReadinessValidation(env=process.env){
     try {
       assert.equal(schemaPreflight(await facts()).status,'prepared');
       await source.transaction(async manager=>{
-        await new Activation().down(manager.queryRunner);
-        await manager.query('DELETE FROM migrations WHERE name=$1',[migration.name]);
+        for(const {Migration} of [...later].reverse()) await new Migration().down(manager.queryRunner);
+        await manager.query('DELETE FROM migrations WHERE name=ANY($1::text[])',[laterNames]);
       });
-      const pendingActivation=schemaPreflight(await facts());
-      assert.equal(pendingActivation.status,'plan_requires_review');assert.deepEqual(pendingActivation.pending,[migration.name]);
+      const pendingLater=schemaPreflight(await facts());
+      assert.equal(pendingLater.status,'plan_requires_review');assert.deepEqual(pendingLater.pending,laterNames);
       await source.transaction(async manager=>{
-        await new Activation().up(manager.queryRunner);
-        await manager.query('INSERT INTO migrations("timestamp",name) VALUES ($1,$2)',[migration.timestamp,migration.name]);
+        for(const {Migration,row} of later) {
+          await new Migration().up(manager.queryRunner);
+          await manager.query('INSERT INTO migrations("timestamp",name) VALUES ($1,$2)',[row.timestamp,row.name]);
+        }
       });
       assert.equal(schemaPreflight(await facts()).status,'prepared');
     } finally {
       await source.transaction(async manager=>{
         await new Banquet().down(manager.queryRunner);
-        await manager.query('DELETE FROM migrations WHERE name=ANY($1::text[])',[[banquetName,migration.name]]);
-        await manager.query('INSERT INTO migrations(id,"timestamp",name) VALUES ($1,$2,$3)',[migration.id,migration.timestamp,migration.name]);
+        await manager.query('DELETE FROM migrations WHERE name=ANY($1::text[])',[[banquetName,...laterNames]]);
+        for(const {row} of later) await manager.query('INSERT INTO migrations(id,"timestamp",name) VALUES ($1,$2,$3)',[row.id,row.timestamp,row.name]);
       });
     }
     assert.deepEqual(await snapshots(),baseline);
@@ -115,6 +138,7 @@ export async function runSyrveReadinessValidation(env=process.env){
     await source.query('INSERT INTO public.syrve_table_links(integration_id,organization_id,molo_table_id,syrve_table_id,last_known_number) VALUES ($1,$2,$3,$4,1)',[integrationId,org,tableId,provider]);
     let before=await snapshots(),f=await facts(),r=readinessResponse(f);assert.equal(f.data.linksValid,true);
     assert.equal(r.checks.find(c=>c.key==='connection').status,'ok');assert.equal(r.checks.find(c=>c.key==='state').status,'not_checked');
+    assert.equal(r.activationAvailable,true);assert.equal(r.syncEnabled,false);
     assert.deepEqual(await snapshots(),before);assert.doesNotMatch(JSON.stringify(r),/synthetic-cipher|synthetic-iv|synthetic-tag/);
     const states=new SyrveStateStore(source,new SyrveSettingsStore(source));const capture=await states.capture(tableId);
     await states.applyObservation(capture,[{orderIds:[],probe:probe(capture.state.scope,[row(capture.state.scope,id(10))])}]);

@@ -18,6 +18,8 @@ const runtimeHistory = [
   'CreateSyrveDurableState2026093000050',
   'CreateSyrveWorkerState2026100100060',
   'CreateSyrveActivation2026100200070',
+  'CreateSyrveRequestLimits2026100600080',
+  'CreateSyrveOperations2026100700010',
 ];
 const baseline = 'InitialSchemaBaseline2026081300000';
 const probe = 'MigrationHistoryProbe9999999999999';

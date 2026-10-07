@@ -6,7 +6,7 @@ const {schemaPreflight,schemaReference,readSyrveSchemaPreflight,preflightFingerp
 const {SYRVE_ALLOWED_FOLLOWUP_HISTORY,SYRVE_SCHEMA_STEPS,SYRVE_EXISTING_HISTORY,SYRVE_SCHEMA_REFERENCE}=require('../dist/syrve/syrve-schema-contract.js');
 const {SyrveReadinessService,readinessResponse}=require('../dist/syrve/syrve-readiness.service.js');
 const history=names=>names.map((name,i)=>({id:i+1,timestamp:Number(name.match(/\d{13}$/)[0]),name}));
-test('the committed PostgreSQL catalog contract contains all seven frozen migration references',()=>{
+test('the committed PostgreSQL catalog contract contains all nine frozen migration references',()=>{
   assert.deepEqual(Object.keys(SYRVE_SCHEMA_REFERENCE),SYRVE_SCHEMA_STEPS.map(step=>step.name));
   for(const value of Object.values(SYRVE_SCHEMA_REFERENCE))assert.match(value,/^[0-9a-f]{64}$/);
   assert.doesNotMatch(readFileSync(resolve(__dirname,'../scripts/syrve-readiness-validation.mjs'),'utf8'),/return 'captured'/);
@@ -23,6 +23,25 @@ function facts() {
     data:{tablesUnambiguous:true,integrationCount:1,connected:true,credentials:true,links:1,linksValid:true,
       configurationRevision:'d0000000-0000-4000-8000-000000000001',snapshot:'synthetic',workerRecords:0,state:'valid'}};
 }
+test('the installed 17-row history including durable quota and connection operations is prepared',()=>{
+  const f=facts(),reference=schemaReference(f);
+  f.history=history([
+    ...SYRVE_EXISTING_HISTORY,
+    'CreateSyrveTableLinks2026093000010',
+    'FenceSyrveConfiguration2026093000020',
+    'CreateTableMapIdentities2026093000030',
+    'ProtectCanonicalTableNumbers2026093000040',
+    'CreateSyrveDurableState2026093000050',
+    'CreateSyrveWorkerState2026100100060',
+    'CreateSyrveActivation2026100200070',
+    'CreateSyrveRequestLimits2026100600080',
+    'CreateSyrveOperations2026100700010',
+  ]);
+  assert.equal(f.history.length,17);
+  const report=schemaPreflight(f,reference);
+  assert.equal(report.historyValid,true);assert.equal(report.status,'prepared');
+  assert.equal(report.applicationAvailable,false);assert.deepEqual(report.pending,[]);
+});
 test('verified catalog plus exact existing/fresh migration history produces a reviewable plan, never application approval',()=>{
   const value=facts(),reference=schemaReference(value);
   for(const baseline of [false,true]) {
@@ -48,20 +67,20 @@ test('known post-Syrve banquet migration history remains prepared without joinin
   const report=schemaPreflight(f,reference);
   assert.equal(report.status,'prepared');assert.equal(report.historyValid,true);assert.deepEqual(report.pending,[]);
 });
-test('banquet history after the original six steps permits the later activation step',()=>{
-  for(const baseline of [false,true]) for(const activated of [false,true]) {
-    const f=facts(),reference=schemaReference(f),activation=SYRVE_SCHEMA_STEPS.at(-1);
+test('banquet history after the original six steps permits each later Syrve migration prefix',()=>{
+  for(const baseline of [false,true]) for(let prefix=6;prefix<=SYRVE_SCHEMA_STEPS.length;prefix++) {
+    const f=facts(),reference=schemaReference(f),pending=SYRVE_SCHEMA_STEPS.slice(prefix);
     const names=[...(baseline?['InitialSchemaBaseline2026081300000']:[]),...SYRVE_EXISTING_HISTORY,
-      ...SYRVE_SCHEMA_STEPS.slice(0,-1).map(step=>step.name),...SYRVE_ALLOWED_FOLLOWUP_HISTORY,
-      ...(activated?[activation.name]:[])];
+      ...SYRVE_SCHEMA_STEPS.slice(0,6).map(step=>step.name),...SYRVE_ALLOWED_FOLLOWUP_HISTORY,
+      ...SYRVE_SCHEMA_STEPS.slice(6,prefix).map(step=>step.name)];
     f.history=history(names);
-    if(!activated) for(const key of ['tables','columns','constraints','indexes','triggers']) {
-      f[key]=f[key].filter(row=>!activation.tables.includes(row.table));
+    for(const key of ['tables','columns','constraints','indexes','triggers']) {
+      f[key]=f[key].filter(row=>!pending.some(step=>step.tables.includes(row.table)));
     }
     const report=schemaPreflight(f,reference);
     assert.equal(report.historyValid,true);
-    assert.equal(report.status,activated?'prepared':'plan_requires_review');
-    assert.deepEqual(report.pending,activated?[]:[activation.name]);
+    assert.equal(report.status,pending.length?'plan_requires_review':'prepared');
+    assert.deepEqual(report.pending,pending.map(step=>step.name));
   }
 });
 test('duplicate banquet records and activation before the original six steps still require audit',()=>{
@@ -81,7 +100,7 @@ test('unknown or early post-Syrve history still requires an audit',()=>{
   unknown.history=history([...unknown.history.map(row=>row.name),'UnknownFollowup2026100200999']);
   assert.equal(schemaPreflight(unknown,reference).status,'requires_audit');
   const early=facts(),names=early.history.map(row=>row.name);
-  names.splice(names.length-2,0,SYRVE_ALLOWED_FOLLOWUP_HISTORY[0]);
+  names.splice(names.indexOf('CreateSyrveWorkerState2026100100060'),0,SYRVE_ALLOWED_FOLLOWUP_HISTORY[0]);
   early.history=history(names);
   assert.equal(schemaPreflight(early,reference).status,'requires_audit');
 });
@@ -92,7 +111,25 @@ test('partial objects and applied-but-missing objects cannot be interpreted as p
   assert.equal(schemaPreflight(f,reference).steps.find(step=>step.name==='CreateSyrveWorkerState2026100100060').status,'missing');
   assert.equal(schemaPreflight(f,reference).status,'requires_audit');
 });
-test('legacy prepared-object-free schema produces seven ordered pending steps without adopting a baseline',()=>{
+for(const table of ['syrve_request_limits','syrve_operations']) {
+  test('a recorded '+table+' migration still requires audit when its objects are missing or drifted',()=>{
+    for(const missing of [false,true]) {
+      const f=facts(),reference=schemaReference(f);
+      if(missing) for(const key of ['tables','columns','constraints','indexes','triggers']) f[key]=f[key].filter(row=>row.table!==table);
+      else f.constraints.find(row=>row.table===table).validated=false;
+      const report=schemaPreflight(f,reference);
+      assert.equal(report.historyValid,true);assert.equal(report.status,'requires_audit');
+      assert.equal(report.applicationAvailable,false);
+    }
+  });
+}
+test('reversed quota and operation migration records still require audit',()=>{
+  const f=facts(),reference=schemaReference(f),names=f.history.map(row=>row.name);
+  [names[names.length-2],names[names.length-1]]=[names[names.length-1],names[names.length-2]];
+  f.history=history(names);
+  assert.equal(schemaPreflight(f,reference).status,'requires_audit');
+});
+test('legacy prepared-object-free schema produces nine ordered pending steps without adopting a baseline',()=>{
   const f=facts();for(const key of ['tables','columns','constraints','indexes','functions','triggers']) f[key]=[];
   f.history=history(SYRVE_EXISTING_HISTORY);
   const result=schemaPreflight(f);assert.equal(result.status,'plan_requires_review');
@@ -112,12 +149,15 @@ test('readiness projects only fixed diagnostics and retains unverified order acc
 });
 test('catalog check uses repeatable-read/read-only and fixed catalog SELECTs, with zero HTTP or writes',async(t)=>{
   t.mock.method(globalThis,'fetch',()=>assert.fail('unexpected network'));
-  const queries=[];const source={options:{type:'postgres'},transaction:async(isolation,action)=>{
-    assert.equal(isolation,'REPEATABLE READ');return action({query:async sql=>{queries.push(sql);return [];}});
+  const queries=[],catalogTables=[];const source={options:{type:'postgres'},transaction:async(isolation,action)=>{
+    assert.equal(isolation,'REPEATABLE READ');return action({query:async(sql,parameters)=>{
+      queries.push(sql);catalogTables.push(...(parameters?.[0]||[]));return [];
+    }});
   }};
   const f=await readSyrveSchemaPreflight(source);assert.equal(f.data,null);
   assert.equal(queries[0],'SET TRANSACTION READ ONLY');assert.ok(queries.some(sql=>sql.includes('statement_timeout')));
   assert.ok(queries.every(sql=>/^(SET|SELECT)/.test(sql)));assert.equal(schemaPreflight(f).status,'requires_audit');
+  assert.ok(catalogTables.includes('syrve_request_limits'));assert.ok(catalogTables.includes('syrve_operations'));
 });
 test('database and schema failures expose a fixed Ukrainian diagnostic rather than driver messages',async()=>{
   for(const source of [{options:{type:'postgres',schema:'other'}},{options:{type:'postgres'},transaction:async()=>{throw new Error('private-DB-URL');}}]) {
