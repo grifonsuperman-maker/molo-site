@@ -29,13 +29,15 @@ test('a table rejected after a staff action does not stop applying the other tab
   const captures = links.map(link => ({ linkId: link.id, orderIds: [[]], state: { scope: {
     integrationId: lease.version.id, configurationRevision: lease.version.revision, organizationId: ORG,
     moloTableId: link.moloTableId, syrveTableId: link.syrveTableId } } }));
-  const applied = [];
+  const applied = [], partial = [];
   const store = { claim: async () => ({ status: 'claimed', lease }), captureBatch: async () => captures,
     guardBatch: async () => ({ organizationId: ORG, groups: [] }), release: async () => {},
+    partialFailure: async (_, linkId, code) => partial.push([linkId, code]),
     apply: async (_, capture) => { applied.push(capture.linkId); return { code: capture === captures[0] ? 'SYRVE_LOCAL_STATE_CHANGED' : null }; } };
   const runner = new SyrveWorkerRunner(store, () => assert.fail('unexpected fallback'), async () => captures.map(() => [{ orderIds: [], probe: { checks: {} } }]));
   const result = await runner.run();
   assert.equal(result.status, 'observed'); assert.equal(result.processed, 1); assert.deepEqual(applied, links.map(link => link.id));
+  assert.deepEqual(partial, [[links[0].id, 'SYRVE_LOCAL_STATE_CHANGED']]);
 });
 
 function fixture(t, count = 2, options = {}) {
