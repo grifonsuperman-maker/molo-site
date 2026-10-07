@@ -10,7 +10,7 @@ export async function runSyrveReadinessValidation(env=process.env){
   const require=createRequire(import.meta.url),{DataSource}=require('typeorm');
   const {readSyrveSchemaPreflight,schemaPreflight,schemaReference}=require('../dist/syrve/syrve-schema-preflight.js');
   const {SYRVE_SCHEMA_REFERENCE,SYRVE_SCHEMA_STEPS}=require('../dist/syrve/syrve-schema-contract.js');
-  const {readinessResponse}=require('../dist/syrve/syrve-readiness.service.js');
+  const {readinessResponse,SyrveReadinessService}=require('../dist/syrve/syrve-readiness.service.js');
   const {SyrveSettingsStore}=require('../dist/syrve/syrve-settings.store.js');
   const {SyrveStateStore}=require('../dist/syrve/syrve-state.store.js');
   const {row,probe,id}=require('../test/helpers/syrve-state-fixtures.js');
@@ -138,7 +138,8 @@ export async function runSyrveReadinessValidation(env=process.env){
     await source.query('INSERT INTO public.syrve_table_links(integration_id,organization_id,molo_table_id,syrve_table_id,last_known_number) VALUES ($1,$2,$3,$4,1)',[integrationId,org,tableId,provider]);
     let before=await snapshots(),f=await facts(),r=readinessResponse(f);assert.equal(f.data.linksValid,true);
     assert.equal(r.checks.find(c=>c.key==='connection').status,'ok');assert.equal(r.checks.find(c=>c.key==='state').status,'not_checked');
-    assert.equal(r.activationAvailable,true);assert.equal(r.syncEnabled,false);
+    const ready=await new SyrveReadinessService(source).read();
+    assert.equal(ready.activationAvailable,true);assert.equal(ready.syncEnabled,false);
     assert.deepEqual(await snapshots(),before);assert.doesNotMatch(JSON.stringify(r),/synthetic-cipher|synthetic-iv|synthetic-tag/);
     const states=new SyrveStateStore(source,new SyrveSettingsStore(source));const capture=await states.capture(tableId);
     await states.applyObservation(capture,[{orderIds:[],probe:probe(capture.state.scope,[row(capture.state.scope,id(10))])}]);
