@@ -216,6 +216,25 @@ for(const code of ['SYRVE_AUTH_FAILED','SYRVE_ACCESS_DENIED','SYRVE_RATE_LIMITED
   });
 }
 
+test('partial register outage does not escalate the shared backoff for healthy groups',async()=>{
+  const integrationId=id(700),organizationId=id(701),revision=id(702);
+  const links=[0,1,2].map(n=>({id:id(710+n),integrationId,organizationId,moloTableId:id(720+n),syrveTableId:id(730+n)}));
+  const lease={id:id(740),version:{id:integrationId,revision},links};
+  const captures=links.map(link=>({linkId:link.id,orderIds:[],state:{scope:{integrationId,configurationRevision:revision,
+    organizationId,moloTableId:link.moloTableId,syrveTableId:link.syrveTableId}}}));
+  const calls={apply:[],failure:[],partial:[],release:0};
+  const store={claim:async()=>({status:'claimed',lease}),captureBatch:async()=>captures,
+    guardBatch:async()=>({organizationId,groups:[]}),
+    apply:async(_lease,captured)=>{calls.apply.push(captured.linkId);return {code:null};},
+    failure:async(_lease,linkId,code)=>calls.failure.push([linkId,code]),
+    partialFailure:async(_lease,linkId,code)=>calls.partial.push([linkId,code]),
+    release:async()=>{calls.release++;}};
+  const runner=new SyrveWorkerRunner(store,()=>assert.fail('single-table probe must not run'),async()=>[[],null,null]);
+  assert.deepEqual(await runner.run(),{status:'observed',processed:1,code:'SYRVE_OBSERVATION_UNKNOWN'});
+  assert.deepEqual(calls.apply,[links[0].id]);assert.deepEqual(calls.failure,[]);
+  assert.deepEqual(calls.partial,[[links[1].id,'SYRVE_OBSERVATION_UNKNOWN']]);assert.equal(calls.release,1);
+});
+
 test('unknown/offline/missing answers preserve occupancy and manual suppression',async()=>{
   for(const variant of ['offline','missing','unknown']) {
     const h=prepared(); await h.runner().run(); await h.store.recordStaffAction(h.table,'manual_free'); h.due();

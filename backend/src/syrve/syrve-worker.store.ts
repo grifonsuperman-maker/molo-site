@@ -165,6 +165,17 @@ export class SyrveWorkerStore {
     });
   }
 
+  partialFailure(lease: SyrveWorkerLease, linkId: string, code: SyrveWorkerError) {
+    return this.settings.transaction(lease.version, async (manager, current) => {
+      if (current.entity?.status !== 'connected') throw staleSyrveSettings();
+      if (!(await this.activation.read(current, manager)).enabled) throw staleSyrveSettings();
+      await this.lockedLease(manager, lease);
+      // A partial register outage must remain visible without escalating the
+      // integration-wide backoff and suppressing healthy register groups.
+      await this.record(manager, lease, linkId, 0, code);
+    });
+  }
+
   release(lease: SyrveWorkerLease) {
     // Token compare-and-set cannot clear a lease reacquired after a crash or
     // reconfiguration. Releasing stale work records no error for the new scope.

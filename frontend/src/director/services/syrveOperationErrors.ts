@@ -2,6 +2,7 @@ const CODE_MESSAGES: Readonly<Record<string, string>> = {
   SYRVE_AUTH_FAILED: 'Syrve відхилив дані доступу. Перевірте API-ключ і налаштування підключення.',
   SYRVE_ACCESS_DENIED: 'Syrve не надав права для цієї перевірки.',
   SYRVE_RATE_LIMITED: 'Syrve тимчасово обмежив кількість запитів. Спробуйте пізніше.',
+  SYRVE_RATE_GUARD_UNAVAILABLE: 'Не вдалося перевірити загальний ліміт запитів Syrve. Запит не надіслано, збережений стан не змінено.',
   SYRVE_TIMEOUT: 'Syrve не відповів протягом 12 секунд.',
   SYRVE_UNAVAILABLE: 'Не вдалося встановити захищене з’єднання із Syrve.',
   SYRVE_INVALID_RESPONSE: 'Syrve повернув неочікувану відповідь. Синхронізацію не ввімкнено.',

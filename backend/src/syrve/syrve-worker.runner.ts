@@ -89,7 +89,6 @@ export class SyrveWorkerRunner {
       for (const link of lease.links) {
         linkId = link.id;
         if (unavailable.has(link.id)) {
-          await this.store.failure(lease, link.id, 'SYRVE_OBSERVATION_UNKNOWN');
           skipped = 'SYRVE_OBSERVATION_UNKNOWN';
           continue;
         }
@@ -130,6 +129,14 @@ export class SyrveWorkerRunner {
         if (applied.code === 'SYRVE_LOCAL_STATE_CHANGED' && this.batchProbe) { skipped = applied.code; continue; }
         if (applied.code) return { status: applied.code === 'SYRVE_LOCAL_STATE_CHANGED' ? 'stale' : 'failed', processed, code: applied.code };
         processed++;
+      }
+      if (unavailable.size) {
+        const representative = lease.links.find((link) => unavailable.has(link.id));
+        if (representative) {
+          linkId = representative.id;
+          if (loaded.size) await this.store.partialFailure(lease, representative.id, 'SYRVE_OBSERVATION_UNKNOWN');
+          else await this.store.failure(lease, representative.id, 'SYRVE_OBSERVATION_UNKNOWN');
+        }
       }
       return { status: !processed && skipped ? skipped === 'SYRVE_LOCAL_STATE_CHANGED' ? 'stale' : 'failed' : 'observed',
         processed, ...(skipped ? { code: skipped } : {}) };

@@ -74,6 +74,20 @@ test('credential rotation is rechecked before every request after quota waiting'
   assert.equal(sends, 1); assert.equal((await h.service.read(started.operationId, actor)).status, 'failed');
   await h.service.onApplicationShutdown();
 });
+test('Director role is rechecked before every delayed request', async () => {
+  const h = fixture(); let current = actor, sends = 0;
+  const started = await h.service.start(actor, 'test', async () => {
+    await currentSyrveOperation().beforeRequest(); sends++;
+    current = { ...actor, role: 'waiter' };
+    await currentSyrveOperation().beforeRequest(); sends++;
+  }, async () => current); await flush();
+  assert.equal(sends, 1);
+  const result = await h.service.read(started.operationId, actor);
+  assert.equal(result.status, 'failed');
+  assert.match(result.error.message, /Сесію Директора не підтверджено/);
+  await h.service.onApplicationShutdown();
+});
+
 test('concurrent operation contexts keep their signals and deadlines separate', async () => {
   const a = new AbortController(), b = new AbortController();
   const values = await Promise.all([10, 20].map((deadline, index) => withSyrveOperation({ deadline, signal: index ? b.signal : a.signal }, async () => { await flush(); return currentSyrveOperation().deadline; })));

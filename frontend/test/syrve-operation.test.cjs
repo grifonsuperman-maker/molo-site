@@ -29,3 +29,14 @@ test('failed, foreign and malformed progress cannot report success', async () =>
   await assert.rejects(fixture([{ status: 'done', operationId: 'foreign', result: {} }]).run(), /Недійсний/);
   await assert.rejects(fixture([{ status: 'unexpected', result: {} }]).run(), /Недійсний/);
 });
+
+
+test('request-guard preparation failures keep their safe actionable Director message', () => {
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../src/director/services/syrveOperationErrors.ts'), 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports });
+  const message = 'Не вдалося перевірити загальний ліміт запитів Syrve. Запит не надіслано, збережений стан не змінено.';
+  assert.equal(exports.syrveOperationError({ code: 'SYRVE_RATE_GUARD_UNAVAILABLE', message: 'private-db-detail' }, 'fallback'), message);
+  assert.equal(exports.syrveOperationError({ message }, 'fallback'), message);
+  assert.equal(exports.syrveOperationError({ message: message + ' private-db-detail' }, 'fallback'), 'fallback');
+});

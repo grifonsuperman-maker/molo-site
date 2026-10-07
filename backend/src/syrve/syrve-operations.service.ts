@@ -25,7 +25,7 @@ export class SyrveOperationsService implements OnApplicationShutdown {
     await this.source.query('UPDATE ' + this.table() + " SET status='failed',completed_at=clock_timestamp(),error=$2::jsonb"
       + " WHERE owner_hash=$1 AND status='running' AND (live_until<=clock_timestamp() OR expires_at<=clock_timestamp())", [owner, JSON.stringify(INTERRUPTED)]);
   }
-  async start(actor: AuthUser | undefined, kind: string, action: () => Promise<unknown>, authorize: () => Promise<unknown>) {
+  async start(actor: AuthUser | undefined, kind: string, action: () => Promise<unknown>, authorize: () => Promise<AuthUser>) {
     if (this.stopped) throw new ServiceUnavailableException('Перевірку Syrve перервано. Повторіть дію пізніше.');
     const owner = this.owner(actor), id = randomUUID();
     if (!/^[a-z-]{1,40}$/.test(kind)) throw new ConflictException('Невідома перевірка Syrve.');
@@ -45,7 +45,8 @@ export class SyrveOperationsService implements OnApplicationShutdown {
     const timeout = setTimeout(() => abort.abort(), SYRVE_OPERATION_BUDGET_MS);
     const guard = async () => {
       if (abort.signal.aborted) throw new ConflictException(INTERRUPTED);
-      await authorize();
+      const currentOwner = this.owner(await authorize());
+      if (currentOwner !== owner) throw new ConflictException('Сесію Директора не підтверджено. Увійдіть повторно.');
       const [row] = await this.source.query('SELECT id FROM ' + this.table()
         + " WHERE id=$1 AND owner_hash=$2 AND runner_id=$3 AND status='running' AND live_until>clock_timestamp() AND expires_at>clock_timestamp()", [id, owner, this.runner]);
       if (!row || abort.signal.aborted) throw new ConflictException(INTERRUPTED);
