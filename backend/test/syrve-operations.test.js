@@ -70,7 +70,7 @@ test('credential rotation is rechecked before every request after quota waiting'
   const started = await h.service.start(actor, 'test', async () => {
     await currentSyrveOperation().beforeRequest(); sends++;
     revoked = true; await currentSyrveOperation().beforeRequest(); sends++;
-  }, async () => { if (revoked) throw new ConflictException('Недійсний вхід Директора'); }); await flush();
+  }, async () => { if (revoked) throw new ConflictException('Недійсний вхід Директора'); return actor; }); await flush();
   assert.equal(sends, 1); assert.equal((await h.service.read(started.operationId, actor)).status, 'failed');
   await h.service.onApplicationShutdown();
 });
