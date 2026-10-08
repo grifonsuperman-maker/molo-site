@@ -355,6 +355,38 @@ export default function SyrveIntegrationDock() {
     }
   }
 
+  async function resetBindings() {
+    if (statusLoadState !== 'ready' || busy || loadingTables || changingAutoStatus || status.syncEnabled
+      || !status.settingsPrepared || !status.configurationRevision || status.confirmedLinks < 1) return;
+    const typed = window.prompt(
+      'Скинути ' + status.confirmedLinks + ' зв’язків Syrve та видалити збережений API-ключ? '
+      + 'Перед видаленням буде створено резервну копію в базі. Карта, бронювання і каса не зміняться. '
+      + 'Для підтвердження введіть СКИНУТИ.', '',
+    );
+    if (typed === null) return;
+    if (typed !== 'СКИНУТИ') return setError('Для скидання потрібно точно ввести СКИНУТИ.');
+    if (!window.confirm('Підтвердити скидання саме ' + status.confirmedLinks
+      + ' зв’язків Syrve? Автостатуси мають бути вимкнені. Дію не можна скасувати кнопкою Назад.')) return;
+    const version = ++requestVersion.current;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await syrveApi.resetBindings(status.configurationRevision, status.confirmedLinks);
+      if (version !== requestVersion.current) return;
+      applyStatus(result.integration);
+      window.alert('Зв’язки Syrve скинуто (' + result.removedLinks
+        + '). Копія збережена в базі, ID: ' + result.backupId
+        + '. Тепер можна підключити Syrve знову.');
+      close();
+    } catch (cause: any) {
+      if (version !== requestVersion.current) return;
+      setError(cause?.message || 'Скидання не виконано. Старі зв’язки збережено.');
+      await load();
+    } finally {
+      if (version === requestVersion.current) setBusy(false);
+    }
+  }
+
   const connected = status.status === 'connected';
   const statusUnavailable = statusLoadState !== 'ready';
   const showConnectionSuccess = step === 3 && !statusUnavailable && connected && status.hasCredentials && !status.syncEnabled;
@@ -467,6 +499,19 @@ export default function SyrveIntegrationDock() {
               <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-white/35">Поточне підключення</p><h2 className="mt-1 text-xl font-black">{status.displayName}</h2><p className="mt-2 text-sm text-white/45">{status.organizationName} · {status.apiLoginMasked}</p><p className="mt-1 text-xs text-white/30">Перевірено: {dateTime(status.lastCheckedAt)}</p></div><span className="rounded-full border border-emerald-200/35 bg-emerald-400/10 px-3 py-1 text-xs font-black text-emerald-100">{statusUnavailable ? 'Останній підтверджений стан' : connected ? 'Підключено' : 'Потребує перевірки'}</span></div>
                 <div className="mt-4 grid gap-2 sm:grid-cols-3"><button type="button" disabled={statusUnavailable || busy || loadingTables || changingAutoStatus || status.syncEnabled} onClick={() => void recheck()} className="rounded-2xl border border-cyan-200/35 bg-cyan-400/10 p-3 text-sm font-black text-cyan-100 disabled:opacity-40">Перевірити</button><button type="button" disabled={statusUnavailable || busy || loadingTables || changingAutoStatus || status.syncEnabled} onClick={() => start(true)} className="rounded-2xl border border-amber-200/35 bg-amber-300/10 p-3 text-sm font-black text-amber-100 disabled:opacity-40">Змінити дані</button><button type="button" disabled={statusUnavailable || busy || loadingTables || changingAutoStatus} onClick={() => void disconnect()} className="flex items-center justify-center gap-2 rounded-2xl border border-red-200/35 bg-red-500/10 p-3 text-sm font-black text-red-100 disabled:opacity-40"><Unplug size={16} />Відключити</button></div>
+              </section>
+            )}
+            {!editingConnection && !statusUnavailable && status.confirmedLinks > 0 && (
+              <section className="mt-4 rounded-2xl border border-amber-200/25 p-4 text-sm">
+                <p className="font-bold text-amber-100">Повне перепідключення Syrve</p>
+                <p className="mt-2 text-white/60">Це окрема дія: спочатку зберегти резервну копію зв’язків і історії Syrve в базі,
+                  потім скинути {status.confirmedLinks} зв’язків та видалити API-ключ. Карта столів, бронювання та дії каси не змінюються.</p>
+                <button type="button" disabled={busy || loadingTables || changingAutoStatus || status.syncEnabled || !status.settingsPrepared}
+                  onClick={() => void resetBindings()}
+                  className="mt-3 rounded-xl border border-red-300/40 px-4 py-3 font-bold text-red-100 disabled:opacity-40">
+                  Зберегти копію та скинути зв’язки Syrve
+                </button>
+                {status.syncEnabled && <p className="mt-2 text-amber-100">Спочатку вимкніть автоматичні статуси.</p>}
               </section>
             )}
             {!editingConnection && !statusUnavailable && !status.syncEnabled && <SyrveReadinessPanel key={`${status.configurationRevision}:${busy}:${loadingTables}:${changingAutoStatus}`} configurationRevision={status.configurationRevision} />}
