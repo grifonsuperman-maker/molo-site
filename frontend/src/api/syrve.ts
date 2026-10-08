@@ -66,6 +66,19 @@ export type SyrveOrderDiagnostics = {
   renamingApplied: false;
 };
 
+export type SyrveBillDiagnostics = {
+  configurationRevision: string; organizationId: string; requestedId: string;
+  startedAt: string; checkedAt: string; lookup: 'posId' | 'orderId' | null;
+  found: boolean; statusesApplied: false; bindingsApplied: false;
+  order: {
+    id: string; posId: string | null; timestamp: number;
+    creationStatus: 'Success' | 'InProgress' | 'Error'; number: number | null;
+    status: 'New' | 'Bill' | 'Closed' | 'Deleted' | 'Unknown' | null;
+    terminalGroupId: string | null;
+    tables: { syrveTableId: string; moloTableNumber: string | null }[];
+  } | null;
+};
+
 type SyrveLoadingFlags = { syncEnabled: false; activationAvailable: false; statusesApplied: false; renamingApplied: false; complete: false };
 export type SyrveTableLoadingPreview = SyrveLoadingFlags & {
   configurationRevision: string; organizationId: string; checkedAt: string;
@@ -116,6 +129,8 @@ export const syrveApi = {
   disableAutoStatus: (configurationRevision: string) => api.post<{ configurationRevision: string; checkedAt: string; syncEnabled: false }>('/syrve-integration/disable-auto-status', { configurationRevision }),
   orderDiagnostics: (configurationRevision: string) =>
     syrveOperation<SyrveOrderDiagnostics>('/syrve-integration/orders-diagnostics', { configurationRevision }),
+  billDiagnostics: (configurationRevision: string, orderId: string) =>
+    syrveOperation<SyrveBillDiagnostics>('/syrve-integration/bill-diagnostics', { configurationRevision, orderId }),
   previewTableLoading: (configurationRevision: string) =>
     syrveOperation<SyrveTableLoadingPreview>('/syrve-integration/table-loading-preview', { configurationRevision }),
   loadTables: (configurationRevision: string, confirmationProof: string) =>

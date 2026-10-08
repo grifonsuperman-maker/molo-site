@@ -9,7 +9,7 @@ import { Repository } from 'typeorm';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { LogsService } from '../logs/logs.service';
 import { TableEntity } from '../tables/entities/table.entity';
-import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisionDto,
+import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisionDto, SyrveBillDiagnosticsDto,
   TestSyrveConnectionDto, UpdateSyrveConnectionDto } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
 import { SyrveTableLink } from './entities/syrve-table-link.entity';
@@ -131,6 +131,40 @@ export class SyrveIntegrationService {
   async orderDiagnostics(dto: SyrveRevisionDto) {
     const { observation, posVersions } = await this.probeSavedTables(dto);
     return directorOrderDiagnostics(observation, posVersions);
+  }
+
+  async billDiagnostics(dto: SyrveBillDiagnosticsDto) {
+    const snapshot = await this.checkedRevision(dto), entity = snapshot.entity!;
+    if (entity.status !== 'connected' || !entity.organizationId) {
+      throw new BadRequestException('Спочатку збережіть і перевірте підключення Syrve.');
+    }
+    // Worker ledger/staff status updates do not invalidate a read-only identity
+    // lookup. Credentials, configuration and UUID bindings must remain current.
+    const scope = (saved: SyrveSettingsSnapshot) => JSON.stringify({
+      prepared: saved.prepared, version: settingsVersion(saved),
+      connection: saved.entity && [saved.entity.status, saved.entity.organizationId, saved.entity.apiBaseUrl,
+        saved.entity.apiLoginEncrypted, saved.entity.apiLoginIv, saved.entity.apiLoginAuthTag],
+      links: saved.links.map(link => [link.id, link.integrationId, link.organizationId, link.moloTableId,
+        link.syrveTableId, link.lastKnownNumber]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    });
+    const expected = scope(snapshot);
+    const guard = async () => { if (scope(await this.settings.read()) !== expected) throw staleSyrveSettings(); };
+    const result = await this.client.lookupBill(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId,
+      dto.orderId, guard);
+    const local = await this.tablesRepo.find({ select: { id: true, tableNumber: true } });
+    await guard();
+    const order = result.order;
+    return { configurationRevision: entity.configurationRevision, organizationId: entity.organizationId.toLowerCase(),
+      requestedId: dto.orderId.toLowerCase(), startedAt: result.startedAt, checkedAt: result.checkedAt,
+      lookup: result.lookup, found: Boolean(order), statusesApplied: false, bindingsApplied: false,
+      order: order ? { id: order.id, posId: order.posId, timestamp: order.timestamp, number: order.number,
+        status: order.status, creationStatus: order.creationStatus, terminalGroupId: order.terminalGroupId,
+        tables: order.tableIds.map(syrveTableId => {
+          const links = snapshot.links.filter(link => link.integrationId === entity.id
+            && link.organizationId.toLowerCase() === entity.organizationId!.toLowerCase() && link.syrveTableId.toLowerCase() === syrveTableId);
+          const table = links.length === 1 ? local.find(row => row.id === links[0].moloTableId) : null;
+          return { syrveTableId, moloTableNumber: table?.tableNumber || null };
+        }) } : null };
   }
 
   private requirePrepared(snapshot: SyrveSettingsSnapshot) {

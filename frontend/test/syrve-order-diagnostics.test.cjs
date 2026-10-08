@@ -73,6 +73,7 @@ function dock() {
     organizations: [{ id: ORG, name: 'Збережений ресторан' }, { id: OTHER, name: 'Інший ресторан' }] }) };
   const states = [], refs = [], effects = []; let stateIndex = 0, refIndex = 0, previous;
   const OrderPanel = () => React.createElement('div', { 'data-order-panel': true });
+  const BillPanel = () => React.createElement('div', { 'data-bill-panel': true });
   const ReadinessPanel = () => React.createElement('div', { 'data-readiness-panel': true });
   const LoadingPanel = () => React.createElement('div', { 'data-loading-panel': true });
   const hooks = {
@@ -90,6 +91,7 @@ function dock() {
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText,
     { exports, require: name => name === 'react' ? hooks : name === '../api/syrve' ? { syrveApi: api }
       : name === './SyrveOrderDiagnosticsPanel' ? { __esModule: true, default: OrderPanel }
+      : name === './SyrveBillDiagnosticsPanel' ? { __esModule: true, default: BillPanel }
       : name === './SyrveReadinessPanel' ? { __esModule: true, default: ReadinessPanel }
       : name === './SyrveTableLoadingPanel' ? { __esModule: true, default: LoadingPanel }
       : name === './SyrveAutoStatusPanel' ? { __esModule: true, default: () => null }
@@ -98,8 +100,17 @@ function dock() {
   const render = () => { stateIndex = 0; refIndex = 0; const tree = exports.default(); while (effects.length) effects.shift()(); return tree; };
   const click = predicate => { const target = find(render(), predicate); assert.ok(target, 'actual dock control must exist'); target.props.onClick(); };
   return { render, click, saved, panels: tree => ({ order: find(tree, node => node.type === OrderPanel),
-    readiness: find(tree, node => node.type === ReadinessPanel), loading: find(tree, node => node.type === LoadingPanel) }) };
+    bill: find(tree, node => node.type === BillPanel), readiness: find(tree, node => node.type === ReadinessPanel), loading: find(tree, node => node.type === LoadingPanel) }) };
 }
+
+test('bill lookup stays available with automatic synchronization enabled and uses only the saved connection', async () => {
+  const h = dock(); h.saved.syncEnabled = true; h.render(); await flush();
+  h.click(node => node.type === 'button' && node.props['aria-label']?.startsWith('Syrve підключено')); await flush();
+  const tree = h.render(), panel = h.panels(tree).bill;
+  assert.ok(panel); assert.equal(panel.props.connectionReady, true); assert.equal(panel.props.configurationRevision, VERSION);
+  assert.equal(panel.props.organizationId, ORG); assert.equal(panel.props.busy, false);
+  assert.equal(h.panels(tree).order, null); assert.equal(h.saved.syncEnabled, true);
+});
 
 test('the actual API adapter sends only saved configuration revision to the Director diagnostics route', async () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/api/syrve.ts'), 'utf8');

@@ -27,6 +27,7 @@ import {
 import SyrveCatalogPreviewPanel from './SyrveCatalogPreviewPanel';
 import SyrveReadinessPanel from './SyrveReadinessPanel';
 import SyrveOrderDiagnosticsPanel from './SyrveOrderDiagnosticsPanel';
+import SyrveBillDiagnosticsPanel from './SyrveBillDiagnosticsPanel';
 import SyrveTableLoadingPanel from './SyrveTableLoadingPanel';
 import SyrveAutoStatusPanel from './SyrveAutoStatusPanel';
 import { syrveOperationError } from './services/syrveOperationErrors';
@@ -476,6 +477,9 @@ export default function SyrveIntegrationDock() {
               organizationId={status.organizationId} linkedTables={status.confirmedLinks}
               connectionReady={connected && status.hasCredentials && status.settingsPrepared} busy={busy || changingAutoStatus}
               onBusyChange={working => { setLoadingTables(working); if (working) { setError(null); setNotice(null); } }} onFinished={finishTableLoading} />}
+            {!editingConnection && !statusUnavailable && <SyrveBillDiagnosticsPanel configurationRevision={status.configurationRevision}
+              organizationId={status.organizationId} connectionReady={connected && status.hasCredentials && status.settingsPrepared}
+              busy={busy || loadingTables || changingAutoStatus} />}
             {!editingConnection && !statusUnavailable && <SyrveAutoStatusPanel configurationRevision={status.configurationRevision} organizationId={status.organizationId}
               linkedTables={status.confirmedLinks} syncEnabled={status.syncEnabled} busy={busy || loadingTables}
               onBusyChange={working => { setChangingAutoStatus(working); if (working) { setError(null); setNotice(null); } }} onFinished={finishAutoStatus} />}

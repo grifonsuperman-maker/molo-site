@@ -8,6 +8,7 @@ import {
   EnableSyrveAutoStatusDto,
   DisconnectSyrveDto,
   SyrveRevisionDto,
+  SyrveBillDiagnosticsDto,
   PreviewSyrveTablesDto,
   TestSyrveConnectionDto,
   UpdateSyrveConnectionDto,
@@ -101,6 +102,13 @@ export class SyrveIntegrationController {
   @Header('Cache-Control', 'no-store')
   orderDiagnostics(@Body() dto: SyrveRevisionDto) {
     return this.service.orderDiagnostics(dto);
+  }
+
+  @Post('bill-diagnostics')
+  @SyrveAsync('bill-diagnostics')
+  @Header('Cache-Control', 'no-store')
+  billDiagnostics(@Body() dto: SyrveBillDiagnosticsDto) {
+    return this.service.billDiagnostics(dto);
   }
 
   @Post('table-loading-preview')

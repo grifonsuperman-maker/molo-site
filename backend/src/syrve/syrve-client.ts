@@ -7,7 +7,8 @@ import { TABLE_ORDER_BATCH_SIZE, ORDER_ID_BATCH_SIZE, MAX_CATALOG_TABLES, MAX_RE
   type ObservationCheckName, type SyrveObservedOrder, type SyrveOrderProbe } from './syrve-order-observer';
 import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, loadingPlanFingerprint, tableLoadingPlan, tableLoadingCatalogPlan, parseLoadingCorrelation, SyrveLoadingValidationError, type TableLoadingPlan } from './syrve-table-loading';
 import { assessSyrvePosVersion } from './syrve-pos-version';
-import { currentSyrveOperation, syrveObservationDeadline } from './syrve-operation-context';
+import { currentSyrveOperation, syrveObservationDeadline, withSyrveOperation } from './syrve-operation-context';
+import { parseSyrveBill } from './syrve-bill-diagnostics';
 import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs } from './syrve-request-limiter';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
@@ -343,6 +344,38 @@ export class SyrveClient {
   async checkOrganizations(apiBaseUrl: string, apiLogin: string) {
     const { baseUrl, organizations, diagnostics } = await this.openSession(apiBaseUrl, apiLogin);
     return { baseUrl, organizations, diagnostics };
+  }
+
+  async lookupBill(apiBaseUrl: string, apiLogin: string, organizationId: string, requestedId: string,
+    beforeRead: () => Promise<void>) {
+    if (!UUID.test(organizationId) || !UUID.test(requestedId) || typeof beforeRead !== 'function') {
+      throw new BadRequestException('Вкажіть коректний UUID рахунку Syrve.');
+    }
+    this.normalizeBaseUrl(apiBaseUrl);
+    organizationId = organizationId.toLowerCase(); requestedId = requestedId.toLowerCase();
+    const parent = currentSyrveOperation(), deadline = syrveObservationDeadline();
+    const guard = async () => { await parent?.beforeRequest?.(); await beforeRead(); };
+    const startedAt = new Date().toISOString();
+    // Compose the saved-connection fence with the Director JWT/operation guard
+    // before every quota claim, including authentication and organization reads.
+    return withSyrveOperation({ deadline, signal: parent?.signal || new AbortController().signal, beforeRequest: guard }, async () => {
+      await guard();
+      const budget: RequestBudget = { remaining: 4 };
+      const session = await this.batchSession(apiBaseUrl, apiLogin, { deadline, requestBudget: budget });
+      if (!session.organizations.some(org => org.id === organizationId)) throw new SyrveClientException('SYRVE_ORGANIZATION_UNAVAILABLE');
+      for (const lookup of ['posId', 'orderId'] as const) {
+        const payload = await this.postJson(session.rateKey, '/api/1/order/by_id', {
+          organizationIds: [organizationId], orderIds: lookup === 'orderId' ? [requestedId] : null,
+          posOrderIds: lookup === 'posId' ? [requestedId] : null,
+        }, session.token, deadline, undefined, budget);
+        let order;
+        try { order = parseSyrveBill(payload, organizationId, requestedId, lookup); }
+        catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
+        await guard();
+        if (order) return { startedAt, checkedAt: new Date().toISOString(), lookup, order };
+      }
+      return { startedAt, checkedAt: new Date().toISOString(), lookup: null, order: null };
+    });
   }
 
   async getCatalog(apiBaseUrl: string, apiLogin: string, organizationId: string): Promise<SyrveCatalog> {
