@@ -21,6 +21,12 @@ export function staleSyrveSettings() {
 export class SyrveSettingsStore {
   constructor(private readonly dataSource: DataSource) {}
 
+  table(name: string) {
+    const options = this.dataSource.options;
+    const schema = options.type === 'postgres' ? options.schema || 'public' : 'public';
+    return '"' + schema.replace(/"/g, '""') + '"."' + name.replace(/"/g, '""') + '"';
+  }
+
   async read(manager = this.dataSource.manager, lock = false): Promise<SyrveSettingsSnapshot> {
     const options = this.dataSource.options;
     const schemaName = options?.type === 'postgres' ? options.schema || 'public' : 'public';

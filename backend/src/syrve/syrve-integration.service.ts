@@ -1,5 +1,5 @@
 import {
-  BadGatewayException, BadRequestException, ConflictException, Injectable,
+  BadGatewayException, BadRequestException, ConflictException, ForbiddenException, Injectable,
   InternalServerErrorException, Logger, ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -9,7 +9,7 @@ import { Repository } from 'typeorm';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { LogsService } from '../logs/logs.service';
 import { TableEntity } from '../tables/entities/table.entity';
-import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisionDto, SyrveBillDiagnosticsDto, SyrvePosBillDiagnosticsDto,
+import { ConnectSyrveDto, DisconnectSyrveDto, ResetSyrveBindingsDto, PreviewSyrveTablesDto, SyrveRevisionDto, SyrveBillDiagnosticsDto, SyrvePosBillDiagnosticsDto,
   TestSyrveConnectionDto, UpdateSyrveConnectionDto } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
 import { SyrveTableLink } from './entities/syrve-table-link.entity';
@@ -356,6 +356,50 @@ export class SyrveIntegrationService {
       };
     });
     return this.response(updated);
+  }
+
+
+  // A separate Director-confirmed clean reconnect. Removes only Syrve bindings and
+  // their dependent Syrve observation history; never changes physical tables.
+  async resetBindings(dto: ResetSyrveBindingsDto, actor?: AuthUser) {
+    if (actor?.role !== 'owner' || typeof actor.sub !== 'string' || !actor.sub
+      || !Number.isSafeInteger(actor.directorSessionVersion)) {
+      throw new ForbiddenException('Підтвердіть постійний вхід Директора перед скиданням зв’язків.');
+    }
+    const before = await this.checkedRevision(dto);
+    const result = await this.settings.transaction(settingsVersion(before), async (manager, current) => {
+      await this.activation.requireDisabled(current, manager);
+      const entity = current.entity;
+      if (!entity || !current.links.length || current.links.length !== dto.expectedLinks
+        || current.links.some(link => link.integrationId !== entity.id)) {
+        throw new ConflictException('Кількість або склад зв’язків змінилися. Оновіть сторінку перед скиданням.');
+      }
+      const table = (name: string) => this.settings.table(name);
+      // Do not delete a link while an older Syrve worker still owns its lease.
+      const [worker] = await manager.query('SELECT lease_until > clock_timestamp() AS busy FROM '
+        + table('syrve_worker_state') + ' WHERE integration_id=$1 FOR UPDATE', [entity.id]);
+      if (worker?.busy) throw new ConflictException('Каса ще перевіряється. Дочекайтеся завершення та повторіть скидання.');
+      // requireDisabled() above validates the full current activation consent,
+      // not just a stale enabled flag. The settings lock fences concurrent consent.
+
+      // FK cascades retire only Syrve sync states and order versions for these links.
+      // The entire reset, including credential revocation, is one transaction.
+      const deleted = await manager.query('DELETE FROM ' + table('syrve_table_links')
+        + ' WHERE integration_id=$1 RETURNING id', [entity.id]);
+      if (deleted.length !== current.links.length) throw staleSyrveSettings();
+      const next = await this.settings.save(manager, { ...entity,
+        apiLoginEncrypted: null, apiLoginIv: null, apiLoginAuthTag: null, apiLoginMasked: null,
+        organizationId: null, organizationName: null, status: 'not_connected',
+        lastCheckedAt: new Date(), connectedAt: null, lastError: null });
+      await manager.query('UPDATE ' + table('syrve_sync_activation')
+        + ' SET enabled=false,configuration_revision=$2,bindings_fingerprint=NULL,loading_plan=NULL,'
+        + 'actor_hash=NULL,consented_at=NULL WHERE integration_id=$1', [entity.id, next.configurationRevision]);
+      return { removedLinks: deleted.length,
+        integration: this.response({ prepared: true, entity: next, links: [] }) };
+    });
+    await this.audit('Директор скинув зв’язки Syrve для чистого перепідключення', {
+      removedLinks: result.removedLinks, actorName: actor.name || null, actorRole: actor.role });
+    return { message: 'Зв’язки та історію станів Syrve скинуто. Підключіть API заново.', ...result };
   }
 
   async disconnect(dto: DisconnectSyrveDto, actor?: AuthUser) {

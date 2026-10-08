@@ -7,6 +7,7 @@ import {
   ConfirmSyrveTableLoadingDto,
   EnableSyrveAutoStatusDto,
   DisconnectSyrveDto,
+  ResetSyrveBindingsDto,
   SyrveRevisionDto,
   SyrveBillDiagnosticsDto,
   SyrvePosBillDiagnosticsDto,
@@ -149,6 +150,12 @@ export class SyrveIntegrationController {
   @Patch()
   updateMetadata(@Body() dto: UpdateSyrveConnectionDto) {
     return this.service.updateMetadata(dto);
+  }
+
+  @Post('reset-bindings')
+  @Header('Cache-Control', 'no-store')
+  resetBindings(@Body() dto: ResetSyrveBindingsDto, @Req() request: { user?: AuthUser }) {
+    return this.service.resetBindings(dto, request.user);
   }
 
   @Post('disconnect')

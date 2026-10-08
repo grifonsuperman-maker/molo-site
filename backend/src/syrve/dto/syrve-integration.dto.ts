@@ -9,6 +9,9 @@ import {
   ArrayMaxSize,
   ValidateNested,
   IsBoolean,
+  IsInt,
+  Min,
+  Max,
   Equals,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -101,6 +104,22 @@ export class DisconnectSyrveDto extends SyrveRevisionDto {
   @IsString()
   @MaxLength(300)
   reason?: string;
+}
+
+// Destructive operation: a Director must acknowledge the exact current link count.
+export class ResetSyrveBindingsDto extends SyrveRevisionDto {
+  @IsBoolean()
+  @Equals(true)
+  confirmed: boolean;
+
+  @IsString()
+  @Equals('СКИНУТИ')
+  confirmationText: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  expectedLinks: number;
 }
 
 export class EnableSyrveAutoStatusDto extends ConfirmSyrveTableLoadingDto {
