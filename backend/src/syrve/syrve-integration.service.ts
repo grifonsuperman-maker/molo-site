@@ -3,7 +3,7 @@ import {
   InternalServerErrorException, Logger, ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createCipheriv, randomBytes, randomUUID } from 'crypto';
+import { createCipheriv, randomBytes } from 'crypto';
 import { Repository } from 'typeorm';
 
 import type { AuthUser } from '../auth/types/auth-user.type';
@@ -359,8 +359,8 @@ export class SyrveIntegrationService {
   }
 
 
-  // A distinct Director-only operation; ordinary disconnect must keep its legacy behavior.
-  // Snapshot and deletion commit atomically. Never save an API login in the backup.
+  // A separate Director-confirmed clean reconnect. Removes only Syrve bindings and
+  // their dependent Syrve observation history; never changes physical tables.
   async resetBindings(dto: ResetSyrveBindingsDto, actor?: AuthUser) {
     if (actor?.role !== 'owner' || typeof actor.sub !== 'string' || !actor.sub
       || !Number.isSafeInteger(actor.directorSessionVersion)) {
@@ -375,7 +375,7 @@ export class SyrveIntegrationService {
         throw new ConflictException('Кількість або склад зв’язків змінилися. Оновіть сторінку перед скиданням.');
       }
       const table = (name: string) => this.settings.table(name);
-      // An already-running Syrve request cannot be retired by clearing its link mid-lease.
+      // Do not delete a link while an older Syrve worker still owns its lease.
       const [worker] = await manager.query('SELECT lease_until > clock_timestamp() AS busy FROM '
         + table('syrve_worker_state') + ' WHERE integration_id=$1 FOR UPDATE', [entity.id]);
       if (worker?.busy) throw new ConflictException('Каса ще перевіряється. Дочекайтеся завершення та повторіть скидання.');
@@ -383,29 +383,11 @@ export class SyrveIntegrationService {
         + ' WHERE integration_id=$1 FOR UPDATE', [entity.id]);
       if (activation?.enabled) throw new ConflictException('Спочатку вимкніть автоматичні статуси Syrve.');
 
-      const snapshotSql = [
-        "SELECT jsonb_build_object(",
-        "'links', (SELECT COALESCE(jsonb_agg(to_jsonb(l) ORDER BY l.id), '[]'::jsonb) FROM " + table('syrve_table_links') + " l WHERE l.integration_id=$1),",
-        "'sync_states', (SELECT COALESCE(jsonb_agg(to_jsonb(s) ORDER BY s.link_id), '[]'::jsonb) FROM " + table('syrve_table_sync_states') + " s WHERE s.integration_id=$1),",
-        "'order_versions', (SELECT COALESCE(jsonb_agg(to_jsonb(v) ORDER BY v.link_id, v.order_id), '[]'::jsonb) FROM " + table('syrve_order_versions') + " v JOIN " + table('syrve_table_sync_states') + " s ON s.link_id=v.link_id WHERE s.integration_id=$1),",
-        "'activation', (SELECT COALESCE(jsonb_agg(to_jsonb(a)), '[]'::jsonb) FROM " + table('syrve_sync_activation') + " a WHERE a.integration_id=$1),",
-        "'worker', (SELECT COALESCE(jsonb_agg(to_jsonb(w)), '[]'::jsonb) FROM " + table('syrve_worker_state') + " w WHERE w.integration_id=$1)",
-        ") AS snapshot",
-      ].join('');
-      const [saved] = await manager.query(snapshotSql, [entity.id]);
-      if (!Array.isArray(saved?.snapshot?.links) || saved.snapshot.links.length !== current.links.length) {
-        throw staleSyrveSettings();
-      }
-      const backupId = randomUUID();
-      await manager.query('INSERT INTO ' + table('syrve_binding_reset_backups')
-        + ' (id,integration_id,organization_id,configuration_revision,link_count,snapshot)'
-        + ' VALUES ($1,$2,$3,$4,$5,$6::jsonb)',
-      [backupId, entity.id, entity.organizationId, entity.configurationRevision,
-        current.links.length, JSON.stringify(saved.snapshot)]);
+      // FK cascades retire only Syrve sync states and order versions for these links.
+      // The entire reset, including credential revocation, is one transaction.
       const deleted = await manager.query('DELETE FROM ' + table('syrve_table_links')
         + ' WHERE integration_id=$1 RETURNING id', [entity.id]);
       if (deleted.length !== current.links.length) throw staleSyrveSettings();
-
       const next = await this.settings.save(manager, { ...entity,
         apiLoginEncrypted: null, apiLoginIv: null, apiLoginAuthTag: null, apiLoginMasked: null,
         organizationId: null, organizationName: null, status: 'not_connected',
@@ -413,13 +395,12 @@ export class SyrveIntegrationService {
       await manager.query('UPDATE ' + table('syrve_sync_activation')
         + ' SET enabled=false,configuration_revision=$2,bindings_fingerprint=NULL,loading_plan=NULL,'
         + 'actor_hash=NULL,consented_at=NULL WHERE integration_id=$1', [entity.id, next.configurationRevision]);
-      return { backupId, removedLinks: deleted.length,
+      return { removedLinks: deleted.length,
         integration: this.response({ prepared: true, entity: next, links: [] }) };
     });
-    await this.audit('Директор зберіг резервну копію та скинув зв’язки Syrve', {
-      backupId: result.backupId, removedLinks: result.removedLinks, actorName: actor.name || null,
-      actorRole: actor.role });
-    return { message: 'Зв’язки Syrve скинуто; резервну копію збережено у базі', ...result };
+    await this.audit('Директор скинув зв’язки Syrve для чистого перепідключення', {
+      removedLinks: result.removedLinks, actorName: actor.name || null, actorRole: actor.role });
+    return { message: 'Зв’язки та історію станів Syrve скинуто. Підключіть API заново.', ...result };
   }
 
   async disconnect(dto: DisconnectSyrveDto, actor?: AuthUser) {
