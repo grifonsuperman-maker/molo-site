@@ -127,16 +127,17 @@ export default function SyrveBillDiagnosticsPanel({ configurationRevision, organ
   const [failed, setFailed] = useState(false);
   const [registers, setRegisters] = useState<SyrveBillRegisters | null>(null);
   const [terminalGroupId, setTerminalGroupId] = useState('');
-  const [confirmed, setConfirmed] = useState(false);
+  const [confirmationScope, setConfirmationScope] = useState<string | null>(null);
   const [action, setAction] = useState<'read' | 'registers' | 'pos'>('read');
   const [failureMessage, setFailureMessage] = useState('');
   const request = useRef<{ version: number; pending: boolean; scope?: string }>({ version: 0, pending: false });
+  const confirmation = useRef<string | null>(null);
   const requestedId = input.trim().toLowerCase();
   const ready = connectionReady && !busy && uuid(configurationRevision) && uuid(organizationId);
   const eligible = ready && uuid(requestedId);
   useEffect(() => {
     request.current.version++; request.current.pending = false;
-    setReport(null); setLoading(false); setFailed(false); setFailureMessage(''); setConfirmed(false);
+    setReport(null); setLoading(false); setFailed(false); setFailureMessage(''); clearConfirmation();
     const scope = JSON.stringify([configurationRevision, organizationId, connectionReady, busy]);
     if (request.current.scope !== scope) {
       request.current.scope = scope; setRegisters(null); setTerminalGroupId('');
@@ -146,11 +147,15 @@ export default function SyrveBillDiagnosticsPanel({ configurationRevision, organ
   const currentRegisters = ready && registers?.configurationRevision === configurationRevision
     && registers.organizationId === organizationId?.toLowerCase() ? registers : null;
   const selected = currentRegisters?.registers.find(item => item.id === terminalGroupId);
+  const posScope = eligible && selected?.loadingSupported
+    ? JSON.stringify([configurationRevision, organizationId?.toLowerCase(), requestedId, terminalGroupId]) : null;
+  const confirmed = posScope !== null && confirmationScope === posScope;
+  function clearConfirmation() { confirmation.current = null; setConfirmationScope(null); }
   async function checkBill(kind: 'read' | 'registers' | 'pos' = 'read') {
     if (!eligible || request.current.pending || !configurationRevision || !organizationId) return;
-    if (kind === 'pos' && (!confirmed || !selected?.loadingSupported)) return;
+    if (kind === 'pos' && (!confirmed || confirmation.current !== posScope || !selected?.loadingSupported)) return;
     const version = ++request.current.version;
-    request.current.pending = true; setReport(null); setFailed(false); setFailureMessage(''); setLoading(true); setAction(kind); setConfirmed(false);
+    request.current.pending = true; setReport(null); setFailed(false); setFailureMessage(''); setLoading(true); setAction(kind); clearConfirmation();
     try {
       if (kind === 'registers') {
         const value = await syrveApi.billRegisters(configurationRevision);
@@ -177,7 +182,7 @@ export default function SyrveBillDiagnosticsPanel({ configurationRevision, organ
     <h2 className="font-black">Перевірка окремого рахунку</h2>
     <p className="mt-2 text-sm text-white/55">Знайдіть рахунок за UUID, щоб перевірити, до яких столів його прив’язано у Syrve.</p>
     <label className="mt-3 block text-sm">UUID рахунку
-      <input value={input} onChange={event => setInput(event.target.value)} disabled={!ready || loading}
+      <input value={input} onChange={event => { clearConfirmation(); setInput(event.target.value); }} disabled={!ready || loading}
         autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={38}
         className="mt-2 block w-full rounded-xl border border-white/15 bg-black/30 p-3 font-mono text-xs" />
     </label>
@@ -190,7 +195,7 @@ export default function SyrveBillDiagnosticsPanel({ configurationRevision, organ
         className="mt-3 rounded-xl border border-white/20 px-4 py-3 text-sm font-bold disabled:opacity-40">Обрати касу для перевірки</button>
       {currentRegisters && <>
         <label className="mt-3 block text-sm">Касова група
-          <select value={terminalGroupId} onChange={event => setTerminalGroupId(event.target.value)} disabled={loading}
+          <select value={terminalGroupId} onChange={event => { clearConfirmation(); setTerminalGroupId(event.target.value); }} disabled={loading}
             className="mt-2 block w-full rounded-xl border border-white/15 bg-neutral-900 p-3">
             <option value="">Оберіть касову групу</option>
             {currentRegisters.registers.map(item => <option key={item.id} value={item.id} disabled={!item.loadingSupported}>
@@ -204,7 +209,10 @@ export default function SyrveBillDiagnosticsPanel({ configurationRevision, organ
         {!currentRegisters.registers.some(item => item.loadingSupported)
           && <p className="mt-2 text-sm text-amber-100">Немає активної касової групи з підтвердженою підтримкою завантаження рахунків.</p>}
         <label className="mt-3 flex items-start gap-2 text-sm">
-          <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} disabled={loading || !selected?.loadingSupported} />
+          <input type="checkbox" checked={confirmed} onChange={event => {
+            const scope = event.target.checked ? posScope : null;
+            confirmation.current = scope; setConfirmationScope(scope);
+          }} disabled={loading || !selected?.loadingSupported} />
           Підтверджую перевірку цього UUID рахунку в обраній касовій групі.
         </label>
         <button type="button" disabled={!eligible || loading || !confirmed || !selected?.loadingSupported} onClick={() => void checkBill('pos')}

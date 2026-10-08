@@ -53,12 +53,14 @@ function mounted(api) {
     useRef(value) { const i = refIndex++; if (!(i in refs)) refs[i] = { current: value }; return refs[i]; },
     useEffect(effect, deps) { if (JSON.stringify(previous) !== JSON.stringify(deps)) { previous = deps; effects.push(effect); } },
   } }).default;
-  const render = changes => {
+  const flushEffects = () => { while (effects.length) { cleanup?.(); cleanup = effects.shift()(); } };
+  const render = (changes, runEffects = true) => {
     props = { ...props, ...changes }; stateIndex = 0; refIndex = 0; const tree = component(props);
-    while (effects.length) { cleanup?.(); cleanup = effects.shift()(); }
+    if (runEffects) flushEffects();
     return tree;
   };
-  return { states, render, input: value => { find(render(), 'input').props.onChange({ target: { value } }); render(); },
+  return { states, render, renderBeforeEffects: changes => render(changes, false), flushEffects,
+    input: value => { find(render(), 'input').props.onChange({ target: { value } }); render(); },
     click: () => find(render(), 'button').props.onClick(), unmount: () => cleanup?.(),
     prepare: () => button(render(), 'Обрати касу для перевірки').props.onClick(),
     consent: value => all(render(), 'input').find(node => node.props.type === 'checkbox').props.onChange({ target: { checked: value } }),
@@ -176,7 +178,7 @@ test('registers require explicit preparation and POS loading requires fresh sele
   assert.deepEqual(calls[1], ['load', VERSION, POS, OTHER]); assert.equal(calls.length, 2);
   response.resolve(loadedReport()); await flush();
   assert.equal(h.states[1].posLoading.requestAccepted, true); assert.equal(h.states[1].order.sum, 80); assert.equal(h.states[2], false);
-  assert.equal(h.states[6], false, 'an accepted attempt consumes consent');
+  assert.equal(h.states[6], null, 'an accepted attempt consumes consent');
 });
 
 test('unsupported or unknown registers cannot load a bill and several supported registers require selection', async () => {
@@ -209,7 +211,48 @@ test('late register preparation and POS reports cannot survive scope, candidate,
 test('scope, register and candidate changes consume the earlier loading consent', async () => {
   const h = mounted({ billRegisters: async () => registers(), posBillDiagnostics: () => assert.fail('expired consent must not dispatch') });
   h.input(POS); h.prepare(); await flush(); h.render(); h.consent(true); h.input(CLOUD); h.loadPos();
-  assert.equal(h.states[6], false); h.consent(true); h.choose(TABLE); h.loadPos(); assert.equal(h.states[6], false);
+  assert.equal(h.states[6], null); h.consent(true); h.choose(TABLE); h.loadPos(); assert.equal(h.states[6], null);
+});
+
+test('changing a bill or register revokes consent before rendering and before passive effects run', async () => {
+  for (const field of ['bill', 'register']) {
+    const calls = [];
+    const h = mounted({ billRegisters: async () => ({ ...registers(), registers: [...registers().registers,
+      { id: TABLE, name: 'Інша каса', posVersion: '9.0.0', loadingSupported: true }] }),
+      posBillDiagnostics: async (version, id, group) => {
+        calls.push([version, id, group]);
+        const value = loadedReport(); value.requestedId = id; value.order.posId = id;
+        value.order.terminalGroupId = group; value.posLoading.terminalGroupId = group;
+        return value;
+      } });
+    h.input(POS); h.prepare(); await flush(); h.render(); h.choose(OTHER); h.consent(true);
+    const before = h.render();
+    const oldLoad = button(before, 'Завантажити з каси та перевірити');
+    assert.equal(oldLoad.props.disabled, false);
+    if (field === 'bill') find(before, 'input').props.onChange({ target: { value: CLOUD } });
+    else find(before, 'select').props.onChange({ target: { value: TABLE } });
+    // The old render's handler must already be invalid, even before React commits.
+    oldLoad.props.onClick(); assert.deepEqual(calls, []);
+    const changed = h.renderBeforeEffects();
+    const checkbox = all(changed, 'input').find(node => node.props.type === 'checkbox');
+    const newLoad = button(changed, 'Завантажити з каси та перевірити');
+    assert.equal(checkbox.props.checked, false); assert.equal(newLoad.props.disabled, true);
+    newLoad.props.onClick(); await flush(); assert.deepEqual(calls, []);
+    h.flushEffects(); h.render(); h.consent(true); h.loadPos(); await flush();
+    assert.deepEqual(calls, [[VERSION, field === 'bill' ? CLOUD : POS, field === 'register' ? TABLE : OTHER]]);
+    assert.equal(h.states[6], null);
+  }
+});
+
+test('changing away and back before effects cannot restore an earlier POS confirmation', async () => {
+  const h = mounted({ billRegisters: async () => registers(), posBillDiagnostics: () => assert.fail('revoked consent must not revive') });
+  h.input(POS); h.prepare(); await flush(); h.render(); h.consent(true);
+  let tree = h.renderBeforeEffects(); find(tree, 'input').props.onChange({ target: { value: CLOUD } });
+  tree = h.renderBeforeEffects(); find(tree, 'input').props.onChange({ target: { value: POS } });
+  tree = h.renderBeforeEffects();
+  assert.equal(all(tree, 'input').find(node => node.props.type === 'checkbox').props.checked, false);
+  const load = button(tree, 'Завантажити з каси та перевірити'); assert.equal(load.props.disabled, true);
+  load.props.onClick(); await flush();
 });
 
 test('register metadata has bounded identities and versions and strips provider extras', () => {
