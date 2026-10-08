@@ -162,6 +162,11 @@ export const syrveApi = {
     syrveOperation<{ message: string; integration: SyrveIntegrationStatus }>(
       '/syrve-integration/recheck', { configurationRevision },
     ),
+  resetBindings: (configurationRevision: string, expectedLinks: number) =>
+    api.post<{ message: string; backupId: string; removedLinks: number; integration: SyrveIntegrationStatus }>(
+      '/syrve-integration/reset-bindings',
+      { configurationRevision, expectedLinks, confirmed: true, confirmationText: 'СКИНУТИ' },
+    ),
   disconnect: (configurationRevision: string, reason?: string) =>
     api.post<{ message: string; integration: SyrveIntegrationStatus }>(
       '/syrve-integration/disconnect',
