@@ -10,28 +10,22 @@ const LINK = { id: '33333333-4444-4555-8666-777777777777', integrationId: ID,
 const ACTOR = { sub: 'director', directorSessionVersion: 1, role: 'owner' };
 const REQUEST = { configurationRevision: REVISION, expectedLinks: 1, confirmed: true, confirmationText: 'СКИНУТИ' };
 
-function setup({ failBackup = false, workerBusy = false, activationEnabled = false } = {}) {
+function setup({ failDelete = false, workerBusy = false, activationEnabled = false } = {}) {
   const queries = [];
   const entity = { id: ID, configurationRevision: REVISION, organizationId: ID,
     apiBaseUrl: 'https://api-eu.syrve.live', apiLoginEncrypted: 'private-ciphertext', apiLoginIv: 'iv',
     apiLoginAuthTag: 'tag', apiLoginMasked: '***', status: 'connected' };
   const snapshot = { prepared: true, entity, links: [LINK] };
-  const stored = { links: [{ id: LINK.id, integration_id: ID, molo_table_id: LINK.moloTableId }],
-    sync_states: [{ link_id: LINK.id }], order_versions: [{ link_id: LINK.id }],
-    activation: [], worker: [] };
-  let savedCopy, savedEntity;
+  let savedEntity;
   const manager = {
     query: async (sql, params = []) => {
       queries.push({ sql, params });
       if (sql.startsWith('SELECT lease_until')) return [{ busy: workerBusy }];
       if (sql.startsWith('SELECT enabled')) return [{ enabled: activationEnabled }];
-      if (sql.startsWith('SELECT jsonb_build_object(')) return [{ snapshot: stored }];
-      if (sql.startsWith('INSERT INTO ') && sql.includes('syrve_binding_reset_backups')) {
-        if (failBackup) throw new Error('backup DB unavailable');
-        savedCopy = JSON.parse(params[5]);
-        return [];
+      if (sql.startsWith('DELETE FROM ')) {
+        if (failDelete) throw new Error('database delete failed');
+        return [{ id: LINK.id }];
       }
-      if (sql.startsWith('DELETE FROM ')) return [{ id: LINK.id }];
       return [];
     },
   };
@@ -51,37 +45,34 @@ function setup({ failBackup = false, workerBusy = false, activationEnabled = fal
   const service = new SyrveIntegrationService(settings,
     { create: async (...args) => logs.push(args) }, {},
     {}, { requireDisabled: async () => {} });
-  return { service, queries, logs, entity, saved: () => savedCopy, next: () => savedEntity };
+  return { service, queries, logs, next: () => savedEntity };
 }
 
-test('clean reconnect snapshots links, durable order ledger and activation before deletion, then clears only API access', async () => {
+test('clean reconnect deletes only Syrve links and clears credentials in one settings transaction', async () => {
   const h = setup();
   const response = await h.service.resetBindings(REQUEST, ACTOR);
   const sql = h.queries.map(row => row.sql);
-  const backup = sql.findIndex(value => value.startsWith('INSERT INTO ') && value.includes('syrve_binding_reset_backups'));
-  const deletion = sql.findIndex(value => value.startsWith('DELETE FROM '));
-  assert.ok(backup >= 0 && deletion > backup);
-  assert.equal(h.saved().links.length, 1);
-  assert.equal(h.saved().sync_states.length, 1);
-  assert.equal(h.saved().order_versions.length, 1);
-  assert.ok(!JSON.stringify(h.saved()).includes('private-ciphertext'));
+  assert.equal(sql.filter(value => value.startsWith('DELETE FROM ')).length, 1);
+  assert.match(sql.find(value => value.startsWith('DELETE FROM ')), /syrve_table_links/);
+  assert.ok(!sql.some(value => /DELETE FROM .*tables(?!_)/.test(value)));
+  assert.ok(!sql.some(value => /syrve_binding_reset_backups/.test(value)));
+  assert.ok(sql.some(value => /UPDATE .*syrve_sync_activation/.test(value)));
   assert.equal(h.next().apiLoginEncrypted, null);
   assert.equal(h.next().organizationId, null);
+  assert.equal(h.next().status, 'not_connected');
   assert.equal(response.removedLinks, 1);
   assert.equal(response.integration.confirmedLinks, 0);
   assert.equal(response.integration.hasCredentials, false);
-  assert.match(response.backupId, /^[0-9a-f-]{36}$/);
   assert.equal(h.logs.length, 1);
 });
 
-test('failure to store the backup never starts deleting live Syrve links', async () => {
-  const h = setup({ failBackup: true });
-  await assert.rejects(h.service.resetBindings(REQUEST, ACTOR), /backup DB unavailable/);
-  assert.ok(!h.queries.some(row => row.sql.startsWith('DELETE FROM ')));
+test('failed link deletion does not clear saved API credentials', async () => {
+  const h = setup({ failDelete: true });
+  await assert.rejects(h.service.resetBindings(REQUEST, ACTOR), /database delete failed/);
   assert.equal(h.next(), undefined);
 });
 
-test('reset rejects a stale link count, active worker lease, enabled auto statuses and non-Director session', async () => {
+test('reset rejects stale count, active worker lease, enabled auto statuses, and non-Director session', async () => {
   for (const [config, input, actor] of [
     [{}, { ...REQUEST, expectedLinks: 36 }, ACTOR],
     [{ workerBusy: true }, REQUEST, ACTOR],
