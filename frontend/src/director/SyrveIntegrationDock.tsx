@@ -158,7 +158,9 @@ export default function SyrveIntegrationDock() {
     const value = await load();
     if (version !== requestVersion.current) return;
     setBusy(false);
-    if (value && !value.hasCredentials) start();
+    // Keep existing first-connection flow, but surface the Director's reset
+    // when credentials are absent and confirmed links still exist.
+    if (value && !value.hasCredentials && value.confirmedLinks === 0) start();
   }
 
   useEffect(() => {
@@ -510,6 +512,10 @@ export default function SyrveIntegrationDock() {
                   className="mt-3 rounded-xl border border-red-300/40 px-4 py-3 font-bold text-red-100 disabled:opacity-40">
                   Скинути прив’язки Syrve та підключити заново
                 </button>
+                {!status.hasCredentials && <button type="button" disabled={busy || loadingTables || changingAutoStatus || status.syncEnabled}
+                  onClick={() => start()} className="mt-3 block text-left text-sm font-bold text-cyan-100/75 underline disabled:opacity-40">
+                  Підключити Syrve без скидання прив’язок
+                </button>}
                 {status.syncEnabled && <p className="mt-2 text-amber-100">Спочатку вимкніть автоматичні статуси.</p>}
               </section>
             )}
