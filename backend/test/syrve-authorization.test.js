@@ -16,7 +16,7 @@ const { AuthService } = require('../dist/auth/auth.service.js');
 
 test('real JWT and role guards protect every Syrve route from non-Directors', async (t) => {
   let serviceCalls = 0;
-  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'orderDiagnostics', 'connect', 'recheck', 'updateMetadata', 'disconnect']
+  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'orderDiagnostics', 'billDiagnostics', 'connect', 'recheck', 'updateMetadata', 'disconnect']
     .map((method) => [method, async () => { serviceCalls++; return { syncEnabled: false }; }]));
   const module = await Test.createTestingModule({
     controllers: [SyrveIntegrationController],
@@ -47,7 +47,8 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     apiBaseUrl: input.apiBaseUrl, apiLogin: input.apiLogin }], ['POST', '/connect', input],
     ['POST', '/tables-preview', { displayName: input.displayName, apiBaseUrl: input.apiBaseUrl,
       apiLogin: input.apiLogin, organizationId: input.organizationId }],
-    ['POST', '/orders-observation', revision], ['POST', '/orders-diagnostics', revision], ['POST', '/recheck', revision],
+    ['POST', '/orders-observation', revision], ['POST', '/orders-diagnostics', revision],
+    ['POST', '/bill-diagnostics', { ...revision, orderId: input.organizationId }], ['POST', '/recheck', revision],
     ['POST','/table-loading-preview',revision], ['POST','/table-loading',{...revision,confirmationProof:input.confirmationProof,confirmed:true}],
     ['PATCH', '', { displayName: 'MOLO', ...revision }], ['POST', '/disconnect', revision]];
   for (const [method, path, body] of routes) {
@@ -61,7 +62,7 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
       await response.text();
       assert.equal(response.status, expected, `${method} ${path} for ${role}`);
       assert.equal(serviceCalls - before, role === 'owner' ? 1 : 0);
-      if (['/tables-preview', '/orders-observation','/orders-diagnostics','/readiness','/table-loading-preview','/table-loading','/auto-status','/auto-status-preview','/enable-auto-status','/disable-auto-status'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
+      if (['/tables-preview', '/orders-observation','/orders-diagnostics','/bill-diagnostics','/readiness','/table-loading-preview','/table-loading','/auto-status','/auto-status-preview','/enable-auto-status','/disable-auto-status'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
     }
   }
   const before = serviceCalls;
@@ -83,6 +84,10 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     ['/orders-diagnostics', { ...revision, tableIds: [input.organizationId] }],
     ['/orders-diagnostics', { ...revision, orderIds: [input.organizationId] }],
     ['/orders-diagnostics', { ...revision, apiLogin: 'caller-supplied-secret' }],
+    ['/bill-diagnostics', {}], ['/bill-diagnostics', revision],
+    ['/bill-diagnostics', { ...revision, orderId: '53389' }],
+    ['/bill-diagnostics', { ...revision, orderId: input.organizationId, organizationId: input.organizationId }],
+    ['/bill-diagnostics', { ...revision, orderId: input.organizationId, apiLogin: 'caller-supplied-secret' }],
     ['/disable-auto-status',{}],['/disable-auto-status',{...revision,enabled:true}],
     ['/auto-status-preview',{...revision,visibilityVerified:true}],['/enable-auto-status',{...revision,confirmed:true,confirmationProof:input.confirmationProof,tableIds:[input.organizationId]}],
     ['/enable-auto-status',{...revision,confirmed:false,confirmationProof:input.confirmationProof}],

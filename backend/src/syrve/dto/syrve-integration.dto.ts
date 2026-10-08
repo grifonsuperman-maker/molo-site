@@ -68,6 +68,11 @@ export class SyrveRevisionDto {
   configurationRevision: string;
 }
 
+export class SyrveBillDiagnosticsDto extends SyrveRevisionDto {
+  @IsUUID('all')
+  orderId: string;
+}
+
 export class ConfirmSyrveTableLoadingDto extends SyrveRevisionDto {
   @IsString()
   @MinLength(40)
