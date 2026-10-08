@@ -16,8 +16,10 @@ const { AuthService } = require('../dist/auth/auth.service.js');
 
 test('real JWT and role guards protect every Syrve route from non-Directors', async (t) => {
   let serviceCalls = 0;
+  let lastPosRequest;
   const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'orderDiagnostics', 'billDiagnostics', 'billRegisters', 'posBillDiagnostics', 'connect', 'recheck', 'updateMetadata', 'disconnect']
     .map((method) => [method, async () => { serviceCalls++; return { syncEnabled: false }; }]));
+  service.posBillDiagnostics = async dto => { serviceCalls++; lastPosRequest = dto; return { syncEnabled: false }; };
   const module = await Test.createTestingModule({
     controllers: [SyrveIntegrationController],
     providers: [{ provide: SyrveIntegrationService, useValue: service },
@@ -42,6 +44,8 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
   const input = { displayName: 'MOLO', apiBaseUrl: 'https://api-eu.syrve.live', apiLogin: 'test-only-login',
     organizationId: '11111111-2222-4333-8444-555555555555', organizationName: 'MOLO', confirmationProof: 'test-confirmation-proof'.repeat(3), pairs: [] };
   const revision = { configurationRevision: '11111111-2222-4333-8444-555555555555' };
+  // Syrve register IDs can have a non-RFC variant, as in the live API catalogue.
+  const registerGuid = 'a1111111-b222-5333-0444-c55555555555';
   const routes = [['GET','/operations/11111111-2222-4333-8444-555555555555',null],['GET','/auto-status',null],['POST','/auto-status-preview',revision],
     ['POST','/enable-auto-status',{...revision,confirmationProof:input.confirmationProof,confirmed:true}],['POST','/disable-auto-status',revision],['GET', '', null], ['GET','/readiness',null], ['POST', '/test', { displayName: input.displayName,
     apiBaseUrl: input.apiBaseUrl, apiLogin: input.apiLogin }], ['POST', '/connect', input],
@@ -51,6 +55,8 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     ['POST', '/bill-diagnostics', { ...revision, orderId: input.organizationId }], ['POST', '/recheck', revision],
     ['POST', '/bill-registers', revision],
     ['POST', '/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId: input.organizationId, confirmed: true }],
+    ['POST', '/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId: registerGuid, confirmed: true }],
+    ['POST', '/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId: registerGuid.toUpperCase(), confirmed: true }],
     ['POST','/table-loading-preview',revision], ['POST','/table-loading',{...revision,confirmationProof:input.confirmationProof,confirmed:true}],
     ['PATCH', '', { displayName: 'MOLO', ...revision }], ['POST', '/disconnect', revision]];
   for (const [method, path, body] of routes) {
@@ -64,6 +70,12 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
       await response.text();
       assert.equal(response.status, expected, `${method} ${path} for ${role}`);
       assert.equal(serviceCalls - before, role === 'owner' ? 1 : 0);
+      if (path === '/bill-loading-diagnostics' && role === 'owner') {
+        assert.equal(lastPosRequest.terminalGroupId, body.terminalGroupId);
+        assert.equal(lastPosRequest.orderId, body.orderId);
+        assert.equal(lastPosRequest.configurationRevision, body.configurationRevision);
+        assert.equal(lastPosRequest.confirmed, true);
+      }
       if (['/tables-preview', '/orders-observation','/orders-diagnostics','/bill-diagnostics','/bill-registers','/bill-loading-diagnostics','/readiness','/table-loading-preview','/table-loading','/auto-status','/auto-status-preview','/enable-auto-status','/disable-auto-status'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
     }
   }
@@ -97,6 +109,10 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
       { confirmed: true, terminalGroupId: input.organizationId, tableIds: [input.organizationId] },
       { confirmed: true, terminalGroupId: input.organizationId, apiLogin: 'caller-supplied-secret' },
     ].map(extra => ['/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, ...extra }]),
+    ...[null, 5437575, '5437575', '', ' ' + registerGuid, registerGuid + '\n',
+      '{' + registerGuid + '}', registerGuid.replace(/-/g, ''), registerGuid.slice(1),
+      registerGuid.replace('a', 'z'), { id: registerGuid }, [registerGuid],
+    ].map(terminalGroupId => ['/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId, confirmed: true }]),
     ['/disable-auto-status',{}],['/disable-auto-status',{...revision,enabled:true}],
     ['/auto-status-preview',{...revision,visibilityVerified:true}],['/enable-auto-status',{...revision,confirmed:true,confirmationProof:input.confirmationProof,tableIds:[input.organizationId]}],
     ['/enable-auto-status',{...revision,confirmed:false,confirmationProof:input.confirmationProof}],
