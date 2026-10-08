@@ -360,13 +360,13 @@ export default function SyrveIntegrationDock() {
       || !status.settingsPrepared || !status.configurationRevision || status.confirmedLinks < 1) return;
     const typed = window.prompt(
       'Скинути ' + status.confirmedLinks + ' зв’язків Syrve та видалити збережений API-ключ? '
-      + 'Перед видаленням буде створено резервну копію в базі. Карта, бронювання і каса не зміняться. '
+      + 'Прив’язки та історія Syrve будуть видалені без відновлення. Карта, бронювання і каса не зміняться. '
       + 'Для підтвердження введіть СКИНУТИ.', '',
     );
     if (typed === null) return;
     if (typed !== 'СКИНУТИ') return setError('Для скидання потрібно точно ввести СКИНУТИ.');
     if (!window.confirm('Підтвердити скидання саме ' + status.confirmedLinks
-      + ' зв’язків Syrve? Автостатуси мають бути вимкнені. Дію не можна скасувати кнопкою Назад.')) return;
+      + ' зв’язків Syrve? Автостатуси мають бути вимкнені. Старі зв’язки та історію Syrve відновити буде неможливо.')) return;
     const version = ++requestVersion.current;
     setBusy(true);
     setError(null);
@@ -375,8 +375,7 @@ export default function SyrveIntegrationDock() {
       if (version !== requestVersion.current) return;
       applyStatus(result.integration);
       window.alert('Зв’язки Syrve скинуто (' + result.removedLinks
-        + '). Копія збережена в базі, ID: ' + result.backupId
-        + '. Тепер можна підключити Syrve знову.');
+        + '). Тепер можна підключити Syrve знову.');
       close();
     } catch (cause: any) {
       if (version !== requestVersion.current) return;
@@ -504,12 +503,12 @@ export default function SyrveIntegrationDock() {
             {!editingConnection && !statusUnavailable && status.confirmedLinks > 0 && (
               <section className="mt-4 rounded-2xl border border-amber-200/25 p-4 text-sm">
                 <p className="font-bold text-amber-100">Повне перепідключення Syrve</p>
-                <p className="mt-2 text-white/60">Це окрема дія: спочатку зберегти резервну копію зв’язків і історії Syrve в базі,
-                  потім скинути {status.confirmedLinks} зв’язків та видалити API-ключ. Карта столів, бронювання та дії каси не змінюються.</p>
+                <p className="mt-2 text-white/60">Буде безповоротно видалено {status.confirmedLinks} прив’язок та історію станів Syrve,
+                  а також поточний API-ключ. Карта столів, бронювання та дії каси не змінюються.</p>
                 <button type="button" disabled={busy || loadingTables || changingAutoStatus || status.syncEnabled || !status.settingsPrepared}
                   onClick={() => void resetBindings()}
                   className="mt-3 rounded-xl border border-red-300/40 px-4 py-3 font-bold text-red-100 disabled:opacity-40">
-                  Зберегти копію та скинути зв’язки Syrve
+                  Скинути прив’язки Syrve та підключити заново
                 </button>
                 {status.syncEnabled && <p className="mt-2 text-amber-100">Спочатку вимкніть автоматичні статуси.</p>}
               </section>
