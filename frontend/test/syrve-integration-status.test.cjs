@@ -492,7 +492,7 @@ test('explicit confirmed disconnect still updates the saved server state', async
 });
 
 test('newly saved connection retains its summary after a failed refresh and shows the recovered consent', async () => {
-  const disconnected = saved({ hasCredentials: false, status: 'not_connected' });
+  const disconnected = saved({ hasCredentials: false, status: 'not_connected', confirmedLinks: 0 });
   let connections = 0;
   const h = mounted([disconnected, disconnected, unavailable, saved({ syncEnabled: true })], {
     test: async () => ({ apiBaseUrl: 'https://api-eu.syrve.live', organizations: [{ id: ORG, name: 'Ресторан MOLO' }] }),
