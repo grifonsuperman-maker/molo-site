@@ -163,7 +163,7 @@ export const syrveApi = {
       '/syrve-integration/recheck', { configurationRevision },
     ),
   resetBindings: (configurationRevision: string, expectedLinks: number) =>
-    api.post<{ message: string; backupId: string; removedLinks: number; integration: SyrveIntegrationStatus }>(
+    api.post<{ message: string; removedLinks: number; integration: SyrveIntegrationStatus }>(
       '/syrve-integration/reset-bindings',
       { configurationRevision, expectedLinks, confirmed: true, confirmationText: 'СКИНУТИ' },
     ),
