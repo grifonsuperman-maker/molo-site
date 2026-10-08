@@ -10,7 +10,8 @@ const LINK = { id: '33333333-4444-4555-8666-777777777777', integrationId: ID,
 const ACTOR = { sub: 'director', directorSessionVersion: 1, role: 'owner' };
 const REQUEST = { configurationRevision: REVISION, expectedLinks: 1, confirmed: true, confirmationText: 'СКИНУТИ' };
 
-function setup({ failDelete = false, workerBusy = false, activationEnabled = false } = {}) {
+function setup({ failDelete = false, workerBusy = false, activationEnabled = false,
+  activationRevision = REVISION } = {}) {
   const queries = [];
   const entity = { id: ID, configurationRevision: REVISION, organizationId: ID,
     apiBaseUrl: 'https://api-eu.syrve.live', apiLoginEncrypted: 'private-ciphertext', apiLoginIv: 'iv',
@@ -21,7 +22,7 @@ function setup({ failDelete = false, workerBusy = false, activationEnabled = fal
     query: async (sql, params = []) => {
       queries.push({ sql, params });
       if (sql.startsWith('SELECT lease_until')) return [{ busy: workerBusy }];
-      if (sql.startsWith('SELECT enabled')) return [{ enabled: activationEnabled }];
+      if (sql.startsWith('SELECT enabled')) return [{ enabled: activationEnabled, configuration_revision: activationRevision }];
       if (sql.startsWith('DELETE FROM ')) {
         if (failDelete) throw new Error('database delete failed');
         return [{ id: LINK.id }];
@@ -64,6 +65,15 @@ test('clean reconnect deletes only Syrve links and clears credentials in one set
   assert.equal(response.integration.confirmedLinks, 0);
   assert.equal(response.integration.hasCredentials, false);
   assert.equal(h.logs.length, 1);
+});
+
+test('reset accepts stale enabled activation row after disconnect revision rotation', async () => {
+  const staleRevision = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
+  const h = setup({ activationEnabled: true, activationRevision: staleRevision });
+  const response = await h.service.resetBindings(REQUEST, ACTOR);
+  assert.equal(response.removedLinks, 1);
+  assert.equal(response.integration.confirmedLinks, 0);
+  assert.ok(h.queries.some(row => row.sql.includes('SELECT enabled, configuration_revision')));
 });
 
 test('failed link deletion does not clear saved API credentials', async () => {
