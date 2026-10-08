@@ -9,6 +9,7 @@ import {
   DisconnectSyrveDto,
   SyrveRevisionDto,
   SyrveBillDiagnosticsDto,
+  SyrvePosBillDiagnosticsDto,
   PreviewSyrveTablesDto,
   TestSyrveConnectionDto,
   UpdateSyrveConnectionDto,
@@ -109,6 +110,20 @@ export class SyrveIntegrationController {
   @Header('Cache-Control', 'no-store')
   billDiagnostics(@Body() dto: SyrveBillDiagnosticsDto) {
     return this.service.billDiagnostics(dto);
+  }
+
+  @Post('bill-registers')
+  @SyrveAsync('bill-registers')
+  @Header('Cache-Control', 'no-store')
+  billRegisters(@Body() dto: SyrveRevisionDto) {
+    return this.service.billRegisters(dto);
+  }
+
+  @Post('bill-loading-diagnostics')
+  @SyrveAsync('bill-loading-diagnostics')
+  @Header('Cache-Control', 'no-store')
+  posBillDiagnostics(@Body() dto: SyrvePosBillDiagnosticsDto) {
+    return this.service.posBillDiagnostics(dto);
   }
 
   @Post('table-loading-preview')

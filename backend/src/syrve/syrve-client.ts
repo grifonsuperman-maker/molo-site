@@ -8,7 +8,7 @@ import { TABLE_ORDER_BATCH_SIZE, ORDER_ID_BATCH_SIZE, MAX_CATALOG_TABLES, MAX_RE
 import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, loadingPlanFingerprint, tableLoadingPlan, tableLoadingCatalogPlan, parseLoadingCorrelation, SyrveLoadingValidationError, type TableLoadingPlan } from './syrve-table-loading';
 import { assessSyrvePosVersion } from './syrve-pos-version';
 import { currentSyrveOperation, syrveObservationDeadline, withSyrveOperation } from './syrve-operation-context';
-import { parseSyrveBill } from './syrve-bill-diagnostics';
+import { parseSyrveBill, type SyrveBillReadResult, type SyrveBillRegister } from './syrve-bill-diagnostics';
 import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs } from './syrve-request-limiter';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
@@ -346,35 +346,112 @@ export class SyrveClient {
     return { baseUrl, organizations, diagnostics };
   }
 
-  async lookupBill(apiBaseUrl: string, apiLogin: string, organizationId: string, requestedId: string,
-    beforeRead: () => Promise<void>) {
-    if (!UUID.test(organizationId) || !UUID.test(requestedId) || typeof beforeRead !== 'function') {
+  private async withBillScope<T>(apiBaseUrl: string, apiLogin: string, organizationId: string,
+    beforeRead: () => Promise<void>, requests: number,
+    action: (session: SyrveSession, deadline: number, budget: RequestBudget, guard: () => Promise<void>) => Promise<T>) {
+    if (!UUID.test(organizationId) || typeof beforeRead !== 'function') {
       throw new BadRequestException('Вкажіть коректний UUID рахунку Syrve.');
     }
     this.normalizeBaseUrl(apiBaseUrl);
-    organizationId = organizationId.toLowerCase(); requestedId = requestedId.toLowerCase();
+    organizationId = organizationId.toLowerCase();
     const parent = currentSyrveOperation(), deadline = syrveObservationDeadline();
     const guard = async () => { await parent?.beforeRequest?.(); await beforeRead(); };
-    const startedAt = new Date().toISOString();
     // Compose the saved-connection fence with the Director JWT/operation guard
     // before every quota claim, including authentication and organization reads.
     return withSyrveOperation({ deadline, signal: parent?.signal || new AbortController().signal, beforeRequest: guard }, async () => {
       await guard();
-      const budget: RequestBudget = { remaining: 4 };
+      const budget: RequestBudget = { remaining: requests };
       const session = await this.batchSession(apiBaseUrl, apiLogin, { deadline, requestBudget: budget });
       if (!session.organizations.some(org => org.id === organizationId)) throw new SyrveClientException('SYRVE_ORGANIZATION_UNAVAILABLE');
-      for (const lookup of ['posId', 'orderId'] as const) {
-        const payload = await this.postJson(session.rateKey, '/api/1/order/by_id', {
-          organizationIds: [organizationId], orderIds: lookup === 'orderId' ? [requestedId] : null,
-          posOrderIds: lookup === 'posId' ? [requestedId] : null,
-        }, session.token, deadline, undefined, budget);
-        let order;
-        try { order = parseSyrveBill(payload, organizationId, requestedId, lookup); }
-        catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
-        await guard();
-        if (order) return { startedAt, checkedAt: new Date().toISOString(), lookup, order };
+      return action(session, deadline, budget, guard);
+    });
+  }
+
+  private async readBill(session: SyrveSession, organizationId: string, requestedId: string, startedAt: string,
+    deadline: number, budget: RequestBudget, guard: () => Promise<void>, posOnly = false): Promise<SyrveBillReadResult> {
+    for (const lookup of (posOnly ? ['posId'] : ['posId', 'orderId']) as ('posId' | 'orderId')[]) {
+      const payload = await this.postJson(session.rateKey, '/api/1/order/by_id', {
+        organizationIds: [organizationId], orderIds: lookup === 'orderId' ? [requestedId] : null,
+        posOrderIds: lookup === 'posId' ? [requestedId] : null,
+      }, session.token, deadline, undefined, budget);
+      let order;
+      try { order = parseSyrveBill(payload, organizationId, requestedId, lookup); }
+      catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
+      await guard();
+      if (order) return { startedAt, checkedAt: new Date().toISOString(), lookup, order };
+    }
+    return { startedAt, checkedAt: new Date().toISOString(), lookup: null, order: null };
+  }
+
+  async lookupBill(apiBaseUrl: string, apiLogin: string, organizationId: string, requestedId: string,
+    beforeRead: () => Promise<void>): Promise<SyrveBillReadResult> {
+    if (!UUID.test(requestedId)) throw new BadRequestException('Вкажіть коректний UUID рахунку Syrve.');
+    organizationId = organizationId.toLowerCase(); requestedId = requestedId.toLowerCase();
+    const startedAt = new Date().toISOString();
+    return this.withBillScope(apiBaseUrl, apiLogin, organizationId, beforeRead, 4,
+      (session, deadline, budget, guard) => this.readBill(session, organizationId, requestedId, startedAt, deadline, budget, guard));
+  }
+
+  private async activeBillRegisters(session: SyrveSession, organizationId: string, deadline: number,
+    budget: RequestBudget): Promise<SyrveBillRegister[]> {
+    try {
+      const groups = parseTerminalGroups(await this.postJson(session.rateKey, '/api/1/terminal_groups', {
+        organizationIds: [organizationId], includeDisabled: false,
+      }, session.token, deadline, undefined, budget), organizationId, true);
+      return groups.active.map(group => ({ id: group.id, name: group.name, posVersion: group.posVersion || null,
+        loadingSupported: assessSyrvePosVersion(group.posVersion).initialization === 'supported' }));
+    } catch (error) {
+      if (error instanceof SyrveCatalogValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+      throw error;
+    }
+  }
+
+  async billRegisters(apiBaseUrl: string, apiLogin: string, organizationId: string, beforeRead: () => Promise<void>) {
+    organizationId = organizationId.toLowerCase();
+    return this.withBillScope(apiBaseUrl, apiLogin, organizationId, beforeRead, 3, async (session, deadline, budget, guard) => {
+      const registers = await this.activeBillRegisters(session, organizationId, deadline, budget);
+      await guard();
+      return { checkedAt: new Date().toISOString(), registers };
+    });
+  }
+
+  async loadAndLookupBill(apiBaseUrl: string, apiLogin: string, organizationId: string, requestedId: string,
+    terminalGroupId: string, beforeRead: () => Promise<void>): Promise<SyrveBillReadResult> {
+    if (!UUID.test(requestedId) || !UUID.test(terminalGroupId)) {
+      throw new BadRequestException('Вкажіть коректні UUID рахунку та касової групи Syrve.');
+    }
+    organizationId = organizationId.toLowerCase(); requestedId = requestedId.toLowerCase(); terminalGroupId = terminalGroupId.toLowerCase();
+    const startedAt = new Date().toISOString();
+    return this.withBillScope(apiBaseUrl, apiLogin, organizationId, beforeRead, 6, async (session, deadline, budget, guard) => {
+      // Independent of the table map: fresh registered POS identities/versions
+      // fence a single explicit Director attempt, never a scan of all registers.
+      const registers = await this.activeBillRegisters(session, organizationId, deadline, budget);
+      const group = registers.find(item => item.id === terminalGroupId);
+      if (!group?.loadingSupported) throw new BadRequestException('Обрана касова група недоступна або її версія не підтримує завантаження рахунків.');
+      let alive;
+      try {
+        alive = parsePosAvailability(await this.postJson(session.rateKey, '/api/1/terminal_groups/is_alive', {
+          organizationIds: [organizationId], terminalGroupIds: [terminalGroupId],
+        }, session.token, deadline, undefined, budget), organizationId, [terminalGroupId]);
+      } catch (error) {
+        if (error instanceof SyrveOrderValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+        throw error;
       }
-      return { startedAt, checkedAt: new Date().toISOString(), lookup: null, order: null };
+      if (!alive[0].isAlive) throw new BadRequestException('Обрана касова група зараз не відповідає. Завантаження рахунку не виконано.');
+      let correlationId;
+      try {
+        correlationId = parseLoadingCorrelation(await this.postJson(session.rateKey, '/api/1/order/init_by_posOrder', {
+          organizationId, terminalGroupId, posOrderIds: [requestedId],
+        }, session.token, deadline, undefined, budget));
+      } catch (error) {
+        if (error instanceof SyrveLoadingValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+        throw error;
+      }
+      await guard();
+      // A loading acknowledgement is not occupancy/closure evidence. Read only
+      // the POS selector; no Cloud fallback can validate a guessed QR identity.
+      const result = await this.readBill(session, organizationId, requestedId, startedAt, deadline, budget, guard, true);
+      return { ...result, posLoading: { terminalGroupId, terminalGroupName: group.name, correlationId, requestAccepted: true } };
     });
   }
 

@@ -70,13 +70,19 @@ export type SyrveBillDiagnostics = {
   configurationRevision: string; organizationId: string; requestedId: string;
   startedAt: string; checkedAt: string; lookup: 'posId' | 'orderId' | null;
   found: boolean; statusesApplied: false; bindingsApplied: false;
+  posLoading?: { terminalGroupId: string; terminalGroupName: string; correlationId: string; requestAccepted: true };
   order: {
     id: string; posId: string | null; timestamp: number;
-    creationStatus: 'Success' | 'InProgress' | 'Error'; number: number | null;
+    creationStatus: 'Success' | 'InProgress' | 'Error'; number: number | null; sum?: number | null;
     status: 'New' | 'Bill' | 'Closed' | 'Deleted' | 'Unknown' | null;
     terminalGroupId: string | null;
     tables: { syrveTableId: string; moloTableNumber: string | null }[];
   } | null;
+};
+
+export type SyrveBillRegisters = {
+  configurationRevision: string; organizationId: string; checkedAt: string;
+  registers: { id: string; name: string; posVersion: string | null; loadingSupported: boolean }[];
 };
 
 type SyrveLoadingFlags = { syncEnabled: false; activationAvailable: false; statusesApplied: false; renamingApplied: false; complete: false };
@@ -131,6 +137,10 @@ export const syrveApi = {
     syrveOperation<SyrveOrderDiagnostics>('/syrve-integration/orders-diagnostics', { configurationRevision }),
   billDiagnostics: (configurationRevision: string, orderId: string) =>
     syrveOperation<SyrveBillDiagnostics>('/syrve-integration/bill-diagnostics', { configurationRevision, orderId }),
+  billRegisters: (configurationRevision: string) =>
+    syrveOperation<SyrveBillRegisters>('/syrve-integration/bill-registers', { configurationRevision }),
+  posBillDiagnostics: (configurationRevision: string, orderId: string, terminalGroupId: string) =>
+    syrveOperation<SyrveBillDiagnostics>('/syrve-integration/bill-loading-diagnostics', { configurationRevision, orderId, terminalGroupId, confirmed: true }),
   previewTableLoading: (configurationRevision: string) =>
     syrveOperation<SyrveTableLoadingPreview>('/syrve-integration/table-loading-preview', { configurationRevision }),
   loadTables: (configurationRevision: string, confirmationProof: string) =>

@@ -22,8 +22,12 @@ function report() {
 function load(deps = {}) {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/director/SyrveBillDiagnosticsPanel.tsx'), 'utf8');
   const exports = {};
+  const errors = {};
+  const errorSource = fs.readFileSync(path.resolve(__dirname, '../src/director/services/syrveOperationErrors.ts'), 'utf8');
+  vm.runInNewContext(ts.transpileModule(errorSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: errors });
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText,
     { exports, require: name => name === '../api/syrve' ? { syrveApi: deps.api || {} }
+      : name === './services/syrveOperationErrors' ? errors
       : name === 'react' ? deps.react || React : require(name) });
   return exports;
 }
@@ -33,6 +37,11 @@ function find(node, type) {
   for (const child of [node.props?.children].flat(Infinity)) { const found = find(child, type); if (found) return found; }
   return null;
 }
+function all(node, type) {
+  if (!node || typeof node !== 'object') return [];
+  return [...(node.type === type ? [node] : []), ...[node.props?.children].flat(Infinity).flatMap(child => all(child, type))];
+}
+const button = (tree, label) => all(tree, 'button').find(node => node.props.children === label);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 function deferred() { let resolve; const promise = new Promise(yes => resolve = yes); return { promise, resolve }; }
 function mounted(api) {
@@ -44,13 +53,29 @@ function mounted(api) {
     useRef(value) { const i = refIndex++; if (!(i in refs)) refs[i] = { current: value }; return refs[i]; },
     useEffect(effect, deps) { if (JSON.stringify(previous) !== JSON.stringify(deps)) { previous = deps; effects.push(effect); } },
   } }).default;
-  const render = changes => {
+  const flushEffects = () => { while (effects.length) { cleanup?.(); cleanup = effects.shift()(); } };
+  const render = (changes, runEffects = true) => {
     props = { ...props, ...changes }; stateIndex = 0; refIndex = 0; const tree = component(props);
-    while (effects.length) { cleanup?.(); cleanup = effects.shift()(); }
+    if (runEffects) flushEffects();
     return tree;
   };
-  return { states, render, input: value => { find(render(), 'input').props.onChange({ target: { value } }); render(); },
-    click: () => find(render(), 'button').props.onClick(), unmount: () => cleanup?.() };
+  return { states, render, renderBeforeEffects: changes => render(changes, false), flushEffects,
+    input: value => { find(render(), 'input').props.onChange({ target: { value } }); render(); },
+    click: () => find(render(), 'button').props.onClick(), unmount: () => cleanup?.(),
+    prepare: () => button(render(), 'Обрати касу для перевірки').props.onClick(),
+    consent: value => all(render(), 'input').find(node => node.props.type === 'checkbox').props.onChange({ target: { checked: value } }),
+    choose: value => { find(render(), 'select').props.onChange({ target: { value } }); render(); },
+    loadPos: () => button(render(), 'Завантажити з каси та перевірити').props.onClick() };
+}
+
+function registers() {
+  return { configurationRevision: VERSION, organizationId: ORG, checkedAt: '2026-10-08T07:00:01Z',
+    registers: [{ id: OTHER, name: 'Тестова каса', posVersion: '7.7.1', loadingSupported: true }] };
+}
+function loadedReport() {
+  const value = report(); value.order.sum = 80;
+  value.posLoading = { terminalGroupId: OTHER, terminalGroupName: 'Тестова каса', correlationId: VERSION, requestAccepted: true };
+  return value;
 }
 
 test('API adapter sends only the saved revision and bill UUID through existing async operation polling', async () => {
@@ -60,6 +85,11 @@ test('API adapter sends only the saved revision and bill UUID through existing a
     { exports, require: require('./helpers/syrve-operation-fixture.cjs').resolver({ post: async (url, payload) => { request = { url, payload }; return report(); } }) });
   await exports.syrveApi.billDiagnostics(VERSION, POS);
   assert.deepEqual(JSON.parse(JSON.stringify(request)), { url: '/syrve-integration/bill-diagnostics', payload: { configurationRevision: VERSION, orderId: POS } });
+  await exports.syrveApi.billRegisters(VERSION);
+  assert.deepEqual(JSON.parse(JSON.stringify(request)), { url: '/syrve-integration/bill-registers', payload: { configurationRevision: VERSION } });
+  await exports.syrveApi.posBillDiagnostics(VERSION, POS, OTHER);
+  assert.deepEqual(JSON.parse(JSON.stringify(request)), { url: '/syrve-integration/bill-loading-diagnostics',
+    payload: { configurationRevision: VERSION, orderId: POS, terminalGroupId: OTHER, confirmed: true } });
 });
 
 test('mounting and entering a UUID send no provider request; an explicit click suppresses duplicates', async () => {
@@ -100,6 +130,29 @@ test('unmounting discards a pending report and failures display no upstream erro
   assert.match(html, /Перевірку не завершено/); assert.doesNotMatch(html, /private-provider-body/);
 });
 
+test('diagnostics display fixed access, register and response errors without suggesting sync was disabled', async () => {
+  for (const [message, expected] of [
+    ['Syrve не надав права для цієї перевірки.', /не надав права/],
+    ['Обрана касова група зараз не відповідає. Завантаження рахунку не виконано.', /касова група зараз не відповідає/],
+    ['Обрана касова група недоступна або її версія не підтримує завантаження рахунків.', /версія не підтримує/],
+    ['Syrve повернув неочікувану відповідь. Синхронізацію не ввімкнено.', /неповну або неочікувану відповідь/],
+  ]) {
+    const h = mounted({ billDiagnostics: async () => { throw new Error(message); } });
+    h.input(POS); h.click(); await flush(); const html = renderToStaticMarkup(h.render());
+    assert.match(html, expected); assert.doesNotMatch(html, /Синхронізацію не ввімкнено/);
+  }
+});
+
+test('diagnostic errors reject private suffixes and late errors after scope changes', async () => {
+  const h = mounted({ billDiagnostics: async () => { throw new Error('Обрана касова група зараз не відповідає. Завантаження рахунку не виконано. private-secret'); } });
+  h.input(POS); h.click(); await flush(); assert.doesNotMatch(renderToStaticMarkup(h.render()), /private-secret/);
+  let reject; const promise = new Promise((_, no) => { reject = no; });
+  const stale = mounted({ billDiagnostics: () => promise });
+  stale.input(POS); stale.click(); stale.render({ configurationRevision: OTHER });
+  reject(new Error('Syrve не надав права для цієї перевірки.')); await flush();
+  assert.equal(stale.states[3], false); assert.equal(stale.states[8], '');
+});
+
 test('reports with other identities, malformed fields or applied statuses cannot be displayed', () => {
   const { validateBillDiagnostics } = load();
   for (const mutate of [r => r.configurationRevision = OTHER, r => r.organizationId = OTHER,
@@ -111,6 +164,135 @@ test('reports with other identities, malformed fields or applied statuses cannot
     r => r.order.creationStatus = 'Error', r => r.order.terminalGroupId = null]) {
     const value = report(); mutate(value); assert.throws(() => validateBillDiagnostics(value, scope()), /Недійсний/);
   }
+});
+
+test('registers require explicit preparation and POS loading requires fresh selection plus separate consent', async () => {
+  const calls = [], response = deferred();
+  const h = mounted({ billRegisters: async version => { calls.push(['registers', version]); return registers(); },
+    posBillDiagnostics: (version, id, group) => { calls.push(['load', version, id, group]); return response.promise; } });
+  h.render(); h.input(POS); await flush(); assert.deepEqual(calls, []);
+  h.prepare(); h.prepare(); await flush(); h.render();
+  assert.deepEqual(calls, [['registers', VERSION]]); assert.equal(find(h.render(), 'select').props.value, OTHER);
+  h.loadPos(); await flush(); assert.equal(calls.length, 1, 'selection alone must not initialize a POS order');
+  h.consent(true); h.loadPos(); h.loadPos();
+  assert.deepEqual(calls[1], ['load', VERSION, POS, OTHER]); assert.equal(calls.length, 2);
+  response.resolve(loadedReport()); await flush();
+  assert.equal(h.states[1].posLoading.requestAccepted, true); assert.equal(h.states[1].order.sum, 80); assert.equal(h.states[2], false);
+  assert.equal(h.states[6], null, 'an accepted attempt consumes consent');
+});
+
+test('unsupported or unknown registers cannot load a bill and several supported registers require selection', async () => {
+  for (const items of [[{ id: OTHER, name: 'Невідома', posVersion: null, loadingSupported: false }],
+    [{ id: OTHER, name: 'Перша', posVersion: '7.7.1', loadingSupported: true },
+      { id: TABLE, name: 'Друга', posVersion: '9.0.0', loadingSupported: true }]]) {
+    let loads = 0;
+    const h = mounted({ billRegisters: async () => ({ ...registers(), registers: items }), posBillDiagnostics: () => { loads++; } });
+    h.input(POS); h.prepare(); await flush(); h.render();
+    assert.equal(find(h.render(), 'select').props.value, ''); h.consent(true); h.loadPos(); assert.equal(loads, 0);
+  }
+});
+
+test('late register preparation and POS reports cannot survive scope, candidate, register or sibling changes', async () => {
+  for (const change of [{ configurationRevision: OTHER }, { organizationId: OTHER }, { busy: true }, { connectionReady: false }]) {
+    const response = deferred(); const h = mounted({ billRegisters: () => response.promise });
+    h.input(POS); h.prepare(); h.render(change); response.resolve(registers()); await flush(); assert.equal(h.states[4], null);
+  }
+  for (const change of [{ configurationRevision: OTHER }, { organizationId: OTHER }, { busy: true }, { connectionReady: false }, 'bill', 'register', 'unmount']) {
+    const response = deferred(); const h = mounted({ billRegisters: async () => registers(), posBillDiagnostics: () => response.promise });
+    h.input(POS); h.prepare(); await flush(); h.render(); h.consent(true); h.loadPos();
+    if (change === 'bill') h.input(CLOUD);
+    else if (change === 'register') h.choose(TABLE);
+    else if (change === 'unmount') h.unmount();
+    else h.render(change);
+    response.resolve(loadedReport()); await flush(); assert.equal(h.states[1], null);
+  }
+});
+
+test('scope, register and candidate changes consume the earlier loading consent', async () => {
+  const h = mounted({ billRegisters: async () => registers(), posBillDiagnostics: () => assert.fail('expired consent must not dispatch') });
+  h.input(POS); h.prepare(); await flush(); h.render(); h.consent(true); h.input(CLOUD); h.loadPos();
+  assert.equal(h.states[6], null); h.consent(true); h.choose(TABLE); h.loadPos(); assert.equal(h.states[6], null);
+});
+
+test('changing a bill or register revokes consent before rendering and before passive effects run', async () => {
+  for (const field of ['bill', 'register']) {
+    const calls = [];
+    const h = mounted({ billRegisters: async () => ({ ...registers(), registers: [...registers().registers,
+      { id: TABLE, name: 'Інша каса', posVersion: '9.0.0', loadingSupported: true }] }),
+      posBillDiagnostics: async (version, id, group) => {
+        calls.push([version, id, group]);
+        const value = loadedReport(); value.requestedId = id; value.order.posId = id;
+        value.order.terminalGroupId = group; value.posLoading.terminalGroupId = group;
+        return value;
+      } });
+    h.input(POS); h.prepare(); await flush(); h.render(); h.choose(OTHER); h.consent(true);
+    const before = h.render();
+    const oldLoad = button(before, 'Завантажити з каси та перевірити');
+    assert.equal(oldLoad.props.disabled, false);
+    if (field === 'bill') find(before, 'input').props.onChange({ target: { value: CLOUD } });
+    else find(before, 'select').props.onChange({ target: { value: TABLE } });
+    // The old render's handler must already be invalid, even before React commits.
+    oldLoad.props.onClick(); assert.deepEqual(calls, []);
+    const changed = h.renderBeforeEffects();
+    const checkbox = all(changed, 'input').find(node => node.props.type === 'checkbox');
+    const newLoad = button(changed, 'Завантажити з каси та перевірити');
+    assert.equal(checkbox.props.checked, false); assert.equal(newLoad.props.disabled, true);
+    newLoad.props.onClick(); await flush(); assert.deepEqual(calls, []);
+    h.flushEffects(); h.render(); h.consent(true); h.loadPos(); await flush();
+    assert.deepEqual(calls, [[VERSION, field === 'bill' ? CLOUD : POS, field === 'register' ? TABLE : OTHER]]);
+    assert.equal(h.states[6], null);
+  }
+});
+
+test('changing away and back before effects cannot restore an earlier POS confirmation', async () => {
+  const h = mounted({ billRegisters: async () => registers(), posBillDiagnostics: () => assert.fail('revoked consent must not revive') });
+  h.input(POS); h.prepare(); await flush(); h.render(); h.consent(true);
+  let tree = h.renderBeforeEffects(); find(tree, 'input').props.onChange({ target: { value: CLOUD } });
+  tree = h.renderBeforeEffects(); find(tree, 'input').props.onChange({ target: { value: POS } });
+  tree = h.renderBeforeEffects();
+  assert.equal(all(tree, 'input').find(node => node.props.type === 'checkbox').props.checked, false);
+  const load = button(tree, 'Завантажити з каси та перевірити'); assert.equal(load.props.disabled, true);
+  load.props.onClick(); await flush();
+});
+
+test('register metadata has bounded identities and versions and strips provider extras', () => {
+  const { validateBillRegisters } = load();
+  const value = registers(); value.privatePayload = 'private-body'; value.registers[0].secret = 'private-secret';
+  assert.doesNotMatch(JSON.stringify(validateBillRegisters(value, scope())), /private-/);
+  for (const mutate of [r => r.configurationRevision = OTHER, r => r.organizationId = OTHER, r => r.checkedAt = 'bad',
+    r => r.registers.push(r.registers[0]), r => r.registers[0].id = '8', r => r.registers[0].name = '',
+    r => r.registers[0].loadingSupported = 'true', r => r.registers[0].posVersion = null,
+    r => r.registers[0].posVersion = 'private-version', r => r.registers = Array(101).fill(r.registers[0])]) {
+    const value = registers(); mutate(value); assert.throws(() => validateBillRegisters(value, scope()), /Недійсний/);
+  }
+});
+
+test('POS acknowledgements cannot be mixed with read-only or Cloud lookups or another chosen register', () => {
+  const { validateBillDiagnostics } = load();
+  const expected = { ...scope(), terminalGroupId: OTHER };
+  assert.throws(() => validateBillDiagnostics(loadedReport(), scope()));
+  for (const mutate of [r => delete r.posLoading, r => r.posLoading.requestAccepted = false,
+    r => r.posLoading.terminalGroupId = TABLE, r => r.posLoading.terminalGroupName = '',
+    r => r.posLoading.correlationId = 'bad', r => r.lookup = 'orderId',
+    r => r.order.sum = '80', r => r.order.sum = -1, r => r.order.sum = Infinity]) {
+    const value = loadedReport(); mutate(value); assert.throws(() => validateBillDiagnostics(value, expected), /Недійсний/);
+  }
+});
+
+test('a POS acknowledgement shows amount and register comparison without proving occupancy or closure', () => {
+  const { validateBillDiagnostics, SyrveBillDiagnosticsView } = load();
+  const value = loadedReport(); value.posLoading.privatePayload = 'private-provider'; value.order.items = ['private-item'];
+  const expected = { ...scope(), terminalGroupId: OTHER };
+  let checked = validateBillDiagnostics(value, expected); assert.doesNotMatch(JSON.stringify(checked), /private-/);
+  let html = renderToStaticMarkup(React.createElement(SyrveBillDiagnosticsView, { report: checked }));
+  assert.match(html, /Сума рахунку: 80,00/); assert.match(html, /ще не підтверджує правильність UUID/);
+  assert.doesNotMatch(html, /Вільний|private-/);
+  value.order.terminalGroupId = TABLE;
+  html = renderToStaticMarkup(React.createElement(SyrveBillDiagnosticsView, { report: validateBillDiagnostics(value, expected) }));
+  assert.match(html, /Касова група у відповіді відрізняється/);
+  const missing = { ...loadedReport(), found: false, order: null, lookup: null };
+  html = renderToStaticMarkup(React.createElement(SyrveBillDiagnosticsView, { report: validateBillDiagnostics(missing, expected) }));
+  assert.match(html, /не підтверджує закриття/); assert.match(html, /Статуси столів та зв’язки не змінено/);
 });
 
 test('whitelisted report shows exact UUID bindings and omits customer data and activation controls', () => {

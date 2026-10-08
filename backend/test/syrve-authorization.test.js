@@ -16,7 +16,7 @@ const { AuthService } = require('../dist/auth/auth.service.js');
 
 test('real JWT and role guards protect every Syrve route from non-Directors', async (t) => {
   let serviceCalls = 0;
-  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'orderDiagnostics', 'billDiagnostics', 'connect', 'recheck', 'updateMetadata', 'disconnect']
+  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'orderDiagnostics', 'billDiagnostics', 'billRegisters', 'posBillDiagnostics', 'connect', 'recheck', 'updateMetadata', 'disconnect']
     .map((method) => [method, async () => { serviceCalls++; return { syncEnabled: false }; }]));
   const module = await Test.createTestingModule({
     controllers: [SyrveIntegrationController],
@@ -49,6 +49,8 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
       apiLogin: input.apiLogin, organizationId: input.organizationId }],
     ['POST', '/orders-observation', revision], ['POST', '/orders-diagnostics', revision],
     ['POST', '/bill-diagnostics', { ...revision, orderId: input.organizationId }], ['POST', '/recheck', revision],
+    ['POST', '/bill-registers', revision],
+    ['POST', '/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId: input.organizationId, confirmed: true }],
     ['POST','/table-loading-preview',revision], ['POST','/table-loading',{...revision,confirmationProof:input.confirmationProof,confirmed:true}],
     ['PATCH', '', { displayName: 'MOLO', ...revision }], ['POST', '/disconnect', revision]];
   for (const [method, path, body] of routes) {
@@ -62,7 +64,7 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
       await response.text();
       assert.equal(response.status, expected, `${method} ${path} for ${role}`);
       assert.equal(serviceCalls - before, role === 'owner' ? 1 : 0);
-      if (['/tables-preview', '/orders-observation','/orders-diagnostics','/bill-diagnostics','/readiness','/table-loading-preview','/table-loading','/auto-status','/auto-status-preview','/enable-auto-status','/disable-auto-status'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
+      if (['/tables-preview', '/orders-observation','/orders-diagnostics','/bill-diagnostics','/bill-registers','/bill-loading-diagnostics','/readiness','/table-loading-preview','/table-loading','/auto-status','/auto-status-preview','/enable-auto-status','/disable-auto-status'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
     }
   }
   const before = serviceCalls;
@@ -88,6 +90,13 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     ['/bill-diagnostics', { ...revision, orderId: '53389' }],
     ['/bill-diagnostics', { ...revision, orderId: input.organizationId, organizationId: input.organizationId }],
     ['/bill-diagnostics', { ...revision, orderId: input.organizationId, apiLogin: 'caller-supplied-secret' }],
+    ['/bill-registers', {}], ['/bill-registers', { ...revision, organizationId: input.organizationId }],
+    ...[{}, { confirmed: false }, { confirmed: 'true' }, { confirmed: true, terminalGroupId: 'bad' },
+      { confirmed: true, terminalGroupId: input.organizationId, orderId: '53389' },
+      { confirmed: true, terminalGroupId: input.organizationId, organizationId: input.organizationId },
+      { confirmed: true, terminalGroupId: input.organizationId, tableIds: [input.organizationId] },
+      { confirmed: true, terminalGroupId: input.organizationId, apiLogin: 'caller-supplied-secret' },
+    ].map(extra => ['/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, ...extra }]),
     ['/disable-auto-status',{}],['/disable-auto-status',{...revision,enabled:true}],
     ['/auto-status-preview',{...revision,visibilityVerified:true}],['/enable-auto-status',{...revision,confirmed:true,confirmationProof:input.confirmationProof,tableIds:[input.organizationId]}],
     ['/enable-auto-status',{...revision,confirmed:false,confirmationProof:input.confirmationProof}],
