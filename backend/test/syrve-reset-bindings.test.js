@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { SyrveIntegrationService } = require('../dist/syrve/syrve-integration.service.js');
+const { ConflictException } = require('@nestjs/common');
 
 const ID = '11111111-2222-4333-8444-555555555555';
 const REVISION = '22222222-3333-4444-8555-666666666666';
@@ -11,7 +12,7 @@ const ACTOR = { sub: 'director', directorSessionVersion: 1, role: 'owner' };
 const REQUEST = { configurationRevision: REVISION, expectedLinks: 1, confirmed: true, confirmationText: 'СКИНУТИ' };
 
 function setup({ failDelete = false, workerBusy = false, activationEnabled = false,
-  activationRevision = REVISION } = {}) {
+  activationRevision = REVISION, activationConsentValid = true } = {}) {
   const queries = [];
   const entity = { id: ID, configurationRevision: REVISION, organizationId: ID,
     apiBaseUrl: 'https://api-eu.syrve.live', apiLoginEncrypted: 'private-ciphertext', apiLoginIv: 'iv',
@@ -22,7 +23,6 @@ function setup({ failDelete = false, workerBusy = false, activationEnabled = fal
     query: async (sql, params = []) => {
       queries.push({ sql, params });
       if (sql.startsWith('SELECT lease_until')) return [{ busy: workerBusy }];
-      if (sql.startsWith('SELECT enabled')) return [{ enabled: activationEnabled, configuration_revision: activationRevision }];
       if (sql.startsWith('DELETE FROM ')) {
         if (failDelete) throw new Error('database delete failed');
         return [{ id: LINK.id }];
@@ -45,7 +45,11 @@ function setup({ failDelete = false, workerBusy = false, activationEnabled = fal
   const logs = [];
   const service = new SyrveIntegrationService(settings,
     { create: async (...args) => logs.push(args) }, {},
-    {}, { requireDisabled: async () => {} });
+    {}, { requireDisabled: async current => {
+      if (activationEnabled && activationRevision === current.entity.configurationRevision && activationConsentValid) {
+        throw new ConflictException('Спочатку вимкніть автоматичні статуси Syrve.');
+      }
+    } });
   return { service, queries, logs, next: () => savedEntity };
 }
 
@@ -73,7 +77,15 @@ test('reset accepts stale enabled activation row after disconnect revision rotat
   const response = await h.service.resetBindings(REQUEST, ACTOR);
   assert.equal(response.removedLinks, 1);
   assert.equal(response.integration.confirmedLinks, 0);
-  assert.ok(h.queries.some(row => row.sql.includes('SELECT enabled, configuration_revision')));
+  assert.ok(!h.queries.some(row => row.sql.includes('SELECT enabled')));
+});
+
+test('reset accepts same-revision invalidated consent when validated auto-status is disabled', async () => {
+  const h = setup({ activationEnabled: true, activationConsentValid: false });
+  const response = await h.service.resetBindings(REQUEST, ACTOR);
+  assert.equal(response.removedLinks, 1);
+  assert.equal(response.integration.syncEnabled, false);
+  assert.ok(h.queries.some(row => row.sql.startsWith('DELETE FROM ')));
 });
 
 test('failed link deletion does not clear saved API credentials', async () => {
