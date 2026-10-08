@@ -379,13 +379,8 @@ export class SyrveIntegrationService {
       const [worker] = await manager.query('SELECT lease_until > clock_timestamp() AS busy FROM '
         + table('syrve_worker_state') + ' WHERE integration_id=$1 FOR UPDATE', [entity.id]);
       if (worker?.busy) throw new ConflictException('Каса ще перевіряється. Дочекайтеся завершення та повторіть скидання.');
-      const [activation] = await manager.query('SELECT enabled, configuration_revision FROM ' + table('syrve_sync_activation')
-        + ' WHERE integration_id=$1 FOR UPDATE', [entity.id]);
-      // A previous disconnect rotates the configuration revision without changing
-      // the old activation row. Only a matching, currently enabled scope blocks reset.
-      if (activation?.enabled && activation.configuration_revision === entity.configurationRevision) {
-        throw new ConflictException('Спочатку вимкніть автоматичні статуси Syrve.');
-      }
+      // requireDisabled() above validates the full current activation consent,
+      // not just a stale enabled flag. The settings lock fences concurrent consent.
 
       // FK cascades retire only Syrve sync states and order versions for these links.
       // The entire reset, including credential revocation, is one transaction.
