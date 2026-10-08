@@ -13,7 +13,7 @@ const VERSION = 'f0000000-0000-4000-8000-000000000001';
 const BASE = 'https://api-eu.syrve.live', LOGIN = 'fixture-api-secret';
 function payload() {
   return { correlationId: VERSION, orders: [{ id: CLOUD, posId: POS, organizationId: ORG,
-    timestamp: 1, creationStatus: 'Success', order: { number: 42, status: 'New',
+    timestamp: 1, creationStatus: 'Success', order: { number: 42, sum: 80, status: 'New',
       tableIds: [TABLE], terminalGroupId: GROUP, customer: { name: 'private-guest' },
       items: ['private-item'], phone: 'private-phone' }, errorInfo: 'private-error' }] };
 }
@@ -35,7 +35,7 @@ const empty = () => Response.json({ correlationId: VERSION, orders: [] });
 
 test('POS and Cloud identities remain distinct and private order data never leaves the parser', () => {
   const result = parseSyrveBill(payload(), ORG, POS, 'posId');
-  assert.equal(result.id, CLOUD); assert.equal(result.posId, POS); assert.equal(result.number, 42);
+  assert.equal(result.id, CLOUD); assert.equal(result.posId, POS); assert.equal(result.number, 42); assert.equal(result.sum, 80);
   assert.deepEqual(result.tableIds, [TABLE]); assert.doesNotMatch(JSON.stringify(result), /private-/);
   assert.equal(parseSyrveBill(payload(), ORG, CLOUD, 'orderId').id, CLOUD);
 });
@@ -46,6 +46,7 @@ test('wrong identity, foreign organization and malformed evidence fail closed', 
     p => p.orders[0].timestamp = Number.MAX_SAFE_INTEGER + 1,
     p => p.orders[0].order.tableIds.push(TABLE), p => p.orders[0].order.tableIds = ['8'],
     p => p.orders[0].order.terminalGroupId = 'invalid', p => p.orders[0].order.number = '42',
+    p => p.orders[0].order.sum = '80', p => p.orders[0].order.sum = -1, p => p.orders[0].order.sum = Infinity,
     p => p.orders[0].creationStatus = 'Other', p => p.orders[0].order.status = '',
     p => delete p.correlationId];
   for (const mutate of mutations) { const p = payload(); mutate(p); assert.throws(() => parseSyrveBill(p, ORG, POS, 'posId')); }
@@ -59,7 +60,7 @@ test('in-progress and error wrappers expose only identity; unknown states and cl
     const p = payload(); p.orders[0].creationStatus = creationStatus;
     p.orders[0].order = 'private-broken-body';
     const result = parseSyrveBill(p, ORG, POS, 'posId');
-    assert.equal(result.status, null); assert.equal(result.number, null); assert.deepEqual(result.tableIds, []);
+    assert.equal(result.status, null); assert.equal(result.number, null); assert.equal(result.sum, null); assert.deepEqual(result.tableIds, []);
     assert.doesNotMatch(JSON.stringify(result), /private-/);
   }
   const p = payload(); p.orders[0].order.status = 'Closed'; p.orders[0].order.tableIds = [];
@@ -68,6 +69,107 @@ test('in-progress and error wrappers expose only identity; unknown states and cl
   assert.equal(parseSyrveBill(p, ORG, POS, 'posId').status, 'Unknown');
   p.orders[0].id = POS; p.orders[0].posId = null;
   assert.equal(parseSyrveBill(p, ORG, POS, 'posId').posId, null);
+});
+
+const registers = (items = [{ id: GROUP, organizationId: ORG, name: 'Тестова каса', posVersion: '7.7.1' }], sleeping = []) => ({
+  terminalGroups: [{ organizationId: ORG, items }], terminalGroupsInSleep: sleeping.length ? [{ organizationId: ORG, items: sleeping }] : [],
+});
+const alive = (isAlive = true) => ({ correlationId: VERSION, isAliveStatus: [{ organizationId: ORG, terminalGroupId: GROUP, isAlive }] });
+const accepted = () => Response.json({ correlationId: VERSION });
+
+test('register preparation reads fresh active groups and supported versions without loading any order or table catalogue', async t => {
+  const groups = registers([
+    { id: GROUP, organizationId: ORG, name: 'Тестова каса', posVersion: '7.7.1', privatePayload: 'private-group' },
+    { id: TABLE, organizationId: ORG, name: 'Стара каса', posVersion: '7.7.0' },
+    { id: CLOUD, organizationId: ORG, name: 'Невідома версія', posVersion: 'invalid-private-version' },
+  ], [{ id: POS, organizationId: ORG, name: 'Спляча каса', posVersion: '9.0.0' }]);
+  const h = transport(t, [...auth(), Response.json(groups), Response.json(registers())]);
+  const result = await h.client.billRegisters(BASE, LOGIN, ORG.toUpperCase(), async () => {});
+  assert.deepEqual(result.registers.map(({ id, posVersion, loadingSupported }) => ({ id, posVersion, loadingSupported })), [
+    { id: GROUP, posVersion: '7.7.1', loadingSupported: true },
+    { id: TABLE, posVersion: '7.7.0', loadingSupported: false },
+    { id: CLOUD, posVersion: null, loadingSupported: false },
+  ]);
+  assert.equal(h.calls.length, 3); assert.deepEqual(h.calls[2].body, { organizationIds: [ORG], includeDisabled: false });
+  assert.doesNotMatch(JSON.stringify(result), /private-|fixture-/);
+  const again = await h.client.billRegisters(BASE, LOGIN, ORG, async () => {});
+  assert.equal(again.registers.length, 1); assert.equal(h.calls.length, 4, 'a second preparation must read fresh register metadata');
+});
+
+test('a single POS UUID is initialized before POS lookup with current owner and saved-scope guards', async t => {
+  const h = transport(t, [...auth(), Response.json(registers()), Response.json(alive()), accepted(), Response.json(payload())]);
+  let ownerChecks = 0, savedChecks = 0;
+  const result = await withSyrveOperation({ deadline: Date.now() + 180000, signal: new AbortController().signal,
+    beforeRequest: async () => { ownerChecks++; } }, () => h.client.loadAndLookupBill(BASE, LOGIN, ORG.toUpperCase(),
+    POS.toUpperCase(), GROUP.toUpperCase(), async () => { savedChecks++; }));
+  assert.deepEqual(h.calls.map(call => new URL(call.url).pathname), [
+    '/api/1/access_token', '/api/1/organizations', '/api/1/terminal_groups',
+    '/api/1/terminal_groups/is_alive', '/api/1/order/init_by_posOrder', '/api/1/order/by_id',
+  ]);
+  assert.deepEqual(h.calls[4].body, { organizationId: ORG, terminalGroupId: GROUP, posOrderIds: [POS] });
+  assert.deepEqual(h.calls[5].body, { organizationIds: [ORG], orderIds: null, posOrderIds: [POS] });
+  assert.equal(result.order.id, CLOUD); assert.equal(result.order.sum, 80); assert.equal(result.lookup, 'posId');
+  assert.deepEqual(result.posLoading, { terminalGroupId: GROUP, terminalGroupName: 'Тестова каса', correlationId: VERSION, requestAccepted: true });
+  assert.ok(savedChecks > h.calls.length); assert.equal(savedChecks, ownerChecks);
+  assert.doesNotMatch(JSON.stringify(result), /private-|fixture-/);
+});
+
+test('accepted POS loading followed by an empty read never queries Cloud IDs or proves a free table', async t => {
+  const h = transport(t, [...auth(), Response.json(registers()), Response.json(alive()), accepted(), empty()]);
+  const result = await h.client.loadAndLookupBill(BASE, LOGIN, ORG, POS, GROUP, async () => {});
+  assert.equal(result.order, null); assert.equal(result.lookup, null); assert.equal(result.posLoading.requestAccepted, true);
+  assert.equal(h.calls.length, 6); assert.equal(h.calls.filter(call => call.url.endsWith('/by_id')).length, 1);
+  assert.doesNotMatch(JSON.stringify(result), /free|occupied|visibilityVerified|statusesApplied/);
+});
+
+test('sleeping, unknown, foreign and unsupported registers cannot initialize the candidate POS order', async t => {
+  for (const groups of [registers([]), registers([], [{ id: GROUP, organizationId: ORG, name: 'Спляча', posVersion: '9.0.0' }]),
+    registers([{ id: GROUP, organizationId: ORG, name: 'Каса', posVersion: '7.7.0' }]),
+    registers([{ id: GROUP, organizationId: ORG, name: 'Каса', posVersion: null }]),
+    registers([{ id: GROUP, organizationId: TABLE, name: 'Каса', posVersion: '9.0.0' }]),
+    registers([{ id: GROUP, organizationId: ORG, name: 'Каса', posVersion: '9.0.0' },
+      { id: GROUP, organizationId: ORG, name: 'Дублікат', posVersion: '9.0.0' }])]) {
+    const h = transport(t, [...auth(), Response.json(groups)]);
+    await assert.rejects(h.client.loadAndLookupBill(BASE, LOGIN, ORG, POS, GROUP, async () => {}));
+    assert.equal(h.calls.length, 3); assert.ok(!h.calls.some(call => call.url.endsWith('/init_by_posOrder')));
+  }
+});
+
+test('offline or malformed availability and rejected or malformed loading stop before bill lookup', async t => {
+  const badAvailability = alive(); badAvailability.isAliveStatus[0].organizationId = TABLE;
+  for (const response of [Response.json(alive(false)), Response.json(badAvailability),
+    Response.json({ correlationId: VERSION, isAliveStatus: [] })]) {
+    const h = transport(t, [...auth(), Response.json(registers()), response]);
+    await assert.rejects(h.client.loadAndLookupBill(BASE, LOGIN, ORG, POS, GROUP, async () => {}));
+    assert.equal(h.calls.length, 4);
+  }
+  for (const response of [Response.json({ privatePayload: 'private-provider' }, { status: 403 }),
+    Response.json({ correlationId: 'invalid' }), Response.json({ correlationId: VERSION, privatePayload: 'private-provider' })]) {
+    const h = transport(t, [...auth(), Response.json(registers()), Response.json(alive()), response]);
+    await assert.rejects(h.client.loadAndLookupBill(BASE, LOGIN, ORG, POS, GROUP, async () => {}), error => !/private-|fixture-/.test(JSON.stringify(error.getResponse())));
+    assert.equal(h.calls.length, 5);
+  }
+});
+
+test('revoking the saved configuration after initialization blocks the subsequent bill read', async t => {
+  let stale = false;
+  const h = transport(t, [...auth(), Response.json(registers()), Response.json(alive()), () => { stale = true; return accepted(); }]);
+  await assert.rejects(h.client.loadAndLookupBill(BASE, LOGIN, ORG, POS, GROUP,
+    async () => { if (stale) throw new Error('configuration changed'); }), /configuration changed/);
+  assert.equal(h.calls.length, 5); assert.ok(!h.calls.some(call => call.url.endsWith('/by_id')));
+});
+
+test('invalid identifiers, rejected origins and revoked operations never dispatch POS loading', async t => {
+  const h = transport(t, []);
+  for (const args of [[BASE, LOGIN, ORG, '42', GROUP], [BASE, LOGIN, ORG, POS, 'bad'],
+    ['https://untrusted.example', LOGIN, ORG, POS, GROUP]]) {
+    await assert.rejects(h.client.loadAndLookupBill(...args, async () => {}));
+  }
+  await assert.rejects(h.client.loadAndLookupBill(BASE, LOGIN, ORG, POS, GROUP, async () => { throw new Error('revoked'); }));
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(withSyrveOperation({ deadline: Date.now() + 180000, signal: controller.signal },
+    () => h.client.loadAndLookupBill(BASE, LOGIN, ORG, POS, GROUP, async () => {})));
+  assert.equal(h.calls.length, 0);
 });
 
 test('lookup sends the documented POS selector first through the shared request guard', async t => {
@@ -121,11 +223,21 @@ function serviceHarness(t, mutate) {
       syrveTableId: TABLE, lastKnownNumber: 8, lastSyrveState: 'unknown' }] };
   let writes = 0;
   const store = { read: async () => structuredClone(saved), save: () => { writes++; }, transaction: () => { writes++; } };
-  const client = { lookupBill: async (base, login, org, id, guard) => {
+  const lookupBill = async (base, login, org, id, guard) => {
     assert.equal(base, BASE); assert.equal(login, LOGIN); assert.equal(org, ORG); assert.equal(id, POS);
     await guard(); mutate?.(saved); await guard();
     return { startedAt: '2026-10-08T07:00:00Z', checkedAt: '2026-10-08T07:00:01Z', lookup: 'posId',
       order: parseSyrveBill(payload(), ORG, POS, 'posId') };
+  };
+  const client = { lookupBill, loadAndLookupBill: async (base, login, org, id, groupId, guard) => {
+    assert.equal(groupId, GROUP);
+    return { ...await lookupBill(base, login, org, id, guard), posLoading: {
+      terminalGroupId: GROUP, terminalGroupName: 'Тестова каса', correlationId: VERSION, requestAccepted: true,
+    } };
+  }, billRegisters: async (base, login, org, guard) => {
+    assert.equal(base, BASE); assert.equal(login, LOGIN); assert.equal(org, ORG);
+    await guard(); mutate?.(saved); await guard();
+    return { checkedAt: '2026-10-08T07:00:01Z', registers: [{ id: GROUP, name: 'Тестова каса', posVersion: '7.7.1', loadingSupported: true }] };
   } };
   const service = new SyrveIntegrationService(store, { create: () => { writes++; } }, client,
     { find: async () => [{ id: POS, tableNumber: '8' }], save: () => { writes++; } });
@@ -133,6 +245,29 @@ function serviceHarness(t, mutate) {
   return { service, saved, writes: () => writes };
 }
 const request = { configurationRevision: VERSION, orderId: POS };
+const posRequest = { ...request, terminalGroupId: GROUP, confirmed: true };
+
+test('POS diagnostic consent and pure group/bill reports never modify physical state or UUID bindings', async t => {
+  const h = serviceHarness(t);
+  await assert.rejects(h.service.posBillDiagnostics({ ...posRequest, confirmed: false }), error => error.getStatus() === 400);
+  const groups = await h.service.billRegisters({ configurationRevision: VERSION });
+  assert.equal(groups.registers[0].id, GROUP);
+  const result = await h.service.posBillDiagnostics(posRequest);
+  assert.equal(result.statusesApplied, false); assert.equal(result.bindingsApplied, false);
+  assert.equal(result.posLoading.requestAccepted, true); assert.equal(result.order.sum, 80);
+  assert.deepEqual(result.order.tables, [{ syrveTableId: TABLE, moloTableNumber: '8' }]);
+  assert.equal(h.writes(), 0); assert.doesNotMatch(JSON.stringify(result), /private-|fixture-|opaque/);
+});
+
+test('loading reports and register preparation share the existing credential/revision/binding fence', async t => {
+  for (const action of [h => h.service.posBillDiagnostics(posRequest), h => h.service.billRegisters({ configurationRevision: VERSION })]) {
+    for (const mutate of [s => s.entity.configurationRevision = CLOUD, s => s.entity.apiLoginEncrypted = 'rotated',
+      s => s.entity.status = 'not_connected', s => s.links[0].syrveTableId = CLOUD]) {
+      const h = serviceHarness(t, mutate);
+      await assert.rejects(action(h), error => error.getStatus() === 409); assert.equal(h.writes(), 0);
+    }
+  }
+});
 
 test('saved UUID bindings resolve the bill table without changing statuses, mappings or logs', async t => {
   const h = serviceHarness(t, saved => { saved.links[0].lastSyrveState = 'open'; });

@@ -1303,3 +1303,42 @@ scope changes and close; late responses are discarded, duplicate clicks are bloc
 and accepted attempts refresh the consumed saved revision before sibling actions unlock.
 No order/menu/customer/payment interface is added. Maps, photographs, geometry, table
 numbers, click zones, status colors, waiter buttons and existing polling stay unchanged.
+
+### Explicit single-bill POS loading diagnostics
+
+The existing UUID lookup remains read-only. A separate Director action can request
+loading one candidate POS UUID with `/api/1/order/init_by_posOrder`, then read it with
+`/api/1/order/by_id` using only `posOrderIds`. There is no Cloud-selector fallback in
+this action: a QR identifier is only a candidate until the returned bill's identity,
+number and amount can be compared with the actual POS receipt.
+
+`POST /syrve-integration/bill-registers` takes only the saved configuration revision.
+It returns bounded, validated active register UUIDs, names, normalized POS versions
+and loading compatibility. It reads fresh register metadata and does not initialize
+orders or depend on table mappings. Preparation is explicit; the UI does not issue
+provider requests on mount or on entering a bill UUID.
+
+`POST /syrve-integration/bill-loading-diagnostics` requires the saved revision, one
+bill UUID, one selected register UUID and literal `confirmed: true`. Before loading,
+the server rechecks the selected organization, active register/version and current
+POS availability. Sleeping, foreign, unsupported, unknown or offline registers fail
+before initialization. The fixed official API host, durable shared request quota,
+12-second HTTP timeout, operation/JWT guard and saved credential/binding fence apply
+to every request, including authentication and quota waits. A cold load/read uses at
+most six requests. It never scans other registers or initializes any table UUID.
+
+The official initialization response's correlation UUID records only acceptance of
+the request; it is not an asynchronous command and is not polled through
+`commands/status`. Rejection, malformed acknowledgement, expiration or lost scope
+stops subsequent reads. Acceptance plus an empty read never proves closure or
+validates the candidate UUID. Results add a whitelisted loading acknowledgement and
+optional nonnegative finite bill amount to the existing diagnostic identities.
+Guest, item, payment, credential and raw provider payloads are never returned.
+
+The frontend requires a current register selection and separate acknowledgment,
+consumes it on submission, blocks duplicate attempts and discards delayed results
+after a UUID/register/configuration/connection/sibling action change or unmount.
+It shows differing selected/returned register IDs without rebinding any table.
+The diagnostic does not write settings, logs, physical table statuses, bindings,
+worker ledgers or activation consent, and cannot issue worker visibility receipts.
+No migrations, cashier plugin, booking changes or polling changes are introduced.

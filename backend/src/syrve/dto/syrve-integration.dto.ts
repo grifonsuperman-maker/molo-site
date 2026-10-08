@@ -73,6 +73,15 @@ export class SyrveBillDiagnosticsDto extends SyrveRevisionDto {
   orderId: string;
 }
 
+export class SyrvePosBillDiagnosticsDto extends SyrveBillDiagnosticsDto {
+  @IsUUID('all')
+  terminalGroupId: string;
+
+  @IsBoolean()
+  @Equals(true)
+  confirmed: boolean;
+}
+
 export class ConfirmSyrveTableLoadingDto extends SyrveRevisionDto {
   @IsString()
   @MinLength(40)

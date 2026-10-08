@@ -9,7 +9,7 @@ import { Repository } from 'typeorm';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { LogsService } from '../logs/logs.service';
 import { TableEntity } from '../tables/entities/table.entity';
-import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisionDto, SyrveBillDiagnosticsDto,
+import { ConnectSyrveDto, DisconnectSyrveDto, PreviewSyrveTablesDto, SyrveRevisionDto, SyrveBillDiagnosticsDto, SyrvePosBillDiagnosticsDto,
   TestSyrveConnectionDto, UpdateSyrveConnectionDto } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
 import { SyrveTableLink } from './entities/syrve-table-link.entity';
@@ -24,6 +24,7 @@ import { diagnoseSyrvePosVersions } from './syrve-pos-version';
 import { syrveCaptureContext, type SyrveStateCapture } from './syrve-state.store';
 import { savedSyrveFingerprint } from './syrve-saved-scope';
 import { decryptSyrveCredentials, syrveCredentialsKey } from './syrve-credentials';
+import type { SyrveBillReadResult } from './syrve-bill-diagnostics';
 
 type EncryptedValue = { encrypted: string; iv: string; authTag: string };
 
@@ -133,7 +134,7 @@ export class SyrveIntegrationService {
     return directorOrderDiagnostics(observation, posVersions);
   }
 
-  async billDiagnostics(dto: SyrveBillDiagnosticsDto) {
+  private async billScope(dto: SyrveRevisionDto) {
     const snapshot = await this.checkedRevision(dto), entity = snapshot.entity!;
     if (entity.status !== 'connected' || !entity.organizationId) {
       throw new BadRequestException('Спочатку збережіть і перевірте підключення Syrve.');
@@ -149,16 +150,43 @@ export class SyrveIntegrationService {
     });
     const expected = scope(snapshot);
     const guard = async () => { if (scope(await this.settings.read()) !== expected) throw staleSyrveSettings(); };
+    return { snapshot, entity, guard };
+  }
+
+  async billDiagnostics(dto: SyrveBillDiagnosticsDto) {
+    const { snapshot, entity, guard } = await this.billScope(dto);
     const result = await this.client.lookupBill(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId,
       dto.orderId, guard);
+    return this.billReport(snapshot, result, dto.orderId, guard);
+  }
+
+  async billRegisters(dto: SyrveRevisionDto) {
+    const { entity, guard } = await this.billScope(dto);
+    const result = await this.client.billRegisters(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!, guard);
+    await guard();
+    return { configurationRevision: entity.configurationRevision, organizationId: entity.organizationId!.toLowerCase(),
+      checkedAt: result.checkedAt, registers: result.registers };
+  }
+
+  async posBillDiagnostics(dto: SyrvePosBillDiagnosticsDto) {
+    if (dto.confirmed !== true) throw new BadRequestException('Підтвердіть завантаження цього рахунку з обраної касової групи.');
+    const { snapshot, entity, guard } = await this.billScope(dto);
+    const result = await this.client.loadAndLookupBill(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!,
+      dto.orderId, dto.terminalGroupId, guard);
+    return this.billReport(snapshot, result, dto.orderId, guard);
+  }
+
+  private async billReport(snapshot: SyrveSettingsSnapshot, result: SyrveBillReadResult, requestedId: string, guard: () => Promise<void>) {
+    const entity = snapshot.entity!;
     const local = await this.tablesRepo.find({ select: { id: true, tableNumber: true } });
     await guard();
     const order = result.order;
     return { configurationRevision: entity.configurationRevision, organizationId: entity.organizationId.toLowerCase(),
-      requestedId: dto.orderId.toLowerCase(), startedAt: result.startedAt, checkedAt: result.checkedAt,
+      requestedId: requestedId.toLowerCase(), startedAt: result.startedAt, checkedAt: result.checkedAt,
       lookup: result.lookup, found: Boolean(order), statusesApplied: false, bindingsApplied: false,
+      ...(result.posLoading ? { posLoading: result.posLoading } : {}),
       order: order ? { id: order.id, posId: order.posId, timestamp: order.timestamp, number: order.number,
-        status: order.status, creationStatus: order.creationStatus, terminalGroupId: order.terminalGroupId,
+        sum: order.sum, status: order.status, creationStatus: order.creationStatus, terminalGroupId: order.terminalGroupId,
         tables: order.tableIds.map(syrveTableId => {
           const links = snapshot.links.filter(link => link.integrationId === entity.id
             && link.organizationId.toLowerCase() === entity.organizationId!.toLowerCase() && link.syrveTableId.toLowerCase() === syrveTableId);

@@ -4,8 +4,18 @@ const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 export type SyrveBillRecord = {
   id: string; posId: string | null; timestamp: number;
   creationStatus: 'Success' | 'InProgress' | 'Error';
-  number: number | null; status: 'New' | 'Bill' | 'Closed' | 'Deleted' | 'Unknown' | null;
+  number: number | null; sum: number | null; status: 'New' | 'Bill' | 'Closed' | 'Deleted' | 'Unknown' | null;
   terminalGroupId: string | null; tableIds: string[];
+};
+export type SyrveBillPosLoading = {
+  terminalGroupId: string; terminalGroupName: string; correlationId: string; requestAccepted: true;
+};
+export type SyrveBillReadResult = {
+  startedAt: string; checkedAt: string; lookup: 'posId' | 'orderId' | null;
+  order: SyrveBillRecord | null; posLoading?: SyrveBillPosLoading;
+};
+export type SyrveBillRegister = {
+  id: string; name: string; posVersion: string | null; loadingSupported: boolean;
 };
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SyrveOrderValidationError();
@@ -31,12 +41,14 @@ export function parseSyrveBill(payload: unknown, organizationId: string, request
     || (lookup === 'orderId' ? id !== requestedId : posId !== null ? posId !== requestedId : id !== requestedId)) throw new SyrveOrderValidationError();
   const base = { id, posId, timestamp: wrapper.timestamp as number,
     creationStatus: wrapper.creationStatus as SyrveBillRecord['creationStatus'] };
-  if (base.creationStatus !== 'Success') return { ...base, number: null, status: null, terminalGroupId: null, tableIds: [] };
+  if (base.creationStatus !== 'Success') return { ...base, number: null, sum: null, status: null, terminalGroupId: null, tableIds: [] };
   const order = record(wrapper.order);
+  const sum = order.sum == null ? null : order.sum;
   const tableIds = observationIds(order.tableIds, 1000), terminalGroupId = uuid(order.terminalGroupId);
   if (!Number.isInteger(order.number) || (order.number as number) < 0 || (order.number as number) > 2147483647
+    || (sum !== null && (typeof sum !== 'number' || !Number.isFinite(sum) || sum < 0))
     || typeof order.status !== 'string' || !order.status || order.status.length > 40) throw new SyrveOrderValidationError();
   const status = ['New', 'Bill', 'Closed', 'Deleted'].includes(order.status)
     ? order.status as SyrveBillRecord['status'] : 'Unknown';
-  return { ...base, number: order.number as number, status, terminalGroupId, tableIds };
+  return { ...base, number: order.number as number, sum: sum as number | null, status, terminalGroupId, tableIds };
 }
