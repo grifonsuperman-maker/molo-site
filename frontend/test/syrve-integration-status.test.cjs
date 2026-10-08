@@ -522,3 +522,29 @@ test('newly saved connection retains its summary after a failed refresh and show
   assert.doesNotMatch(h.html(), /Синхронізація ще не ввімкнена|Не вдалося оновити стан Syrve/);
   assert.equal(connections, 1);
 });
+
+test('disconnected Syrve with saved links offers the reset action before entering the wizard', async () => {
+  const disconnected = saved({ hasCredentials: false, status: 'not_connected',
+    organizationId: null, organizationName: null, apiLoginMasked: null, confirmedLinks: 2 });
+  const h = mounted([disconnected, disconnected]);
+  await h.ready();
+  await h.open();
+  const reset = h.button('Скинути прив’язки Syrve та підключити заново');
+  assert.ok(reset, 'Director can reach reset after disconnect with saved links');
+  assert.equal(reset.props.disabled, false);
+  assert.doesNotMatch(h.html(), /API-логін \/ ключ/);
+  assert.ok(h.button('Підключити Syrve без скидання прив’язок'));
+  await h.click('Підключити Syrve без скидання прив’язок');
+  assert.match(h.html(), /API-логін \/ ключ/);
+  assert.deepEqual(h.requests, ['getStatus', 'getStatus']);
+});
+
+test('disconnected Syrve without saved links still opens the connection wizard automatically', async () => {
+  const disconnected = saved({ hasCredentials: false, status: 'not_connected',
+    organizationId: null, organizationName: null, apiLoginMasked: null, confirmedLinks: 0 });
+  const h = mounted([disconnected, disconnected]);
+  await h.ready();
+  await h.open();
+  assert.match(h.html(), /API-логін \/ ключ/);
+  assert.equal(h.button('Скинути прив’язки Syrve та підключити заново'), null);
+});
