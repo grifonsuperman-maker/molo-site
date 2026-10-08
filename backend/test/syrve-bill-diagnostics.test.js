@@ -8,7 +8,8 @@ const ORG = 'a0000000-0000-4000-8000-000000000001';
 const POS = 'b0000000-0000-4000-8000-000000000001';
 const CLOUD = 'c0000000-0000-4000-8000-000000000001';
 const TABLE = 'd0000000-0000-4000-8000-000000000001';
-const GROUP = 'e0000000-0000-4000-8000-000000000001';
+// Match the non-RFC variant found in real Syrve terminal-group GUIDs.
+const GROUP = 'e0000000-0000-5000-0000-000000000001';
 const VERSION = 'f0000000-0000-4000-8000-000000000001';
 const BASE = 'https://api-eu.syrve.live', LOGIN = 'fixture-api-secret';
 function payload() {

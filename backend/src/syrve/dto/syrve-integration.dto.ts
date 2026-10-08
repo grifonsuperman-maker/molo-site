@@ -74,7 +74,10 @@ export class SyrveBillDiagnosticsDto extends SyrveRevisionDto {
 }
 
 export class SyrvePosBillDiagnosticsDto extends SyrveBillDiagnosticsDto {
-  @IsUUID('all')
+  // Syrve register GUIDs need not use the RFC UUID variant. The client also
+  // verifies membership in the current organization's fresh register catalogue.
+  @IsUUID('loose', { message: 'Вкажіть коректний ID касової групи Syrve.' })
+  @MaxLength(36)
   terminalGroupId: string;
 
   @IsBoolean()
