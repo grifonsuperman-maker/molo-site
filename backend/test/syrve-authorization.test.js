@@ -17,7 +17,7 @@ const { AuthService } = require('../dist/auth/auth.service.js');
 test('real JWT and role guards protect every Syrve route from non-Directors', async (t) => {
   let serviceCalls = 0;
   let lastPosRequest;
-  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'orderDiagnostics', 'billDiagnostics', 'billRegisters', 'posBillDiagnostics', 'connect', 'recheck', 'updateMetadata', 'disconnect']
+  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'orderDiagnostics', 'billDiagnostics', 'billRegisters', 'posBillDiagnostics', 'connect', 'recheck', 'updateMetadata', 'disconnect', 'resetBindings']
     .map((method) => [method, async () => { serviceCalls++; return { syncEnabled: false }; }]));
   service.posBillDiagnostics = async dto => { serviceCalls++; lastPosRequest = dto; return { syncEnabled: false }; };
   const module = await Test.createTestingModule({
@@ -58,7 +58,7 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     ['POST', '/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId: registerGuid, confirmed: true }],
     ['POST', '/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId: registerGuid.toUpperCase(), confirmed: true }],
     ['POST','/table-loading-preview',revision], ['POST','/table-loading',{...revision,confirmationProof:input.confirmationProof,confirmed:true}],
-    ['PATCH', '', { displayName: 'MOLO', ...revision }], ['POST', '/disconnect', revision]];
+    ['PATCH', '', { displayName: 'MOLO', ...revision }], ['POST', '/disconnect', revision], ['POST', '/reset-bindings', { ...revision, expectedLinks: 36, confirmed: true, confirmationText: 'СКИНУТИ' }]];
   for (const [method, path, body] of routes) {
     for (const [role, expected] of [[null, 401], ['invalid', 401], ['guest', 403],
       ['waiter', 403], ['hookah', 403], ['admin', 403], ['owner', method === 'POST' ? 201 : 200]]) {
@@ -76,7 +76,7 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
         assert.equal(lastPosRequest.configurationRevision, body.configurationRevision);
         assert.equal(lastPosRequest.confirmed, true);
       }
-      if (['/tables-preview', '/orders-observation','/orders-diagnostics','/bill-diagnostics','/bill-registers','/bill-loading-diagnostics','/readiness','/table-loading-preview','/table-loading','/auto-status','/auto-status-preview','/enable-auto-status','/disable-auto-status'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
+      if (['/tables-preview', '/orders-observation','/orders-diagnostics','/bill-diagnostics','/bill-registers','/bill-loading-diagnostics','/readiness','/table-loading-preview','/table-loading','/auto-status','/auto-status-preview','/enable-auto-status','/disable-auto-status','/reset-bindings'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
     }
   }
   const before = serviceCalls;
@@ -91,7 +91,12 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     ['/connect', { ...input, confirmationProof: undefined }],
     ['/connect', { ...input, pairs: [{ moloTableId: 'invalid', syrveTableId: input.organizationId }] }],
     ['/connect', { ...input, pairs: [{ moloTableId: input.organizationId, syrveTableId: input.organizationId, tableNumber: '77' }] }],
-    ['/recheck', {}], ['/disconnect', {}], ['/orders-observation', {}],
+    ['/recheck', {}], ['/disconnect', {}], ['/reset-bindings', {}],
+    ['/reset-bindings', { ...revision, expectedLinks: 36, confirmed: false, confirmationText: 'СКИНУТИ' }],
+    ['/reset-bindings', { ...revision, expectedLinks: 0, confirmed: true, confirmationText: 'СКИНУТИ' }],
+    ['/reset-bindings', { ...revision, expectedLinks: 36, confirmed: true, confirmationText: 'wrong' }],
+    ['/reset-bindings', { ...revision, expectedLinks: 36, confirmed: true, confirmationText: 'СКИНУТИ', apiLogin: 'secret' }],
+    ['/orders-observation', {}],
     ['/orders-observation', { ...revision, tableIds: ['11111111-2222-4333-8444-555555555555'] }],
     ['/orders-observation', { ...revision, orderIds: ['11111111-2222-4333-8444-555555555555'] }],
     ['/orders-diagnostics', {}],
