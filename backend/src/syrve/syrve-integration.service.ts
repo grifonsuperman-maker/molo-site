@@ -384,8 +384,10 @@ export class SyrveIntegrationService {
 
       // FK cascades retire only Syrve sync states and order versions for these links.
       // The entire reset, including credential revocation, is one transaction.
-      const deleted = await manager.query('DELETE FROM ' + table('syrve_table_links')
-        + ' WHERE integration_id=$1 RETURNING id', [entity.id]);
+      // PostgresQueryRunner returns [rows, rowCount] for a top-level DELETE.
+      // A SELECT over the deleted IDs keeps the count guard on actual rows.
+      const deleted = await manager.query('WITH deleted_links AS (DELETE FROM ' + table('syrve_table_links')
+        + ' WHERE integration_id=$1 RETURNING id) SELECT id FROM deleted_links', [entity.id]);
       if (deleted.length !== current.links.length) throw staleSyrveSettings();
       const next = await this.settings.save(manager, { ...entity,
         apiLoginEncrypted: null, apiLoginIv: null, apiLoginAuthTag: null, apiLoginMasked: null,
