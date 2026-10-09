@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import type { SyrveSettingsSnapshot } from './syrve-settings.store';
 import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, LOADING_TTL_MS, type TableLoadingPlan } from './syrve-table-loading';
-import { assessSyrvePosVersion } from './syrve-pos-version';
+import { canAttemptSyrveInitialization } from './syrve-pos-version';
 
 const uuid = (value: unknown): value is string => typeof value === 'string' && value.length === 36
   && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
@@ -15,8 +15,9 @@ export function activationPlan(value: unknown, snapshot: SyrveSettingsSnapshot):
     || !Array.isArray(plan.groups) || !plan.groups.length || plan.groups.length > LOADING_MAX_GROUPS) invalid();
   const groups = plan.groups.map(group => {
     if (!group || !uuid(group.terminalGroupId) || !Array.isArray(group.tableIds) || !group.tableIds.length
-      || group.tableIds.some(id => !uuid(id)) || assessSyrvePosVersion(group.posVersion).initialization !== 'supported') invalid();
-    return { terminalGroupId: group.terminalGroupId, posVersion: group.posVersion, tableIds: [...group.tableIds].sort() };
+      || group.tableIds.some(id => !uuid(id)) || !canAttemptSyrveInitialization(group.posVersion, group.posVersionStatus)) invalid();
+    return { terminalGroupId: group.terminalGroupId, posVersion: group.posVersion,
+      ...(group.posVersion === null ? { posVersionStatus: group.posVersionStatus } : {}), tableIds: [...group.tableIds].sort() };
   }).sort((a, b) => a.terminalGroupId.localeCompare(b.terminalGroupId));
   const ids = groups.flatMap(group => group.tableIds);
   if (!ids.length || ids.length > LOADING_MAX_TABLES || new Set(ids).size !== ids.length

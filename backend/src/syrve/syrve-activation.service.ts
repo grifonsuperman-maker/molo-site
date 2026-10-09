@@ -39,6 +39,7 @@ export class SyrveActivationService {
     const checkedAt = Date.now();
     return { configurationRevision: dto.configurationRevision, organizationId: plan.organizationId, checkedAt: new Date(checkedAt).toISOString(),
       linkedTables: captured.snapshot.links.length, terminalGroups: plan.groups.length,
+      versionUnreportedGroups: plan.groups.filter(group => group.posVersion === null).length,
       totalTables: captured.tables.length,
       unlinkedTableNumbers: captured.tables.filter(table => !captured.snapshot.links.some(link => link.moloTableId === table.id))
         .map(table => table.tableNumber).sort((a, b) => Number(a) - Number(b)),

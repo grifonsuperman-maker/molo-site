@@ -34,7 +34,7 @@ export type SyrveReadiness = {
 
 export type SyrveAutoStatus = { configurationRevision: string | null; checkedAt: string; syncEnabled: boolean; activationAvailable: boolean; linkedTables: number };
 export type SyrveActivationPreview = { configurationRevision: string; organizationId: string; checkedAt: string; syncEnabled: false;
-  linkedTables: number; terminalGroups: number; tableNumbers: string[]; totalTables?: number; unlinkedTableNumbers?: string[];
+  linkedTables: number; terminalGroups: number; tableNumbers: string[]; totalTables?: number; unlinkedTableNumbers?: string[]; versionUnreportedGroups?: number;
   confirmation: { proof: string; expiresAt: string } };
 export type SyrveActivationResult = { requestedRevision: string; configurationRevision: string; organizationId: string; checkedAt: string;
   linkedTables: number; syncEnabled: boolean; code: string | null };
@@ -83,13 +83,14 @@ export type SyrveBillDiagnostics = {
 export type SyrvePosVersionStatus = 'valid' | 'missing' | 'null' | 'empty' | 'invalid_type' | 'invalid_format';
 export type SyrveBillRegisters = {
   configurationRevision: string; organizationId: string; checkedAt: string;
-  registers: { id: string; name: string; posVersion: string | null; posVersionStatus?: SyrvePosVersionStatus; loadingSupported: boolean }[];
+  registers: { id: string; name: string; posVersion: string | null; posVersionStatus?: SyrvePosVersionStatus;
+    loadingSupported: boolean; canAttemptLoading?: boolean }[];
 };
 
 type SyrveLoadingFlags = { syncEnabled: false; activationAvailable: false; statusesApplied: false; renamingApplied: false; complete: false };
 export type SyrveTableLoadingPreview = SyrveLoadingFlags & {
   configurationRevision: string; organizationId: string; checkedAt: string;
-  linkedTables: number; terminalGroups: number; tableNumbers: string[];
+  linkedTables: number; terminalGroups: number; tableNumbers: string[]; versionUnreportedGroups?: number;
   confirmation: { proof: string; expiresAt: string };
 };
 export type SyrveTableLoadingResult = SyrveLoadingFlags & {

@@ -6,7 +6,7 @@ import { TABLE_ORDER_BATCH_SIZE, ORDER_ID_BATCH_SIZE, MAX_CATALOG_TABLES, MAX_RE
   mergeSyrveOrders, observationIds, parsePosAvailability, parseSyrveOrders, SyrveOrderValidationError,
   type ObservationCheckName, type SyrveObservedOrder, type SyrveOrderProbe } from './syrve-order-observer';
 import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, loadingPlanFingerprint, tableLoadingPlan, tableLoadingCatalogPlan, parseLoadingCorrelation, SyrveLoadingValidationError, type TableLoadingPlan } from './syrve-table-loading';
-import { assessSyrvePosVersion } from './syrve-pos-version';
+import { assessSyrvePosVersion, canAttemptSyrveInitialization } from './syrve-pos-version';
 import { currentSyrveOperation, syrveObservationDeadline, withSyrveOperation } from './syrve-operation-context';
 import { parseSyrveBill, type SyrveBillReadResult, type SyrveBillRegister } from './syrve-bill-diagnostics';
 import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs } from './syrve-request-limiter';
@@ -322,8 +322,10 @@ export class SyrveClient {
       const parsed = parseTerminalGroups(await this.postJson(session.rateKey, '/api/1/terminal_groups', {
         organizationIds: [organizationId], includeDisabled: false,
       }, session.token, controls.deadline, controls.signal, controls.requestBudget), organizationId, true);
-      const groups = { active: parsed.active.map(({ id, posVersion }) => ({ id, posVersion })).sort((a, b) => a.id.localeCompare(b.id)),
-        sleeping: parsed.sleeping.map(({ id, posVersion }) => ({ id, posVersion })).sort((a, b) => a.id.localeCompare(b.id)) };
+      const evidence = ({ id, posVersion, posVersionStatus }: (typeof parsed.active)[number]) =>
+        ({ id, posVersion, ...(posVersion === null ? { posVersionStatus } : {}) });
+      const groups = { active: parsed.active.map(evidence).sort((a, b) => a.id.localeCompare(b.id)),
+        sleeping: parsed.sleeping.map(evidence).sort((a, b) => a.id.localeCompare(b.id)) };
       const groupIds = groups.active.map(group => group.id);
       const tables = groupIds.length ? parseRestaurantSections(await this.postJson(session.rateKey,
         '/api/1/reserve/available_restaurant_sections', { terminalGroupIds: groupIds, returnSchema: false },
@@ -400,7 +402,8 @@ export class SyrveClient {
       }, session.token, deadline, undefined, budget), organizationId, true);
       return groups.active.map(group => ({ id: group.id, name: group.name, posVersion: group.posVersion || null,
         posVersionStatus: group.posVersionStatus ?? (group.posVersion ? 'valid' : 'missing'),
-        loadingSupported: assessSyrvePosVersion(group.posVersion).initialization === 'supported' }));
+        loadingSupported: assessSyrvePosVersion(group.posVersion).initialization === 'supported',
+        canAttemptLoading: canAttemptSyrveInitialization(group.posVersion, group.posVersionStatus) }));
     } catch (error) {
       if (error instanceof SyrveCatalogValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
       throw error;
@@ -428,7 +431,7 @@ export class SyrveClient {
       // fence a single explicit Director attempt, never a scan of all registers.
       const registers = await this.activeBillRegisters(session, organizationId, deadline, budget);
       const group = registers.find(item => item.id === terminalGroupId);
-      if (!group?.loadingSupported) throw new BadRequestException('Обрана касова група недоступна або її версія не підтримує завантаження рахунків.');
+      if (!group?.canAttemptLoading) throw new BadRequestException('Обрана касова група недоступна або її версія не підтримує завантаження рахунків.');
       let alive;
       try {
         alive = parsePosAvailability(await this.postJson(session.rateKey, '/api/1/terminal_groups/is_alive', {
@@ -544,8 +547,9 @@ export class SyrveClient {
       organizationIds: [probe.organizationId], includeDisabled: false,
     }), probe.organizationId, true));
     if (!groups) return finish();
-    probe.terminalGroups = { active: groups.active.map(({ id, posVersion }) => ({ id, posVersion })),
-      sleeping: groups.sleeping.map(({ id, posVersion }) => ({ id, posVersion })) };
+    const evidence = ({ id, posVersion, posVersionStatus }: (typeof groups.active)[number]) =>
+      ({ id, posVersion, ...(posVersion === null ? { posVersionStatus } : {}) });
+    probe.terminalGroups = { active: groups.active.map(evidence), sleeping: groups.sleeping.map(evidence) };
     if (!groups.active.length) return finish();
     const groupIds = groups.active.map((group) => group.id);
     const sections = await check('restaurantSections', async () => {
@@ -602,7 +606,7 @@ export class SyrveClient {
       || plan.groups.length > LOADING_MAX_GROUPS || !ids?.length || ids.length > LOADING_MAX_TABLES
       || new Set(ids).size !== ids.length || new Set(plan.groups.map(group => group?.terminalGroupId)).size !== plan.groups.length
       || plan.groups.some(group => !group || !uuid(group.terminalGroupId) || !Array.isArray(group.tableIds) || !group.tableIds.length
-        || group.tableIds.some(id => !uuid(id)) || assessSyrvePosVersion(group.posVersion).initialization !== 'supported')
+        || group.tableIds.some(id => !uuid(id)) || !canAttemptSyrveInitialization(group.posVersion, group.posVersionStatus))
       || typeof controls.beforeCommand !== 'function') throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
     if (controls.deadline !== undefined && !Number.isFinite(controls.deadline)) throw new SyrveClientException('SYRVE_TIMEOUT');
     const deadline = syrveObservationDeadline(controls.deadline);

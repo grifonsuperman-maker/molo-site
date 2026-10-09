@@ -1,14 +1,15 @@
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import type { SyrveOrderProbe } from './syrve-order-observer';
-import { assessSyrvePosVersion } from './syrve-pos-version';
+import { canAttemptSyrveInitialization } from './syrve-pos-version';
 
 export const LOADING_TTL_MS = 40 * 60_000;
 export const LOADING_MAX_TABLES = 100;
 export const LOADING_MAX_GROUPS = 4;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const uuid = (value: unknown): value is string => typeof value === 'string' && value.length === 36 && UUID.test(value);
-export type TableLoadingPlan = { organizationId: string; groups: { terminalGroupId: string; tableIds: string[]; posVersion: string }[] };
+export type TableLoadingPlan = { organizationId: string; groups: { terminalGroupId: string; tableIds: string[];
+  posVersion: string | null; posVersionStatus?: 'missing' | 'null' }[] };
 export class SyrveLoadingValidationError extends Error {}
 const invalid = (): never => { throw new SyrveLoadingValidationError(); };
 
@@ -42,9 +43,11 @@ export function tableLoadingCatalogPlan(probe: SyrveOrderProbe, ids: string[]): 
     const active = (probe.terminalGroups?.active || []).filter(group => group.id === table?.terminalGroupId);
     if (!table || !uuid(table.terminalGroupId) || active.length !== 1
       || probe.terminalGroups?.sleeping.some(group => group.id === table.terminalGroupId)
-      || assessSyrvePosVersion(active[0].posVersion).initialization !== 'supported') invalid();
+      || !canAttemptSyrveInitialization(active[0].posVersion ?? null, active[0].posVersionStatus)) invalid();
     const group = groups.get(table.terminalGroupId) || { terminalGroupId: table.terminalGroupId,
-      posVersion: active[0].posVersion!, tableIds: [] };
+      posVersion: active[0].posVersion ?? null,
+      ...(!active[0].posVersion ? { posVersionStatus: active[0].posVersionStatus === 'missing' ? 'missing' as const : 'null' as const } : {}),
+      tableIds: [] };
     group.tableIds.push(id); groups.set(group.terminalGroupId, group);
   }
   if (groups.size > LOADING_MAX_GROUPS) invalid();

@@ -16,7 +16,7 @@ export type SyrveBillReadResult = {
   order: SyrveBillRecord | null; posLoading?: SyrveBillPosLoading;
 };
 export type SyrveBillRegister = {
-  id: string; name: string; posVersion: string | null; posVersionStatus: SyrvePosVersionStatus; loadingSupported: boolean;
+  id: string; name: string; posVersion: string | null; posVersionStatus: SyrvePosVersionStatus; loadingSupported: boolean; canAttemptLoading: boolean;
 };
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SyrveOrderValidationError();
