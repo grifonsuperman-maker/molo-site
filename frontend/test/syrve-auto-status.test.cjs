@@ -58,6 +58,16 @@ test('opening settings only reads local consent and never previews, enables or l
   let calls=0;const forbidden=()=>assert.fail('unrequested write');const h=mounted({getAutoStatus:async()=>{calls++;return gate();},
     previewAutoStatus:forbidden,enableAutoStatus:forbidden,disableAutoStatus:forbidden});await h.ready();h.render();assert.equal(calls,1);
 });
+
+test('unreported versions disclose the real loading requirement before separate activation consent',async()=>{
+  let enables=0;const p={...preview(),versionUnreportedGroups:1};
+  const h=mounted({previewAutoStatus:async()=>p,enableAutoStatus:async()=>{enables++;return result();}});
+  await h.ready();h.prepare();await flush();const html=renderToStaticMarkup(h.render());
+  assert.match(html,/лише після успішного завантаження та повторного читання/);assert.equal(enables,0);
+  h.enable();await flush();assert.equal(enables,0);h.ack();h.enable();await flush();assert.equal(enables,1);
+  const {validateActivationPreview}=load();
+  for (const count of [-1,2,'1',null]) assert.throws(()=>validateActivationPreview({...p,versionUnreportedGroups:count},scope()));
+});
 test('activation accepts server-valid numbers and rejects canonical duplicates or invalid numbers',()=>{
   const {validateActivationPreview}=load();
   for(const numbers of [['0012','1234567'],[' 12 ','999999999999']]) {

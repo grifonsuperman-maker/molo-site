@@ -40,6 +40,14 @@ export function assessSyrvePosVersion(value: unknown) {
   return { read: supports(MINIMUM_READ), initialization: supports(MINIMUM_INITIALIZATION) };
 }
 
+// Optional metadata cannot prove that a method is unsupported. Absent/null
+// versions permit a guarded attempt, not a compatibility or visibility claim.
+// Consent, successful loading and fresh reads remain mandatory for activation.
+export function canAttemptSyrveInitialization(value: unknown, status?: SyrvePosVersionStatus) {
+  return assessSyrvePosVersion(value).initialization === 'supported'
+    || value === null && (status === 'missing' || status === 'null');
+}
+
 export function missingPosVersions(tables: number): SyrvePosVersions {
   return { read: { supported: 0, unsupported: 0, unknown: tables },
     initialization: { supported: 0, unsupported: 0, unknown: tables } };

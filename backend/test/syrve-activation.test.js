@@ -169,6 +169,41 @@ test('only real transport completion followed by fresh full reads issues a nonse
   assert.equal(h.calls.filter(c=>c.path.endsWith('commands/status')).length,0);
   value.byTable.push(value.byId[0]);assert.equal(isVerifiedLoadedProbe(value,h.controls.visibilityContext,ORG,TABLE),false);
 });
+
+for (const posVersion of [undefined,null]) for (const failure of [null,'load','read'])
+test('unreported version '+String(posVersion)+' activates only after real loading and fresh reads: '+String(failure),async t=>{
+  const tx=transport(t,{
+    '/api/1/terminal_groups':{terminalGroups:[{organizationId:ORG,items:[{id:GROUP,organizationId:ORG,name:'Каса',posVersion}]}],terminalGroupsInSleep:[]},
+    ...(failure==='load'?{'/api/1/order/init_by_table':Response.json({}, {status:403})}:{}),
+    ...(failure==='read'?{'/api/1/order/by_table':Response.json({}, {status:403})}:{}),
+  }),h=fixture(t);
+  h.client.probeOrders=tx.client.probeOrders.bind(tx.client);
+  h.client.probeTablePlan=tx.client.probeTablePlan.bind(tx.client);
+  h.client.initializeTables=tx.client.initializeTables.bind(tx.client);
+  const before=structuredClone(h.capture.tables),p=await h.service.preview({configurationRevision:REV},actor);
+  assert.equal(p.versionUnreportedGroups,1);assert.equal(tx.calls.filter(c=>c.path.endsWith('init_by_table')).length,0);
+  const result=await h.service.enable(h.dto(p),actor);
+  assert.equal(result.syncEnabled,failure===null);assert.equal(h.stats().saved,failure===null);
+  assert.equal(result.code,failure===null?null:'SYRVE_ACCESS_DENIED');assert.deepEqual(h.capture.tables,before);
+  assert.equal(tx.calls.filter(c=>c.path.endsWith('init_by_table')).length,1);
+});
+
+for (const batch of [false,true]) test('unreported versions remain unknown while real '+(batch?'batch':'single-table')+' loading issues fresh private visibility receipts',async t=>{
+  const status='missing',h=transport(t,{
+    '/api/1/terminal_groups':{terminalGroups:[{organizationId:ORG,items:[{id:GROUP,organizationId:ORG,name:'Каса'}]}],terminalGroupsInSleep:[]},
+  });
+  const source=probe(scope,[]);Object.assign(source.terminalGroups.active[0],{posVersion:null,posVersionStatus:status});
+  h.controls.loadingPlan=tableLoadingPlan(source,[TABLE]);
+  const value=batch?(await h.client.probeLoadedOrderBatch('https://api-eu.syrve.live','synthetic-login',ORG,
+    [{tableId:TABLE,orderIdBatches:[[]],visibilityContext:h.controls.visibilityContext}],h.controls))[0][0]:await h.read([]);
+  assert.equal(value.terminalGroups.active[0].posVersion,null);assert.equal(value.terminalGroups.active[0].posVersionStatus,status);
+  assert.equal(isVerifiedLoadedProbe(value,h.controls.visibilityContext,ORG,TABLE),true);
+  assert.equal(isVerifiedLoadedProbe(structuredClone(value),h.controls.visibilityContext,ORG,TABLE),false);
+  assert.equal(h.calls.filter(c=>c.path.endsWith('init_by_table')).length,1);
+  assert.ok(h.calls.findIndex(c=>c.path.endsWith('init_by_table'))<h.calls.findLastIndex(c=>c.path.endsWith('by_table')));
+  const saved=activationPlan(h.controls.loadingPlan,{entity:{organizationId:ORG},links:[{syrveTableId:TABLE}]});
+  assert.equal(saved.groups[0].posVersion,null);assert.equal(saved.groups[0].posVersionStatus,status);
+});
 for(const failure of ['command','partial','changed','guard','expired','budget'])test('runtime '+failure+' cannot certify table visibility',async t=>{
   const h=transport(t,failure==='command'?{'/api/1/order/init_by_table':Response.json({}, {status:500})}:failure==='partial'?{'/api/1/order/by_id':Response.json({}, {status:403})}:{});
   if(failure==='changed')h.controls.loadingPlan.groups[0].posVersion='8.0.0';

@@ -25,6 +25,8 @@ export function validateActivationPreview(value: SyrveActivationPreview, scope: 
     || !uuid(value.organizationId) || !time(value.checkedAt) || value.syncEnabled !== false || value.linkedTables !== scope.linkedTables
     || !Number.isSafeInteger(value.linkedTables) || value.linkedTables < 1 || value.linkedTables > 100
     || !Number.isSafeInteger(value.terminalGroups) || value.terminalGroups < 1 || value.terminalGroups > 4
+    || (value.versionUnreportedGroups !== undefined && (!Number.isSafeInteger(value.versionUnreportedGroups)
+      || value.versionUnreportedGroups < 0 || value.versionUnreportedGroups > value.terminalGroups))
     || !Array.isArray(value.tableNumbers) || value.tableNumbers.length !== value.linkedTables
     || value.tableNumbers.some(number => tableNumber(number) === null)
     || new Set(value.tableNumbers.map(tableNumber)).size !== value.tableNumbers.length
@@ -39,6 +41,7 @@ export function validateActivationPreview(value: SyrveActivationPreview, scope: 
       || new Set([...value.tableNumbers, ...value.unlinkedTableNumbers].map(tableNumber)).size !== value.totalTables)) throw new Error('Недійсний склад столів.');
   return { configurationRevision: value.configurationRevision, organizationId: value.organizationId, checkedAt: value.checkedAt, syncEnabled: false,
     linkedTables: value.linkedTables, terminalGroups: value.terminalGroups, tableNumbers: [...value.tableNumbers],
+    ...(value.versionUnreportedGroups !== undefined ? { versionUnreportedGroups: value.versionUnreportedGroups } : {}),
     ...(value.totalTables !== undefined ? { totalTables: value.totalTables, unlinkedTableNumbers: [...value.unlinkedTableNumbers!] } : {}),
     confirmation: { proof: value.confirmation.proof, expiresAt: value.confirmation.expiresAt }, confirmationDeadline };
 }
@@ -134,6 +137,7 @@ export default function SyrveAutoStatusPanel(props: Props) {
       {preview.totalTables !== undefined && <p>Підключено {preview.linkedTables} із {preview.totalTables} столів MOLO.</p>}
       {!!preview.unlinkedTableNumbers?.length && <p className="mt-2 text-amber-100">Без зв’язку із Syrve: {preview.unlinkedTableNumbers.join(', ')}. Перевірте доступність їхніх секцій через Syrve API та повторіть підтвердження зв’язків.</p>}
       <p>Столи: {preview.tableNumbers.join(', ')}. Касових груп: {preview.terminalGroups}.</p>
+      {!!preview.versionUnreportedGroups && <p className="text-amber-100">Syrve не повідомив версію {preview.versionUnreportedGroups} касових груп. Автостатуси ввімкнуться лише після успішного завантаження та повторного читання.</p>}
       <label className="mt-3 flex gap-3"><input type="checkbox" checked={acknowledged} disabled={working} onChange={event => setAcknowledged(event.target.checked)} />
         <span>Дозволяю звірити вже відкриті рахунки та увімкнути автостатуси. Повторне ввімкнення зберігає ручні зміни, зроблені після врахованого відкриття рахунку.</span></label>
       <button type="button" disabled={!allowed || working || !acknowledged} onClick={() => void change(true)} className="mt-4 rounded-2xl border border-emerald-200/40 px-4 py-3 font-bold disabled:opacity-40">Увімкнути автостатуси</button>

@@ -29,7 +29,7 @@ export class SyrveTableLoadingService {
     if (probe.organizationId !== entity!.organizationId!.toLowerCase()
       || readOrders && knownIds.length && probe.checks.ordersById.status !== 'ok') throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
     try { return readOrders ? tableLoadingPlan(probe, ids) : tableLoadingAvailablePlan(probe, ids); }
-    catch { throw new ConflictException('Для всіх пов’язаних столів потрібні доступні каси Syrve POS від версії 7.7.1 та дозволи читання. Перевірте підключення.'); }
+    catch { throw new ConflictException('Перевірте доступність кас, зв’язки столів і дозволи читання. Відома версія каси має бути від 7.7.1; некоректний формат версії блокує завантаження.'); }
   }
   async preview(dto: SyrveRevisionDto, actor?: AuthUser) {
     const identity = this.identity(actor), key = syrveCredentialsKey();
@@ -38,6 +38,7 @@ export class SyrveTableLoadingService {
     const checkedAt = Date.now();
     return { configurationRevision: dto.configurationRevision, organizationId: plan.organizationId,
       checkedAt: new Date(checkedAt).toISOString(), linkedTables: tableNumbers.length, terminalGroups: plan.groups.length, tableNumbers,
+      versionUnreportedGroups: plan.groups.filter(group => group.posVersion === null).length,
       confirmation: issueLoadingProof(key, { revision: dto.configurationRevision, local: captured.fingerprint,
         upstream: loadingPlanFingerprint(plan), actor: identity }, checkedAt), ...FLAGS };
   }

@@ -55,6 +55,16 @@ test('actual API adapter sends only saved revision/proof/explicit confirmation, 
   assert.deepEqual(JSON.parse(JSON.stringify(requests)),[{url:'/syrve-integration/table-loading-preview',payload:{configurationRevision:REV}},
     {url:'/syrve-integration/table-loading',payload:{configurationRevision:REV,confirmationProof:'opaque-proof',confirmed:true}}]);
 });
+
+test('unreported versions are disclosed before a confirmed loading attempt and never cause an automatic command',async()=>{
+  let commands=0;const p={...preview(),versionUnreportedGroups:1};
+  const h=mounted({previewTableLoading:async()=>p,loadTables:async()=>{commands++;return result();}});
+  h.render();h.prepare();await flush();const html=renderToStaticMarkup(h.render());
+  assert.match(html,/Підтримку завантаження ще не підтверджено/);assert.equal(commands,0);
+  h.confirm();await flush();assert.equal(commands,0);h.ack();h.confirm();await flush();assert.equal(commands,1);
+  const {validateLoadingPreview}=load();
+  for (const count of [-1,2,'1',null]) assert.throws(()=>validateLoadingPreview({...p,versionUnreportedGroups:count},scope()));
+});
 test('preview and command responses reject stale scopes, positive activation flags and contradictory results',()=>{
   const {validateLoadingPreview:vp,validateLoadingResult:vr}=load();
   assert.deepEqual(JSON.parse(JSON.stringify(vp(preview(),scope()))).tableNumbers,['1','2']);assert.equal(vr(result(),scope(),1).readCompleted,true);

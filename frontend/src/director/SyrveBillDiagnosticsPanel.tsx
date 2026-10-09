@@ -89,15 +89,21 @@ export function validateBillRegisters(value: unknown, expected: Pick<Scope, 'con
     || new Set(result.registers.map(item => item?.id)).size !== result.registers.length
     || result.registers.some(item => !item || !uuid(item.id) || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 240
       || typeof item.loadingSupported !== 'boolean' || (item.loadingSupported && item.posVersion === null)
+      || (item.canAttemptLoading !== undefined && (typeof item.canAttemptLoading !== 'boolean'
+        || item.canAttemptLoading && !item.loadingSupported
+          && !(item.posVersion === null && (item.posVersionStatus === 'missing' || item.posVersionStatus === 'null'))))
       || (item.posVersionStatus !== undefined && (typeof item.posVersionStatus !== 'string'
         || !Object.prototype.hasOwnProperty.call(VERSION_MESSAGES, item.posVersionStatus)
         || (item.posVersionStatus === 'valid') !== (item.posVersion !== null)))
       || (item.posVersion !== null && (typeof item.posVersion !== 'string'
         || !/^(?:0|[1-9]\d{0,4})(?:\.(?:0|[1-9]\d{0,4})){2,3}$/.test(item.posVersion))))) invalid();
   return { configurationRevision: result.configurationRevision, organizationId: result.organizationId, checkedAt: result.checkedAt,
-    registers: result.registers.map(({ id, name, posVersion, posVersionStatus, loadingSupported }) => ({ id, name, posVersion,
-      ...(posVersionStatus !== undefined ? { posVersionStatus } : {}), loadingSupported })) };
+    registers: result.registers.map(({ id, name, posVersion, posVersionStatus, loadingSupported, canAttemptLoading }) => ({ id, name, posVersion,
+      ...(posVersionStatus !== undefined ? { posVersionStatus } : {}), loadingSupported,
+      ...(canAttemptLoading !== undefined ? { canAttemptLoading } : {}) })) };
 }
+
+const registerCanAttempt = (item?: SyrveBillRegisters['registers'][number]) => item?.canAttemptLoading ?? item?.loadingSupported ?? false;
 
 export function SyrveBillRegistersView({ report }: { report: SyrveBillRegisters }) {
   return <div className="mt-3 space-y-2 text-sm">
@@ -111,6 +117,7 @@ export function SyrveBillRegistersView({ report }: { report: SyrveBillRegisters 
           : 'Причину невідомої версії не отримано. Потрібна повторна перевірка після оновлення MOLO.'}</p>
       {item.posVersion && <p className="mt-1 text-white/55">{item.loadingSupported
         ? 'Версія підтримує завантаження рахунків.' : 'Для завантаження рахунків потрібна версія каси від 7.7.1.'}</p>}
+      {!item.posVersion && registerCanAttempt(item) && <p className="mt-1 text-amber-100">Можна підтвердити пробне завантаження цього рахунку. Підтримку методу ще не підтверджено.</p>}
     </li>)}</ul>
     {!report.registers.length && <p className="text-amber-100">Syrve не надав активних касових груп.</p>}
   </div>;
@@ -176,13 +183,13 @@ export default function SyrveBillDiagnosticsPanel({ configurationRevision, organ
   const currentRegisters = ready && registers?.configurationRevision === configurationRevision
     && registers.organizationId === organizationId?.toLowerCase() ? registers : null;
   const selected = currentRegisters?.registers.find(item => item.id === terminalGroupId);
-  const posScope = eligible && selected?.loadingSupported
+  const posScope = eligible && registerCanAttempt(selected)
     ? JSON.stringify([configurationRevision, organizationId?.toLowerCase(), requestedId, terminalGroupId]) : null;
   const confirmed = posScope !== null && confirmationScope === posScope;
   function clearConfirmation() { confirmation.current = null; setConfirmationScope(null); }
   async function checkBill(kind: 'read' | 'registers' | 'pos' = 'read') {
     if (!(kind === 'registers' ? ready : eligible) || request.current.pending || !configurationRevision || !organizationId) return;
-    if (kind === 'pos' && (!confirmed || confirmation.current !== posScope || !selected?.loadingSupported)) return;
+    if (kind === 'pos' && (!confirmed || confirmation.current !== posScope || !registerCanAttempt(selected))) return;
     const version = ++request.current.version;
     request.current.pending = true; setReport(null); setFailed(false); setFailureMessage(''); setLoading(true); setAction(kind); clearConfirmation();
     try {
@@ -190,7 +197,7 @@ export default function SyrveBillDiagnosticsPanel({ configurationRevision, organ
         const value = await syrveApi.billRegisters(configurationRevision);
         if (version !== request.current.version) return;
         const checked = validateBillRegisters(value, { configurationRevision, organizationId });
-        const available = checked.registers.filter(item => item.loadingSupported);
+        const available = checked.registers.filter(registerCanAttempt);
         setRegisters(checked);
         setTerminalGroupId(available.some(item => item.id === terminalGroupId) ? terminalGroupId : available.length === 1 ? available[0].id : '');
         return;
@@ -228,16 +235,17 @@ export default function SyrveBillDiagnosticsPanel({ configurationRevision, organ
           <select value={terminalGroupId} onChange={event => { clearConfirmation(); setTerminalGroupId(event.target.value); }} disabled={loading}
             className="mt-2 block w-full rounded-xl border border-white/15 bg-neutral-900 p-3">
             <option value="">Оберіть касову групу</option>
-            {currentRegisters.registers.map(item => <option key={item.id} value={item.id} disabled={!item.loadingSupported}>
-              {item.name}{!item.loadingSupported ? ' · Завантаження не підтримується або версія невідома' : ''}
+            {currentRegisters.registers.map(item => <option key={item.id} value={item.id} disabled={!registerCanAttempt(item)}>
+              {item.name}{!registerCanAttempt(item) ? ' · Завантаження недоступне'
+                : !item.loadingSupported ? ' · Версія невідома: пробна перевірка' : ''}
             </option>)}
           </select>
         </label>
         {selected && <div className="mt-2 text-xs text-white/55">
           <p className="break-all font-mono">{selected.id}</p>
         </div>}
-        {!currentRegisters.registers.some(item => item.loadingSupported)
-          && <p className="mt-2 text-sm text-amber-100">Немає активної касової групи з підтвердженою підтримкою завантаження рахунків.</p>}
+        {!currentRegisters.registers.some(registerCanAttempt)
+          && <p className="mt-2 text-sm text-amber-100">Немає активної касової групи, доступної для пробного завантаження рахунку.</p>}
         <label className="mt-3 flex items-start gap-2 text-sm">
           <input type="checkbox" checked={confirmed} onChange={event => {
             const scope = event.target.checked ? posScope : null;
@@ -245,7 +253,7 @@ export default function SyrveBillDiagnosticsPanel({ configurationRevision, organ
           }} disabled={loading || !posScope} />
           Підтверджую перевірку цього UUID рахунку в обраній касовій групі.
         </label>
-        <button type="button" disabled={!eligible || loading || !confirmed || !selected?.loadingSupported} onClick={() => void checkBill('pos')}
+        <button type="button" disabled={!eligible || loading || !confirmed || !registerCanAttempt(selected)} onClick={() => void checkBill('pos')}
           className="mt-3 rounded-xl border border-cyan-200/35 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-100 disabled:opacity-40">Завантажити з каси та перевірити</button>
       </>}
     </div>

@@ -42,6 +42,19 @@ test('an unrelated compatible register cannot validate a mapped unsupported regi
   assert.throws(()=>model.tableLoadingPlan(p,[TABLE]));
 });
 
+test('optional missing/null version metadata permits a plan without inventing a version; malformed or unexplained values do not', () => {
+  for (const status of ['missing','null']) {
+    const p=probe();Object.assign(p.terminalGroups.active[0],{posVersion:null,posVersionStatus:status});
+    const candidate=model.tableLoadingPlan(p,[TABLE,TABLE2]);
+    assert.equal(candidate.groups[0].posVersion,null);assert.equal(candidate.groups[0].posVersionStatus,status);
+    assert.notEqual(model.loadingPlanFingerprint(candidate),model.loadingPlanFingerprint(plan()));
+  }
+  for (const status of [undefined,'empty','invalid_type','invalid_format','valid']) {
+    const p=probe();Object.assign(p.terminalGroups.active[0],{posVersion:null,posVersionStatus:status});
+    assert.throws(()=>model.tableLoadingPlan(p,[TABLE,TABLE2]));
+  }
+});
+
 test('loading proofs are purpose-separated, expire and bind actor/session/local/upstream/revision', () => {
   const key=Buffer.alloc(32,7),now=1000000;
   const input={revision:REV,local:'a'.repeat(64),upstream:'b'.repeat(64),actor:model.loadingActor(actor)};
@@ -160,7 +173,8 @@ function service(t) {
     guard:async capture=>store.assertCurrent(capture),release:async()=>{releases++;leaseHeld=false;}};
   const client={probeOrders:async(base,login,org,tables,known,controls)=>{reads++;assert.equal(login,'synthetic-loading-login');assert.equal(org,ORG);
     assert.deepEqual(tables,[TABLE,TABLE2]);if(controls?.requestBudget)controls.requestBudget.remaining-=6;return respond(reads,known);},
-    initializeTables:async(base,login,p,controls)=>{commands++;assert.deepEqual(p,plan());await controls.beforeCommand();await execute();return {completedGroups:1};}};
+    initializeTables:async(base,login,p,controls)=>{commands++;assert.equal(p.organizationId,ORG);
+      assert.deepEqual(p.groups.flatMap(group=>group.tableIds),[TABLE,TABLE2]);await controls.beforeCommand();await execute(p);return {completedGroups:1};}};
   const app=new SyrveTableLoadingService(store,client);
   return {app,state,stats:()=>({claims,releases,reads,commands,leaseHeld}),respond:value=>respond=value,execute:value=>execute=value,
     dto:preview=>({configurationRevision:REV,confirmationProof:preview.confirmation.proof,confirmed:true})};
@@ -174,6 +188,19 @@ test('preview only reads, explicit confirmation consumes revision, verifies comm
   assert.deepEqual(h.stats(),{claims:1,releases:1,reads:3,commands:1,leaseHeld:false});assert.equal(JSON.stringify(h.state.tables),before);
   assert.ok(!JSON.stringify([preview,result]).includes('synthetic-loading-login'));
   const calls=h.stats();await assert.rejects(h.app.load(h.dto(preview),actor));assert.deepEqual(h.stats(),calls);
+});
+
+for (const success of [true,false]) test('unreported version loading requires explicit consent and '+(success?'fresh reads':'retains failure without applying statuses'),async t=>{
+  const h=service(t),before=JSON.stringify(h.state.tables);
+  h.respond(()=>{const p=probe();Object.assign(p.terminalGroups.active[0],{posVersion:null,posVersionStatus:'missing'});return p;});
+  h.execute(async p=>{assert.equal(p.groups[0].posVersion,null);if(!success)throw new SyrveClientException('SYRVE_ACCESS_DENIED');});
+  const p=await h.app.preview({configurationRevision:REV},actor);
+  assert.equal(p.versionUnreportedGroups,1);assert.equal(h.stats().commands,0);assert.equal(h.stats().claims,0);
+  await assert.rejects(h.app.load({...h.dto(p),confirmed:false},actor));assert.equal(h.stats().commands,0);
+  const result=await h.app.load(h.dto(p),actor);assert.equal(result.readCompleted,success);
+  assert.equal(result.commandsConfirmed,success);assert.equal(result.code,success?null:'SYRVE_ACCESS_DENIED');
+  assert.equal(result.syncEnabled,false);assert.equal(JSON.stringify(h.state.tables),before);
+  assert.equal(h.stats().releases,success?1:0);
 });
 test('loading preview timestamps and signed expiry share one server instant',async t=>{
   const h=service(t),RealDate=Date;let now=RealDate.now();

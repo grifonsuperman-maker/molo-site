@@ -1,3 +1,4 @@
+import type { SyrvePosVersionStatus } from './syrve-pos-version';
 // Read-only evidence. No table status reducer, persistence or activation lives here.
 export class SyrveOrderValidationError extends Error {}
 
@@ -29,7 +30,8 @@ export type SyrveOrderProbe = {
   completedAt: string;
   authentication: 'v2' | 'legacy_v1' | null;
   checks: Record<ObservationCheckName, ObservationCheck>;
-  terminalGroups: { active: { id: string; posVersion?: string | null }[]; sleeping: { id: string; posVersion?: string | null }[] } | null;
+  terminalGroups: { active: { id: string; posVersion?: string | null; posVersionStatus?: SyrvePosVersionStatus }[];
+    sleeping: { id: string; posVersion?: string | null; posVersionStatus?: SyrvePosVersionStatus }[] } | null;
   catalogTables: { id: string; terminalGroupId: string; isDeleted: boolean }[] | null;
   availability: { terminalGroupId: string; isAlive: boolean }[] | null;
   byTable: SyrveObservedOrder[] | null;

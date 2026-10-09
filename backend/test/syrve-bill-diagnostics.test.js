@@ -105,7 +105,8 @@ test('register preparation preserves the exact reason for an unknown API version
   const h = transport(t, [...auth(), ...responses]);
   for (const [, posVersionStatus] of cases) {
     const result = await h.client.billRegisters(BASE, LOGIN, ORG, async () => {});
-    assert.deepEqual(result.registers, [{ id: GROUP, name: 'Каса', posVersion: null, posVersionStatus, loadingSupported: false }]);
+    assert.deepEqual(result.registers, [{ id: GROUP, name: 'Каса', posVersion: null, posVersionStatus, loadingSupported: false,
+      canAttemptLoading: ['missing', 'null'].includes(posVersionStatus) }]);
     assert.doesNotMatch(JSON.stringify(result), /private-|fixture-/);
   }
   assert.equal(h.calls.length, cases.length + 2);
@@ -130,6 +131,15 @@ test('a single POS UUID is initialized before POS lookup with current owner and 
   assert.doesNotMatch(JSON.stringify(result), /private-|fixture-/);
 });
 
+for (const posVersion of [undefined,null]) test('one explicitly scoped POS bill may be tested when the optional version is unreported: '+String(posVersion),async t=>{
+  const groups=registers([{id:GROUP,organizationId:ORG,name:'Каса',posVersion}]);
+  const h=transport(t,[...auth(),Response.json(groups),Response.json(alive()),accepted(),Response.json(payload())]);
+  const result=await h.client.loadAndLookupBill(BASE,LOGIN,ORG,POS,GROUP,async()=>{});
+  assert.equal(result.lookup,'posId');assert.equal(result.posLoading.requestAccepted,true);
+  assert.equal(h.calls.filter(call=>call.url.endsWith('/init_by_posOrder')).length,1);
+  assert.deepEqual(h.calls[4].body,{organizationId:ORG,terminalGroupId:GROUP,posOrderIds:[POS]});
+});
+
 test('accepted POS loading followed by an empty read never queries Cloud IDs or proves a free table', async t => {
   const h = transport(t, [...auth(), Response.json(registers()), Response.json(alive()), accepted(), empty()]);
   const result = await h.client.loadAndLookupBill(BASE, LOGIN, ORG, POS, GROUP, async () => {});
@@ -138,10 +148,10 @@ test('accepted POS loading followed by an empty read never queries Cloud IDs or 
   assert.doesNotMatch(JSON.stringify(result), /free|occupied|visibilityVerified|statusesApplied/);
 });
 
-test('sleeping, unknown, foreign and unsupported registers cannot initialize the candidate POS order', async t => {
+test('sleeping, malformed, foreign and unsupported registers cannot initialize the candidate POS order', async t => {
   for (const groups of [registers([]), registers([], [{ id: GROUP, organizationId: ORG, name: 'Спляча', posVersion: '9.0.0' }]),
     registers([{ id: GROUP, organizationId: ORG, name: 'Каса', posVersion: '7.7.0' }]),
-    registers([{ id: GROUP, organizationId: ORG, name: 'Каса', posVersion: null }]),
+    registers([{ id: GROUP, organizationId: ORG, name: 'Каса', posVersion: 'private-invalid-version' }]),
     registers([{ id: GROUP, organizationId: TABLE, name: 'Каса', posVersion: '9.0.0' }]),
     registers([{ id: GROUP, organizationId: ORG, name: 'Каса', posVersion: '9.0.0' },
       { id: GROUP, organizationId: ORG, name: 'Дублікат', posVersion: '9.0.0' }])]) {

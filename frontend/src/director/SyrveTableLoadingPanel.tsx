@@ -27,6 +27,8 @@ export function validateLoadingPreview(value: unknown, scope: Scope, requestStar
   const preview = value as SyrveTableLoadingPreview; checked(preview, scope);
   const confirmation = preview.confirmation;
   if (preview.configurationRevision !== scope.configurationRevision || !Array.isArray(preview.tableNumbers)
+    || (preview.versionUnreportedGroups !== undefined && (!count(preview.versionUnreportedGroups)
+      || preview.versionUnreportedGroups > preview.terminalGroups))
     || preview.tableNumbers.length !== scope.linkedTables || new Set(preview.tableNumbers).size !== scope.linkedTables
     || preview.tableNumbers.some(number => typeof number !== 'string' || number !== number.trim() || !/^[1-9]\d{0,5}$/.test(number))
     || !confirmation || typeof confirmation.proof !== 'string' || confirmation.proof.length > 1500
@@ -35,6 +37,7 @@ export function validateLoadingPreview(value: unknown, scope: Scope, requestStar
   if (confirmationDeadline === null) invalid();
   return { configurationRevision: preview.configurationRevision, organizationId: preview.organizationId, checkedAt: preview.checkedAt,
     linkedTables: preview.linkedTables, terminalGroups: preview.terminalGroups, tableNumbers: [...preview.tableNumbers],
+    ...(preview.versionUnreportedGroups !== undefined ? { versionUnreportedGroups: preview.versionUnreportedGroups } : {}),
     confirmation: { proof: confirmation.proof, expiresAt: confirmation.expiresAt }, confirmationDeadline,
     syncEnabled: false, activationAvailable: false, statusesApplied: false, renamingApplied: false, complete: false };
 }
@@ -125,11 +128,12 @@ export default function SyrveTableLoadingPanel(props: Props) {
   return <section className="mt-5 rounded-[28px] border border-white/10 bg-neutral-950/80 p-4 sm:p-5" aria-label="Завантаження стану столів Syrve">
     <h2 className="font-black">Завантаження стану столів із каси</h2>
     <p className="mt-2 text-sm text-white/55">Syrve завантажить дані лише для підтверджених столів. Спочатку перевірте перелік, потім підтвердьте дію.</p>
-    <p className="mt-2 text-sm text-white/55">Потрібні доступні каси Syrve POS від версії 7.7.1 та дозволи на завантаження й читання даних столів.</p>
+    <p className="mt-2 text-sm text-white/55">Метод завантаження працює з Syrve POS від версії 7.7.1. Якщо Syrve не повідомляє версію, можна підтвердити пробне завантаження.</p>
     <button type="button" disabled={!eligible || loading} onClick={() => void prepare()}
       className="mt-3 rounded-xl border border-cyan-200/35 px-4 py-3 text-sm font-bold text-cyan-100 disabled:opacity-40">Підготувати завантаження</button>
     {visible && preview && <div className="mt-4 space-y-3">
       <p className="text-sm">Столи: {preview.tableNumbers.join(', ')}. Касових груп: {preview.terminalGroups}.</p>
+      {!!preview.versionUnreportedGroups && <p className="text-sm text-amber-100">Syrve не повідомив версію {preview.versionUnreportedGroups} касових груп. Підтримку завантаження ще не підтверджено; результат перевірить Syrve.</p>}
       <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={acknowledged}
         onChange={event => setAcknowledged(event.target.checked)} />Підтверджую завантаження стану перелічених столів із Syrve.</label>
       <button type="button" disabled={!acknowledged || loading} onClick={() => void confirm()}

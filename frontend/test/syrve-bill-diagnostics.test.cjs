@@ -217,6 +217,28 @@ test('unsupported or unknown registers cannot load a bill and several supported 
   }
 });
 
+for (const status of ['missing','null']) test('unreported version '+status+' permits only a separately confirmed bill attempt',async()=>{
+  let loads=0;const value=registers();Object.assign(value.registers[0],{posVersion:null,posVersionStatus:status,loadingSupported:false,canAttemptLoading:true});
+  const h=mounted({billRegisters:async()=>value,posBillDiagnostics:async()=>{loads++;return loadedReport();}});
+  h.input(POS);h.prepare();await flush();h.render();assert.equal(find(h.render(),'select').props.value,OTHER);
+  h.loadPos();await flush();assert.equal(loads,0);
+  h.consent(true);h.loadPos();await flush();assert.equal(loads,1);assert.equal(h.states[1].posLoading.requestAccepted,true);
+  const {validateBillRegisters,SyrveBillRegistersView}=load();
+  const html=renderToStaticMarkup(React.createElement(SyrveBillRegistersView,{report:validateBillRegisters(value,scope())}));
+  assert.match(html,/Версія каси: невідома/);assert.match(html,/Підтримку методу ще не підтверджено/);
+  assert.doesNotMatch(html,/Версія підтримує/);
+});
+
+test('malformed or unexplained versions cannot be turned into eligible bill attempts by an added flag',()=>{
+  const {validateBillRegisters}=load();
+  for (const status of [undefined,'empty','invalid_type','invalid_format']) {
+    const value=registers();Object.assign(value.registers[0],{posVersion:null,posVersionStatus:status,loadingSupported:false,canAttemptLoading:true});
+    assert.throws(()=>validateBillRegisters(value,scope()));
+  }
+  const value=registers();Object.assign(value.registers[0],{posVersion:'7.7.0',loadingSupported:false,canAttemptLoading:true});
+  assert.throws(()=>validateBillRegisters(value,scope()));
+});
+
 test('late register preparation and POS reports cannot survive scope, candidate, register or sibling changes', async () => {
   for (const change of [{ configurationRevision: OTHER }, { organizationId: OTHER }, { busy: true }, { connectionReady: false }]) {
     const response = deferred(); const h = mounted({ billRegisters: () => response.promise });
