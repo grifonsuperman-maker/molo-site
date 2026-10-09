@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { SyrveIntegrationService } = require('../dist/syrve/syrve-integration.service.js');
 const { ConflictException } = require('@nestjs/common');
+const { PostgresQueryRunner } = require('typeorm/driver/postgres/PostgresQueryRunner');
 
 const ID = '11111111-2222-4333-8444-555555555555';
 const REVISION = '22222222-3333-4444-8555-666666666666';
@@ -12,24 +13,37 @@ const ACTOR = { sub: 'director', directorSessionVersion: 1, role: 'owner' };
 const REQUEST = { configurationRevision: REVISION, expectedLinks: 1, confirmed: true, confirmationText: 'СКИНУТИ' };
 
 function setup({ failDelete = false, workerBusy = false, activationEnabled = false,
-  activationRevision = REVISION, activationConsentValid = true } = {}) {
+  activationRevision = REVISION, activationConsentValid = true,
+  linkCount = 1, deletedCount = linkCount } = {}) {
   const queries = [];
   const entity = { id: ID, configurationRevision: REVISION, organizationId: ID,
     apiBaseUrl: 'https://api-eu.syrve.live', apiLoginEncrypted: 'private-ciphertext', apiLoginIv: 'iv',
     apiLoginAuthTag: 'tag', apiLoginMasked: '***', status: 'connected' };
-  const snapshot = { prepared: true, entity, links: [LINK] };
+  const links = Array.from({ length: linkCount }, (_, index) => ({ ...LINK,
+    id: '33333333-4444-4555-8666-' + String(index + 1).padStart(12, '0'),
+  }));
+  const snapshot = { prepared: true, entity, links };
   let savedEntity;
-  const manager = {
+  // Use the installed driver to shape results: a flat mock hid PostgreSQL's
+  // DELETE [rows, rowCount] response and the production 36-versus-2 failure.
+  const runner = new PostgresQueryRunner({ options: {}, connection: {
+    subscribers: [], logger: { logQuery() {}, logQueryError() {} },
+  } }, 'master');
+  runner.connect = async () => ({
     query: async (sql, params = []) => {
       queries.push({ sql, params });
-      if (sql.startsWith('SELECT lease_until')) return [{ busy: workerBusy }];
-      if (sql.startsWith('DELETE FROM ')) {
-        if (failDelete) throw new Error('database delete failed');
-        return [{ id: LINK.id }];
+      if (sql.startsWith('SELECT lease_until')) {
+        return { command: 'SELECT', rows: [{ busy: workerBusy }], rowCount: 1 };
       }
-      return [];
+      if (sql.includes('DELETE FROM ')) {
+        if (failDelete) throw new Error('database delete failed');
+        return { command: sql.startsWith('DELETE FROM ') ? 'DELETE' : 'SELECT',
+          rows: links.slice(0, deletedCount).map(link => ({ id: link.id })), rowCount: deletedCount };
+      }
+      return { command: sql.startsWith('UPDATE ') ? 'UPDATE' : 'SELECT', rows: [], rowCount: 1 };
     },
-  };
+  });
+  const manager = { query: (sql, params = []) => runner.query(sql, params) };
   const settings = {
     read: async () => snapshot,
     table: name => '"public"."' + name + '"',
@@ -50,15 +64,25 @@ function setup({ failDelete = false, workerBusy = false, activationEnabled = fal
         throw new ConflictException('Спочатку вимкніть автоматичні статуси Syrve.');
       }
     } });
-  return { service, queries, logs, next: () => savedEntity };
+  return { service, manager, queries, logs, next: () => savedEntity };
 }
+
+const deletesLinks = sql => sql.includes('DELETE FROM "public"."syrve_table_links"');
+
+test('regression harness preserves the PostgreSQL DELETE tuple for 36 returned rows', async () => {
+  const h = setup({ linkCount: 36 });
+  const result = await h.manager.query('DELETE FROM "public"."syrve_table_links" WHERE integration_id=$1 RETURNING id', [ID]);
+  assert.equal(result.length, 2);
+  assert.equal(result[0].length, 36);
+  assert.equal(result[1], 36);
+});
 
 test('clean reconnect deletes only Syrve links and clears credentials in one settings transaction', async () => {
   const h = setup();
   const response = await h.service.resetBindings(REQUEST, ACTOR);
   const sql = h.queries.map(row => row.sql);
-  assert.equal(sql.filter(value => value.startsWith('DELETE FROM ')).length, 1);
-  assert.match(sql.find(value => value.startsWith('DELETE FROM ')), /syrve_table_links/);
+  assert.equal(sql.filter(deletesLinks).length, 1);
+  assert.match(sql.find(deletesLinks), /RETURNING id/);
   assert.ok(!sql.some(value => /DELETE FROM .*tables(?!_)/.test(value)));
   assert.ok(!sql.some(value => /syrve_binding_reset_backups/.test(value)));
   assert.ok(sql.some(value => /UPDATE .*syrve_sync_activation/.test(value)));
@@ -70,6 +94,28 @@ test('clean reconnect deletes only Syrve links and clears credentials in one set
   assert.equal(response.integration.hasCredentials, false);
   assert.equal(h.logs.length, 1);
 });
+
+for (const linkCount of [2, 36]) {
+  test('clean reconnect reports all ' + linkCount + ' deleted links with the PostgreSQL driver', async () => {
+    const h = setup({ linkCount });
+    const response = await h.service.resetBindings({ ...REQUEST, expectedLinks: linkCount }, ACTOR);
+    assert.equal(response.removedLinks, linkCount);
+    assert.equal(response.integration.confirmedLinks, 0);
+    assert.equal(response.integration.hasCredentials, false);
+    assert.equal(h.next().status, 'not_connected');
+    assert.equal(h.logs.length, 1);
+  });
+}
+
+for (const [linkCount, deletedCount] of [[2, 0], [2, 1], [36, 0], [36, 35]]) {
+  test('reset rejects partial deletion of ' + deletedCount + ' out of ' + linkCount + ' links', async () => {
+    const h = setup({ linkCount, deletedCount });
+    await assert.rejects(h.service.resetBindings({ ...REQUEST, expectedLinks: linkCount }, ACTOR), ConflictException);
+    assert.equal(h.next(), undefined);
+    assert.equal(h.logs.length, 0);
+    assert.ok(!h.queries.some(row => /UPDATE .*syrve_sync_activation/.test(row.sql)));
+  });
+}
 
 test('reset accepts stale enabled activation row after disconnect revision rotation', async () => {
   const staleRevision = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
@@ -85,7 +131,7 @@ test('reset accepts same-revision invalidated consent when validated auto-status
   const response = await h.service.resetBindings(REQUEST, ACTOR);
   assert.equal(response.removedLinks, 1);
   assert.equal(response.integration.syncEnabled, false);
-  assert.ok(h.queries.some(row => row.sql.startsWith('DELETE FROM ')));
+  assert.ok(h.queries.some(row => deletesLinks(row.sql)));
 });
 
 test('failed link deletion does not clear saved API credentials', async () => {
@@ -104,6 +150,6 @@ test('reset rejects stale count, active worker lease, enabled auto statuses, and
   ]) {
     const h = setup(config);
     await assert.rejects(h.service.resetBindings(input, actor));
-    assert.ok(!h.queries.some(row => row.sql.startsWith('DELETE FROM ')));
+    assert.ok(!h.queries.some(row => deletesLinks(row.sql)));
   }
 });
