@@ -80,21 +80,36 @@ const accepted = () => Response.json({ correlationId: VERSION });
 
 test('register preparation reads fresh active groups and supported versions without loading any order or table catalogue', async t => {
   const groups = registers([
-    { id: GROUP, organizationId: ORG, name: 'Тестова каса', posVersion: '7.7.1', privatePayload: 'private-group' },
+    { id: GROUP, organizationId: ORG, name: 'Тестова каса', posVersion: '8.8.8001.0', privatePayload: 'private-group' },
     { id: TABLE, organizationId: ORG, name: 'Стара каса', posVersion: '7.7.0' },
     { id: CLOUD, organizationId: ORG, name: 'Невідома версія', posVersion: 'invalid-private-version' },
   ], [{ id: POS, organizationId: ORG, name: 'Спляча каса', posVersion: '9.0.0' }]);
   const h = transport(t, [...auth(), Response.json(groups), Response.json(registers())]);
   const result = await h.client.billRegisters(BASE, LOGIN, ORG.toUpperCase(), async () => {});
-  assert.deepEqual(result.registers.map(({ id, posVersion, loadingSupported }) => ({ id, posVersion, loadingSupported })), [
-    { id: GROUP, posVersion: '7.7.1', loadingSupported: true },
-    { id: TABLE, posVersion: '7.7.0', loadingSupported: false },
-    { id: CLOUD, posVersion: null, loadingSupported: false },
+  assert.deepEqual(result.registers.map(({ id, posVersion, posVersionStatus, loadingSupported }) => ({ id, posVersion, posVersionStatus, loadingSupported })), [
+    { id: GROUP, posVersion: '8.8.8001.0', posVersionStatus: 'valid', loadingSupported: true },
+    { id: TABLE, posVersion: '7.7.0', posVersionStatus: 'valid', loadingSupported: false },
+    { id: CLOUD, posVersion: null, posVersionStatus: 'invalid_format', loadingSupported: false },
   ]);
   assert.equal(h.calls.length, 3); assert.deepEqual(h.calls[2].body, { organizationIds: [ORG], includeDisabled: false });
   assert.doesNotMatch(JSON.stringify(result), /private-|fixture-/);
   const again = await h.client.billRegisters(BASE, LOGIN, ORG, async () => {});
   assert.equal(again.registers.length, 1); assert.equal(h.calls.length, 4, 'a second preparation must read fresh register metadata');
+});
+
+test('register preparation preserves the exact reason for an unknown API version and never sends loading commands', async t => {
+  const cases = [[undefined, 'missing'], [null, 'null'], ['', 'empty'], ['  ', 'empty'],
+    [8.8, 'invalid_type'], [{ privateValue: 'private-secret' }, 'invalid_type'],
+    ['private-secret', 'invalid_format']];
+  const responses = cases.map(([posVersion]) => Response.json(registers([{ id: GROUP, organizationId: ORG, name: 'Каса', posVersion }])));
+  const h = transport(t, [...auth(), ...responses]);
+  for (const [, posVersionStatus] of cases) {
+    const result = await h.client.billRegisters(BASE, LOGIN, ORG, async () => {});
+    assert.deepEqual(result.registers, [{ id: GROUP, name: 'Каса', posVersion: null, posVersionStatus, loadingSupported: false }]);
+    assert.doesNotMatch(JSON.stringify(result), /private-|fixture-/);
+  }
+  assert.equal(h.calls.length, cases.length + 2);
+  assert.ok(h.calls.every(call => ['/api/1/access_token', '/api/1/organizations', '/api/1/terminal_groups'].includes(new URL(call.url).pathname)));
 });
 
 test('a single POS UUID is initialized before POS lookup with current owner and saved-scope guards', async t => {

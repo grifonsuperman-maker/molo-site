@@ -80,9 +80,10 @@ export type SyrveBillDiagnostics = {
   } | null;
 };
 
+export type SyrvePosVersionStatus = 'valid' | 'missing' | 'null' | 'empty' | 'invalid_type' | 'invalid_format';
 export type SyrveBillRegisters = {
   configurationRevision: string; organizationId: string; checkedAt: string;
-  registers: { id: string; name: string; posVersion: string | null; loadingSupported: boolean }[];
+  registers: { id: string; name: string; posVersion: string | null; posVersionStatus?: SyrvePosVersionStatus; loadingSupported: boolean }[];
 };
 
 type SyrveLoadingFlags = { syncEnabled: false; activationAvailable: false; statusesApplied: false; renamingApplied: false; complete: false };

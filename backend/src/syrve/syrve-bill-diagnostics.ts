@@ -1,4 +1,5 @@
 import { observationIds, SyrveOrderValidationError } from './syrve-order-observer';
+import type { SyrvePosVersionStatus } from './syrve-pos-version';
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 export type SyrveBillRecord = {
@@ -15,7 +16,7 @@ export type SyrveBillReadResult = {
   order: SyrveBillRecord | null; posLoading?: SyrveBillPosLoading;
 };
 export type SyrveBillRegister = {
-  id: string; name: string; posVersion: string | null; loadingSupported: boolean;
+  id: string; name: string; posVersion: string | null; posVersionStatus: SyrvePosVersionStatus; loadingSupported: boolean;
 };
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SyrveOrderValidationError();

@@ -399,6 +399,7 @@ export class SyrveClient {
         organizationIds: [organizationId], includeDisabled: false,
       }, session.token, deadline, undefined, budget), organizationId, true);
       return groups.active.map(group => ({ id: group.id, name: group.name, posVersion: group.posVersion || null,
+        posVersionStatus: group.posVersionStatus ?? (group.posVersion ? 'valid' : 'missing'),
         loadingSupported: assessSyrvePosVersion(group.posVersion).initialization === 'supported' }));
     } catch (error) {
       if (error instanceof SyrveCatalogValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');

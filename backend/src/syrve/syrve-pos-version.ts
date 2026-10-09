@@ -3,6 +3,7 @@ import type { OrderObservationLink, SyrveOrderProbe } from './syrve-order-observ
 type VersionSupport = 'supported' | 'unsupported' | 'unknown';
 type SupportCounts = Record<VersionSupport, number>;
 export type SyrvePosVersions = { read: SupportCounts; initialization: SupportCounts };
+export type SyrvePosVersionStatus = 'valid' | 'missing' | 'null' | 'empty' | 'invalid_type' | 'invalid_format';
 
 const MINIMUM_READ = [7, 4, 6];
 const MINIMUM_INITIALIZATION = [7, 7, 1];
@@ -13,6 +14,17 @@ export function normalizeSyrvePosVersion(value: unknown): string | null {
   if (typeof value !== 'string' || value !== value.trim()
     || !/^(?:0|[1-9]\d{0,4})(?:\.(?:0|[1-9]\d{0,4})){2,3}$/.test(value)) return null;
   return value;
+}
+
+// Preserve the reason at the transport boundary, before invalid values become
+// null. Only fixed classifications and an already validated version may leave
+// this function; arbitrary provider values must never reach diagnostics.
+export function inspectSyrvePosVersion(value: unknown): { posVersion: string | null; posVersionStatus: SyrvePosVersionStatus } {
+  const posVersion = normalizeSyrvePosVersion(value);
+  const posVersionStatus: SyrvePosVersionStatus = posVersion !== null ? 'valid'
+    : value === undefined ? 'missing' : value === null ? 'null'
+      : typeof value !== 'string' ? 'invalid_type' : !value.trim() ? 'empty' : 'invalid_format';
+  return { posVersion, posVersionStatus };
 }
 
 export function assessSyrvePosVersion(value: unknown) {
