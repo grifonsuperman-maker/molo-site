@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { normalizeSyrvePosVersion, assessSyrvePosVersion, diagnoseSyrvePosVersions } = require('../dist/syrve/syrve-pos-version.js');
+const { normalizeSyrvePosVersion, assessSyrvePosVersion, diagnoseSyrvePosVersions, inspectSyrvePosVersion } = require('../dist/syrve/syrve-pos-version.js');
 const { parseTerminalGroups } = require('../dist/syrve/syrve-catalog.js');
 
 const ORG = 'a0000000-0000-4000-8000-000000000001';
@@ -20,6 +20,7 @@ for (const [version, read, initialization] of [
   ['7.4.6.123', 'supported', 'unsupported'], ['7.7.0.99', 'supported', 'unsupported'],
   ['7.7.1', 'supported', 'supported'], ['7.7.1.0', 'supported', 'supported'],
   ['7.10.0', 'supported', 'supported'], ['8.0.0', 'supported', 'supported'],
+  ['8.8.8001.0', 'supported', 'supported'],
   ['6.99.99', 'unsupported', 'unsupported'],
 ]) test(`documented POS version boundaries are compared numerically: ${version}`, () => {
   assert.deepEqual(assessSyrvePosVersion(version), { read, initialization });
@@ -37,11 +38,22 @@ test('missing or arbitrary version text never establishes support or retains pro
 test('only explicitly requested version projection changes the catalog contract', () => {
   const payload = { terminalGroups: [{ organizationId: ORG, items: [{ id: GROUP, organizationId: ORG, name: 'Каса', posVersion: '7.7.1' }] }], terminalGroupsInSleep: [] };
   assert.deepEqual(parseTerminalGroups(payload, ORG).active, [{ id: GROUP, name: 'Каса' }]);
-  assert.deepEqual(parseTerminalGroups(payload, ORG, true).active, [{ id: GROUP, name: 'Каса', posVersion: '7.7.1' }]);
+  assert.deepEqual(parseTerminalGroups(payload, ORG, true).active, [{ id: GROUP, name: 'Каса', posVersion: '7.7.1', posVersionStatus: 'valid' }]);
   payload.terminalGroups[0].items[0].posVersion = { credential: 'secret-customer-token' };
   const parsed = parseTerminalGroups(payload, ORG, true);
   assert.equal(parsed.active[0].posVersion, null);
+  assert.equal(parsed.active[0].posVersionStatus, 'invalid_type');
   assert.ok(!JSON.stringify(parsed).includes('secret-customer-token'));
+});
+
+test('version diagnostics distinguish missing values and rejected formats without retaining arbitrary provider text', () => {
+  for (const [value, status] of [[undefined, 'missing'], [null, 'null'], ['', 'empty'], ['  ', 'empty'],
+    [8.8, 'invalid_type'], [{ credential: 'secret-customer-token' }, 'invalid_type'],
+    [' 8.8.8001.0', 'invalid_format'], ['8.8', 'invalid_format'], ['secret-customer-token', 'invalid_format']]) {
+    assert.deepEqual(inspectSyrvePosVersion(value), { posVersion: null, posVersionStatus: status });
+    assert.deepEqual(assessSyrvePosVersion(value), { read: 'unknown', initialization: 'unknown' });
+  }
+  assert.deepEqual(inspectSyrvePosVersion('8.8.8001.0'), { posVersion: '8.8.8001.0', posVersionStatus: 'valid' });
 });
 
 test('version evidence covers every mapped table while ignoring unrelated supported registers', () => {

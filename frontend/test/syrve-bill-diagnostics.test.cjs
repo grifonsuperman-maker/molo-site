@@ -102,6 +102,31 @@ test('mounting and entering a UUID send no provider request; an explicit click s
   response.resolve(report()); await flush(); assert.equal(h.states[1].order.number, 42); assert.equal(h.states[2], false);
 });
 
+test('register versions can be checked without a bill UUID while bill reading and POS loading remain guarded', async () => {
+  const calls = [];
+  const h = mounted({ billRegisters: async version => { calls.push(['registers', version]); return registers(); },
+    billDiagnostics: () => assert.fail('no bill was requested'), posBillDiagnostics: () => assert.fail('no loading was confirmed') });
+  let tree = h.render();
+  assert.equal(button(tree, 'Обрати касу для перевірки').props.disabled, false);
+  assert.equal(button(tree, 'Перевірити рахунок').props.disabled, true);
+  h.prepare(); h.prepare(); await flush(); tree = h.render();
+  assert.deepEqual(calls, [['registers', VERSION]]);
+  assert.equal(button(tree, 'Завантажити з каси та перевірити').props.disabled, true);
+  assert.equal(all(tree, 'input').find(node => node.props.type === 'checkbox').props.disabled, true);
+  h.click(); h.consent(true); h.loadPos(); await flush(); assert.deepEqual(calls, [['registers', VERSION]]);
+});
+
+test('register preparation still needs a current saved connection and discards a delayed response when the panel closes', async () => {
+  for (const changes of [{ connectionReady: false }, { busy: true }, { configurationRevision: null }, { organizationId: null }]) {
+    const h = mounted({ billRegisters: () => assert.fail('unavailable scope must not request registers') });
+    const tree = h.render(changes); assert.equal(button(tree, 'Обрати касу для перевірки').props.disabled, true);
+    h.prepare(); await flush();
+  }
+  const response = deferred(); const h = mounted({ billRegisters: () => response.promise });
+  h.prepare(); h.unmount(); const before = JSON.stringify(h.states);
+  response.resolve(registers()); await flush(); assert.equal(JSON.stringify(h.states), before);
+});
+
 test('invalid UUIDs, unavailable settings and sibling operations cannot submit a lookup', async () => {
   for (const change of [{ connectionReady: false }, { busy: true }, { configurationRevision: null }, { organizationId: null }]) {
     let calls = 0; const h = mounted({ billDiagnostics: async () => { calls++; return report(); } });
@@ -265,6 +290,46 @@ test('register metadata has bounded identities and versions and strips provider 
     r => r.registers[0].posVersion = 'private-version', r => r.registers = Array(101).fill(r.registers[0])]) {
     const value = registers(); mutate(value); assert.throws(() => validateBillRegisters(value, scope()), /Недійсний/);
   }
+});
+
+test('register version reasons are bounded, consistent with the version, and never retain upstream details', () => {
+  const { validateBillRegisters } = load();
+  for (const status of ['missing', 'null', 'empty', 'invalid_type', 'invalid_format']) {
+    const value = registers(); Object.assign(value.registers[0], { posVersion: null, posVersionStatus: status,
+      loadingSupported: false, upstreamBody: 'private-secret' });
+    const checked = validateBillRegisters(value, scope());
+    assert.equal(checked.registers[0].posVersionStatus, status); assert.doesNotMatch(JSON.stringify(checked), /private-/);
+  }
+  for (const status of ['private-secret', 'constructor', null, {}, ['valid'], 'missing']) {
+    const value = registers(); value.registers[0].posVersionStatus = status;
+    assert.throws(() => validateBillRegisters(value, scope()), /Недійсний/);
+  }
+  const value = registers(); Object.assign(value.registers[0], { posVersion: null, loadingSupported: false, posVersionStatus: 'valid' });
+  assert.throws(() => validateBillRegisters(value, scope()), /Недійсний/);
+  value.registers[0].posVersionStatus = ['missing'];
+  assert.throws(() => validateBillRegisters(value, scope()), /Недійсний/);
+});
+
+test('version reasons are visible for unselectable registers and actual 8.8.8001.0 remains compatible', () => {
+  const { validateBillRegisters, SyrveBillRegistersView } = load();
+  for (const [status, message] of [['missing', /не передав поле/], ['null', /\(null\)/],
+    ['empty', /порожній текст/], ['invalid_type', /типі даних/], ['invalid_format', /форматі, який MOLO не розпізнає/]]) {
+    const value = registers(); Object.assign(value.registers[0], { posVersion: null, posVersionStatus: status, loadingSupported: false });
+    const html = renderToStaticMarkup(React.createElement(SyrveBillRegistersView, { report: validateBillRegisters(value, scope()) }));
+    assert.match(html, /Тестова каса/); assert.match(html, /Версія каси: невідома/); assert.match(html, message);
+    assert.doesNotMatch(html, /Оновіть|private-|<button/);
+  }
+  const value = registers(); Object.assign(value.registers[0], { posVersion: '8.8.8001.0', posVersionStatus: 'valid' });
+  const html = renderToStaticMarkup(React.createElement(SyrveBillRegistersView, { report: validateBillRegisters(value, scope()) }));
+  assert.match(html, /8.8.8001.0/); assert.match(html, /Версія підтримує завантаження рахунків/);
+});
+
+test('older backend reports remain usable without inventing a reason for their null versions', () => {
+  const { validateBillRegisters, SyrveBillRegistersView } = load();
+  const value = registers(); Object.assign(value.registers[0], { posVersion: null, loadingSupported: false });
+  const checked = validateBillRegisters(value, scope()); assert.equal(checked.registers[0].posVersionStatus, undefined);
+  const html = renderToStaticMarkup(React.createElement(SyrveBillRegistersView, { report: checked }));
+  assert.match(html, /Причину невідомої версії не отримано/); assert.doesNotMatch(html, /не передав поле|\(null\)/);
 });
 
 test('POS acknowledgements cannot be mixed with read-only or Cloud lookups or another chosen register', () => {

@@ -1,8 +1,8 @@
-import { normalizeSyrvePosVersion } from './syrve-pos-version';
+import { inspectSyrvePosVersion, type SyrvePosVersionStatus } from './syrve-pos-version';
 
 export class SyrveCatalogValidationError extends Error {}
 
-type TerminalGroup = { id: string; name: string; posVersion?: string | null };
+type TerminalGroup = { id: string; name: string; posVersion?: string | null; posVersionStatus?: SyrvePosVersionStatus };
 export type SyrveCatalogTable = {
   id: string;
   number: number;
@@ -55,7 +55,7 @@ export function parseTerminalGroups(payload: unknown, organizationId: string, in
         seen.add(id);
         if (seen.size > 100) throw new SyrveCatalogValidationError();
         return { id, name: name(group.name) || 'Група без назви',
-          ...(includePosVersions ? { posVersion: normalizeSyrvePosVersion(group.posVersion) } : {}) };
+          ...(includePosVersions ? inspectSyrvePosVersion(group.posVersion) : {}) };
       });
     });
   }
