@@ -239,13 +239,13 @@ export class GuestBookingsService {
 
       const tableRepository = manager.getRepository(TableEntity);
       let query = tableRepository
-        .createQueryBuilder('table')
-        .leftJoinAndSelect('table.zone', 'zone')
-        .setLock('pessimistic_write', undefined, ['table']);
+        .createQueryBuilder('locked_table')
+        .leftJoinAndSelect('locked_table.zone', 'zone')
+        .setLock('pessimistic_write', undefined, ['locked_table']);
 
       query = tableId
-        ? query.where('table.id = :tableId', { tableId })
-        : query.where('table.tableNumber = :tableNumber', { tableNumber });
+        ? query.where('locked_table.id = :tableId', { tableId })
+        : query.where('locked_table.tableNumber = :tableNumber', { tableNumber });
 
       const newTable = await query.getOne();
       if (!newTable) throw new BadRequestException('Стіл не знайдено');

@@ -106,7 +106,7 @@ test('cancelling a banquet projects each table from its remaining active booking
 
   const tableRepository = {
     createQueryBuilder(alias) {
-      assert.equal(alias, 'table');
+      assert.equal(alias, 'locked_table');
       let tableId = null;
       const builder = {
         where(_sql, params) {
@@ -116,7 +116,7 @@ test('cancelling a banquet projects each table from its remaining active booking
         setLock(mode, version, aliases) {
           assert.equal(mode, 'pessimistic_write');
           assert.equal(version, undefined);
-          assert.deepEqual(aliases, ['table']);
+          assert.deepEqual(aliases, ['locked_table']);
           return builder;
         },
         async getOne() {
