@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assertFreshSchemaReferenceTarget } from './fresh-schema-reference.mjs';
@@ -12,6 +12,7 @@ export async function runSyrveBatchValidation(env = process.env) {
   const { SyrveActivationStore } = require('../dist/syrve/syrve-activation.store.js');
   const { SyrveWorkerStore } = require('../dist/syrve/syrve-worker.store.js');
   const { SyrveWorkerRunner } = require('../dist/syrve/syrve-worker.runner.js');
+  const { SyrveStateStore } = require('../dist/syrve/syrve-state.store.js');
   const { SyrveIntegrationService } = require('../dist/syrve/syrve-integration.service.js');
   const { SyrveClient } = require('../dist/syrve/syrve-client.js');
   const { TableEntity } = require('../dist/tables/entities/table.entity.js');
@@ -72,10 +73,36 @@ export async function runSyrveBatchValidation(env = process.env) {
     assert.equal(unconsumed.count, 0); assert.equal(tx.calls.length, 7);
     await due(); const warmStart = tx.calls.length; assert.equal((await run()).processed, 60);
     assert.equal(tx.calls.length - warmStart, 3);
+    const transferred = orders('New');
+    transferred[0] = row({ organizationId: org, syrveTableId: providers[1] }, id(10000), 'Bill', 150);
+    tx.setRows(transferred); await due(); const transferStart = tx.calls.length;
+    assert.equal((await run()).processed, 60); assert.equal(tx.calls.length - transferStart, 3);
+    const movedTables = await source.query('SELECT id,status FROM tables WHERE id=ANY($1::uuid[])', [physical.slice(0, 2)]);
+    assert.equal(movedTables.find(item => item.id === physical[0]).status, 'free');
+    assert.equal(movedTables.find(item => item.id === physical[1]).status, 'occupied');
+    const movedLinks = await source.query('SELECT molo_table_id,active_syrve_order_ids FROM syrve_table_links WHERE molo_table_id=ANY($1::uuid[])', [physical.slice(0, 2)]);
+    assert.deepEqual(movedLinks.find(item => item.molo_table_id === physical[0]).active_syrve_order_ids, []);
+    assert.deepEqual(movedLinks.find(item => item.molo_table_id === physical[1]).active_syrve_order_ids.sort(), [id(10000), id(10001)]);
+    assert.deepEqual(await source.query('SELECT * FROM bookings WHERE id=$1', [bookingId]), bookingBefore);
+    // Reproduce the old reducer's durable unknown, followed by a staff mark.
+    const legacyFingerprint = createHash('sha256').update(JSON.stringify(['Bill', 'open', null, id(1), [providers[3]]])).digest('hex');
+    await source.query("UPDATE syrve_order_versions SET timestamp=160,state='unknown',fingerprint=$2 WHERE link_id=(SELECT id FROM syrve_table_links WHERE molo_table_id=$1) AND order_id=$3",
+      [physical[2], legacyFingerprint, id(10002)]);
+    await other.query("UPDATE tables SET status='cleaning',updated_at=clock_timestamp() WHERE id=$1", [physical[2]]);
+    await new SyrveStateStore(other, settings(other)).recordStaffAction(physical[2], 'status_changed');
+    const manualBefore = await source.query('SELECT status,updated_at::text FROM tables WHERE id=$1', [physical[2]]);
+    transferred[2] = row({ organizationId: org, syrveTableId: providers[3] }, id(10002), 'Bill', 160);
+    tx.setRows(transferred); await due(); assert.equal((await run()).processed, 60);
+    assert.deepEqual(await source.query('SELECT status,updated_at::text FROM tables WHERE id=$1', [physical[2]]), manualBefore);
+    const [repaired] = await source.query('SELECT l.active_syrve_order_ids,v.state,v.timestamp::text,v.fingerprint FROM syrve_table_links l JOIN syrve_order_versions v ON v.link_id=l.id WHERE l.molo_table_id=$1 AND v.order_id=$2', [physical[2], id(10002)]);
+    assert.deepEqual(repaired, { active_syrve_order_ids: [], state: 'closed', timestamp: '160', fingerprint: legacyFingerprint });
+    await due(); assert.equal((await run()).processed, 60);
+    assert.deepEqual(await source.query('SELECT status,updated_at::text FROM tables WHERE id=$1', [physical[2]]), manualBefore);
     tx.setRows(orders('Closed')); await due(); const closingStart = tx.calls.length; assert.equal((await run()).processed, 60);
     assert.equal(tx.calls.length - closingStart, 4);
     assert.equal(tx.calls.filter(call => call.path.endsWith('/by_id')).length, 1);
-    assert.equal((await source.query("SELECT count(*)::int AS count FROM tables WHERE id=ANY($1::uuid[]) AND status='free'", [physical]))[0].count, 60);
+    assert.equal((await source.query("SELECT count(*)::int AS count FROM tables WHERE id=ANY($1::uuid[]) AND status='free'", [physical]))[0].count, 59);
+    assert.deepEqual(await source.query('SELECT status,updated_at::text FROM tables WHERE id=$1', [physical[2]]), manualBefore);
     assert.deepEqual(await source.query('SELECT * FROM bookings WHERE id=$1', [bookingId]), bookingBefore);
     mixed = true;
     await source.query('UPDATE syrve_sync_activation SET loading_plan=$2::jsonb WHERE integration_id=$1', [integrationId, JSON.stringify({ organizationId: org, groups })]);
@@ -85,7 +112,7 @@ export async function runSyrveBatchValidation(env = process.env) {
     assert.equal((await source.query("SELECT count(*)::int AS count FROM tables WHERE id=ANY($1::uuid[]) AND status='occupied'", [physical.slice(0, 30)]))[0].count, 30);
     assert.equal((await source.query("SELECT count(*)::int AS count FROM tables WHERE id=ANY($1::uuid[]) AND status='free'", [physical.slice(30)]))[0].count, 30);
     assert.deepEqual(await source.query('SELECT * FROM bookings WHERE id=$1', [bookingId]), bookingBefore);
-    process.stdout.write('Syrve batch PostgreSQL passed: 60 tables, two pools, physical-version fence, independent registers and unchanged booking.\n');
+    process.stdout.write('Syrve batch PostgreSQL passed: 60 tables, confirmed transfer, legacy repair preserving staff status, two pools, physical-version fence, independent registers and unchanged booking.\n');
   } finally {
     globalThis.fetch = previousFetch;
     secret === undefined ? delete env.SYRVE_CREDENTIALS_SECRET : env.SYRVE_CREDENTIALS_SECRET = secret;
