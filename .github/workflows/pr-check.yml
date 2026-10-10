@@ -116,6 +116,8 @@ jobs:
         run: node backend/scripts/syrve-schema-application-validation.mjs
       - name: Validate isolated banquet table assignment migration
         run: node backend/scripts/booking-table-assignments-validation.mjs
+      - name: Validate booking buttons, physical table locks and transactional rollback
+        run: node backend/scripts/booking-status-validation.mjs
       - name: Validate global Syrve request quota, concurrent instances and restart
         run: node backend/scripts/syrve-request-limit-validation.mjs
       - name: Validate independent batched Syrve status application on 60 tables

@@ -936,11 +936,11 @@ export class BookingsService {
           : null;
 
         const foundTables = await tables
-          .createQueryBuilder('table')
-          .leftJoinAndSelect('table.zone', 'zone')
-          .where('table.id IN (:...tableIds)', { tableIds: [...uniqueTableIds].sort() })
-          .orderBy('table.id', 'ASC')
-          .setLock('pessimistic_write', undefined, ['table'])
+          .createQueryBuilder('locked_table')
+          .leftJoinAndSelect('locked_table.zone', 'zone')
+          .where('locked_table.id IN (:...tableIds)', { tableIds: [...uniqueTableIds].sort() })
+          .orderBy('locked_table.id', 'ASC')
+          .setLock('pessimistic_write', undefined, ['locked_table'])
           .getMany();
         if (foundTables.length !== uniqueTableIds.length) {
           throw new NotFoundException('Один або кілька столів не знайдено');
@@ -1355,9 +1355,9 @@ export class BookingsService {
         const tableRepository = manager.getRepository(TableEntity);
         for (const tableId of [...tableIds].sort()) {
           const table = await tableRepository
-            .createQueryBuilder('table')
-            .where('table.id = :tableId', { tableId })
-            .setLock('pessimistic_write', undefined, ['table'])
+            .createQueryBuilder('locked_table')
+            .where('locked_table.id = :tableId', { tableId })
+            .setLock('pessimistic_write', undefined, ['locked_table'])
             .getOne();
           if (!table || table.status === 'closed') continue;
           if (

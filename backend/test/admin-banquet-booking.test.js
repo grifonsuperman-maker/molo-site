@@ -192,7 +192,7 @@ function createServiceHarness({ conflictOnSecond = false, failAssignments = fals
   const clientRepository = {};
   const tableRepository = {
     createQueryBuilder(alias) {
-      assert.equal(alias, 'table');
+      assert.equal(alias, 'locked_table');
       const builder = {
         leftJoinAndSelect() { return builder; },
         where() { return builder; },
@@ -279,7 +279,7 @@ test('banquet creation commits one booking with primary plus all assignments and
   assert.deepEqual(writes.tableLock, {
     mode: 'pessimistic_write',
     version: undefined,
-    aliases: ['table'],
+    aliases: ['locked_table'],
   });
   assert.equal(writes.bookings.length, 1);
   assert.equal(writes.bookings[0].table.id, TABLE_A);
