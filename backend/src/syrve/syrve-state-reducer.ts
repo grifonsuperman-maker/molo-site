@@ -186,14 +186,26 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   const associated = orders.filter((order) => order.tableIds.includes(state.scope.syrveTableId));
   const open = new Set(associated.filter((order) => order.state === 'open').map((order) => order.id));
   const closed = new Set(associated.filter((order) => order.state === 'closed').map((order) => order.id));
-  // Missing/moved/ambiguous orders cannot make any partial closure free a table.
-  const unknownOrders = state.activeSyrveOrderIds.some((orderId) => !open.has(orderId) && !closed.has(orderId)) || orders.some((order) =>
+  // A usable newer version with explicit other table UUIDs is departure
+  // evidence, even while the bill stays open. Never infer it from disappearance.
+  // Every destination must still exist on an alive, matching cash group in
+  // every complete probe; unknown/deleted/out-of-scope tables cannot release us.
+  const departed = new Set(orders.filter(order => order.state !== 'unknown' && order.tableIds.length
+    && !order.tableIds.includes(state.scope.syrveTableId) && probes.every(probe => order.tableIds.every(tableId => {
+      const table = probe.catalogTables?.find(table => table.id === tableId);
+      return table && !table.isDeleted && table.terminalGroupId === order.terminalGroupId
+        && probe.terminalGroups?.active.some(group => group.id === table.terminalGroupId)
+        && probe.availability?.some(group => group.terminalGroupId === table.terminalGroupId && group.isAlive);
+    }))).map(order => order.id));
+  const unknownOrders = state.activeSyrveOrderIds.some((orderId) => !open.has(orderId) && !closed.has(orderId) && !departed.has(orderId)) || orders.some((order) =>
     order.state === 'unknown' && (!order.tableIds.length || order.tableIds.includes(state.scope.syrveTableId)));
   const candidates = orders
     .filter((order) => order.tableIds.includes(state.scope.syrveTableId) || active.has(order.id) || versions.has(order.id)
       || (order.state === 'unknown' && !order.tableIds.length))
     .map((order) => ({ order, previous: versions.get(order.id), signature: fingerprint(order),
-      evidenceState: open.has(order.id) ? 'open' as const : closed.has(order.id) ? 'closed' as const
+      // `closed` is this table's association outcome. The fingerprint retains
+      // the real provider status and destination; no POS bill is closed here.
+      evidenceState: open.has(order.id) ? 'open' as const : closed.has(order.id) || departed.has(order.id) ? 'closed' as const
         : !active.has(order.id) ? order.state : 'unknown' as const }));
   const accepted: typeof candidates = [];
   // Phase one derives the entire prospective ledger without changing membership
@@ -206,9 +218,12 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
       diagnostics.add('conflicting_order_versions');
       continue;
     }
-    // Even an identical fingerprint cannot certify an unresolved stored outcome
-    // at the same version. Only strictly newer usable evidence resolves it.
-    if (previous?.state === 'unknown' && order.timestamp === previous.timestamp) continue;
+    // Unresolved provider evidence requires a strictly newer usable version.
+    // Earlier code stored an otherwise valid departure as unknown. Re-reading
+    // its identical fingerprint can repair that classification without a new
+    // provider version. A null/conflicting fingerprint stays strictly fenced.
+    if (previous?.state === 'unknown' && order.timestamp === previous.timestamp
+      && !(departed.has(order.id) && previous.fingerprint === signature)) continue;
     versions.set(order.id, { id: order.id, timestamp: order.timestamp, state: evidenceState, fingerprint: signature });
     accepted.push({ order, previous, signature, evidenceState });
   }
@@ -221,7 +236,7 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   // Phase two applies membership only after every prospective outcome is known.
   for (const { order } of accepted) {
     if (open.has(order.id)) active.add(order.id);
-    else if (closed.has(order.id) && canClose) { active.delete(order.id); freed.delete(order.id); }
+    else if ((closed.has(order.id) || departed.has(order.id)) && canClose) { active.delete(order.id); freed.delete(order.id); }
     // Unknown versions advance the high-water mark but retain active IDs/overrides.
   }
 

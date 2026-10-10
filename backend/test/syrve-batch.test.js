@@ -4,6 +4,7 @@ const { performance } = require('node:perf_hooks');
 const { SyrveClient, isVerifiedLoadedProbe } = require('../dist/syrve/syrve-client.js');
 const { SyrveWorkerRunner } = require('../dist/syrve/syrve-worker.runner.js');
 const { SyrveWorkerStore } = require('../dist/syrve/syrve-worker.store.js');
+const { createSyrveTableSyncState, reduceSyrveOrderState, syrveTableStatusEvent } = require('../dist/syrve/syrve-state-reducer.js');
 const { syrveCaptureContext } = require('../dist/syrve/syrve-state.store.js');
 const { batchTransport } = require('./helpers/syrve-batch-transport.js');
 const { harness } = require('./helpers/syrve-state-harness.js');
@@ -84,6 +85,66 @@ test('batch filters each table and retains direct by-ID evidence about a transfe
   assert.equal(isVerifiedLoadedProbe(structuredClone(source), TABLES[0], ORG, TABLES[0]), false);
   source.byId[0].timestamp++;
   assert.equal(isVerifiedLoadedProbe(source, TABLES[0], ORG, TABLES[0]), false);
+});
+
+test('one fresh transfer batch releases table 46 and occupies table 48 without an extra ID request', async t => {
+  const h = fixture(t, 2), scope = (table, index) => ({ integrationId: id(300), configurationRevision: id(301),
+    organizationId: ORG, moloTableId: id(46 + index * 2), syrveTableId: table });
+  let states = TABLES.map((table, index) => createSyrveTableSyncState(scope(table, index), id(400 + index)));
+  let revision = 500;
+  const apply = async () => {
+    const probes = await h.read(states.map(state => request(state.scope.syrveTableId, [state.activeSyrveOrderIds])));
+    const results = states.map((state, index) => reduceSyrveOrderState(state, {
+      expectedScope: state.scope, currentScope: state.scope, expectedRevision: state.localRevision,
+      nextRevision: id(revision++), probe: [{ orderIds: state.activeSyrveOrderIds, probe: probes[index][0] }],
+      visibilityVerified: isVerifiedLoadedProbe(probes[index][0], state.scope.syrveTableId, ORG, state.scope.syrveTableId),
+    }));
+    const events = results.map((result, index) => syrveTableStatusEvent(states[index], result));
+    states = results.map(result => result.state);
+    return events;
+  };
+  h.setRows([row({ organizationId: ORG, syrveTableId: TABLES[0] }, id(10))]);
+  assert.deepEqual(await apply(), ['occupied', null]);
+  const before = h.calls.length;
+  h.setRows([row({ organizationId: ORG, syrveTableId: TABLES[1] }, id(10), 'Bill', 200)]);
+  assert.deepEqual(await apply(), ['free', 'occupied']);
+  assert.deepEqual(states.map(state => state.activeSyrveOrderIds), [[], [id(10)]]);
+  assert.equal(h.calls.length - before, 3);
+  assert.equal(h.calls.filter(call => call.path.endsWith('/by_id')).length, 0);
+  assert.deepEqual(await apply(), [null, null]);
+  h.setRows([row({ organizationId: ORG, syrveTableId: TABLES[0] }, id(10), 'Bill', 201)]);
+  assert.deepEqual(await apply(), ['occupied', 'free']);
+});
+
+test('worker atomically persists a transfer release, and a replay preserves a later manual mark', async t => {
+  const h = harness(); Object.assign(h.entity, { apiLoginEncrypted: 'synthetic', apiLoginIv: 'synthetic', apiLoginAuthTag: 'synthetic' }); consent(h);
+  const scope = (await h.store.capture(h.table)).state.scope, destination = id(48);
+  const tx = batchTransport(scope.organizationId, [scope.syrveTableId, destination]);
+  t.mock.method(globalThis, 'fetch', tx.fetch);
+  const client = new SyrveClient(require('./helpers/syrve-test-request-limiter.js')), store = new SyrveWorkerStore(h.source, h.settings);
+  const read = async (capture, ids, controls) => {
+    const [probes] = await client.probeLoadedOrderBatch('https://api-eu.syrve.live', 'synthetic-login', scope.organizationId,
+      [request(scope.syrveTableId, [ids], controls.visibilityContext)], controls);
+    return probes[0];
+  };
+  const run = () => new SyrveWorkerRunner(store, read).run();
+  tx.setRows([row(scope, id(10))]);
+  assert.equal((await run()).status, 'observed');
+  assert.equal(h.saved().physical.status, 'occupied');
+  const bookings = h.saved().bookings;
+  h.advance(300001);
+  tx.setRows([row({ ...scope, syrveTableId: destination }, id(10), 'Bill', 200)]);
+  assert.equal((await run()).status, 'observed');
+  assert.equal(h.saved().physical.status, 'free');
+  assert.deepEqual(h.saved().link.active_syrve_order_ids, []);
+  assert.deepEqual(h.saved().bookings, bookings);
+  assert.deepEqual((await h.restart().capture(h.table)).state.activeSyrveOrderIds, []);
+  h.mutate(db => db.physical.status = 'cleaning');
+  await h.store.recordStaffAction(h.table, 'status_changed');
+  const manual = h.saved().physical;
+  h.advance(300001);
+  assert.equal((await run()).status, 'observed');
+  assert.deepEqual(h.saved().physical, manual);
 });
 
 test('explicit shared bills reuse fresh table evidence without a redundant by-ID request', async t => {

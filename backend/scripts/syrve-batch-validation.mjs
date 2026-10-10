@@ -72,6 +72,17 @@ export async function runSyrveBatchValidation(env = process.env) {
     assert.equal(unconsumed.count, 0); assert.equal(tx.calls.length, 7);
     await due(); const warmStart = tx.calls.length; assert.equal((await run()).processed, 60);
     assert.equal(tx.calls.length - warmStart, 3);
+    const transferred = orders('New');
+    transferred[0] = row({ organizationId: org, syrveTableId: providers[1] }, id(10000), 'Bill', 150);
+    tx.setRows(transferred); await due(); const transferStart = tx.calls.length;
+    assert.equal((await run()).processed, 60); assert.equal(tx.calls.length - transferStart, 3);
+    const movedTables = await source.query('SELECT id,status FROM tables WHERE id=ANY($1::uuid[])', [physical.slice(0, 2)]);
+    assert.equal(movedTables.find(item => item.id === physical[0]).status, 'free');
+    assert.equal(movedTables.find(item => item.id === physical[1]).status, 'occupied');
+    const movedLinks = await source.query('SELECT molo_table_id,active_syrve_order_ids FROM syrve_table_links WHERE molo_table_id=ANY($1::uuid[])', [physical.slice(0, 2)]);
+    assert.deepEqual(movedLinks.find(item => item.molo_table_id === physical[0]).active_syrve_order_ids, []);
+    assert.deepEqual(movedLinks.find(item => item.molo_table_id === physical[1]).active_syrve_order_ids.sort(), [id(10000), id(10001)]);
+    assert.deepEqual(await source.query('SELECT * FROM bookings WHERE id=$1', [bookingId]), bookingBefore);
     tx.setRows(orders('Closed')); await due(); const closingStart = tx.calls.length; assert.equal((await run()).processed, 60);
     assert.equal(tx.calls.length - closingStart, 4);
     assert.equal(tx.calls.filter(call => call.path.endsWith('/by_id')).length, 1);
@@ -85,7 +96,7 @@ export async function runSyrveBatchValidation(env = process.env) {
     assert.equal((await source.query("SELECT count(*)::int AS count FROM tables WHERE id=ANY($1::uuid[]) AND status='occupied'", [physical.slice(0, 30)]))[0].count, 30);
     assert.equal((await source.query("SELECT count(*)::int AS count FROM tables WHERE id=ANY($1::uuid[]) AND status='free'", [physical.slice(30)]))[0].count, 30);
     assert.deepEqual(await source.query('SELECT * FROM bookings WHERE id=$1', [bookingId]), bookingBefore);
-    process.stdout.write('Syrve batch PostgreSQL passed: 60 tables, two pools, physical-version fence, independent registers and unchanged booking.\n');
+    process.stdout.write('Syrve batch PostgreSQL passed: 60 tables, confirmed transfer, two pools, physical-version fence, independent registers and unchanged booking.\n');
   } finally {
     globalThis.fetch = previousFetch;
     secret === undefined ? delete env.SYRVE_CREDENTIALS_SECRET : env.SYRVE_CREDENTIALS_SECRET = secret;
