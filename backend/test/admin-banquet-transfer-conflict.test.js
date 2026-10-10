@@ -281,3 +281,87 @@ test('Admin Plan same-day transfer preserves a later banquet reservation on the 
     false,
   );
 });
+
+function createSimpleTransferFixture(destinationStatus = 'free', persisted = true) {
+  const date = '2099-05-01';
+  const oldTable = {
+    id: 'table-41', tableNumber: '41', seats: 4, status: 'occupied', isVisible: true,
+    zone: { id: 'zone-1', isClosed: false, isVisible: true },
+  };
+  const newTable = {
+    id: 'table-42', tableNumber: '42', seats: 4, status: destinationStatus, isVisible: true,
+    zone: { id: 'zone-1', isClosed: false, isVisible: true },
+  };
+  const booking = {
+    id: 'booking-41', status: 'approved', bookingDate: date, bookingTime: '19:00:00',
+    durationMinutes: 120, guestsCount: 2, table: oldTable, client: null,
+  };
+  const calls = { reads: 0, writes: 0, history: 0, logs: 0 };
+  const bookingRepository = {
+    async findOne() {
+      calls.reads += 1;
+      // The first read loads the booking; the second must reflect persisted storage.
+      return calls.reads === 1 ? booking : { ...booking, table: persisted ? newTable : oldTable };
+    },
+    createQueryBuilder() {
+      return {
+        leftJoinAndSelect() { return this; },
+        where() { return this; },
+        andWhere() { return this; },
+        distinct() { return this; },
+        async getMany() { return []; },
+      };
+    },
+    async save() { calls.writes += 1; },
+  };
+  const manager = {
+    async query() { return [{ ready: false }]; },
+    getRepository(entity) {
+      if (entity === Booking) return bookingRepository;
+      if (entity === TableEntity) return {
+        async findOne({ where }) { return where.id === newTable.id ? newTable : oldTable; },
+      };
+      if (entity.name === 'AvailabilityBlock') return { async find() { return []; } };
+      if (entity.name === 'BookingHistory') return {
+        create(value) { return value; },
+        async save() { calls.history += 1; },
+      };
+      throw new Error('Unexpected repository: ' + entity?.name);
+    },
+  };
+  const service = new AvailabilityBlocksService(
+    { async transaction(work) { return work(manager); } },
+    {}, {}, {}, {}, {},
+    { async create() { calls.logs += 1; } },
+    { async sendMessage() {} },
+  );
+  service.today = () => date;
+  return { service, booking, oldTable, newTable, calls };
+}
+
+test('Admin Plan does not acknowledge table 41 to 42 transfer without a persisted booking change', async () => {
+  const { service, booking, newTable, calls } = createSimpleTransferFixture('free', false);
+  // Use a future date so this test only exercises persistence read-back.
+  service.today = () => '2099-04-30';
+  await assert.rejects(
+    () => service.transferBooking(booking.id, { tableId: newTable.id }, { role: 'admin' }),
+    /Зміну столу не підтверджено у бронюванні/,
+  );
+  assert.equal(calls.reads, 2, 'the service must read the booking back after saving');
+  assert.equal(calls.writes, 1);
+  assert.equal(calls.history, 0, 'do not write a completed transfer history');
+  assert.equal(calls.logs, 0, 'do not report a successful transfer');
+});
+
+test('Admin Plan refuses occupied or cleaning destinations for a booking today', async () => {
+  for (const status of ['occupied', 'cleaning']) {
+    const { service, booking, oldTable, newTable, calls } = createSimpleTransferFixture(status);
+    await assert.rejects(
+      () => service.transferBooking(booking.id, { tableId: newTable.id }, { role: 'admin' }),
+      /Новий стіл зараз зайнятий або готується/,
+    );
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.reads, 1);
+    assert.equal(booking.table.id, oldTable.id, 'the old reservation must remain assigned');
+  }
+});

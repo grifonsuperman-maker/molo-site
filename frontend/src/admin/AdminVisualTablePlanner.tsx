@@ -274,7 +274,7 @@ export default function AdminVisualTablePlanner({
     if (!silent) setLoading(true);
     setError('');
     const [mapResult, bookingsResult, blocksResult, statusesResult] = await Promise.allSettled([
-      mapApi.get(), bookingsApi.getByDate(date), availabilityBlocksApi.list(date), bookingsApi.tableStatuses({ bookingDate: date, bookingTime: time, durationMinutes: 120 }),
+      mapApi.get(), bookingsApi.getByDate(date, { cache: 'no-store' }), availabilityBlocksApi.list(date), bookingsApi.tableStatuses({ bookingDate: date, bookingTime: time, durationMinutes: 120 }),
     ]);
     if (mapResult.status === 'fulfilled') setMap(mapResult.value);
     if (bookingsResult.status === 'fulfilled') setBookings(bookingsResult.value);
@@ -303,6 +303,7 @@ export default function AdminVisualTablePlanner({
     const bookingStart = timeToMinutes(booking.bookingTime); const bookingEnd = bookingStart + bookingDuration(booking) + CLEANUP_MINUTES;
     return (map?.tables || []).filter((table) => {
       if (table.id === booking.table?.id || !table.isVisible || table.status === 'closed' || table.zone?.isClosed || table.zone?.isVisible === false || Number(table.seats) < Number(booking.guestsCount)) return false;
+      if (booking.bookingDate === today && (table.status === 'occupied' || table.status === 'cleaning')) return false;
       const conflict = activeBookings.some((candidate) => {
         if (candidate.id === booking.id || candidate.table?.id !== table.id) return false;
         const start = timeToMinutes(candidate.bookingTime); const end = start + bookingDuration(candidate) + CLEANUP_MINUTES;
@@ -337,9 +338,39 @@ export default function AdminVisualTablePlanner({
   }
   async function transferBooking(booking: Booking) {
     if (!transferTableId) return;
+    const nextTableId = transferTableId;
     setBusy(`transfer:${booking.id}`);
-    try { await availabilityBlocksApi.transferBooking(booking.id, transferTableId, reason.trim() || 'Перенесення Адміністратором'); setNotice('Бронювання перенесено'); setTransferBookingId(null); setTransferTableId(''); await load(true); }
-    catch (actionError: any) { setError(actionError?.message || 'Не вдалося перенести'); } finally { setBusy(''); }
+    setError('');
+    setNotice('');
+    let serverAccepted = false;
+    try {
+      await availabilityBlocksApi.transferBooking(
+        booking.id,
+        nextTableId,
+        reason.trim() || 'Перенесення Адміністратором',
+      );
+      serverAccepted = true;
+
+      // Do not trust a successful PATCH alone: check the stored booking using a fresh GET.
+      const latestBookings = await bookingsApi.getByDate(booking.bookingDate, { cache: 'no-store' });
+      const updatedBooking = latestBookings.find((item) => item.id === booking.id);
+      setBookings(latestBookings);
+      if (updatedBooking?.table?.id !== nextTableId) {
+        setError('Сервер прийняв перенесення, але новий стіл не підтверджено. Перевірте бронювання перед повторною спробою.');
+        return;
+      }
+
+      setTransferBookingId(null);
+      setTransferTableId('');
+      await load(true);
+      setNotice(`Бронювання перенесено на стіл №${updatedBooking.table.tableNumber}`);
+    } catch (actionError: any) {
+      setError(serverAccepted
+        ? 'Сервер прийняв перенесення, але перевірка або оновлення даних не вдалися. Перевірте поточний стіл перед повторною спробою.'
+        : actionError?.message || 'Не вдалося перенести');
+    } finally {
+      setBusy('');
+    }
   }
   function openManualBooking() {
     if (!selectedTable) return;
