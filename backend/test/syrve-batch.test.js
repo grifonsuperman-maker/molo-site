@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { performance } = require('node:perf_hooks');
+const { createHash } = require('node:crypto');
 const { SyrveClient, isVerifiedLoadedProbe } = require('../dist/syrve/syrve-client.js');
 const { SyrveWorkerRunner } = require('../dist/syrve/syrve-worker.runner.js');
 const { SyrveWorkerStore } = require('../dist/syrve/syrve-worker.store.js');
@@ -146,6 +147,43 @@ test('worker atomically persists a transfer release, and a replay preserves a la
   assert.equal((await run()).status, 'observed');
   assert.deepEqual(h.saved().physical, manual);
 });
+
+for (const manualStatus of ['free', 'pending', 'reserved', 'occupied', 'cleaning', 'closed']) {
+  test(`worker repairs a legacy transfer after restart without changing staff ${manualStatus}`, async t => {
+    const h = harness(); Object.assign(h.entity, { apiLoginEncrypted: 'synthetic', apiLoginIv: 'synthetic', apiLoginAuthTag: 'synthetic' }); consent(h);
+    const scope = (await h.store.capture(h.table)).state.scope, destination = id(48);
+    const tx = batchTransport(scope.organizationId, [scope.syrveTableId, destination]);
+    t.mock.method(globalThis, 'fetch', tx.fetch);
+    const client = new SyrveClient(require('./helpers/syrve-test-request-limiter.js'));
+    const run = () => new SyrveWorkerRunner(new SyrveWorkerStore(h.source, h.settings), async (capture, ids, controls) => {
+      const [probes] = await client.probeLoadedOrderBatch('https://api-eu.syrve.live', 'synthetic-login', scope.organizationId,
+        [request(scope.syrveTableId, [ids], controls.visibilityContext)], controls);
+      return probes[0];
+    }).run();
+    tx.setRows([row(scope, id(10))]);
+    assert.equal((await run()).status, 'observed');
+    // The previous reducer persisted the usable moved bill as unknown.
+    const fingerprint = createHash('sha256').update(JSON.stringify(['Bill', 'open', null, id(1), [destination]])).digest('hex');
+    h.mutate(db => Object.assign(db.versions[0], { timestamp: 200, state: 'unknown', fingerprint }));
+    h.mutate(db => { db.physical.status = manualStatus; db.physical.updatedAt = new Date(1_200_000); });
+    await h.restart().recordStaffAction(h.table, manualStatus === 'free' ? 'manual_free' : 'status_changed');
+    const manual = h.saved().physical, bookings = h.saved().bookings;
+    h.advance(300001);
+    tx.setRows([row({ ...scope, syrveTableId: destination }, id(10), 'Bill', 200)]);
+    assert.equal((await run()).status, 'observed');
+    assert.deepEqual(h.saved().physical, manual);
+    assert.deepEqual(h.saved().link.active_syrve_order_ids, []);
+    assert.deepEqual(h.saved().link.manually_freed_syrve_order_ids, []);
+    assert.equal(h.saved().versions[0].state, 'closed');
+    assert.equal(h.saved().versions[0].timestamp, 200);
+    assert.equal(h.saved().versions[0].fingerprint, fingerprint);
+    assert.deepEqual((await h.restart().capture(h.table)).state.activeSyrveOrderIds, []);
+    h.advance(300001);
+    assert.equal((await run()).status, 'observed');
+    assert.deepEqual(h.saved().physical, manual);
+    assert.deepEqual(h.saved().bookings, bookings);
+  });
+}
 
 test('explicit shared bills reuse fresh table evidence without a redundant by-ID request', async t => {
   const order = row({ organizationId: ORG, syrveTableId: TABLES[0] }, id(10));

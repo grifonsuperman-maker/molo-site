@@ -35,6 +35,16 @@ function observe(state, rows = [], overrides = {}) {
 }
 const opened = (...rows) => observe(initial(), rows.length ? rows : [row()]).state;
 const staff = (state, action = 'manual_free', overrides = {}) => reduceSyrveStaffAction(state, { ...fence(state), action, ...overrides });
+function legacyTransfer(state = opened(), orderId = ORDER) {
+  const raw = probe([row(orderId, 'Bill', 200, [TABLE2])]).byId[0];
+  const fingerprint = require('node:crypto').createHash('sha256').update(JSON.stringify([
+    raw.status, raw.state, raw.reason, raw.terminalGroupId, [...raw.tableIds].sort(),
+  ])).digest('hex');
+  state = structuredClone(state);
+  state.orderVersions.find(version => version.id === orderId).timestamp = 200;
+  Object.assign(state.orderVersions.find(version => version.id === orderId), { state: 'unknown', fingerprint });
+  return state;
+}
 function status(state, overrides = {}) {
   return projectSyrveTableStatus(state, { currentScope: SCOPE, syncEnabled: true, view: 'today', hidden: false,
     zoneClosed: false, manualStatus: 'free', booking: 'none', checkedIn: false, ...overrides });
@@ -169,20 +179,62 @@ test('a confirmed transfer back is a new opening; older replies cannot restore t
 });
 
 test('a legacy unknown outcome for an identical valid transfer is repaired without inventing a newer version', () => {
-  const before = opened(), raw = probe([row(ORDER, 'Bill', 200, [TABLE2])]).byId[0];
-  const fingerprint = require('node:crypto').createHash('sha256').update(JSON.stringify([
-    raw.status, raw.state, raw.reason, raw.terminalGroupId, [...raw.tableIds].sort(),
-  ])).digest('hex');
-  before.orderVersions = [{ id: ORDER, timestamp: 200, state: 'unknown', fingerprint }];
+  const before = legacyTransfer(), fingerprint = before.orderVersions[0].fingerprint;
   const result = observe(before, [row(ORDER, 'Bill', 200, [TABLE2])]);
   assert.deepEqual(result.state.activeSyrveOrderIds, []);
   assert.equal(result.state.orderVersions[0].timestamp, 200);
   assert.equal(result.state.orderVersions[0].fingerprint, fingerprint);
+  assert.equal(require('../dist/syrve/syrve-state-reducer.js').syrveTableStatusEvent(before, result), null);
+  assert.equal(observe(result.state, [row(ORDER, 'Bill', 200, [TABLE2])]).changed, false);
   const ambiguous = structuredClone(before); ambiguous.orderVersions[0].fingerprint = null;
   const blocked = observe(ambiguous, [row(ORDER, 'Bill', 200, [TABLE2])]);
   assert.deepEqual(blocked.state.activeSyrveOrderIds, [ORDER]);
   assert.ok(blocked.diagnostics.includes('conflicting_order_versions'));
 });
+
+test('legacy transfer repair cannot replay release over a later staff action', () => {
+  const before = staff(legacyTransfer(), 'status_changed').state;
+  const repaired = observe(before, [row(ORDER, 'Bill', 200, [TABLE2])]);
+  assert.deepEqual(repaired.state.activeSyrveOrderIds, []);
+  assert.deepEqual(repaired.diagnostics, []);
+  const event = require('../dist/syrve/syrve-state-reducer.js').syrveTableStatusEvent;
+  assert.equal(event(before, repaired), null);
+  const returned = observe(repaired.state, [row(ORDER, 'Bill', 201)]);
+  assert.equal(event(repaired.state, returned), 'occupied');
+});
+
+for (const blocker of ['unverified visibility', 'unresolved inactive peer']) {
+  test(`legacy repair delayed by ${blocker} retains its provenance until membership can be removed`, () => {
+    const before = staff(legacyTransfer(), 'status_changed').state;
+    const moved = row(ORDER, 'Bill', 200, [TABLE2]);
+    const blocked = observe(before, [moved, ...blocker === 'unresolved inactive peer' ? [pending(ORDER2)] : []],
+      { visibilityVerified: blocker !== 'unverified visibility' });
+    assert.deepEqual(blocked.state.activeSyrveOrderIds, [ORDER]);
+    assert.equal(blocked.state.orderVersions.find(version => version.id === ORDER).state, 'unknown');
+    const repaired = observe(blocked.state, [moved, ...blocker === 'unresolved inactive peer'
+      ? [row(ORDER2, 'Closed', 201, [TABLE2])] : []]);
+    assert.deepEqual(repaired.state.activeSyrveOrderIds, []);
+    assert.deepEqual(repaired.diagnostics, []);
+    assert.equal(require('../dist/syrve/syrve-state-reducer.js').syrveTableStatusEvent(blocked.state, repaired), null);
+  });
+}
+
+test('repair of several historical transfers never emits a release event', () => {
+  const before = legacyTransfer(legacyTransfer(opened(row(ORDER), row(ORDER2))), ORDER2);
+  const repaired = observe(before, [row(ORDER, 'Bill', 200, [TABLE2]), row(ORDER2, 'Bill', 200, [TABLE2])]);
+  assert.deepEqual(repaired.state.activeSyrveOrderIds, []);
+  assert.equal(require('../dist/syrve/syrve-state-reducer.js').syrveTableStatusEvent(before, repaired), null);
+});
+
+for (const peerTables of [[TABLE], [TABLE2]]) {
+  test(`a fresh peer ${peerTables[0] === TABLE ? 'closure' : 'transfer'} still releases the last bill alongside a legacy repair`, () => {
+    const before = staff(legacyTransfer(opened(row(ORDER), row(ORDER2))), 'status_changed').state;
+    const result = observe(before, [row(ORDER, 'Bill', 200, [TABLE2]),
+      row(ORDER2, peerTables[0] === TABLE ? 'Closed' : 'Bill', 201, peerTables)]);
+    assert.deepEqual(result.state.activeSyrveOrderIds, []);
+    assert.equal(require('../dist/syrve/syrve-state-reducer.js').syrveTableStatusEvent(before, result), 'free');
+  });
+}
 
 test('an unassociated pending discovery also blocks closure rather than assuming it belongs elsewhere', () => {
   const result = observe(opened(), [row(ORDER, 'Closed', 200), pending(ORDER2)]);

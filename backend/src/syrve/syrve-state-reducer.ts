@@ -122,6 +122,11 @@ function fingerprint(order: SyrveObservedOrder): string {
     order.terminalGroupId, [...order.tableIds].sort()])).digest('hex');
 }
 
+function isLegacyTransferRepair(previous: SyrveOrderVersion | undefined, next: SyrveOrderVersion | undefined): boolean {
+  return previous?.state === 'unknown' && previous.fingerprint !== null && next?.state === 'closed'
+    && previous.timestamp === next.timestamp && previous.fingerprint === next.fingerprint;
+}
+
 function validateOrder(order: SyrveObservedOrder) {
   uuid(order.id); ids(order.tableIds);
   if (order.terminalGroupId !== null) uuid(order.terminalGroupId);
@@ -208,6 +213,7 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
       evidenceState: open.has(order.id) ? 'open' as const : closed.has(order.id) || departed.has(order.id) ? 'closed' as const
         : !active.has(order.id) ? order.state : 'unknown' as const }));
   const accepted: typeof candidates = [];
+  const legacyRepairs: SyrveOrderVersion[] = [];
   // Phase one derives the entire prospective ledger without changing membership
   // or overrides. This fences existing, newly unknown and equal-conflict records.
   for (const { order, previous, signature, evidenceState } of candidates) {
@@ -222,16 +228,23 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
     // Earlier code stored an otherwise valid departure as unknown. Re-reading
     // its identical fingerprint can repair that classification without a new
     // provider version. A null/conflicting fingerprint stays strictly fenced.
-    if (previous?.state === 'unknown' && order.timestamp === previous.timestamp
-      && !(departed.has(order.id) && previous.fingerprint === signature)) continue;
-    versions.set(order.id, { id: order.id, timestamp: order.timestamp, state: evidenceState, fingerprint: signature });
+    const version = { id: order.id, timestamp: order.timestamp, state: evidenceState, fingerprint: signature };
+    const legacyRepair = departed.has(order.id) && isLegacyTransferRepair(previous, version);
+    if (previous?.state === 'unknown' && order.timestamp === previous.timestamp && !legacyRepair) continue;
+    if (legacyRepair) legacyRepairs.push(previous!);
+    versions.set(order.id, version);
     accepted.push({ order, previous, signature, evidenceState });
   }
+  const canClose = event.visibilityVerified === true && !unknownOrders
+    && ![...versions.values()].some(version => version.state === 'unknown');
+  // Repair classification and membership together. If a peer or visibility
+  // blocks removal, retain the unknown watermark so a later poll cannot mistake
+  // the historical repair for a pending fresh closure and replay its free event.
+  if (!canClose) for (const previous of legacyRepairs) versions.set(previous.id, previous);
   const unresolved = [...versions.values()].filter((version) => version.state === 'unknown');
   if (unknownOrders || unresolved.length) diagnostics.add('unknown_orders');
   if (unresolved.some((version) => version.fingerprint === null)) diagnostics.add('conflicting_order_versions');
   if (!event.visibilityVerified) diagnostics.add('visibility_not_verified');
-  const canClose = event.visibilityVerified === true && !unknownOrders && !unresolved.length;
 
   // Phase two applies membership only after every prospective outcome is known.
   for (const { order } of accepted) {
@@ -271,7 +284,15 @@ export function syrveTableStatusEvent(previous: SyrveTableSyncState, transition:
   if (!sameScope(before.scope, after.scope)) return null;
   const activeBefore = new Set(before.activeSyrveOrderIds);
   if (after.activeSyrveOrderIds.some(id => !activeBefore.has(id))) return 'occupied';
-  if (before.activeSyrveOrderIds.length && !after.activeSyrveOrderIds.length && after.lastSyrveState === 'closed') return 'free';
+  if (before.activeSyrveOrderIds.length && !after.activeSyrveOrderIds.length && after.lastSyrveState === 'closed') {
+    const beforeVersions = new Map(before.orderVersions.map(version => [version.id, version]));
+    const afterVersions = new Map(after.orderVersions.map(version => [version.id, version]));
+    // The old ledger has no durable chronology of staff actions. Repairing an
+    // already observed transfer must preserve the physical status, even occupied.
+    // A genuine peer closure/transfer still emits its normal one-time release.
+    return before.activeSyrveOrderIds.some(id => !isLegacyTransferRepair(beforeVersions.get(id), afterVersions.get(id)))
+      ? 'free' : null;
+  }
   return null;
 }
 
