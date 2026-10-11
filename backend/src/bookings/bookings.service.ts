@@ -1299,7 +1299,7 @@ export class BookingsService {
 
   private async updateBookingStatusWithLock(
     id: string,
-    update: (booking: Booking) => void,
+    update: (booking: Booking) => void | false,
     history: {
       action: string;
       actorRole: string;
@@ -1320,7 +1320,9 @@ export class BookingsService {
       if (!booking) throw new NotFoundException('Бронювання не знайдено');
 
       const previousData = this.bookingSnapshot(booking);
-      update(booking);
+      if (update(booking) === false) {
+        return { booking, previousData, changed: false };
+      }
       await repository.save(booking);
 
       await manager.getRepository(BookingHistory).save(
@@ -1380,7 +1382,7 @@ export class BookingsService {
         }
       }
 
-      return { booking, previousData };
+      return { booking, previousData, changed: true };
     });
   }
 
@@ -1466,9 +1468,13 @@ export class BookingsService {
   }
 
   async complete(id: string, actor?: AuthUser) {
-    const { booking } = await this.updateBookingStatusWithLock(
+    const { changed } = await this.updateBookingStatusWithLock(
       id,
       (lockedBooking) => {
+        if (lockedBooking.status === 'completed') return false;
+        if (lockedBooking.status !== 'pending' && lockedBooking.status !== 'approved') {
+          throw new BadRequestException('Завершити можна лише активне бронювання');
+        }
         lockedBooking.status = 'completed';
         lockedBooking.completedAt = new Date();
       },
@@ -1479,6 +1485,7 @@ export class BookingsService {
         forceTableRelease: true,
       },
     );
+    if (!changed) return { message: 'Бронювання вже завершено' };
     await this.safeLog('Стіл звільнено', {
       bookingId: id,
       staffId: actor?.staffId || null,
@@ -1494,7 +1501,8 @@ export class BookingsService {
 
     const result = await this.bookings.manager.transaction(async (manager) => {
       const booking = await manager.getRepository(Booking).findOne({
-        where: { id }, relations: ['table', 'client'], lock: { mode: 'pessimistic_write' },
+        where: { id }, relations: ['table', 'client'],
+        lock: { mode: 'pessimistic_write', tables: ['bookings'] },
       });
       if (!booking || booking.status !== 'approved' || !booking.table) {
         throw new BadRequestException('Пересадка доступна лише для підтвердженого бронювання');
