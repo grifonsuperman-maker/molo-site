@@ -68,8 +68,16 @@ export default function AdminTablesByLocation({ onClose }: { onClose: () => void
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const scope = `${selectedDate}:${selectedTime}`;
+  const loadScope = useRef(scope);
+  loadScope.current = scope;
+  const loadRequest = useRef({ version: 0, pending: false, active: false });
 
-  async function load(silent = false) {
+  async function load(silent = false, polling = false) {
+    const request = loadRequest.current;
+    if (!request.active || loadScope.current !== scope || (polling && request.pending)) return;
+    const version = ++request.version;
+    request.pending = true;
     if (!silent) setLoading(true);
     setError(null);
 
@@ -82,18 +90,28 @@ export default function AdminTablesByLocation({ onClose }: { onClose: () => void
       }),
     ]);
 
+    if (!request.active || loadScope.current !== scope || version !== request.version) return;
+    request.pending = false;
     if (mapResult.status === 'fulfilled') setFullMap(mapResult.value);
     if (statusResult.status === 'fulfilled') setStatuses(statusResult.value);
 
     const failed = [mapResult, statusResult].find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
     if (failed) setError(failed.reason?.message || 'Не вдалося завантажити столи');
-    if (!silent) setLoading(false);
+    setLoading(false);
   }
 
   useEffect(() => {
+    loadRequest.current.active = true;
+    setFullMap(null);
+    setStatuses(null);
     void load();
-    const timer = window.setInterval(() => void load(true), POLLING_MS);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(() => void load(true, true), POLLING_MS);
+    return () => {
+      window.clearInterval(timer);
+      loadRequest.current.active = false;
+      loadRequest.current.pending = false;
+      loadRequest.current.version += 1;
+    };
   }, [selectedDate, selectedTime]);
 
   useEffect(() => {

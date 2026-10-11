@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   CalendarClock,
@@ -46,6 +46,7 @@ type Target = { type: 'table'; id: string } | { type: 'zone'; id: string } | nul
 
 const ACTIVE_STATUSES = new Set(['pending', 'approved']);
 const CLEANUP_MINUTES = 15;
+const POLLING_MS = 15_000;
 const LOCATION_ZONE_ALIASES: Record<string, string[]> = {
   hall: ['зал ресторану', 'зал', 'hall'],
   canopy: ['навіс', 'навес', 'canopy'],
@@ -256,6 +257,10 @@ export default function AdminVisualTablePlanner({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
+  const scope = `${date}:${time}`;
+  const loadScope = useRef(scope);
+  loadScope.current = scope;
+  const loadRequest = useRef({ version: 0, pending: false, active: false });
 
   const location = LOCATIONS.find((item) => item.key === locationKey) || LOCATIONS[0];
   const zone = useMemo(() => findZone(map?.zones || [], locationKey), [map, locationKey]);
@@ -270,21 +275,42 @@ export default function AdminVisualTablePlanner({
   }), [targetBookings, fullDay, startTime, endTime]);
   const targetBlocks = useMemo(() => blocks.filter((block) => target?.type === 'table' ? block.table?.id === target.id : target?.type === 'zone' ? block.zone?.id === target.id : false), [blocks, target]);
 
-  async function load(silent = false) {
+  async function load(silent = false, polling = false) {
+    const request = loadRequest.current;
+    if (!request.active || loadScope.current !== scope || (polling && request.pending)) return;
+    const version = ++request.version;
+    request.pending = true;
     if (!silent) setLoading(true);
     setError('');
     const [mapResult, bookingsResult, blocksResult, statusesResult] = await Promise.allSettled([
       mapApi.get(), bookingsApi.getByDate(date), availabilityBlocksApi.list(date), bookingsApi.tableStatuses({ bookingDate: date, bookingTime: time, durationMinutes: 120 }),
     ]);
+    if (!request.active || loadScope.current !== scope || version !== request.version) return;
+    request.pending = false;
     if (mapResult.status === 'fulfilled') setMap(mapResult.value);
     if (bookingsResult.status === 'fulfilled') setBookings(bookingsResult.value);
     if (blocksResult.status === 'fulfilled') setBlocks(blocksResult.value);
     if (statusesResult.status === 'fulfilled') setStatuses(statusesResult.value.statuses || {});
     const failed = [mapResult, bookingsResult, blocksResult, statusesResult].find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
     if (failed) setError(failed.reason?.message || 'Не вдалося завантажити план');
-    if (!silent) setLoading(false);
+    setLoading(false);
   }
-  useEffect(() => { setTarget(null); void load(); }, [date, time]);
+  useEffect(() => {
+    loadRequest.current.active = true;
+    setTarget(null);
+    setMap(null);
+    setBookings([]);
+    setBlocks([]);
+    setStatuses({});
+    void load();
+    const timer = window.setInterval(() => void load(true, true), POLLING_MS);
+    return () => {
+      window.clearInterval(timer);
+      loadRequest.current.active = false;
+      loadRequest.current.pending = false;
+      loadRequest.current.version += 1;
+    };
+  }, [date, time]);
   useEffect(() => { setManualBookingOpen(false); }, [target?.type, target?.id]);
 
   function realTable(number: number) { return findTableForMapSlot(map?.tables || [], location.key, number, map?.mapIdentityPrepared); }

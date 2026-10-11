@@ -257,7 +257,7 @@ export class AvailabilityBlocksService {
       const booking = await manager.getRepository(Booking).findOne({
         where: { id: bookingId },
         relations: ['table', 'table.zone', 'client'],
-        lock: { mode: 'pessimistic_write' },
+        lock: { mode: 'pessimistic_write', tables: ['bookings'] },
       });
       if (!booking || !ACTIVE_BOOKING_STATUSES.includes(booking.status)) {
         throw new BadRequestException('Перенесення доступне лише для активного бронювання');
@@ -270,7 +270,7 @@ export class AvailabilityBlocksService {
       const nextTable = await manager.getRepository(TableEntity).findOne({
         where: { id: dto.tableId },
         relations: ['zone'],
-        lock: { mode: 'pessimistic_write' },
+        lock: { mode: 'pessimistic_write', tables: ['tables'] },
       });
       if (!nextTable || !nextTable.isVisible || nextTable.status === 'closed') {
         throw new BadRequestException('Новий стіл закритий або недоступний');

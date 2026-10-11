@@ -8,6 +8,7 @@ const { DataSource } = require('typeorm');
 
 const { BookingsService } = require('../dist/bookings/bookings.service.js');
 const { GuestBookingsService } = require('../dist/bookings/guest-bookings.service.js');
+const { AvailabilityBlocksService } = require('../dist/bookings/availability-blocks.service.js');
 const { Booking } = require('../dist/bookings/entities/booking.entity.js');
 const { BookingHistory } = require('../dist/bookings/entities/booking-history.entity.js');
 const { TableEntity } = require('../dist/tables/entities/table.entity.js');
@@ -99,5 +100,48 @@ for (const destination of [{ tableId: TABLE_ID }, { tableNumber: '46' }]) {
     const service = new GuestBookingsService(bookings, {}, {}, manager);
     await assert.rejects(service.changeTable(BOOKING_ID, 'synthetic-test-token', destination),
       (error) => error === STOP_AFTER_SQL);
+  });
+}
+
+for (const entryPoint of ['planner', 'legacy']) {
+  test(`${entryPoint} transfer locks only its primary rows with nullable relations`, async () => {
+    const captured = [];
+    const booking = {
+      id: BOOKING_ID, status: 'approved', bookingDate: '2099-05-01',
+      table: { id: TABLE_ID, tableNumber: '46' },
+    };
+    const manager = {
+      getRepository(entity) {
+        return {
+          async findOne(options) {
+            const alias = entity === Booking ? 'moving_booking' : 'destination_table';
+            const query = source.getRepository(entity).createQueryBuilder(alias)
+              .setFindOptions({ ...options, take: 1 });
+            const sql = query.getSql();
+            assert.equal(query.expressionMap.lockMode, 'pessimistic_write');
+            if (options.relations?.length) {
+              assert.deepEqual(query.expressionMap.lockTables, [`"${alias}"`]);
+              assert.ok(sql.endsWith(` FOR UPDATE OF "${alias}"`), sql);
+              assert.match(sql, /LEFT JOIN/);
+            } else {
+              assert.match(sql, / FOR UPDATE$/);
+            }
+            captured.push(entity);
+            return entity === Booking ? booking : null;
+          },
+        };
+      },
+      async transaction(work) { return work(manager); },
+    };
+    const bookings = { manager };
+    const planner = new AvailabilityBlocksService(manager, {}, {}, {}, {}, {}, {}, {});
+    const legacy = new BookingsService(bookings, {}, {}, {}, {}, {}, {}, {}, {}, {});
+    legacy.restaurantDateToday = () => booking.bookingDate;
+    const action = entryPoint === 'planner'
+      ? () => planner.transferBooking(BOOKING_ID, { tableId: TABLE_ID }, { role: 'admin' })
+      : () => legacy.waiterTransfer(BOOKING_ID, TABLE_ID, { role: 'admin' });
+
+    await assert.rejects(action, /Новий стіл закритий або недоступний|Обраний стіл закритий або зайнятий/);
+    assert.deepEqual(captured, [Booking, TableEntity]);
   });
 }

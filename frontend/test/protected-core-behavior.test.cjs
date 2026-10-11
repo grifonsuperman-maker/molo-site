@@ -673,8 +673,13 @@ test('each protected recurring production poller remains exactly 15 seconds', ()
     },
     {
       label: 'Admin tables',
-      signature: 'load(true)',
+      signature: 'load(true,true)',
       markers: ['mapApi.get()', 'bookingsApi.tableStatuses', 'setFullMap(mapResult.value)'],
+    },
+    {
+      label: 'Admin planner',
+      signature: 'load(true,true)',
+      markers: ['bookingsApi.getByDate(date)', 'availabilityBlocksApi.list(date)', 'setMap(mapResult.value)'],
     },
     {
       label: 'Director dashboard',
