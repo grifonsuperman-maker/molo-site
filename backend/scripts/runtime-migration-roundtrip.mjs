@@ -22,7 +22,6 @@ export const EXPECTED_RUNTIME_MIGRATIONS = [
   'CreateSyrveActivation2026100200070',
   'CreateSyrveRequestLimits2026100600080',
   'CreateSyrveOperations2026100700010',
-  'AddRestaurantAutoTheme2026101200010',
 ];
 
 const EXPECTED_REWIND_STATE = {
@@ -165,7 +164,6 @@ function loadRuntimeMigrations(require) {
   const { CreateSyrveActivation2026100200070 } = require('../dist/migrations/2026100200070-CreateSyrveActivation.js');
   const { CreateSyrveRequestLimits2026100600080 } = require('../dist/migrations/2026100600080-CreateSyrveRequestLimits.js');
   const { CreateSyrveOperations2026100700010 } = require('../dist/migrations/2026100700010-CreateSyrveOperations.js');
-  const { AddRestaurantAutoTheme2026101200010 } = require('../dist/migrations/2026101200010-AddRestaurantAutoTheme.js');
 
   return [
     CreateStaffPinAttempts2026081400010,
@@ -186,7 +184,6 @@ function loadRuntimeMigrations(require) {
     CreateSyrveActivation2026100200070,
     CreateSyrveRequestLimits2026100600080,
     CreateSyrveOperations2026100700010,
-    AddRestaurantAutoTheme2026101200010,
   ];
 }
 
@@ -212,7 +209,6 @@ async function readRewindState(dataSource) {
       to_regclass('public.syrve_sync_activation') IS NOT NULL AS "syrveActivationTable",
       to_regclass('public.syrve_request_limits') IS NOT NULL AS "syrveRequestLimitsTable",
       to_regclass('public.syrve_operations') IS NOT NULL AS "syrveOperationsTable",
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'restaurant' AND column_name = 'auto_theme_enabled') AS "autoThemeEnabledColumn",
       to_regclass('public.table_map_identities') IS NOT NULL AS "tableMapIdentitiesTable",
       to_regclass('public."UQ_tables_canonical_number"') IS NOT NULL AS "tableNumberUniqueIndex",
       to_regprocedure('public.molo_canonical_table_number(text)') IS NOT NULL AS "tableNumberFunction",
@@ -316,7 +312,6 @@ async function assertRewindCheckpoint(dataSource, remainingMigrationCount) {
       syrveActivationTable: remainingMigrationCount >= 16,
       syrveRequestLimitsTable: remainingMigrationCount >= 17,
       syrveOperationsTable: remainingMigrationCount >= 18,
-      autoThemeEnabledColumn: remainingMigrationCount >= 19,
       syrveConfigurationRevision: remainingMigrationCount >= 11,
       tableMapIdentitiesTable: remainingMigrationCount >= 12,
       tableMapIdentityTrigger: remainingMigrationCount >= 12,
@@ -372,7 +367,6 @@ export async function runRuntimeMigrationRoundtripStep(
         syrveWorkerStateTable: true,
         syrveRequestLimitsTable: true,
         syrveOperationsTable: true,
-        autoThemeEnabledColumn: true,
         syrveConfigurationRevision: true,
         tableMapIdentitiesTable: true,
         tableMapIdentityTrigger: true,
