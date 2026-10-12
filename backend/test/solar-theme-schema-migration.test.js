@@ -15,44 +15,72 @@ const moduleShim = { exports: {} };
 new Function('module', 'exports', output)(moduleShim, moduleShim.exports);
 const Migration = moduleShim.exports.AddRestaurantAutoTheme2026101200010;
 
-test('auto-theme migration adds a disabled boolean flag and audits its schema', async () => {
-  const statements = [];
-  const runner = { query: async (sql) => {
-    statements.push(sql);
-    return sql.includes('information_schema.columns')
-      ? [{ data_type: 'boolean', is_nullable: 'NO', column_default: 'false' }]
-      : [];
-  } };
-  await new Migration().up(runner);
-  assert.match(statements[0], /ADD COLUMN IF NOT EXISTS "auto_theme_enabled" boolean NOT NULL DEFAULT false/);
-  assert.match(statements[1], /information_schema.columns/);
+const transaction = (onQuery) => ({
+  isTransactionActive: true,
+  query: onQuery,
 });
 
-test('auto-theme migration rejects an incompatible preexisting column', async () => {
-  const runner = { query: async (sql) =>
-    sql.includes('information_schema.columns')
+test('migration locks restaurant, adds disabled flag and verifies schema', async () => {
+  const statements = [];
+  const runner = transaction(async (sql) => {
+    statements.push(sql);
+    if (sql.includes('AS present')) return [{ present: false }];
+    if (sql.includes('data_type, is_nullable')) return [
+      { data_type: 'boolean', is_nullable: 'NO', column_default: 'false' },
+    ];
+    return [];
+  });
+  await new Migration().up(runner);
+  assert.match(statements[0], /LOCK TABLE "restaurant" IN ACCESS EXCLUSIVE MODE/);
+  assert.match(statements[1], /information_schema.columns/);
+  assert.match(statements[2], /ADD COLUMN "auto_theme_enabled" boolean NOT NULL DEFAULT false/);
+  assert.match(statements[3], /information_schema.columns/);
+});
+
+test('up rejects a preexisting column even with matching schema', async () => {
+  const statements = [];
+  const runner = transaction(async (sql) => {
+    statements.push(sql);
+    return [{ present: true }];
+  });
+  await assert.rejects(new Migration().up(runner), /already exists/);
+  assert.equal(statements.length, 2);
+});
+
+test('up rejects an unexpected resulting schema', async () => {
+  const runner = transaction(async (sql) =>
+    sql.includes('AS present') ? [{ present: false }] :
+    sql.includes('data_type, is_nullable')
       ? [{ data_type: 'text', is_nullable: 'YES', column_default: null }]
       : [],
-  };
+  );
   await assert.rejects(new Migration().up(runner), /unexpected schema/);
 });
 
-test('auto-theme migration refuses rollback while automation is enabled', async () => {
+test('down locks restaurant before checking active auto flags', async () => {
   const statements = [];
-  const runner = { query: async (sql) => {
+  const runner = transaction(async (sql) => {
     statements.push(sql);
     return [{ enabled: true }];
-  } };
+  });
   await assert.rejects(new Migration().down(runner), /Disable automatic theme/);
-  assert.equal(statements.length, 1);
+  assert.match(statements[0], /ACCESS EXCLUSIVE MODE/);
+  assert.equal(statements.length, 2);
 });
 
-test('auto-theme migration rolls back only when the flag is off', async () => {
+test('down drops column only after exclusive lock and inactive check', async () => {
   const statements = [];
-  const runner = { query: async (sql) => {
+  const runner = transaction(async (sql) => {
     statements.push(sql);
     return [{ enabled: false }];
-  } };
+  });
   await new Migration().down(runner);
-  assert.match(statements[1], /DROP COLUMN IF EXISTS "auto_theme_enabled"/);
+  assert.match(statements[0], /ACCESS EXCLUSIVE MODE/);
+  assert.match(statements[2], /DROP COLUMN "auto_theme_enabled"/);
+});
+
+test('migration refuses operations outside an active transaction', async () => {
+  const runner = { isTransactionActive: false, query: () => assert.fail('no writes') };
+  await assert.rejects(new Migration().up(runner), /active transaction/);
+  await assert.rejects(new Migration().down(runner), /active transaction/);
 });
