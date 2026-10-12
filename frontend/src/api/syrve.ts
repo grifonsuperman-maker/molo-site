@@ -91,6 +91,10 @@ export type SyrveWebhookDiagnostics = {
   configurationRevision: string; organizationId: string; startedAt: string; checkedAt: string;
   settingsReadAccess: 'confirmed'; settingsWriteAccess: 'not_checked';
   webhookAddressSet: boolean; authorizationSet: boolean; settingsChanged: false; statusesApplied: false;
+  verification?: {
+    addressMatches: boolean; authorizationMatches: boolean; tableFilterPresent: boolean;
+    orderStatusesMatch: boolean; itemStatusesMatch: boolean;
+  };
 };
 
 export type SyrveWebhookSetup = {

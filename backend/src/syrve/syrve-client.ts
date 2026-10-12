@@ -12,7 +12,7 @@ import { parseSyrveBill, type SyrveBillReadResult, type SyrveBillRegister } from
 import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs, syrveRequestGroup } from './syrve-request-limiter';
 import { summarizeSyrveWebhookSettings } from './syrve-webhook-diagnostics';
 import { SYRVE_WEBHOOK_TOPOLOGY_TTL_MS, type SyrveWebhookTopology } from './syrve-webhook';
-import { configuredSyrveWebhook, parseSyrveWebhookSetupSettings, syrveWebhookUpdatePayload } from './syrve-webhook-setup';
+import { configuredSyrveWebhook, parseSyrveWebhookSetupSettings, syrveWebhookUpdatePayload, verifySyrveWebhookSettings } from './syrve-webhook-setup';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -45,6 +45,11 @@ const ERRORS = {
   SYRVE_ACCESS_DENIED: 'Syrve не надав права для цієї перевірки.',
   SYRVE_WEBHOOK_WRITE_DENIED: 'API-ключ Syrve не має права змінювати налаштування сповіщень. Потрібен доступ до налаштувань організації.',
   SYRVE_WEBHOOK_NOT_CONFIRMED: 'Налаштування сповіщень у Syrve не підтверджено. Повторіть перевірку підключення.',
+  SYRVE_WEBHOOK_ADDRESS_NOT_CONFIRMED: 'Syrve не підтвердив адресу прийому сповіщень MOLO. Перевірте налаштування сповіщень.',
+  SYRVE_WEBHOOK_AUTHORIZATION_NOT_CONFIRMED: 'Syrve не підтвердив захист сповіщень MOLO. Перевірте налаштування сповіщень.',
+  SYRVE_WEBHOOK_TABLE_FILTER_NOT_CONFIRMED: 'Syrve не повернув фільтр сповіщень про рахунки на столах. Перевірте налаштування сповіщень.',
+  SYRVE_WEBHOOK_ORDER_STATUSES_NOT_CONFIRMED: 'Syrve не підтвердив сповіщення про всі потрібні стани рахунку: відкриття, передчек, закриття та видалення.',
+  SYRVE_WEBHOOK_ITEM_FILTER_NOT_CONFIRMED: 'Syrve повернув обмеження за позиціями рахунку. Надсилання всіх потрібних змін рахунків не підтверджено.',
   SYRVE_RATE_LIMITED: 'Syrve тимчасово обмежив кількість запитів. Спробуйте пізніше.',
   SYRVE_RATE_GUARD_UNAVAILABLE: 'Не вдалося перевірити загальний ліміт запитів Syrve. Запит не надіслано, збережений стан не змінено.',
   SYRVE_TIMEOUT: 'Syrve не відповів протягом 12 секунд.',
@@ -417,17 +422,21 @@ export class SyrveClient {
       (session, deadline, budget, guard) => this.readBill(session, organizationId, requestedId, startedAt, deadline, budget, guard));
   }
 
-  async webhookDiagnostics(apiBaseUrl: string, apiLogin: string, organizationId: string, beforeRead: () => Promise<void>) {
+  async webhookDiagnostics(apiBaseUrl: string, apiLogin: string, organizationId: string, beforeRead: () => Promise<void>, target?: string) {
     const startedAt = new Date().toISOString();
     return this.withBillScope(apiBaseUrl, apiLogin, organizationId, beforeRead, 3, async (session, deadline, budget, guard) => {
       const payload = await this.postJson(session.rateKey, '/api/1/webhooks/settings', {
         organizationId: organizationId.toLowerCase(),
       }, session.token, deadline, undefined, budget);
       let summary;
-      try { summary = summarizeSyrveWebhookSettings(payload); }
+      let verification: ReturnType<typeof verifySyrveWebhookSettings> | undefined;
+      try {
+        summary = summarizeSyrveWebhookSettings(payload);
+        if (target) verification = verifySyrveWebhookSettings(parseSyrveWebhookSetupSettings(payload), target);
+      }
       catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
       await guard();
-      return { startedAt, checkedAt: new Date().toISOString(), ...summary };
+      return { startedAt, checkedAt: new Date().toISOString(), ...summary, ...(verification ? { verification } : {}) };
     });
   }
 
@@ -451,11 +460,10 @@ export class SyrveClient {
       // settings stay in this closure and never enter durable operation data.
       const body = syrveWebhookUpdatePayload(initial, organizationId, target);
       try {
-        const reply = await this.postJson(session.rateKey, '/api/1/webhooks/update_settings', body,
+        await this.postJson(session.rateKey, '/api/1/webhooks/update_settings', body,
           session.token, deadline, undefined, budget);
-        if (!isRecord(reply) || typeof reply.correlationId !== 'string' || !UUID.test(reply.correlationId)) {
-          throw new SyrveClientException('SYRVE_WEBHOOK_NOT_CONFIRMED');
-        }
+        // A 200 acknowledgement is not configuration proof. Always verify the
+        // freshly read settings, even if the acknowledgement omits its ID.
       } catch (error) {
         if (error instanceof SyrveClientException && (error.getResponse() as { code?: string }).code === 'SYRVE_ACCESS_DENIED') {
           throw new SyrveClientException('SYRVE_WEBHOOK_WRITE_DENIED');
@@ -464,7 +472,12 @@ export class SyrveClient {
       }
       const verified = await read();
       await guard();
-      if (!configuredSyrveWebhook(verified, target)) throw new SyrveClientException('SYRVE_WEBHOOK_NOT_CONFIRMED');
+      const verification = verifySyrveWebhookSettings(verified, target);
+      if (!verification.addressMatches) throw new SyrveClientException('SYRVE_WEBHOOK_ADDRESS_NOT_CONFIRMED');
+      if (!verification.authorizationMatches) throw new SyrveClientException('SYRVE_WEBHOOK_AUTHORIZATION_NOT_CONFIRMED');
+      if (!verification.tableFilterPresent) throw new SyrveClientException('SYRVE_WEBHOOK_TABLE_FILTER_NOT_CONFIRMED');
+      if (!verification.orderStatusesMatch) throw new SyrveClientException('SYRVE_WEBHOOK_ORDER_STATUSES_NOT_CONFIRMED');
+      if (!verification.itemStatusesMatch) throw new SyrveClientException('SYRVE_WEBHOOK_ITEM_FILTER_NOT_CONFIRMED');
       return { startedAt, checkedAt: new Date().toISOString(), settingsReadAccess: 'confirmed' as const,
         settingsWriteAccess: 'confirmed' as const, notificationsConfigured: true as const, settingsChanged: true,
         statusesApplied: false as const, deliveryVerified: false as const };

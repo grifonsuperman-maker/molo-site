@@ -107,6 +107,40 @@ test('public reports strip raw fields and never turn a successful read into writ
   }
 });
 
+test('optional verification is strictly validated, strips extra fields and explains the saved filter mismatch', () => {
+  const { validateWebhookDiagnostics, SyrveWebhookDiagnosticsView } = load();
+  const verification = { addressMatches: true, authorizationMatches: true, tableFilterPresent: true,
+    orderStatusesMatch: true, itemStatusesMatch: true };
+  const clean = validateWebhookDiagnostics({ ...report(), verification: { ...verification, authToken: 'private-token' } }, scope);
+  assert.doesNotMatch(JSON.stringify(clean), /private-|authToken/);
+  const render = value => renderToStaticMarkup(React.createElement(SyrveWebhookDiagnosticsView, {
+    report: validateWebhookDiagnostics({ ...report(), verification: value }, scope) }));
+  assert.match(render(verification), /Фільтр потрібних змін рахунку підтверджено/);
+  assert.match(render({ ...verification, addressMatches: false }), /Адреса не відповідає/);
+  assert.match(render({ ...verification, authorizationMatches: false }), /Захист сповіщень не відповідає/);
+  assert.match(render({ ...verification, tableFilterPresent: false }), /не повернув фільтр/);
+  assert.match(render({ ...verification, orderStatusesMatch: false }), /не підтвердив сповіщення про відкриття/);
+  assert.match(render({ ...verification, itemStatusesMatch: false }), /обмеження за позиціями/);
+  for (const bad of [null, [], 'private-value', {}, { ...verification, authorizationMatches: 'yes' },
+    { ...verification, itemStatusesMatch: undefined }]) assert.throws(() => validateWebhookDiagnostics({ ...report(), verification: bad }, scope));
+  assert.equal(validateWebhookDiagnostics(report(), scope).verification, undefined, 'older backend responses remain usable during deployment');
+});
+
+test('setup mismatch codes display fixed reasons and discard private provider messages', async () => {
+  for (const [code, expected] of [
+    ['SYRVE_WEBHOOK_ADDRESS_NOT_CONFIRMED', 'не підтвердив адресу'],
+    ['SYRVE_WEBHOOK_AUTHORIZATION_NOT_CONFIRMED', 'не підтвердив захист'],
+    ['SYRVE_WEBHOOK_TABLE_FILTER_NOT_CONFIRMED', 'не повернув фільтр'],
+    ['SYRVE_WEBHOOK_ORDER_STATUSES_NOT_CONFIRMED', 'всі потрібні стани'],
+    ['SYRVE_WEBHOOK_ITEM_FILTER_NOT_CONFIRMED', 'обмеження за позиціями'],
+  ]) {
+    const h = mounted({ configureWebhook: async () => { throw { code, message: 'private-provider-token' }; } });
+    h.render({ syncEnabled: true }); h.setupClick(); await flush();
+    assert.match(h.states[2], new RegExp(expected)); assert.doesNotMatch(h.states[2], /private-/);
+    assert.equal(h.states[3], null);
+  }
+});
+
 test('setup adapter sends only current revision and explicit confirmation; URL and secrets stay off the browser request', async () => {
   const exports = {}; let request;
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../src/api/syrve.ts'), 'utf8'),
