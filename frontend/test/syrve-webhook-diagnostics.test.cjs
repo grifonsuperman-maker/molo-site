@@ -13,6 +13,9 @@ const scope = { configurationRevision: REV, organizationId: ORG };
 const report = () => ({ ...scope, startedAt: '2026-10-12T09:00:00Z', checkedAt: '2026-10-12T09:00:01Z',
   settingsReadAccess: 'confirmed', settingsWriteAccess: 'not_checked', webhookAddressSet: true,
   authorizationSet: true, settingsChanged: false, statusesApplied: false });
+const setupReport = () => ({ ...scope, startedAt: '2026-10-12T09:00:00Z', checkedAt: '2026-10-12T09:00:01Z',
+  settingsReadAccess: 'confirmed', settingsWriteAccess: 'confirmed', notificationsConfigured: true,
+  settingsChanged: true, statusesApplied: false, deliveryVerified: false });
 function load(api = {}, react = React) {
   const errors = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname,
@@ -47,7 +50,9 @@ function mounted(api) {
     props = { ...props, ...changes }; stateIndex = 0; refIndex = 0;
     const tree = component(props); while (effects.length) { cleanup?.(); cleanup = effects.shift()(); } return tree;
   };
-  return { states, render, click: () => find(render(), node => node.type === 'button').props.onClick(), unmount: () => cleanup?.() };
+  return { states, render, click: () => find(render(), node => node.type === 'button').props.onClick(),
+    setupClick: () => find(render(), node => node.type === 'button' && node.props.children === 'Підключити сповіщення для MOLO').props.onClick(),
+    unmount: () => cleanup?.() };
 }
 
 test('the API adapter sends only the saved revision through the asynchronous operation flow', async () => {
@@ -100,4 +105,54 @@ test('public reports strip raw fields and never turn a successful read into writ
     { settingsChanged: true }, { statusesApplied: true }, { webhookAddressSet: 'yes' }, { checkedAt: 'bad' }]) {
     assert.throws(() => validateWebhookDiagnostics({ ...report(), ...change }, scope));
   }
+});
+
+test('setup adapter sends only current revision and explicit confirmation; URL and secrets stay off the browser request', async () => {
+  const exports = {}; let request;
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../src/api/syrve.ts'), 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText,
+  { exports, require: require('./helpers/syrve-operation-fixture.cjs').resolver({
+    post: async (url, payload) => { request = { url, payload }; return setupReport(); },
+  }) });
+  await exports.syrveApi.configureWebhook(REV);
+  assert.deepEqual(JSON.parse(JSON.stringify(request)), { url: '/syrve-integration/webhook-setup', payload: { configurationRevision: REV, confirmed: true } });
+});
+
+test('setup requires enabled auto-status and an explicit click; repeated clicks share one operation', async () => {
+  let calls = 0; const response = deferred();
+  const h = mounted({ configureWebhook: revision => { assert.equal(revision, REV); calls++; return response.promise; } });
+  h.render(); await flush(); assert.equal(calls, 0);
+  h.setupClick(); assert.equal(calls, 0);
+  h.render({ syncEnabled: true }); await flush(); assert.equal(calls, 0);
+  h.setupClick(); h.setupClick(); assert.equal(calls, 1);
+  response.resolve(setupReport()); await flush(); assert.equal(h.states[3].notificationsConfigured, true);
+  assert.equal(h.states[1], false);
+});
+
+test('disabled consent, disconnect, revision rotation and closed screen discard delayed setup results', async () => {
+  for (const change of [{ syncEnabled: false }, { connectionReady: false }, { configurationRevision: OTHER }, { organizationId: OTHER }, null]) {
+    const response = deferred(), h = mounted({ configureWebhook: () => response.promise });
+    h.render({ syncEnabled: true }); h.setupClick();
+    if (change) h.render(change); else h.unmount();
+    const before = JSON.stringify(h.states); response.resolve(setupReport()); await flush();
+    assert.equal(JSON.stringify(h.states), before);
+  }
+});
+
+test('setup exposes fixed permission errors without displaying raw provider text or tokens', async () => {
+  const h = mounted({ configureWebhook: async () => { throw { code: 'SYRVE_WEBHOOK_WRITE_DENIED', message: 'private-provider-token' }; } });
+  h.render({ syncEnabled: true }); h.setupClick(); await flush();
+  assert.match(h.states[2], /не має права змінювати/); assert.doesNotMatch(h.states[2], /private-/);
+  assert.equal(h.states[3], null);
+});
+
+test('a setup result strips URL/token/filter fields and never presents settings as proven delivery', () => {
+  const { validateWebhookSetup, SyrveWebhookSetupView } = load();
+  const clean = validateWebhookSetup({ ...setupReport(), authToken: 'private-token', webHooksUri: 'private-url', webHooksFilter: { privateKey: 'private-value' } }, scope);
+  assert.doesNotMatch(JSON.stringify(clean), /private-|authToken|webHooksUri|webHooksFilter/);
+  const html = renderToStaticMarkup(React.createElement(SyrveWebhookSetupView, { report: clean }));
+  assert.match(html, /налаштовано та перевірено в Syrve/); assert.match(html, /Доставку ще потрібно перевірити/);
+  for (const change of [{ organizationId: OTHER }, { configurationRevision: OTHER }, { notificationsConfigured: false },
+    { deliveryVerified: true }, { statusesApplied: true }, { checkedAt: ['2026-10-12T09:00:01Z'] },
+    { settingsWriteAccess: 'not_checked', settingsChanged: true }]) assert.throws(() => validateWebhookSetup({ ...setupReport(), ...change }, scope));
 });

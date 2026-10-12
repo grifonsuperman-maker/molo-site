@@ -17,13 +17,31 @@ The secret derives from `SYRVE_CREDENTIALS_SECRET` with a separate HMAC domain;
 it must never be placed in a URL, browser response, repository or log.
 Neither an API login nor a Director JWT can authorize callbacks.
 
+The Director panel now provides **Підключити сповіщення для MOLO**, backed by
+`POST /api/syrve-integration/webhook-setup` with the current revision and
+`confirmed: true`. Existing auto-status consent must be enabled. This explicit
+action reads settings, writes at most once, then verifies the saved URL, token
+and all four supported bill statuses. An already matching configuration is
+read without another write and does not claim newly tested write permission.
+It never claims callback delivery or changes a MOLO table/booking/POS bill.
+
+The callback origin comes from server `SYRVE_WEBHOOK_BASE_URL` or Render's
+automatic `RENDER_EXTERNAL_URL` ([Render documentation](https://render.com/docs/environment-variables)).
+Browser URLs, Host and forwarded headers are not used. A nonempty foreign
+receiver is refused; an earlier MOLO revision is replaced only when both its
+origin/path and its HMAC token prove ownership. Other webhook filters are
+preserved. Syrve offers no compare-and-set for these settings, so its upstream
+read/write is not atomic with concurrent changes by a separate operator.
+Mutation failures are not retried automatically. After uncertain failure,
+the next explicit attempt rereads settings before deciding whether to write.
+
 The organization and current configuration revision must match the saved
 connection, and the Director's existing auto-status consent must still be valid.
-Disconnecting, disabling or changing bindings revokes processing. This PR does
-not configure `/api/1/webhooks/update_settings` or test write permission. After
-deployment, register the HTTPS receiver URL and token through a backend-only
-setup action or a trusted Syrve operator. Read existing settings first to avoid
-overwriting another integration's callback.
+Disconnecting, disabling or changing bindings revokes processing. Re-run the
+Director setup after enabling consent for a new revision. The same saved scope
+and Director-session guards are checked before every quota-paced request.
+Only a successful update and matching readback report write permission as
+confirmed. A live POS test must still confirm opening, transfer and closure.
 
 ## State policy
 

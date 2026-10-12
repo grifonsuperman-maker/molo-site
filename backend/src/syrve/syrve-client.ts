@@ -12,6 +12,7 @@ import { parseSyrveBill, type SyrveBillReadResult, type SyrveBillRegister } from
 import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs, syrveRequestGroup } from './syrve-request-limiter';
 import { summarizeSyrveWebhookSettings } from './syrve-webhook-diagnostics';
 import { SYRVE_WEBHOOK_TOPOLOGY_TTL_MS, type SyrveWebhookTopology } from './syrve-webhook';
+import { configuredSyrveWebhook, parseSyrveWebhookSetupSettings, syrveWebhookUpdatePayload } from './syrve-webhook-setup';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -42,6 +43,8 @@ export function isVerifiedLoadedProbe(probe: SyrveOrderProbe, context: string, o
 const ERRORS = {
   SYRVE_AUTH_FAILED: 'Syrve відхилив дані доступу. Перевірте API-ключ і налаштування підключення.',
   SYRVE_ACCESS_DENIED: 'Syrve не надав права для цієї перевірки.',
+  SYRVE_WEBHOOK_WRITE_DENIED: 'API-ключ Syrve не має права змінювати налаштування сповіщень. Потрібен доступ до налаштувань організації.',
+  SYRVE_WEBHOOK_NOT_CONFIRMED: 'Налаштування сповіщень у Syrve не підтверджено. Повторіть перевірку підключення.',
   SYRVE_RATE_LIMITED: 'Syrve тимчасово обмежив кількість запитів. Спробуйте пізніше.',
   SYRVE_RATE_GUARD_UNAVAILABLE: 'Не вдалося перевірити загальний ліміт запитів Syrve. Запит не надіслано, збережений стан не змінено.',
   SYRVE_TIMEOUT: 'Syrve не відповів протягом 12 секунд.',
@@ -425,6 +428,46 @@ export class SyrveClient {
       catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
       await guard();
       return { startedAt, checkedAt: new Date().toISOString(), ...summary };
+    });
+  }
+
+  async configureWebhook(apiBaseUrl: string, apiLogin: string, organizationId: string, target: string,
+    beforeRequest: () => Promise<void>) {
+    const startedAt = new Date().toISOString();
+    return this.withBillScope(apiBaseUrl, apiLogin, organizationId, beforeRequest, 5, async (session, deadline, budget, guard) => {
+      const read = async () => {
+        const payload = await this.postJson(session.rateKey, '/api/1/webhooks/settings', {
+          organizationId: organizationId.toLowerCase(),
+        }, session.token, deadline, undefined, budget);
+        try { return parseSyrveWebhookSetupSettings(payload); }
+        catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
+      };
+      const initial = await read();
+      await guard();
+      if (configuredSyrveWebhook(initial, target)) return { startedAt, checkedAt: new Date().toISOString(),
+        settingsReadAccess: 'confirmed' as const, settingsWriteAccess: 'not_checked' as const,
+        notificationsConfigured: true as const, settingsChanged: false, statusesApplied: false as const, deliveryVerified: false as const };
+      // Refuse a foreign callback; retain unrelated filters. Token and raw
+      // settings stay in this closure and never enter durable operation data.
+      const body = syrveWebhookUpdatePayload(initial, organizationId, target);
+      try {
+        const reply = await this.postJson(session.rateKey, '/api/1/webhooks/update_settings', body,
+          session.token, deadline, undefined, budget);
+        if (!isRecord(reply) || typeof reply.correlationId !== 'string' || !UUID.test(reply.correlationId)) {
+          throw new SyrveClientException('SYRVE_WEBHOOK_NOT_CONFIRMED');
+        }
+      } catch (error) {
+        if (error instanceof SyrveClientException && (error.getResponse() as { code?: string }).code === 'SYRVE_ACCESS_DENIED') {
+          throw new SyrveClientException('SYRVE_WEBHOOK_WRITE_DENIED');
+        }
+        throw error;
+      }
+      const verified = await read();
+      await guard();
+      if (!configuredSyrveWebhook(verified, target)) throw new SyrveClientException('SYRVE_WEBHOOK_NOT_CONFIRMED');
+      return { startedAt, checkedAt: new Date().toISOString(), settingsReadAccess: 'confirmed' as const,
+        settingsWriteAccess: 'confirmed' as const, notificationsConfigured: true as const, settingsChanged: true,
+        statusesApplied: false as const, deliveryVerified: false as const };
     });
   }
 

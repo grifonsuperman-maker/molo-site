@@ -17,7 +17,7 @@ const { AuthService } = require('../dist/auth/auth.service.js');
 test('real JWT and role guards protect every Syrve route from non-Directors', async (t) => {
   let serviceCalls = 0;
   let lastPosRequest;
-  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'orderDiagnostics', 'billDiagnostics', 'billRegisters', 'webhookDiagnostics', 'posBillDiagnostics', 'connect', 'recheck', 'updateMetadata', 'disconnect', 'resetBindings']
+  const service = Object.fromEntries(['getStatus', 'test', 'previewTables', 'observeOrders', 'orderDiagnostics', 'billDiagnostics', 'billRegisters', 'webhookDiagnostics', 'configureWebhook', 'posBillDiagnostics', 'connect', 'recheck', 'updateMetadata', 'disconnect', 'resetBindings']
     .map((method) => [method, async () => { serviceCalls++; return { syncEnabled: false }; }]));
   service.posBillDiagnostics = async dto => { serviceCalls++; lastPosRequest = dto; return { syncEnabled: false }; };
   const module = await Test.createTestingModule({
@@ -55,6 +55,7 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     ['POST', '/bill-diagnostics', { ...revision, orderId: input.organizationId }], ['POST', '/recheck', revision],
     ['POST', '/bill-registers', revision],
     ['POST', '/webhook-diagnostics', revision],
+    ['POST', '/webhook-setup', { ...revision, confirmed: true }],
     ['POST', '/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId: input.organizationId, confirmed: true }],
     ['POST', '/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId: registerGuid, confirmed: true }],
     ['POST', '/bill-loading-diagnostics', { ...revision, orderId: input.organizationId, terminalGroupId: registerGuid.toUpperCase(), confirmed: true }],
@@ -77,7 +78,7 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
         assert.equal(lastPosRequest.configurationRevision, body.configurationRevision);
         assert.equal(lastPosRequest.confirmed, true);
       }
-      if (['/tables-preview', '/orders-observation','/orders-diagnostics','/bill-diagnostics','/bill-registers','/webhook-diagnostics','/bill-loading-diagnostics','/readiness','/table-loading-preview','/table-loading','/auto-status','/auto-status-preview','/enable-auto-status','/disable-auto-status','/reset-bindings'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
+      if (['/tables-preview', '/orders-observation','/orders-diagnostics','/bill-diagnostics','/bill-registers','/webhook-diagnostics','/webhook-setup','/bill-loading-diagnostics','/readiness','/table-loading-preview','/table-loading','/auto-status','/auto-status-preview','/enable-auto-status','/disable-auto-status','/reset-bindings'].includes(path) && role === 'owner') assert.equal(response.headers.get('cache-control'), 'no-store');
     }
   }
   const before = serviceCalls;
@@ -111,6 +112,9 @@ test('real JWT and role guards protect every Syrve route from non-Directors', as
     ['/bill-registers', {}], ['/bill-registers', { ...revision, organizationId: input.organizationId }],
     ['/webhook-diagnostics', {}], ['/webhook-diagnostics', { ...revision, organizationId: input.organizationId }],
     ['/webhook-diagnostics', { ...revision, apiLogin: 'caller-supplied-secret' }],
+    ...[{}, { confirmed: false }, { confirmed: 'true' }, { confirmed: true, webHooksUri: 'https://foreign.example' },
+      { confirmed: true, authToken: 'caller-secret' }, { confirmed: true, organizationId: input.organizationId },
+      { confirmed: true, apiLogin: 'caller-secret' }].map(extra => ['/webhook-setup', { ...revision, ...extra }]),
     ...[{}, { confirmed: false }, { confirmed: 'true' }, { confirmed: true, terminalGroupId: 'bad' },
       { confirmed: true, terminalGroupId: input.organizationId, orderId: '53389' },
       { confirmed: true, terminalGroupId: input.organizationId, organizationId: input.organizationId },

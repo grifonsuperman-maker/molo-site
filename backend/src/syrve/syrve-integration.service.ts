@@ -9,7 +9,7 @@ import { Repository } from 'typeorm';
 import type { AuthUser } from '../auth/types/auth-user.type';
 import { LogsService } from '../logs/logs.service';
 import { TableEntity } from '../tables/entities/table.entity';
-import { ConnectSyrveDto, DisconnectSyrveDto, ResetSyrveBindingsDto, PreviewSyrveTablesDto, SyrveRevisionDto, SyrveBillDiagnosticsDto, SyrvePosBillDiagnosticsDto,
+import { ConnectSyrveDto, ConfigureSyrveWebhookDto, DisconnectSyrveDto, ResetSyrveBindingsDto, PreviewSyrveTablesDto, SyrveRevisionDto, SyrveBillDiagnosticsDto, SyrvePosBillDiagnosticsDto,
   TestSyrveConnectionDto, UpdateSyrveConnectionDto } from './dto/syrve-integration.dto';
 import { SyrveIntegration } from './entities/syrve-integration.entity';
 import { SyrveTableLink } from './entities/syrve-table-link.entity';
@@ -25,6 +25,7 @@ import { syrveCaptureContext, type SyrveStateCapture } from './syrve-state.store
 import { savedSyrveFingerprint } from './syrve-saved-scope';
 import { decryptSyrveCredentials, syrveCredentialsKey } from './syrve-credentials';
 import type { SyrveBillReadResult } from './syrve-bill-diagnostics';
+import { syrveWebhookReceiverUrl } from './syrve-webhook-setup';
 
 type EncryptedValue = { encrypted: string; iv: string; authTag: string };
 
@@ -172,6 +173,22 @@ export class SyrveIntegrationService {
     const { entity, guard } = await this.billScope(dto);
     const result = await this.client.webhookDiagnostics(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!, guard);
     await guard();
+    return { configurationRevision: entity.configurationRevision, organizationId: entity.organizationId!.toLowerCase(), ...result };
+  }
+
+  async configureWebhook(dto: ConfigureSyrveWebhookDto) {
+    if (dto.confirmed !== true) throw new BadRequestException('Підтвердіть підключення сповіщень Syrve для MOLO.');
+    const { entity, guard } = await this.billScope(dto);
+    const currentGuard = async () => {
+      await guard();
+      const snapshot = await this.settings.read();
+      if (!(await this.activation?.read(snapshot))?.enabled) throw new ConflictException('Спочатку ввімкніть автостатуси Syrve.');
+      await guard();
+    };
+    await currentGuard();
+    const target = syrveWebhookReceiverUrl(entity.configurationRevision);
+    const result = await this.client.configureWebhook(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!, target, currentGuard);
+    await currentGuard();
     return { configurationRevision: entity.configurationRevision, organizationId: entity.organizationId!.toLowerCase(), ...result };
   }
 
