@@ -8,8 +8,8 @@ export class SyrveWebhookTopologyError extends Error {}
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 export const isSyrveWebhookRevision = (value: unknown): value is string => typeof value === 'string' && UUID.test(value);
 
-// Issued only after a complete, initialized transport read. It contains no
-// orders or credentials and is never accepted from a callback/Director DTO.
+// Issued only after a complete, initialized transport read. Only normalized
+// bill evidence; no customer/items/credentials or callback/Director DTO proof.
 export type SyrveWebhookTopology = {
   organizationId: string;
   configurationRevision: string;
@@ -17,6 +17,7 @@ export type SyrveWebhookTopology = {
   tables: { id: string; terminalGroupId: string; isDeleted: boolean }[];
   liveGroupIds: string[];
   visibleTableIds: string[];
+  orders: SyrveObservedOrder[];
 };
 
 // Domain-separated from credential encryption and rotated with the saved

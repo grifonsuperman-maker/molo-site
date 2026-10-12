@@ -154,12 +154,18 @@ export function reduceSyrveWebhookOrder(current: SyrveTableSyncState[], order: S
   if (states.some(state => state.scope.organizationId !== topology.organizationId
     || state.scope.configurationRevision !== topology.configurationRevision)) throw new SyrveStateValidationError();
   const previous = states.flatMap(state => state.orderVersions.filter(version => version.id === order.id));
-  const maximum = previous.length ? Math.max(...previous.map(version => version.timestamp)) : -1;
+  const receiptOrders = topology.orders.filter(value => value.id === order.id);
+  const maximum = Math.max(-1, ...previous.map(version => version.timestamp), ...receiptOrders.map(value => value.timestamp));
   if (order.timestamp < maximum) return unchanged('stale_order');
   const signature = fingerprint(order), equal = order.timestamp === maximum;
-  const conflict = equal && previous.some(version => version.timestamp === maximum && version.fingerprint !== signature);
+  const conflict = equal && (previous.some(version => version.timestamp === maximum && version.fingerprint !== signature)
+    || receiptOrders.some(value => value.timestamp === maximum && fingerprint(value) !== signature));
   const related = (state: SyrveTableSyncState) => order.tableIds.includes(state.scope.syrveTableId)
-    || state.orderVersions.some(version => version.id === order.id);
+    || state.orderVersions.some(version => version.id === order.id)
+    // Match polling's existing conservative policy: an unassociated pending
+    // UUID is durably fenced on every link until a newer usable version scopes
+    // it. Otherwise an acknowledged unknown could become a stale new opening.
+    || (order.state === 'unknown' && !order.tableIds.length);
   const affected = (state: SyrveTableSyncState) => order.tableIds.includes(state.scope.syrveTableId)
     || state.activeSyrveOrderIds.includes(order.id);
   const liveTable = (id: string, matchingGroup?: string | null) => {
@@ -187,7 +193,20 @@ export function reduceSyrveWebhookOrder(current: SyrveTableSyncState[], order: S
     const diagnostics: SyrveTransitionDiagnostic[] = [];
     if (conflict) { version.state = 'unknown'; diagnostics.push('conflicting_order_versions'); }
     versions.set(order.id, version);
-    const canClose = ![...versions.values()].some(value => value.state === 'unknown');
+    // A complete transport read can discover a second bill before its worker
+    // ledger write commits. Do not free the first bill's table in that gap.
+    const unaccounted = topology.orders.some(observed => {
+      const relevant = observed.tableIds.includes(state.scope.syrveTableId)
+        || (observed.state === 'unknown' && !observed.tableIds.length);
+      if (!relevant || active.has(observed.id)) return false;
+      const known = versions.get(observed.id);
+      if (known && known.timestamp > observed.timestamp && known.state === 'closed') return false;
+      if (observed.state !== 'unknown') return observed.state === 'open';
+      const peers = states.flatMap(peer => peer.orderVersions.filter(value => value.id === observed.id));
+      const latest = peers.length ? Math.max(...peers.map(value => value.timestamp)) : -1;
+      return latest <= observed.timestamp || peers.some(value => value.timestamp === latest && value.state === 'unknown');
+    });
+    const canClose = !unaccounted && ![...versions.values()].some(value => value.state === 'unknown');
     if (!conflict && outcome === 'open' && associated) active.add(order.id);
     else if (!conflict && outcome === 'closed' && canClose) active.delete(order.id);
     else if (outcome === 'closed' && active.has(order.id)) {

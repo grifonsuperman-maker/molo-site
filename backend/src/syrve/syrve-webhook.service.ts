@@ -42,7 +42,7 @@ export class SyrveWebhookService {
         if (error instanceof SyrveWebhookTopologyError) throw new ServiceUnavailableException('Столи або касові групи Syrve не підтверджено. Сповіщення не застосовано.');
         throw error;
       }
-      if (topology.expiresAt <= Date.now()) throw new ServiceUnavailableException('Перевірка кас Syrve застаріла. Сповіщення не застосовано.');
+      if (!this.client.isCurrentWebhookTopology(topology)) throw new ServiceUnavailableException('Перевірка кас Syrve змінилася або застаріла. Сповіщення не застосовано.');
       return applied;
     });
     // Acknowledge only committed work. No body, token, order or customer details

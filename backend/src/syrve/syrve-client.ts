@@ -81,8 +81,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 @Injectable()
 export class SyrveClient {
-  // Private, bounded process caches. No token, input credential or order state
-  // is persisted/returned. Cache loss only adds fresh, quota-limited requests.
+  // Private, bounded process caches. No input credential is persisted/returned.
+  // Callback proof contains sanitized bill evidence only to fence stale events
+  // and last-bill releases; it never projects a cached physical table status.
   private readonly sessions = new Map<string, CachedSession>();
   private readonly catalogs = new Map<string, CachedCatalog>();
   private readonly webhookTopologies = new Map<string, { rateKey: string; topology: SyrveWebhookTopology }>();
@@ -110,6 +111,11 @@ export class SyrveClient {
       this.webhookTopologies.delete(key); return null;
     }
     return structuredClone(entry.topology);
+  }
+
+  isCurrentWebhookTopology(topology: SyrveWebhookTopology): boolean {
+    const current = this.webhookTopologies.get(topology.organizationId + ':' + topology.configurationRevision)?.topology;
+    return Boolean(current && current.expiresAt > Date.now() && JSON.stringify(current) === JSON.stringify(topology));
   }
 
   normalizeBaseUrl(value: string): string {
@@ -857,6 +863,7 @@ export class SyrveClient {
       liveGroupIds: probe.availability!.filter(group => group.isAlive
         && probe.terminalGroups!.active.some(active => active.id === group.terminalGroupId))
         .map(group => group.terminalGroupId), visibleTableIds: [...visibleTables],
+      orders: structuredClone(mergeSyrveOrders(probe.byTable!, probe.byId!)),
     } });
     return requests.map(request => !visibleTables.has(request.tableId.toLowerCase()) ? null : request.orderIdBatches.map(orderIds => {
       const tableId = request.tableId.toLowerCase(), ids = new Set(orderIds.map(id => id.toLowerCase()));

@@ -31,6 +31,9 @@ export async function runSyrveWebhookValidation(env = process.env) {
   const client = new SyrveClient(require('../test/helpers/syrve-test-request-limiter.js'));
   const service = (db, transport = client) => new SyrveWebhookService(db, settings(db), new SyrveActivationStore(db, settings(db)), transport);
   const tx = batchTransport(org, providers); globalThis.fetch = tx.fetch;
+  // The production plan fingerprint uses canonical UUID order; preserve the
+  // fixture's physical-index mapping while sorting its separate group plan.
+  tx.plan.groups.forEach(group => { group.tableIds = [...group.tableIds].sort(); });
   let integrationId, bookingId, revision;
   const event = (table, orderId, status, timestamp) => ({ eventType: 'TableOrderUpdate', eventTime: '2026-10-12 10:00:00.123',
     organizationId: org, correlationId: randomUUID(), eventInfo: row({ organizationId: org, syrveTableId: providers[table] }, orderId, status, timestamp) });
@@ -39,7 +42,7 @@ export async function runSyrveWebhookValidation(env = process.env) {
   const ledger = async () => ({ links: await source.query('SELECT * FROM syrve_table_links WHERE integration_id=$1 ORDER BY id', [integrationId]),
     states: await source.query('SELECT * FROM syrve_table_sync_states WHERE integration_id=$1 ORDER BY link_id', [integrationId]),
     versions: await source.query('SELECT v.* FROM syrve_order_versions v JOIN syrve_table_links l ON l.id=v.link_id WHERE l.integration_id=$1 ORDER BY v.link_id,v.order_id', [integrationId]) });
-  const warm = () => client.probeLoadedOrderBatch('https://api-eu.syrve.live', 'synthetic-webhook-ci-login', org,
+  const warm = (transport = client) => transport.probeLoadedOrderBatch('https://api-eu.syrve.live', 'synthetic-webhook-ci-login', org,
     providers.map(tableId => ({ tableId, orderIdBatches: [[]], visibilityContext: randomUUID() })),
     { loadingPlan: tx.plan, configurationRevision: revision, beforeCommand: async () => {} });
   const mark = async (index, value) => {
@@ -117,6 +120,27 @@ export async function runSyrveWebhookValidation(env = process.env) {
     assert.equal((await receive(0, bill, 'Bill', 800)).statusesApplied, 0);
     assert.deepEqual(await source.query('SELECT * FROM bookings WHERE id=$1', [bookingId]), bookingBefore);
 
+    const discovered = randomUUID();
+    tx.setRows([row({ organizationId: org, syrveTableId: providers[0] }, bill, 'Bill', 800),
+      row({ organizationId: org, syrveTableId: providers[0] }, discovered, 'New', 950)]);
+    await warm();
+    assert.equal((await receive(0, bill, 'Closed', 900)).statusesApplied, 0, 'uncommitted discovery blocks last-bill release');
+    assert.equal((await receive(0, discovered, 'Closed', 960)).statusesApplied, 0);
+    assert.equal((await receive(0, bill, 'Closed', 900)).statusesApplied, 1);
+    tx.setRows([]); await warm();
+
+    const pending = randomUUID(), unassociated = event(2, pending, 'New', 3000);
+    unassociated.eventInfo.creationStatus = 'InProgress'; unassociated.eventInfo.order = null;
+    await mark(2, 'cleaning'); const pendingBefore = await status();
+    assert.equal((await service(source).receive(revision, [unassociated])).statusesApplied, 0);
+    const pendingVersions = await source.query('SELECT count(*)::int AS count FROM syrve_order_versions WHERE order_id=$1 AND timestamp=3000 AND state=\'unknown\'', [pending]);
+    assert.equal(pendingVersions[0].count, physical.length);
+    const restartedClient = new SyrveClient(require('../test/helpers/syrve-test-request-limiter.js'));
+    await warm(restartedClient);
+    assert.equal((await service(other, restartedClient).receive(revision, [event(2, pending, 'New', 2900)])).statusesApplied, 0);
+    assert.deepEqual(await status(), pendingBefore);
+    await receive(2, pending, 'Closed', 3001);
+
     // Open and close delivered together remain two events with a final free
     // status, while equal-version contradictions apply no physical action.
     const combined = await service(source).receive(revision, [event(2, second, 'Closed', 1001), event(2, second, 'New', 1000)]);
@@ -145,5 +169,7 @@ export async function runSyrveWebhookValidation(env = process.env) {
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) runSyrveWebhookValidation().catch(error => {
-  process.stderr.write('Syrve webhook PostgreSQL failed: ' + (error instanceof assert.AssertionError ? error.message : 'inspect isolated CI database') + '\n'); process.exitCode = 1;
+  // This command is guarded to synthetic loopback CI. Preserve useful failure
+  // details; production endpoints continue to sanitize provider/database errors.
+  process.stderr.write('Syrve webhook PostgreSQL failed: ' + (error instanceof Error ? error.message : 'unknown test failure') + '\n'); process.exitCode = 1;
 });

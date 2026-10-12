@@ -18,7 +18,7 @@ const ORG = id(80), REV = id(81), INTEGRATION = id(82), GROUP = id(1);
 const TABLES = [id(83), id(84), id(85)], BILL = id(86), OTHER = id(87);
 const topology = () => ({ organizationId: ORG, configurationRevision: REV, expiresAt: Date.now() + 120_000,
   tables: TABLES.map(table => ({ id: table, terminalGroupId: GROUP, isDeleted: false })),
-  liveGroupIds: [GROUP], visibleTableIds: [...TABLES] });
+  liveGroupIds: [GROUP], visibleTableIds: [...TABLES], orders: [] });
 const states = () => TABLES.map((syrveTableId, index) => createSyrveTableSyncState({ integrationId: INTEGRATION,
   configurationRevision: REV, organizationId: ORG, syrveTableId, moloTableId: id(90 + index) }, randomUUID()));
 const event = (table = TABLES[0], bill = BILL, status = 'New', timestamp = 100) => ({
@@ -116,12 +116,39 @@ test('equal-version conflict and unknown evidence retain membership until a newe
   assert.equal(result[0].status, 'free');
 });
 
+test('unassociated unknown callbacks durably fence older openings across every table until a newer version scopes them', () => {
+  const unknown = event(TABLES[0], BILL, 'New', 300);
+  unknown.eventInfo.creationStatus = 'InProgress'; unknown.eventInfo.order = null;
+  let saved = apply(states(), parseSyrveWebhookBatch([unknown]).orders[0]).map(value => value.state);
+  assert.ok(saved.every(state => state.orderVersions.some(version => version.id === BILL && version.timestamp === 300 && version.state === 'unknown')));
+  saved = staff(saved, 1);
+  const old = apply(saved, order(TABLES[1], BILL, 'New', 200));
+  assert.deepEqual(old.map(value => value.state), saved);
+  const newer = apply(saved, order(TABLES[1], BILL, 'New', 400));
+  assert.deepEqual(newer.map(value => value.status), [null, 'occupied', null]);
+  assert.ok(newer.every(value => value.state.orderVersions.find(version => version.id === BILL).state !== 'unknown'));
+});
+
 test('an unresolved peer blocks the last release without discarding active membership', () => {
   const saved = apply(states(), order()).map(value => value.state);
   saved[0].orderVersions.push({ id: OTHER, timestamp: 100, state: 'unknown', fingerprint: null });
   const result = apply(saved, order(TABLES[0], BILL, 'Closed', 200));
   assert.equal(result[0].status, null); assert.deepEqual(result[0].state.activeSyrveOrderIds, [BILL]);
   assert.ok(result[0].diagnostics.includes('unknown_orders'));
+});
+
+test('a bill discovered by the complete read blocks release before its worker ledger write commits', () => {
+  const saved = apply(states(), order()).map(value => value.state);
+  const scope = topology(); scope.orders = [order(), order(TABLES[0], OTHER, 'New', 101)];
+  const blocked = apply(saved, order(TABLES[0], BILL, 'Closed', 200), scope);
+  assert.equal(blocked[0].status, null); assert.deepEqual(blocked[0].state.activeSyrveOrderIds, [BILL]);
+  assert.ok(blocked[0].diagnostics.includes('unknown_orders'));
+  const stale = apply(saved, order(TABLES[0], BILL, 'Closed', 90), scope);
+  assert.equal(stale[0].changed, false); assert.equal(stale[0].status, null);
+  const later = apply(blocked.map(value => value.state), order(TABLES[0], OTHER, 'Closed', 201), scope);
+  assert.equal(later[0].status, null, 'the first deferred closure remains active until a subsequent confirmed read');
+  const released = apply(later.map(value => value.state), order(TABLES[0], BILL, 'Closed', 200), scope);
+  assert.equal(released[0].status, 'free');
 });
 
 test('legacy transfer repair removes membership atomically but preserves the physical source status', () => {
@@ -194,10 +221,12 @@ test('webhook topology is private, bounded and issued only after initialized com
     TABLES.map(tableId => ({ tableId, orderIdBatches: [[]], visibilityContext: randomUUID() })),
     { loadingPlan: tx.plan, configurationRevision: REV, beforeCommand: async () => {} });
   const receipt = client.webhookTopology(ORG, REV);
+  assert.equal(client.isCurrentWebhookTopology(receipt), true);
   assert.deepEqual(receipt.visibleTableIds, TABLES);
   assert.ok(receipt.expiresAt > Date.now() && receipt.expiresAt <= Date.now() + 120_000);
   assert.doesNotMatch(JSON.stringify(receipt), /synthetic-|apiLogin|token/);
   receipt.liveGroupIds.length = 0;
+  assert.equal(client.isCurrentWebhookTopology(receipt), false);
   assert.deepEqual(client.webhookTopology(ORG, REV).liveGroupIds, [GROUP]);
   assert.equal(client.webhookTopology(ORG, id(113)), null);
   const now = Date.now(); t.mock.method(Date, 'now', () => now + 120_001);

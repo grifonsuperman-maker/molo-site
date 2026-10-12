@@ -36,6 +36,10 @@ Repeated bill updates, equal versions and older versions cannot reapply a
 physical action. Equal-version contradictions remain unresolved. Historical
 unknown transfer repairs preserve physical status and remove association only
 when membership can be updated atomically.
+An unknown notification without table UUIDs stores its watermark on every link,
+as polling already does. It conservatively blocks last-bill release until a newer
+usable version scopes the UUID, and survives a restart without allowing an older
+opening to overwrite staff status.
 
 All relevant physical rows use captured status and full PostgreSQL
 `updated_at::text` fences, including microseconds. The durable bill watermarks
@@ -49,10 +53,16 @@ conflicts are reconciled before any action.
 
 The existing initialized batch transport issues a private topology receipt only
 after complete successful reads. Catalog UUIDs, active groups, `isAlive` and
-initialized visible tables are checked. It expires at the earlier of dictionary
+initialized visible tables are checked. Normalized bill evidence also fences
+older callbacks and blocks a last-bill release when the complete read discovered
+another bill that the worker has not yet committed. Customer and item fields are
+excluded, and this proof never projects cached physical statuses.
+It expires at the earlier of dictionary
 expiry or 120 seconds after the availability response. Callbacks add no Syrve
 API calls and do not alter request quotas or the exact 15-second polling interval.
 Offline availability and credential authorization failures revoke cached proof.
+The pinned proof is checked again before commit, so revocation or replacement
+during database writes rolls back the callback as well.
 
 This cache is intentionally process-local. A restarted or separate cold instance
 returns 503 until its worker completes a fresh check. Expired, deleted, missing,
