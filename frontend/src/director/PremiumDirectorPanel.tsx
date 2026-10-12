@@ -356,6 +356,17 @@ export default function PremiumDirectorPanel() {
     } finally { setBusy(null); }
   }
 
+  async function enableAutoTheme() {
+    setBusy('mode:auto');
+    try {
+      await restaurantApi.update({ autoThemeEnabled: true });
+      setHolidayPickerOpen(false);
+      setNotice('Автоматичний режим за сходом і заходом сонця увімкнено');
+      await load(true);
+    } catch (cause: any) { setError(cause?.message || 'Не вдалося увімкнути автоматичний режим'); }
+    finally { setBusy(null); }
+  }
+
   async function changeMode(mode: SiteMode, holidayKey: HolidayKey | null = null) {
     setBusy(`mode:${mode}`);
     try {
@@ -621,12 +632,16 @@ export default function PremiumDirectorPanel() {
           <section className="space-y-3">
             <Heading title="Сайт" subtitle="Режим оформлення та посилання на меню без зміни фотографій, SVG і карт столів." />
             <PremiumCard>
-              <Eyebrow>День · Ніч · Свято</Eyebrow>
+              <Eyebrow>День · Ніч · Свято · Авто</Eyebrow>
               <h2 className="mt-1 text-xl font-black">Оформлення</h2>
               <div className="mt-4 grid grid-cols-3 gap-2">
                 <OutlineAction label="День" tone="green" disabled={Boolean(busy)} onClick={() => { setHolidayPickerOpen(false); void changeMode('day'); }} />
                 <OutlineAction label="Ніч" tone="gold" disabled={Boolean(busy)} onClick={() => { setHolidayPickerOpen(false); void changeMode('night'); }} />
                 <OutlineAction label="Свято" tone="violet" disabled={Boolean(busy)} onClick={() => setHolidayPickerOpen(true)} />
+              </div>
+              <div className="mt-3">
+                <OutlineAction label={restaurant?.autoThemeEnabled ? 'Авто за сонцем ✓' : 'Авто за сонцем'} tone="gold" disabled={Boolean(busy)} onClick={() => void enableAutoTheme()} />
+                <p className="mt-2 text-xs text-white/45">У режимі «Авто» оформлення змінюється за сходом і заходом сонця у Дніпрі. Кнопки «День», «Ніч» і «Свято» залишаються для ручного вибору.</p>
               </div>
               {(holidayPickerOpen || restaurant?.siteMode === 'holiday') && (
                 <div className="mt-5 border-t border-white/10 pt-4">
