@@ -87,26 +87,55 @@ test('write denial, timeout and rate limit never retry the mutation or leak prov
 });
 
 test('failed or mismatched readback never reports a verified setup after an accepted write', async t => {
-  for (const change of [value => value.authToken = 'private-wrong-secret', value => value.webHooksUri = 'https://private.example/hook',
-    value => value.webHooksFilter.tableOrderFilter.orderStatuses = ['New', 'Bill'], value => value.webHooksFilter.tableOrderFilter.itemStatuses = ['Added']]) {
+  for (const [change, code] of [
+    [value => value.authToken = 'private-wrong-secret', 'SYRVE_WEBHOOK_AUTHORIZATION_NOT_CONFIRMED'],
+    [value => value.webHooksUri = 'https://private.example/hook', 'SYRVE_WEBHOOK_ADDRESS_NOT_CONFIRMED'],
+    [value => value.webHooksFilter.tableOrderFilter = null, 'SYRVE_WEBHOOK_TABLE_FILTER_NOT_CONFIRMED'],
+    [value => value.webHooksFilter.tableOrderFilter.orderStatuses = ['New', 'Bill'], 'SYRVE_WEBHOOK_ORDER_STATUSES_NOT_CONFIRMED'],
+    [value => value.webHooksFilter.tableOrderFilter.itemStatuses = ['Added'], 'SYRVE_WEBHOOK_ITEM_FILTER_NOT_CONFIRMED'],
+  ]) {
     const h = transport(t, [...auth(), Response.json(empty()), Response.json({ correlationId: REV }), () => {
       const settings = configured(); change(settings); return Response.json(settings);
     }]);
-    await assert.rejects(h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {}), error => error.getResponse().code === 'SYRVE_WEBHOOK_NOT_CONFIRMED');
+    await assert.rejects(h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {}), error => {
+      assert.equal(error.getResponse().code, code);
+      assert.doesNotMatch(JSON.stringify(error.getResponse()), /private-|fixture-|onrender/); return true;
+    });
     assert.equal(h.calls.length, 5);
+    assert.equal(h.calls.filter(call => call.path.endsWith('/update_settings')).length, 1);
   }
 });
 
-test('malformed settings and mutation acknowledgements stop before claiming configuration or delivery', async t => {
+test('malformed initial settings stop before any mutation', async t => {
   for (const bad of [{ ...empty(), webHooksFilter: [] }, { ...empty(), webHooksFilter: { tableOrderFilter: 'private-value' } },
     { ...empty(), correlationId: 'bad' }]) {
     const h = transport(t, [...auth(), Response.json(bad)]);
     await assert.rejects(h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {}), error => error.getResponse().code === 'SYRVE_INVALID_RESPONSE');
     assert.equal(h.calls.length, 3);
   }
-  const h = transport(t, [...auth(), Response.json(empty()), Response.json({ privateAck: 'private-value' })]);
-  await assert.rejects(h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {}), error => error.getResponse().code === 'SYRVE_WEBHOOK_NOT_CONFIRMED');
-  assert.equal(h.calls.length, 4);
+});
+
+test('an incomplete 200 acknowledgement still requires fresh matching readback and never retries the write', async t => {
+  for (const acknowledgement of [{ privateAck: 'private-value' }, { correlationId: 'private-invalid-id' }, null]) {
+    const h = transport(t, [...auth(), Response.json(empty()), Response.json(acknowledgement), () => Response.json(configured())]);
+    const result = await h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {});
+    assert.equal(result.notificationsConfigured, true); assert.equal(result.settingsWriteAccess, 'confirmed');
+    assert.equal(result.deliveryVerified, false); assert.equal(h.calls.length, 5);
+    assert.equal(h.calls.filter(call => call.path.endsWith('/update_settings')).length, 1);
+    assert.equal(h.calls.at(-1).path, '/api/1/webhooks/settings');
+    assert.doesNotMatch(JSON.stringify(result), /private-|fixture-|onrender/);
+  }
+});
+
+test('an incomplete acknowledgement cannot conceal unchanged settings or a failed verification read', async t => {
+  for (const [readback, code] of [[Response.json(empty()), 'SYRVE_WEBHOOK_ADDRESS_NOT_CONFIRMED'],
+    [Response.json({ privateError: 'private-value' }, { status: 503 }), 'SYRVE_UNAVAILABLE']]) {
+    const h = transport(t, [...auth(), Response.json(empty()), Response.json({ privateAck: 'private-value' }), readback]);
+    await assert.rejects(h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {}), error => {
+      assert.equal(error.getResponse().code, code); assert.doesNotMatch(JSON.stringify(error.getResponse()), /private-/); return true;
+    });
+    assert.equal(h.calls.length, 5); assert.equal(h.calls.filter(call => call.path.endsWith('/update_settings')).length, 1);
+  }
 });
 
 test('saved-scope or Director revocation after the initial read blocks the write', async t => {

@@ -19,20 +19,39 @@ export function validateWebhookDiagnostics(value: unknown, expected: Scope): Syr
     || report.settingsReadAccess !== 'confirmed' || report.settingsWriteAccess !== 'not_checked'
     || typeof report.webhookAddressSet !== 'boolean' || typeof report.authorizationSet !== 'boolean'
     || report.settingsChanged !== false || report.statusesApplied !== false) throw new Error(FAILURE);
+  const verification = report.verification;
+  if (verification !== undefined && (!verification || typeof verification !== 'object' || Array.isArray(verification)
+    || [verification.addressMatches, verification.authorizationMatches, verification.tableFilterPresent,
+      verification.orderStatusesMatch, verification.itemStatusesMatch].some(value => typeof value !== 'boolean'))) throw new Error(FAILURE);
   return {
     configurationRevision: report.configurationRevision, organizationId: report.organizationId,
     startedAt: report.startedAt, checkedAt: report.checkedAt,
     settingsReadAccess: 'confirmed', settingsWriteAccess: 'not_checked',
     webhookAddressSet: report.webhookAddressSet, authorizationSet: report.authorizationSet,
     settingsChanged: false, statusesApplied: false,
+    ...(verification ? { verification: {
+      addressMatches: verification.addressMatches, authorizationMatches: verification.authorizationMatches,
+      tableFilterPresent: verification.tableFilterPresent, orderStatusesMatch: verification.orderStatusesMatch,
+      itemStatusesMatch: verification.itemStatusesMatch,
+    } } : {}),
   };
 }
 
 export function SyrveWebhookDiagnosticsView({ report }: { report: SyrveWebhookDiagnostics }) {
+  const verification = report.verification;
   return <div className="mt-4 space-y-3 text-sm">
     <p className="font-bold text-emerald-100">Читання налаштувань сповіщень дозволено.</p>
     <p className="text-white/70">Адреса сповіщень: {report.webhookAddressSet ? 'задана' : 'не задана'}.</p>
     <p className="text-white/70">Захисний токен сповіщень: {report.authorizationSet ? 'заданий' : 'не заданий'}.</p>
+    {verification && <>
+      <p className="text-white/70">{!verification.addressMatches ? 'Адреса не відповідає поточному підключенню MOLO.'
+        : !verification.authorizationMatches ? 'Захист сповіщень не відповідає поточному підключенню MOLO.'
+        : 'Адреса й захист відповідають поточному підключенню MOLO.'}</p>
+      <p className="text-white/70">{!verification.tableFilterPresent ? 'Syrve не повернув фільтр сповіщень про рахунки на столах.'
+        : !verification.orderStatusesMatch ? 'Syrve не підтвердив сповіщення про відкриття, передчек, закриття та видалення рахунку.'
+        : !verification.itemStatusesMatch ? 'Syrve повернув обмеження за позиціями рахунку. Надсилання всіх потрібних змін не підтверджено.'
+        : 'Фільтр потрібних змін рахунку підтверджено в Syrve.'}</p>
+    </>}
     <p className="text-white/55">Право змінювати налаштування окремо не перевірено. Задана адреса ще не підтверджує доставку сповіщень у MOLO.</p>
     <p className="text-xs text-white/45">Перевірено: {new Date(report.checkedAt).toLocaleString('uk-UA')}</p>
   </div>;

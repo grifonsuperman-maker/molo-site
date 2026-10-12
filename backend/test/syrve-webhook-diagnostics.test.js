@@ -3,6 +3,7 @@ const test = require('node:test');
 const { SyrveClient } = require('../dist/syrve/syrve-client.js');
 const { SyrveIntegrationService } = require('../dist/syrve/syrve-integration.service.js');
 const { summarizeSyrveWebhookSettings } = require('../dist/syrve/syrve-webhook-diagnostics.js');
+const { syrveWebhookToken } = require('../dist/syrve/syrve-webhook.js');
 const ORG = 'a0000000-0000-4000-8000-000000000001';
 const REV = 'b0000000-0000-4000-8000-000000000001';
 const OTHER = 'c0000000-0000-4000-8000-000000000001';
@@ -38,6 +39,43 @@ test('webhook read returns only booleans; URLs, login names and tokens never ent
   assert.equal(h.calls.length, 4, 'reuse the bounded auth session, but read settings afresh');
 });
 
+test('read-only verification identifies receiver, authorization and filter mismatches without exposing settings', async t => {
+  const previous = process.env.SYRVE_CREDENTIALS_SECRET;
+  process.env.SYRVE_CREDENTIALS_SECRET = 'fixture-webhook-root-secret';
+  t.after(() => previous === undefined ? delete process.env.SYRVE_CREDENTIALS_SECRET : process.env.SYRVE_CREDENTIALS_SECRET = previous);
+  const target = 'https://molo-backend-fixture.onrender.com/api/syrve-webhook/' + REV;
+  const valid = () => ({ ...payload(), webHooksUri: target, authToken: syrveWebhookToken(REV),
+    webHooksFilter: { privateNested: 'private-value', tableOrderFilter: {
+      orderStatuses: ['New', 'Bill', 'Closed', 'Deleted'], itemStatuses: null, errors: false } } });
+  const changes = [
+    [() => {}, null], [value => value.webHooksUri = payload().webHooksUri, 'addressMatches'],
+    [value => value.authToken = 'private-wrong-token', 'authorizationMatches'],
+    [value => value.webHooksFilter.tableOrderFilter = null, 'tableFilterPresent'],
+    [value => value.webHooksFilter.tableOrderFilter.orderStatuses = ['New'], 'orderStatusesMatch'],
+    [value => value.webHooksFilter.tableOrderFilter.itemStatuses = [], 'itemStatusesMatch'],
+  ];
+  for (const [change, mismatch] of changes) {
+    const settings = valid(); change(settings);
+    const h = transport(t, [...auth(), Response.json(settings)]);
+    const result = await h.client.webhookDiagnostics(BASE, LOGIN, ORG, async () => {}, target);
+    assert.equal(result.settingsChanged, false); assert.equal(result.settingsWriteAccess, 'not_checked');
+    if (mismatch) assert.equal(result.verification[mismatch], false);
+    else assert.ok(Object.values(result.verification).every(value => value === true));
+    assert.equal(h.calls.length, 3); assert.equal(h.calls.at(-1).path, '/api/1/webhooks/settings');
+    assert.doesNotMatch(JSON.stringify(result), /private-|fixture-|onrender|authToken|webHooksUri|webHooksFilter/);
+  }
+});
+
+test('verification rejects malformed filter objects instead of inventing a successful configuration', async t => {
+  const h = transport(t, [...auth(), Response.json({ ...payload(), webHooksFilter: { tableOrderFilter: 'private-value' } })]);
+  await assert.rejects(h.client.webhookDiagnostics(BASE, LOGIN, ORG, async () => {},
+    'https://molo-backend-fixture.onrender.com/api/syrve-webhook/' + REV), error => {
+      assert.equal(error.getResponse().code, 'SYRVE_INVALID_RESPONSE');
+      assert.doesNotMatch(JSON.stringify(error.getResponse()), /private-/); return true;
+    });
+  assert.equal(h.calls.length, 3);
+});
+
 test('a provider failure is not retried and never tests permission by changing settings', async t => {
   for (const [status, code] of [[401, 'SYRVE_AUTH_FAILED'], [403, 'SYRVE_ACCESS_DENIED'], [429, 'SYRVE_RATE_LIMITED'], [500, 'SYRVE_UNAVAILABLE']]) {
     const h = transport(t, [...auth(), Response.json({ privateError: 'private-provider-secret' }, { status })]);
@@ -70,14 +108,15 @@ test('revoked configuration fences both the outbound read and the returned repor
   assert.equal(after.calls.length, 3);
 });
 
-function serviceHarness(t, mutate) {
+function serviceHarness(t, mutate, expectedTarget) {
   const saved = { prepared: true, links: [], entity: { id: ORG, configurationRevision: REV, status: 'connected',
     organizationId: ORG, apiBaseUrl: BASE, apiLoginEncrypted: 'encrypted', apiLoginIv: 'iv', apiLoginAuthTag: 'tag' } };
   const store = { read: async () => structuredClone(saved) };
   const noWrite = () => assert.fail('diagnostics must not write business state');
   const service = new SyrveIntegrationService(store, { create: noWrite }, {
-    webhookDiagnostics: async (base, login, org, guard) => {
+    webhookDiagnostics: async (base, login, org, guard, target) => {
       assert.equal(base, BASE); assert.equal(login, LOGIN); assert.equal(org, ORG);
+      assert.equal(target, expectedTarget);
       await guard(); mutate?.(saved); await guard();
       return { startedAt: '2026-10-12T09:00:00Z', checkedAt: '2026-10-12T09:00:01Z', ...summarizeSyrveWebhookSettings(payload()) };
     },
@@ -91,6 +130,20 @@ test('saved credentials are used without loading tables or altering connection, 
   assert.equal(result.organizationId, ORG); assert.equal(result.configurationRevision, REV);
   assert.equal(result.settingsReadAccess, 'confirmed'); assert.deepEqual(h.saved, before);
   assert.doesNotMatch(JSON.stringify(result), /private-|encrypted|fixture-/);
+});
+test('diagnostics derives its optional target from the server and preserves read access when no valid origin is configured', async t => {
+  const keys = ['SYRVE_WEBHOOK_BASE_URL', 'RENDER_EXTERNAL_URL'];
+  const previous = keys.map(key => process.env[key]);
+  t.after(() => keys.forEach((key, i) => previous[i] === undefined ? delete process.env[key] : process.env[key] = previous[i]));
+  process.env.RENDER_EXTERNAL_URL = '';
+  for (const origin of ['', 'https://server.internal', 'https://molo-backend-fixture.onrender.com']) {
+    process.env.SYRVE_WEBHOOK_BASE_URL = origin;
+    const target = origin.includes('onrender.com') ? origin + '/api/syrve-webhook/' + REV : undefined;
+    const h = serviceHarness(t, undefined, target);
+    const result = await h.service.webhookDiagnostics({ configurationRevision: REV });
+    assert.equal(result.settingsReadAccess, 'confirmed'); assert.equal(result.settingsChanged, false);
+    assert.doesNotMatch(JSON.stringify(result), /private-|fixture-|onrender/);
+  }
 });
 test('rotated credentials and changed organization or revision reject a delayed result', async t => {
   for (const mutate of [s => s.entity.configurationRevision = OTHER, s => s.entity.organizationId = OTHER,

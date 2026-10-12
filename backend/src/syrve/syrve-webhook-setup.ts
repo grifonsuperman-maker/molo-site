@@ -6,6 +6,10 @@ const STATUSES = ['New', 'Bill', 'Closed', 'Deleted'];
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 export type SyrveWebhookSetupSettings = { webHooksUri: string | null; authToken: string | null;
   webHooksFilter: Record<string, unknown> | null };
+export type SyrveWebhookVerification = {
+  addressMatches: boolean; authorizationMatches: boolean; tableFilterPresent: boolean;
+  orderStatusesMatch: boolean; itemStatusesMatch: boolean;
+};
 
 export function syrveWebhookReceiverUrl(configurationRevision: string): string {
   try {
@@ -41,12 +45,21 @@ function managedRevision(uri: string, target: string): string | null {
   } catch { return null; }
 }
 
-export function configuredSyrveWebhook(settings: SyrveWebhookSetupSettings, target: string): boolean {
+export function verifySyrveWebhookSettings(settings: SyrveWebhookSetupSettings, target: string): SyrveWebhookVerification {
   const revision = managedRevision(target, target), filter = settings.webHooksFilter?.tableOrderFilter;
   const statuses = object(filter) ? filter.orderStatuses : null;
-  return Boolean(revision && settings.webHooksUri === target && hasSyrveWebhookAuthorization(settings.authToken, revision)
-    && object(filter) && Array.isArray(statuses) && statuses.length === STATUSES.length
-    && STATUSES.every(status => statuses.includes(status)) && (filter.itemStatuses === null || filter.itemStatuses === undefined));
+  return {
+    addressMatches: Boolean(revision && settings.webHooksUri === target),
+    authorizationMatches: Boolean(revision && hasSyrveWebhookAuthorization(settings.authToken, revision)),
+    tableFilterPresent: object(filter),
+    orderStatusesMatch: Array.isArray(statuses) && statuses.length === STATUSES.length
+      && STATUSES.every(status => statuses.includes(status)),
+    itemStatusesMatch: object(filter) && (filter.itemStatuses === null || filter.itemStatuses === undefined),
+  };
+}
+
+export function configuredSyrveWebhook(settings: SyrveWebhookSetupSettings, target: string): boolean {
+  return Object.values(verifySyrveWebhookSettings(settings, target)).every(value => value === true);
 }
 
 export function syrveWebhookUpdatePayload(settings: SyrveWebhookSetupSettings, organizationId: string, target: string) {

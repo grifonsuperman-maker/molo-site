@@ -171,7 +171,10 @@ export class SyrveIntegrationService {
 
   async webhookDiagnostics(dto: SyrveRevisionDto) {
     const { entity, guard } = await this.billScope(dto);
-    const result = await this.client.webhookDiagnostics(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!, guard);
+    let target: string | undefined;
+    try { target = syrveWebhookReceiverUrl(entity.configurationRevision); }
+    catch (error) { if (!(error instanceof ServiceUnavailableException)) throw error; }
+    const result = await this.client.webhookDiagnostics(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!, guard, target);
     await guard();
     return { configurationRevision: entity.configurationRevision, organizationId: entity.organizationId!.toLowerCase(), ...result };
   }

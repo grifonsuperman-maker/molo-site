@@ -25,6 +25,17 @@ and all four supported bill statuses. An already matching configuration is
 read without another write and does not claim newly tested write permission.
 It never claims callback delivery or changes a MOLO table/booking/POS bill.
 
+The update acknowledgement is not configuration evidence. After HTTP 200 the
+action always reads settings again, including when the acknowledgement lacks
+a correlation ID. Success still requires the exact current URL and HMAC token,
+the four bill statuses and no item-status restriction. A mismatch returns a
+fixed code identifying address, authorization, missing table filter, bill states
+or item restriction, never an upstream value. There is no additional write retry.
+The read-only diagnostic compares these same five conditions when the backend
+origin is configured and returns only booleans. Its UI accepts older reports
+without those optional checks during deployment. Missing backend origin still
+allows the original read-permission check; it cannot approve setup.
+
 The callback origin comes from server `SYRVE_WEBHOOK_BASE_URL` or Render's
 automatic `RENDER_EXTERNAL_URL` ([Render documentation](https://render.com/docs/environment-variables)).
 Browser URLs, Host and forwarded headers are not used. A nonempty foreign
