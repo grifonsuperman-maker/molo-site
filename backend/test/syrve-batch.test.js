@@ -292,14 +292,29 @@ test('no cached occupancy is used: every warm cycle reads live availability and 
   assert.deepEqual(await h.read(), [null, null]);
 });
 
-test('dictionary TTL refreshes scope and organizations while retaining an unexpired backend token', async t => {
+test('five-minute dictionary refresh retains the organization list and unexpired backend token', async t => {
   let now = 0; t.mock.method(performance, 'now', () => now);
   const h = fixture(t, 2); await h.read(); now = 300_001;
   const before = h.calls.length; await h.read();
-  assert.equal(h.calls.length - before, 6);
+  assert.equal(h.calls.length - before, 5);
   assert.equal(h.calls.filter(call => call.path.endsWith('/access_token')).length, 1);
   assert.equal(h.calls.filter(call => call.path.endsWith('/available_restaurant_sections')).length, 2);
+  assert.equal(h.calls.filter(call => call.path.endsWith('/organizations')).length, 1);
+});
+
+test('organization access refreshes after thirty minutes and prevents loading a removed restaurant', async t => {
+  let now = 0, removed = false; t.mock.method(performance, 'now', () => now);
+  const h = fixture(t, 2, { override: path => removed && path.endsWith('/organizations')
+    ? { organizations: [{ id: id(99), name: 'Інший ресторан' }] } : undefined });
+  await h.read(); now = 30 * 60_000 - 1;
+  await h.read();
+  assert.equal(h.calls.filter(call => call.path.endsWith('/organizations')).length, 1);
+  const loads = h.calls.filter(call => call.path.endsWith('/init_by_table')).length;
+  now = 30 * 60_000; removed = true;
+  await assert.rejects(h.read(), error => error.getResponse().code === 'SYRVE_ORGANIZATION_UNAVAILABLE');
   assert.equal(h.calls.filter(call => call.path.endsWith('/organizations')).length, 2);
+  assert.equal(h.calls.filter(call => call.path.endsWith('/access_token')).length, 1);
+  assert.equal(h.calls.filter(call => call.path.endsWith('/init_by_table')).length, loads);
 });
 
 test('expired changed dictionaries are rejected before a new load', async t => {

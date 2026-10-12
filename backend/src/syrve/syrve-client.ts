@@ -9,7 +9,7 @@ import { LOADING_MAX_GROUPS, LOADING_MAX_TABLES, loadingPlanFingerprint, tableLo
 import { assessSyrvePosVersion, canAttemptSyrveInitialization } from './syrve-pos-version';
 import { currentSyrveOperation, syrveObservationDeadline, withSyrveOperation } from './syrve-operation-context';
 import { parseSyrveBill, type SyrveBillReadResult, type SyrveBillRegister } from './syrve-bill-diagnostics';
-import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs } from './syrve-request-limiter';
+import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs, syrveRequestGroup } from './syrve-request-limiter';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -17,6 +17,7 @@ const MAX_RESPONSE_BYTES = 1_048_576;
 const MAX_OBSERVATION_REQUESTS = 25;
 const TOKEN_CACHE_MS = 50 * 60_000; // Official lifetime 1h; renew early.
 const DICTIONARY_CACHE_MS = 5 * 60_000;
+const ORGANIZATION_CACHE_MS = 30 * 60_000;
 const MAX_CACHE_ENTRIES = 32;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type RequestBudget = { remaining: number; parent?: RequestBudget };
@@ -145,7 +146,7 @@ export class SyrveClient {
     }
     let permit;
     try {
-      permit = await this.requestLimiter.acquire(rateKey, { deadline, signal, beforeClaim: async () => {
+      permit = await this.requestLimiter.acquire(rateKey, { deadline, signal, group: syrveRequestGroup(path), beforeClaim: async () => {
         await operation?.beforeRequest?.();
         if (beforeSend) await beforeSend();
       } });
@@ -290,7 +291,7 @@ export class SyrveClient {
     } catch { lifetime = 0; }
     if (lifetime > 0) this.remember(this.sessions, cacheKey, {
       value: structuredClone(session), expires: performance.now() + lifetime,
-      organizationsExpire: performance.now() + DICTIONARY_CACHE_MS });
+      organizationsExpire: performance.now() + ORGANIZATION_CACHE_MS });
     return session;
   }
 
@@ -307,7 +308,7 @@ export class SyrveClient {
       }, cached.value.token, controls.deadline, controls.signal, controls.requestBudget);
       cached.value.organizations = this.parseOrganizations(result);
       cached.value.diagnostics.organizations.count = cached.value.organizations.length;
-      cached.organizationsExpire = performance.now() + DICTIONARY_CACHE_MS;
+      cached.organizationsExpire = performance.now() + ORGANIZATION_CACHE_MS;
     }
     return structuredClone(cached.value);
   }
