@@ -120,6 +120,13 @@ export class SyrveIntegrationController {
     return this.service.billRegisters(dto);
   }
 
+  @Post('webhook-diagnostics')
+  @SyrveAsync('webhook-diagnostics')
+  @Header('Cache-Control', 'no-store')
+  webhookDiagnostics(@Body() dto: SyrveRevisionDto) {
+    return this.service.webhookDiagnostics(dto);
+  }
+
   @Post('bill-loading-diagnostics')
   @SyrveAsync('bill-loading-diagnostics')
   @Header('Cache-Control', 'no-store')

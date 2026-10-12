@@ -168,6 +168,13 @@ export class SyrveIntegrationService {
       checkedAt: result.checkedAt, registers: result.registers };
   }
 
+  async webhookDiagnostics(dto: SyrveRevisionDto) {
+    const { entity, guard } = await this.billScope(dto);
+    const result = await this.client.webhookDiagnostics(entity.apiBaseUrl, this.decrypt(entity), entity.organizationId!, guard);
+    await guard();
+    return { configurationRevision: entity.configurationRevision, organizationId: entity.organizationId!.toLowerCase(), ...result };
+  }
+
   async posBillDiagnostics(dto: SyrvePosBillDiagnosticsDto) {
     if (dto.confirmed !== true) throw new BadRequestException('Підтвердіть завантаження цього рахунку з обраної касової групи.');
     const { snapshot, entity, guard } = await this.billScope(dto);
