@@ -21,15 +21,20 @@ The Director panel now provides **Підключити сповіщення дл
 `POST /api/syrve-integration/webhook-setup` with the current revision and
 `confirmed: true`. Existing auto-status consent must be enabled. This explicit
 action reads settings, writes at most once, then verifies the saved URL, token
-and all four supported bill statuses. An already matching configuration is
-read without another write and does not claim newly tested write permission.
+and all four supported bill statuses. The payload explicitly includes every
+documented item status: `Added`, `PrintedNotCooking`, `CookingStarted`,
+`CookingCompleted` and `Served`. Readback accepts that complete set in any order
+or the legacy unrestricted `null`/omitted value; empty, partial, duplicate,
+unknown and malformed lists cannot confirm setup. An already matching
+configuration is read without another write and does not claim newly tested
+write permission.
 It never claims callback delivery or changes a MOLO table/booking/POS bill.
 
 The update acknowledgement is not configuration evidence. After HTTP 200 the
 action always reads settings again, including when the acknowledgement lacks
 a correlation ID. Success still requires the exact current URL and HMAC token,
-the four bill statuses and no item-status restriction. A mismatch returns a
-fixed code identifying address, authorization, missing table filter, bill states
+the four bill statuses and no item-status restriction as defined above. A
+mismatch returns a fixed code identifying address, authorization, missing table filter, bill states
 or item restriction, never an upstream value. There is no additional write retry.
 The read-only diagnostic compares these same five conditions when the backend
 origin is configured and returns only booleans. Its UI accepts older reports
