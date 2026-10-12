@@ -3,6 +3,8 @@ import { summarizeSyrveWebhookSettings } from './syrve-webhook-diagnostics';
 import { hasSyrveWebhookAuthorization, isSyrveWebhookRevision, syrveWebhookToken } from './syrve-webhook';
 
 const STATUSES = ['New', 'Bill', 'Closed', 'Deleted'];
+// Syrve Live OpenAPI OrderItemStatus: the complete set imposes no item-state restriction.
+const ITEM_STATUSES = ['Added', 'PrintedNotCooking', 'CookingStarted', 'CookingCompleted', 'Served'];
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 export type SyrveWebhookSetupSettings = { webHooksUri: string | null; authToken: string | null;
   webHooksFilter: Record<string, unknown> | null };
@@ -48,13 +50,16 @@ function managedRevision(uri: string, target: string): string | null {
 export function verifySyrveWebhookSettings(settings: SyrveWebhookSetupSettings, target: string): SyrveWebhookVerification {
   const revision = managedRevision(target, target), filter = settings.webHooksFilter?.tableOrderFilter;
   const statuses = object(filter) ? filter.orderStatuses : null;
+  const itemStatuses = object(filter) ? filter.itemStatuses : undefined;
   return {
     addressMatches: Boolean(revision && settings.webHooksUri === target),
     authorizationMatches: Boolean(revision && hasSyrveWebhookAuthorization(settings.authToken, revision)),
     tableFilterPresent: object(filter),
     orderStatusesMatch: Array.isArray(statuses) && statuses.length === STATUSES.length
       && STATUSES.every(status => statuses.includes(status)),
-    itemStatusesMatch: object(filter) && (filter.itemStatuses === null || filter.itemStatuses === undefined),
+    itemStatusesMatch: object(filter) && (itemStatuses === null || itemStatuses === undefined
+      || (Array.isArray(itemStatuses) && itemStatuses.length === ITEM_STATUSES.length
+        && ITEM_STATUSES.every(status => itemStatuses.includes(status)))),
   };
 }
 
@@ -74,6 +79,6 @@ export function syrveWebhookUpdatePayload(settings: SyrveWebhookSetupSettings, o
   const previousFilter = settings.webHooksFilter?.tableOrderFilter;
   return { organizationId: organizationId.toLowerCase(), webHooksUri: target, authToken: syrveWebhookToken(revision),
     webHooksFilter: { ...settings.webHooksFilter, tableOrderFilter: { ...(object(previousFilter) ? previousFilter : {}),
-      orderStatuses: [...STATUSES], itemStatuses: null,
+      orderStatuses: [...STATUSES], itemStatuses: [...ITEM_STATUSES],
       errors: object(previousFilter) && typeof previousFilter.errors === 'boolean' ? previousFilter.errors : false } } };
 }

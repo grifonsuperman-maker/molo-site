@@ -8,6 +8,7 @@ const ORG = 'a0000000-0000-4000-8000-000000000001';
 const REV = 'b0000000-0000-4000-8000-000000000001';
 const OTHER = 'c0000000-0000-4000-8000-000000000001';
 const BASE = 'https://api-eu.syrve.live', LOGIN = 'fixture-api-secret';
+const ITEM_STATUSES = ['Added', 'PrintedNotCooking', 'CookingStarted', 'CookingCompleted', 'Served'];
 const payload = () => ({ correlationId: REV, apiLoginName: 'private-login',
   webHooksUri: 'https://private-user:private-pass@example.test/hook/private-path?token=private-query',
   authToken: 'private-webhook-token', webHooksFilter: { privateNested: 'private-value' } });
@@ -74,6 +75,31 @@ test('verification rejects malformed filter objects instead of inventing a succe
       assert.doesNotMatch(JSON.stringify(error.getResponse()), /private-/); return true;
     });
   assert.equal(h.calls.length, 3);
+});
+
+test('read-only item-filter verification accepts every documented state but rejects restricted or malformed sets', async t => {
+  const previous = process.env.SYRVE_CREDENTIALS_SECRET;
+  process.env.SYRVE_CREDENTIALS_SECRET = 'fixture-webhook-root-secret';
+  t.after(() => previous === undefined ? delete process.env.SYRVE_CREDENTIALS_SECRET : process.env.SYRVE_CREDENTIALS_SECRET = previous);
+  const target = 'https://molo-backend-fixture.onrender.com/api/syrve-webhook/' + REV;
+  const cases = [[ITEM_STATUSES, true], [[...ITEM_STATUSES].reverse(), true], [null, true], [undefined, true],
+    [[], false], [['Served'], false], [[...ITEM_STATUSES, 'Unknown'], false],
+    [['Added', 'PrintedNotCooking', 'CookingStarted', 'CookingCompleted', 'Added'], false],
+    [['Added', 'PrintedNotCooking', 'CookingStarted', 'CookingCompleted', 'Unknown'], false],
+    ['Served', false], [{}, false], [0, false]];
+  for (const [states, expected] of cases) {
+    const settings = { ...payload(), webHooksUri: target, authToken: syrveWebhookToken(REV),
+      webHooksFilter: { tableOrderFilter: { orderStatuses: ['New', 'Bill', 'Closed', 'Deleted'], itemStatuses: states } } };
+    const h = transport(t, [...auth(), Response.json(settings)]);
+    const result = await h.client.webhookDiagnostics(BASE, LOGIN, ORG, async () => {}, target);
+    assert.equal(result.verification.itemStatusesMatch, expected);
+    assert.ok(['addressMatches', 'authorizationMatches', 'tableFilterPresent', 'orderStatusesMatch']
+      .every(key => result.verification[key] === true));
+    assert.equal(result.settingsChanged, false); assert.equal(result.settingsWriteAccess, 'not_checked');
+    assert.equal(result.statusesApplied, false); assert.equal(h.calls.length, 3);
+    assert.deepEqual(h.calls.map(call => call.path), ['/api/1/access_token', '/api/1/organizations', '/api/1/webhooks/settings']);
+    assert.doesNotMatch(JSON.stringify(result), /private-|fixture-|onrender|authToken|webHooksUri|webHooksFilter|Unknown/);
+  }
 });
 
 test('a provider failure is not retried and never tests permission by changing settings', async t => {

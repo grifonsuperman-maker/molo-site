@@ -8,6 +8,7 @@ const ORG = 'a0000000-0000-4000-8000-000000000001', REV = 'b0000000-0000-4000-80
 const OTHER = 'c0000000-0000-4000-8000-000000000001', BASE = 'https://api-eu.syrve.live';
 const ORIGIN = 'https://molo-backend-fixture.onrender.com', TARGET = ORIGIN + '/api/syrve-webhook/' + REV;
 const LOGIN = 'fixture-api-secret';
+const ITEM_STATUSES = ['Added', 'PrintedNotCooking', 'CookingStarted', 'CookingCompleted', 'Served'];
 function environment(t) {
   const values = { SYRVE_CREDENTIALS_SECRET: 'fixture-webhook-root-secret', SYRVE_APP_ID: '', SYRVE_APP_CLIENT_SECRET: '',
     SYRVE_WEBHOOK_BASE_URL: '', RENDER_EXTERNAL_URL: ORIGIN };
@@ -43,6 +44,7 @@ test('setup reads, writes once and verifies URL, token and every bill status wit
   assert.equal(h.calls[3].body.authToken, syrveWebhookToken(REV));
   assert.deepEqual(h.calls[3].body.webHooksFilter.reserveFilter, initial.webHooksFilter.reserveFilter);
   assert.deepEqual(h.calls[3].body.webHooksFilter.deliveryOrderFilter, initial.webHooksFilter.deliveryOrderFilter);
+  assert.deepEqual(h.calls[3].body.webHooksFilter.tableOrderFilter.itemStatuses, ITEM_STATUSES);
   assert.equal(result.settingsWriteAccess, 'confirmed'); assert.equal(result.settingsChanged, true);
   assert.equal(result.notificationsConfigured, true); assert.equal(result.statusesApplied, false); assert.equal(result.deliveryVerified, false);
   assert.doesNotMatch(JSON.stringify(result), /private-|fixture-|onrender|apiLogin|authToken|webHooksUri|webHooksFilter/);
@@ -53,6 +55,56 @@ test('an already configured receiver is read without another write or a false wr
   const result = await h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {});
   assert.equal(h.calls.length, 3); assert.equal(result.settingsChanged, false);
   assert.equal(result.settingsWriteAccess, 'not_checked'); assert.equal(result.notificationsConfigured, true);
+});
+
+test('all documented item states returned by Syrve confirm setup after one write', async t => {
+  const h = transport(t, [...auth(), Response.json(empty()), Response.json({ correlationId: REV }), () => {
+    const settings = configured();
+    settings.webHooksFilter.tableOrderFilter.itemStatuses = [...ITEM_STATUSES].reverse();
+    return Response.json(settings);
+  }]);
+  const result = await h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {});
+  assert.deepEqual(h.calls[3].body.webHooksFilter.tableOrderFilter.itemStatuses, ITEM_STATUSES);
+  assert.equal(result.notificationsConfigured, true); assert.equal(result.settingsWriteAccess, 'confirmed');
+  assert.equal(result.settingsChanged, true); assert.equal(result.deliveryVerified, false);
+  assert.equal(h.calls.length, 5);
+  assert.equal(h.calls.filter(call => call.path.endsWith('/update_settings')).length, 1);
+  assert.equal(h.calls.at(-1).path, '/api/1/webhooks/settings');
+  assert.doesNotMatch(JSON.stringify(result), /private-|fixture-|onrender|authToken|webHooksUri|webHooksFilter/);
+});
+
+test('a full item-state list or legacy unrestricted filter needs no rewrite', async t => {
+  for (const states of [ITEM_STATUSES, [...ITEM_STATUSES].reverse(), null, undefined]) {
+    const h = transport(t, [...auth(), () => {
+      const settings = configured();
+      if (states === undefined) delete settings.webHooksFilter.tableOrderFilter.itemStatuses;
+      else settings.webHooksFilter.tableOrderFilter.itemStatuses = states;
+      return Response.json(settings);
+    }]);
+    const result = await h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {});
+    assert.equal(result.notificationsConfigured, true); assert.equal(result.settingsChanged, false);
+    assert.equal(result.settingsWriteAccess, 'not_checked'); assert.equal(result.deliveryVerified, false);
+    assert.equal(h.calls.length, 3);
+    assert.equal(h.calls.filter(call => call.path.endsWith('/update_settings')).length, 0);
+  }
+});
+
+test('empty, incomplete, duplicated, unknown or malformed item-state readback never confirms setup', async t => {
+  for (const states of [[], ['Added'], [...ITEM_STATUSES, 'Unknown'],
+    ['Added', 'PrintedNotCooking', 'CookingStarted', 'CookingCompleted', 'Added'],
+    ['Added', 'PrintedNotCooking', 'CookingStarted', 'CookingCompleted', 'Unknown'], 'Served', {}, 0]) {
+    const h = transport(t, [...auth(), Response.json(empty()), Response.json({ correlationId: REV }), () => {
+      const settings = configured(); settings.webHooksFilter.tableOrderFilter.itemStatuses = states;
+      return Response.json(settings);
+    }]);
+    await assert.rejects(h.client.configureWebhook(BASE, LOGIN, ORG, TARGET, async () => {}), error => {
+      assert.equal(error.getResponse().code, 'SYRVE_WEBHOOK_ITEM_FILTER_NOT_CONFIRMED');
+      assert.doesNotMatch(JSON.stringify(error.getResponse()), /private-|fixture-|onrender|Unknown/);
+      return true;
+    });
+    assert.equal(h.calls.length, 5);
+    assert.equal(h.calls.filter(call => call.path.endsWith('/update_settings')).length, 1);
+  }
 });
 
 test('foreign or unprovable callbacks are never overwritten, including a matching host with the wrong secret', async t => {
