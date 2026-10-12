@@ -61,6 +61,7 @@ function loadMigrations(require) {
   const { CreateSyrveActivation2026100200070 } = require('../dist/migrations/2026100200070-CreateSyrveActivation.js');
   const { CreateSyrveRequestLimits2026100600080 } = require('../dist/migrations/2026100600080-CreateSyrveRequestLimits.js');
   const { CreateSyrveOperations2026100700010 } = require('../dist/migrations/2026100700010-CreateSyrveOperations.js');
+  const { AddRestaurantAutoTheme2026101200010 } = require('../dist/migrations/2026101200010-AddRestaurantAutoTheme.js');
 
   return [
     InitialSchemaBaseline2026081300000,
@@ -82,6 +83,7 @@ function loadMigrations(require) {
     CreateSyrveActivation2026100200070,
     CreateSyrveRequestLimits2026100600080,
     CreateSyrveOperations2026100700010,
+    AddRestaurantAutoTheme2026101200010,
   ];
 }
 
