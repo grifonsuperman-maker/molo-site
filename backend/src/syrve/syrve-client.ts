@@ -10,6 +10,7 @@ import { assessSyrvePosVersion, canAttemptSyrveInitialization } from './syrve-po
 import { currentSyrveOperation, syrveObservationDeadline, withSyrveOperation } from './syrve-operation-context';
 import { parseSyrveBill, type SyrveBillReadResult, type SyrveBillRegister } from './syrve-bill-diagnostics';
 import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs, syrveRequestGroup } from './syrve-request-limiter';
+import { summarizeSyrveWebhookSettings } from './syrve-webhook-diagnostics';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -393,6 +394,20 @@ export class SyrveClient {
     const startedAt = new Date().toISOString();
     return this.withBillScope(apiBaseUrl, apiLogin, organizationId, beforeRead, 4,
       (session, deadline, budget, guard) => this.readBill(session, organizationId, requestedId, startedAt, deadline, budget, guard));
+  }
+
+  async webhookDiagnostics(apiBaseUrl: string, apiLogin: string, organizationId: string, beforeRead: () => Promise<void>) {
+    const startedAt = new Date().toISOString();
+    return this.withBillScope(apiBaseUrl, apiLogin, organizationId, beforeRead, 3, async (session, deadline, budget, guard) => {
+      const payload = await this.postJson(session.rateKey, '/api/1/webhooks/settings', {
+        organizationId: organizationId.toLowerCase(),
+      }, session.token, deadline, undefined, budget);
+      let summary;
+      try { summary = summarizeSyrveWebhookSettings(payload); }
+      catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
+      await guard();
+      return { startedAt, checkedAt: new Date().toISOString(), ...summary };
+    });
   }
 
   private async activeBillRegisters(session: SyrveSession, organizationId: string, deadline: number,

@@ -92,6 +92,7 @@ function dock() {
     { exports, require: name => name === 'react' ? hooks : name === '../api/syrve' ? { syrveApi: api }
       : name === './SyrveOrderDiagnosticsPanel' ? { __esModule: true, default: OrderPanel }
       : name === './SyrveBillDiagnosticsPanel' ? { __esModule: true, default: BillPanel }
+      : name === './SyrveWebhookDiagnosticsPanel' ? { __esModule: true, default: () => null }
       : name === './SyrveReadinessPanel' ? { __esModule: true, default: ReadinessPanel }
       : name === './SyrveTableLoadingPanel' ? { __esModule: true, default: LoadingPanel }
       : name === './SyrveAutoStatusPanel' ? { __esModule: true, default: () => null }
