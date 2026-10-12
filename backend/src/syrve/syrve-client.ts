@@ -11,6 +11,7 @@ import { currentSyrveOperation, syrveObservationDeadline, withSyrveOperation } f
 import { parseSyrveBill, type SyrveBillReadResult, type SyrveBillRegister } from './syrve-bill-diagnostics';
 import { SyrveRequestLimiter, SyrveRequestLimitError, SyrveRequestGuardError, isFreshSyrvePermit, syrveRequestKey, syrveRetryAfterMs, syrveRequestGroup } from './syrve-request-limiter';
 import { summarizeSyrveWebhookSettings } from './syrve-webhook-diagnostics';
+import { SYRVE_WEBHOOK_TOPOLOGY_TTL_MS, type SyrveWebhookTopology } from './syrve-webhook';
 
 const API_ORIGIN = 'https://api-eu.syrve.live';
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -80,10 +81,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 @Injectable()
 export class SyrveClient {
-  // Private, bounded process caches. No token, input credential or order state
-  // is persisted/returned. Cache loss only adds fresh, quota-limited requests.
+  // Private, bounded process caches. No input credential is persisted/returned.
+  // Callback proof contains sanitized bill evidence only to fence stale events
+  // and last-bill releases; it never projects a cached physical table status.
   private readonly sessions = new Map<string, CachedSession>();
   private readonly catalogs = new Map<string, CachedCatalog>();
+  private readonly webhookTopologies = new Map<string, { rateKey: string; topology: SyrveWebhookTopology }>();
   constructor(private readonly requestLimiter: SyrveRequestLimiter) {}
 
   private sessionKey(apiLogin: string) {
@@ -98,6 +101,21 @@ export class SyrveClient {
   private invalidate(rateKey: string) {
     for (const [key, entry] of this.sessions) if (entry.value.rateKey === rateKey) this.sessions.delete(key);
     for (const [key, entry] of this.catalogs) if (entry.rateKey === rateKey) this.catalogs.delete(key);
+    for (const [key, entry] of this.webhookTopologies) if (entry.rateKey === rateKey) this.webhookTopologies.delete(key);
+  }
+
+  webhookTopology(organizationId: string, configurationRevision: string): SyrveWebhookTopology | null {
+    const key = organizationId.toLowerCase() + ':' + configurationRevision.toLowerCase();
+    const entry = this.webhookTopologies.get(key);
+    if (!entry || entry.topology.expiresAt <= Date.now()) {
+      this.webhookTopologies.delete(key); return null;
+    }
+    return structuredClone(entry.topology);
+  }
+
+  isCurrentWebhookTopology(topology: SyrveWebhookTopology): boolean {
+    const current = this.webhookTopologies.get(topology.organizationId + ':' + topology.configurationRevision)?.topology;
+    return Boolean(current && current.expiresAt > Date.now() && JSON.stringify(current) === JSON.stringify(topology));
   }
 
   normalizeBaseUrl(value: string): string {
@@ -734,7 +752,7 @@ export class SyrveClient {
     if (!session.organizations.some(item => item.id === organizationId)) throw new SyrveClientException('SYRVE_ORGANIZATION_UNAVAILABLE');
     const catalogKey = createHash('sha256').update(credentialKey).update(organizationId)
       .update(controls.configurationRevision || 'direct').update(loadingPlanFingerprint(controls.loadingPlan)).digest('hex');
-    const catalog = await this.batchCatalog(catalogKey, session, organizationId, shared);
+    let catalog = await this.batchCatalog(catalogKey, session, organizationId, shared);
     const probe: SyrveOrderProbe = { organizationId, startedAt: new Date().toISOString(), completedAt: '',
       authentication: session.diagnostics.authentication.method, terminalGroups: catalog.groups, catalogTables: catalog.tables,
       availability: null, byTable: null, byId: null,
@@ -751,19 +769,32 @@ export class SyrveClient {
       if (!eligible.length) return expectedPlan;
       let plan: TableLoadingPlan;
       try { plan = tableLoadingCatalogPlan(probe, eligible); }
-      catch { this.catalogs.delete(catalogKey); throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
+      catch {
+        this.catalogs.delete(catalogKey);
+        if (webhookKey) this.webhookTopologies.delete(webhookKey);
+        throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+      }
       if (loadingPlanFingerprint(plan) !== loadingPlanFingerprint(expectedPlan)) {
+        if (webhookKey) this.webhookTopologies.delete(webhookKey);
         this.catalogs.delete(catalogKey); throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
       }
       return plan;
     };
     const post = (path: string, body: object) => this.postJson(session.rateKey, path, body, session.token,
       deadline, controls.signal, budget, controls.beforeCommand);
+    let availabilityCheckedAt = 0;
+    const webhookKey = controls.configurationRevision ? organizationId.toLowerCase() + ':' + controls.configurationRevision.toLowerCase() : null;
     const availability = async () => {
       try { probe.availability = parsePosAvailability(await post('/api/1/terminal_groups/is_alive', {
         organizationIds: [organizationId], terminalGroupIds: probe.terminalGroups!.active.map(group => group.id),
       }), organizationId, probe.terminalGroups!.active.map(group => group.id)); }
-      catch (error) { if (error instanceof SyrveOrderValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); throw error; }
+      catch (error) {
+        if (webhookKey) this.webhookTopologies.delete(webhookKey);
+        if (error instanceof SyrveOrderValidationError) throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); throw error;
+      }
+      availabilityCheckedAt = Date.now();
+      // Fresh offline evidence revokes the previous receipt immediately.
+      if (webhookKey && probe.availability.some(group => !group.isAlive)) this.webhookTopologies.delete(webhookKey);
       probe.checks.posAvailability = { status: 'ok', code: null };
     };
     let plan = checkedPlan();
@@ -813,13 +844,27 @@ export class SyrveClient {
     // POS versions before issuing receipts rather than adopting an expired scope.
     if (catalog.expires <= performance.now()) {
       const current = await this.batchCatalog(catalogKey, session, organizationId, shared, true);
-      if (current.fingerprint !== catalog.fingerprint) throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+      if (current.fingerprint !== catalog.fingerprint) {
+        if (webhookKey) this.webhookTopologies.delete(webhookKey);
+        throw new SyrveClientException('SYRVE_INVALID_RESPONSE');
+      }
+      catalog = current;
     }
     try { tableLoadingPlan(probe, [...visibleTables]); }
     catch { throw new SyrveClientException('SYRVE_INVALID_RESPONSE'); }
     await controls.beforeCommand();
     if (Date.now() >= deadline || controls.signal?.aborted) throw new SyrveClientException('SYRVE_TIMEOUT');
     probe.completedAt = new Date().toISOString();
+    if (webhookKey) this.remember(this.webhookTopologies, webhookKey, { rateKey: session.rateKey, topology: {
+      organizationId: organizationId.toLowerCase(), configurationRevision: controls.configurationRevision!.toLowerCase(),
+      expiresAt: Math.min(availabilityCheckedAt + SYRVE_WEBHOOK_TOPOLOGY_TTL_MS,
+        Date.now() + Math.max(0, catalog.expires - performance.now())),
+      tables: structuredClone(probe.catalogTables!),
+      liveGroupIds: probe.availability!.filter(group => group.isAlive
+        && probe.terminalGroups!.active.some(active => active.id === group.terminalGroupId))
+        .map(group => group.terminalGroupId), visibleTableIds: [...visibleTables],
+      orders: structuredClone(mergeSyrveOrders(probe.byTable!, probe.byId!)),
+    } });
     return requests.map(request => !visibleTables.has(request.tableId.toLowerCase()) ? null : request.orderIdBatches.map(orderIds => {
       const tableId = request.tableId.toLowerCase(), ids = new Set(orderIds.map(id => id.toLowerCase()));
       const own: SyrveOrderProbe = { ...probe,

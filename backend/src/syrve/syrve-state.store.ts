@@ -4,8 +4,10 @@ import { DataSource, EntityManager } from 'typeorm';
 
 import { SyrveSettingsSnapshot, SyrveSettingsStore, SyrveSettingsVersion, settingsVersion, staleSyrveSettings } from './syrve-settings.store';
 import { createSyrveTableSyncState, getSyrveOrderIdsToObserve, reduceSyrveOrderState, reduceSyrveStaffAction,
-  syrveTableStatusEvent, SyrveOrderObservationBatch, SyrveStateScope, SyrveTableSyncState, SyrveTransition } from './syrve-state-reducer';
+  syrveTableStatusEvent, reduceSyrveWebhookOrder, SyrveOrderObservationBatch, SyrveStateScope, SyrveTableSyncState, SyrveTransition } from './syrve-state-reducer';
 import { isVerifiedLoadedProbe } from './syrve-client';
+import type { SyrveObservedOrder } from './syrve-order-observer';
+import type { SyrveWebhookTopology } from './syrve-webhook';
 
 export type SyrveStateCapture = { linkId: string; state: SyrveTableSyncState; orderIds: string[][]; physicalVersion: string };
 export const syrveCaptureContext = (leaseId: string, captured: SyrveStateCapture) =>
@@ -107,7 +109,12 @@ export class SyrveStateStore {
   }
 
   captureBatch(tableIds: string[], expected: SyrveSettingsVersion): Promise<SyrveStateCapture[]> {
-    return this.settings.transaction(expected, async (manager, current) => {
+    return this.settings.transaction(expected, (manager, current) => this.captureBatchInTransaction(manager, current, tableIds));
+  }
+
+  private async captureBatchInTransaction(manager: EntityManager, current: SyrveSettingsSnapshot,
+    tableIds: string[]): Promise<SyrveStateCapture[]> {
+      if (!manager.queryRunner?.isTransactionActive) throw new ServiceUnavailableException('Стан Syrve потребує активної транзакції.');
       const entity = this.requireConnection(current);
       if (!tableIds.length || new Set(tableIds).size !== tableIds.length) throw staleSyrveSettings();
       const [schema] = await manager.query('SELECT to_regclass($1) IS NOT NULL AND to_regclass($2) IS NOT NULL AS prepared',
@@ -158,7 +165,44 @@ export class SyrveStateStore {
         + ' molo_table_id uuid,syrve_table_id uuid,local_revision uuid) ON CONFLICT(link_id) DO UPDATE'
         + ' SET configuration_revision=EXCLUDED.configuration_revision,local_revision=EXCLUDED.local_revision', [JSON.stringify(updates)]);
       return captures;
-    });
+  }
+
+  async applyWebhookOrdersInTransaction(manager: EntityManager, current: SyrveSettingsSnapshot,
+    captured: SyrveStateCapture[], orders: SyrveObservedOrder[], topology: SyrveWebhookTopology) {
+    const entity = this.requireConnection(current);
+    if (captured.length !== current.links.length || new Set(captured.map(value => value.linkId)).size !== captured.length
+      || captured.some(value => value.state.scope.integrationId !== entity.id
+        || value.state.scope.configurationRevision !== entity.configurationRevision)) throw staleSyrveSettings();
+    const fresh = await this.captureBatchInTransaction(manager, current, current.links.map(link => link.moloTableId));
+    const orderIds = new Set(orders.map(order => order.id)), destinations = new Set(orders.flatMap(order => order.tableIds));
+    for (const value of fresh) {
+      const before = captured.find(valueBefore => valueBefore.linkId === value.linkId);
+      if (!before || before.state.scope.syrveTableId !== value.state.scope.syrveTableId) throw staleSyrveSettings();
+      const affected = destinations.has(value.state.scope.syrveTableId)
+        || [...before.state.activeSyrveOrderIds, ...value.state.activeSyrveOrderIds].some(id => orderIds.has(id));
+      // Includes direct booking/transfer writers and PostgreSQL microseconds.
+      // Reject the entire transfer/batch without consuming any provider event.
+      if (affected && (before.physicalVersion !== value.physicalVersion || before.state.localRevision !== value.state.localRevision)) {
+        throw new ConflictException('Стан столу змінився. Запізніле сповіщення Syrve не застосовано.');
+      }
+    }
+    let states = fresh.map(value => value.state), statusesApplied = 0;
+    const statuses = new Map<string, string>();
+    // Process all versions in order within one transaction. An open and close
+    // in the same delivery still produce the final free action.
+    for (const order of [...orders].sort((a,b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id))) {
+      const transitions = reduceSyrveWebhookOrder(states, order, topology, states.map(() => randomUUID()));
+      transitions.forEach((transition, index) => {
+        if (transition.status) { statuses.set(fresh[index].state.scope.moloTableId, transition.status); statusesApplied++; }
+      });
+      states = transitions.map(transition => transition.state);
+    }
+    for (const [index, state] of states.entries()) {
+      if (state.localRevision !== fresh[index].state.localRevision) await this.persist(manager, fresh[index].linkId, state);
+    }
+    for (const [id, status] of statuses) await manager.query('UPDATE ' + this.table('tables')
+      + ' SET "status"=$2,"updated_at"=clock_timestamp() WHERE "id"=$1', [id, status]);
+    return { events: orders.length, statusesApplied };
   }
 
   async applyObservation(captured: SyrveStateCapture, batches: SyrveOrderObservationBatch[]): Promise<SyrveTransition> {
@@ -189,8 +233,15 @@ export class SyrveStateStore {
     }
     // Only the freshly locked state is authoritative. A modified/replayed
     // capture cannot supply membership, watermarks, next revision or POS proof.
+    const observedIds = [...new Set(batches.flatMap(batch => [...batch.probe.byTable || [], ...batch.probe.byId || []])
+      .map(order => order.id))];
+    const sharedVersions = observedIds.length ? await manager.query('SELECT v.order_id,v.timestamp,v.state,v.fingerprint FROM '
+      + this.table('syrve_order_versions') + ' v JOIN ' + this.table('syrve_table_links')
+      + ' l ON l.id=v.link_id WHERE l.integration_id=$1 AND l.organization_id=$2 AND v.order_id=ANY($3::uuid[])',
+    [expected.integrationId, expected.organizationId, observedIds]) : [];
     const result = reduceSyrveOrderState(value.state, { expectedScope: expected, expectedRevision: captured.state.localRevision,
       currentScope: value.state.scope, nextRevision: randomUUID(), probe: batches,
+      knownOrderVersions: sharedVersions.map(row => ({ id: row.order_id, timestamp: Number(row.timestamp), state: row.state, fingerprint: row.fingerprint })),
       visibilityVerified: Boolean(context && batches.length && batches.every(batch => isVerifiedLoadedProbe(batch.probe, context,
         expected.organizationId, expected.syrveTableId))) });
     if (strictActivation && result.diagnostics.length) throw new ConflictException('Початкова звірка отримала неповні або застарілі дані. Повторіть перевірку.');
