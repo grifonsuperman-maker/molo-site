@@ -34,7 +34,6 @@ import { CreateSyrveWorkerState2026100100060 } from './migrations/2026100100060-
 import { CreateSyrveActivation2026100200070 } from './migrations/2026100200070-CreateSyrveActivation';
 import { CreateSyrveRequestLimits2026100600080 } from './migrations/2026100600080-CreateSyrveRequestLimits';
 import { CreateSyrveOperations2026100700010 } from './migrations/2026100700010-CreateSyrveOperations';
-import { AddRestaurantAutoTheme2026101200010 } from './migrations/2026101200010-AddRestaurantAutoTheme';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -100,7 +99,6 @@ const staffPinMigrationOptions = {
                 CreateSyrveActivation2026100200070,
                 CreateSyrveRequestLimits2026100600080,
                 CreateSyrveOperations2026100700010,
-                AddRestaurantAutoTheme2026101200010,
               ]
             : staffPinMigrationOptions.migrations,
         };
