@@ -2,7 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { performance } = require('node:perf_hooks');
 const { SyrveRequestLimiter, SyrveRequestLimitError, syrveRequestKey, syrveRetryAfterMs,
-  SYRVE_REQUEST_GAP_MS, isFreshSyrvePermit } = require('../dist/syrve/syrve-request-limiter.js');
+  SYRVE_REQUEST_GAP_MS, SYRVE_DIRECTORY_REQUEST_GAP_MS, syrveDirectoryRequestKey,
+  syrveRequestGroup, isFreshSyrvePermit } = require('../dist/syrve/syrve-request-limiter.js');
 const { SyrveClient } = require('../dist/syrve/syrve-client.js');
 const { CreateSyrveRequestLimits2026100600080: Migration } = require('../dist/migrations/2026100600080-CreateSyrveRequestLimits.js');
 
@@ -18,11 +19,12 @@ function database() {
     if (state.broken) throw new Error('private-db-connection-details');
     if (sql.startsWith('SET ')) return [];
     const [key, delay] = values;
+    if (sql.includes('DO NOTHING')) { if (!rows.has(key)) rows.set(key, state.now); return []; }
     if (sql.includes('RETURNING key_hash')) {
       if ((rows.get(key) ?? -Infinity) > state.now) return [];
       rows.set(key, state.now + delay); state.afterClaim(); return [{ key_hash: key }];
     }
-    if (sql.startsWith('SELECT ')) return [{ wait_ms: Math.max(1, (rows.get(key) || 0) - state.now) }];
+    if (sql.startsWith('SELECT ')) return [{ wait_ms: Math.max(sql.includes('FOR UPDATE') ? 0 : 1, (rows.get(key) || 0) - state.now) }];
     rows.set(key, Math.max(rows.get(key) || 0, state.now + delay)); return [];
   } }) };
   return { source, state, rows, statements, limiter: () => new SyrveRequestLimiter(source) };
@@ -71,6 +73,68 @@ test('concurrent worker and Director attempts cannot admit an extra request', as
   assert.ok(results.filter(r => r.status === 'rejected').every(r => limited(r.reason)));
 });
 
+test('directory dispatches respect 100 per ten minutes and ten per minute despite worst permit delays', async t => {
+  const db = database(); t.mock.method(performance, 'now', () => db.state.now);
+  const admitted = [];
+  for (let n = 0; n < 124; n++) {
+    db.state.now = n * SYRVE_DIRECTORY_REQUEST_GAP_MS;
+    const permit = await db.limiter().acquire(KEY, { group: 'directories', deadline: Date.now() + 2_000 });
+    // A delayed first dispatch followed by immediate sends packs the window.
+    const delay = n % 10 === 0 ? 999 : 0;
+    db.state.now += delay;
+    assert.equal(isFreshSyrvePermit(permit), true);
+    admitted.push(db.state.now);
+    await assert.rejects(db.limiter().acquire(KEY, { group: 'directories', deadline: Date.now() + 5 }), limited);
+  }
+  assert.equal(admitted.filter(time => time < admitted[0] + 60_000).length, 10);
+  for (const start of admitted) assert.ok(admitted.filter(time => time >= start && time < start + 60_000).length <= 10);
+  for (const start of admitted) assert.ok(admitted.filter(time => time >= start && time < start + 600_000).length <= 100);
+  assert.equal(db.rows.get(syrveDirectoryRequestKey(KEY)), 124 * SYRVE_DIRECTORY_REQUEST_GAP_MS);
+  assert.equal(db.rows.get(KEY), 124 * SYRVE_DIRECTORY_REQUEST_GAP_MS);
+});
+
+test('concurrent directory checks share one quota across client instances', async () => {
+  const db = database();
+  const results = await Promise.allSettled(Array.from({ length: 40 }, () =>
+    db.limiter().acquire(KEY, { group: 'directories', deadline: Date.now() + 100 })));
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.ok(results.filter(r => r.status === 'rejected').every(r => limited(r.reason)));
+  assert.equal(db.rows.size, 2);
+});
+
+test('a directory list reserves 6.1 seconds instead of a full 31-second order slot', async () => {
+  const db = database();
+  await db.limiter().acquire(KEY, { group: 'directories' });
+  assert.equal(db.rows.get(KEY), SYRVE_DIRECTORY_REQUEST_GAP_MS);
+  await assert.rejects(db.limiter().acquire(KEY, { deadline: Date.now() + 100 }), limited);
+  db.state.now = SYRVE_DIRECTORY_REQUEST_GAP_MS;
+  await db.limiter().acquire(KEY);
+  assert.equal(db.rows.get(KEY), SYRVE_DIRECTORY_REQUEST_GAP_MS + SYRVE_REQUEST_GAP_MS);
+  assert.equal(db.rows.get(syrveDirectoryRequestKey(KEY)), SYRVE_DIRECTORY_REQUEST_GAP_MS);
+  await assert.rejects(db.limiter().acquire(KEY, { deadline: Date.now() + 5 }), limited);
+});
+
+test('previous deployment permits and cooldowns block the new directory quota', async () => {
+  for (const delay of [SYRVE_REQUEST_GAP_MS, 180_000]) {
+    const db = database(); db.rows.set(KEY, delay);
+    await assert.rejects(db.limiter().acquire(KEY, { group: 'directories', deadline: Date.now() + 100 }), limited);
+    assert.equal(db.rows.get(KEY), delay);
+    assert.equal(db.rows.has(syrveDirectoryRequestKey(KEY)), false);
+    db.state.now = delay;
+    await db.limiter().acquire(KEY, { group: 'directories' });
+    assert.equal(db.rows.get(KEY), delay + SYRVE_DIRECTORY_REQUEST_GAP_MS);
+    assert.equal(db.rows.get(syrveDirectoryRequestKey(KEY)), delay + SYRVE_DIRECTORY_REQUEST_GAP_MS);
+  }
+});
+
+test('order reads, POS availability, loading and unknown paths retain one conservative group', () => {
+  for (const path of ['/api/1/order/by_table', '/api/1/order/by_id', '/api/1/order/init_by_table',
+    '/api/1/order/init_by_posOrder', '/api/1/terminal_groups/is_alive', '/api/1/commands/status',
+    '/api/1/access_token', '/api/v2/access_token', '/api/1/unrecognized']) {
+    assert.equal(syrveRequestGroup(path), 'conservative');
+  }
+});
+
 test('database outage, missing migration and malformed bucket fail before HTTP', async t => {
   const db = database(); db.state.broken = true;
   const { client, calls } = transport(t, db.limiter());
@@ -96,6 +160,7 @@ test('upstream 429 persists Retry-After for every caller and never shortens a lo
   assert.equal(result.checks.connection.code, 'SYRVE_RATE_LIMITED'); assert.equal(db.rows.get(KEY), 180_000);
   await db.limiter().cooldown(KEY, 60_000); assert.equal(db.rows.get(KEY), 180_000);
   await assert.rejects(db.limiter().acquire(KEY, { deadline: Date.now() + 100 }), limited);
+  await assert.rejects(db.limiter().acquire(KEY, { group: 'directories', deadline: Date.now() + 100 }), limited);
   assert.equal(calls.length, 1);
 });
 
@@ -129,9 +194,9 @@ test('a delayed database response cannot dispatch a stale permit', async t => {
   assert.equal(db.rows.get(KEY), SYRVE_REQUEST_GAP_MS);
 });
 
-test('every auth, organization, catalog and section request uses the same quota', async t => {
+test('transport selects the directory group for all lists and retains the same login hash', async t => {
   const admitted = [], noop = require('./helpers/syrve-test-request-limiter.js');
-  const limiter = { acquire: async (key, controls) => { admitted.push(key); return noop.acquire(key, controls); }, cooldown: noop.cooldown };
+  const limiter = { acquire: async (key, controls) => { admitted.push([key, controls.group]); return noop.acquire(key, controls); }, cooldown: noop.cooldown };
   const { client, calls } = transport(t, limiter, url => {
     const path = new URL(url).pathname;
     return Response.json(path.endsWith('access_token') ? { token: 'synthetic-token' }
@@ -140,25 +205,30 @@ test('every auth, organization, catalog and section request uses the same quota'
       : { restaurantSections: [{ id: ORG, terminalGroupId: GROUP, name: 'Зал', tables: [{ id: TABLE, number: 1, name: 'Стіл', isDeleted: false }] }] });
   });
   const catalog = await client.getCatalog(BASE, LOGIN, ORG);
-  assert.equal(calls.length, 4); assert.deepEqual(admitted, Array(4).fill(KEY));
+  assert.equal(calls.length, 4); assert.deepEqual(admitted,
+    ['conservative', 'directories', 'directories', 'directories'].map(group => [KEY, group]));
   assert.ok(!JSON.stringify(catalog).includes(KEY));
 });
 
-test('real pacing keeps the 45-second probe safe but cannot complete its multi-request chain', async t => {
+test('directory pacing completes catalog checks within 45 seconds while order pacing remains conservative', async t => {
   const db = database();
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
   Object.defineProperty(db.state, 'now', { get: () => Date.now() - 1_000 });
   t.mock.method(performance, 'now', () => Date.now() - 1_000);
-  const { client, calls } = transport(t, db.limiter(), url => Response.json(new URL(url).pathname.endsWith('access_token')
-    ? { token: 'synthetic-token' } : { organizations: [{ id: ORG, name: 'MOLO' }] }));
+  const tx = require('./helpers/syrve-batch-transport.js').batchTransport(ORG, [TABLE]);
+  const { client, calls } = transport(t, db.limiter(), tx.fetch);
   const pending = client.probeOrders(BASE, LOGIN, ORG, [TABLE], [], { deadline: 46_000 });
-  while (!db.statements.some(q => q.sql.startsWith('SELECT '))) await new Promise(setImmediate);
-  await new Promise(setImmediate);
-  t.mock.timers.tick(31_000);
+  let settled = false; pending.then(() => settled = true, () => settled = true);
+  for (let n = 0; n < 4_600 && !settled; n++) {
+    await new Promise(setImmediate); if (!settled) t.mock.timers.tick(10);
+  }
   const probe = await pending;
-  assert.deepEqual(calls, ['/api/1/access_token', '/api/1/organizations']);
+  assert.deepEqual(calls, ['/api/1/access_token', '/api/1/organizations', '/api/1/terminal_groups',
+    '/api/1/reserve/available_restaurant_sections']);
   assert.equal(probe.checks.connection.status, 'ok');
-  assert.equal(probe.checks.terminalGroups.code, 'SYRVE_RATE_LIMITED');
+  assert.equal(probe.checks.terminalGroups.status, 'ok');
+  assert.equal(probe.checks.restaurantSections.status, 'ok');
+  assert.equal(probe.checks.posAvailability.code, 'SYRVE_RATE_LIMITED');
   assert.equal(probe.byTable, null); assert.equal(probe.byId, null);
 });
 
@@ -231,7 +301,7 @@ test('a 60-table long operation and concurrent Director check complete under the
   Object.defineProperty(db.state, 'now', { get: () => Date.now() - 1_000 });
   t.mock.method(performance, 'now', () => Date.now() - 1_000);
   const dispatches = [];
-  t.mock.method(globalThis, 'fetch', (url, options) => { dispatches.push(Date.now()); return tx.fetch(url, options); });
+  t.mock.method(globalThis, 'fetch', (url, options) => { dispatches.push({ time: Date.now(), group: syrveRequestGroup(new URL(url).pathname) }); return tx.fetch(url, options); });
   for (const key of ['SYRVE_APP_ID', 'SYRVE_APP_CLIENT_SECRET']) {
     const before = process.env[key]; delete process.env[key];
     t.after(() => before === undefined ? delete process.env[key] : process.env[key] = before);
@@ -247,7 +317,7 @@ test('a 60-table long operation and concurrent Director check complete under the
   for (let n = 0; n < 55 && !settled; n++) { await new Promise(setImmediate); if (!settled) t.mock.timers.tick(31_000); }
   const [probes, director] = await pending;
   assert.equal(probes.length, 60); assert.equal(director.organizations.length, 1);
-  assert.equal(dispatches.length, 9); assert.ok(dispatches.at(-1) - dispatches[0] > 45_000);
+  assert.equal(dispatches.length, 9); assert.ok(dispatches.at(-1).time - dispatches[0].time > 45_000);
   const warmStart = dispatches.length;
   settled = false;
   const warm = withSyrveOperation(controls, () => client.probeLoadedOrderBatch(BASE, LOGIN, ORG,
@@ -257,7 +327,9 @@ test('a 60-table long operation and concurrent Director check complete under the
   const warmed = await warm;
   assert.equal(dispatches.length - warmStart, 3);
   assert.equal(tx.calls.filter(call => call.path.endsWith('/init_by_table')).length, 2);
-  for (const time of dispatches) assert.ok(dispatches.filter(value => value >= time && value < time + 60_000).length <= 2);
+  for (const { time, group } of dispatches) assert.ok(dispatches.filter(value => value.group === group
+    && value.time >= time && value.time < time + 60_000).length <= (group === 'directories' ? 10 : 2));
+  for (const { time } of dispatches) assert.ok(dispatches.filter(value => value.time >= time && value.time < time + 60_000).length <= 10);
   for (const [index, value] of probes.entries()) assert.equal(isVerifiedLoadedProbe(value[0], tables[index], ORG, tables[index]), true);
   for (const [index, value] of warmed.entries()) {
     assert.equal(isVerifiedLoadedProbe(value[0], 'warm-' + tables[index], ORG, tables[index]), true);
