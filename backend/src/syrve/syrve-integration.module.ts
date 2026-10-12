@@ -21,12 +21,15 @@ import { SyrveActivationService } from './syrve-activation.service';
 import { AuthModule } from '../auth/auth.module';
 import { SyrveOperationsService } from './syrve-operations.service';
 import { SyrveAsyncInterceptor } from './syrve-async.interceptor';
+import { SyrveWebhookController, SyrveWebhookGuard } from './syrve-webhook.controller';
+import { SyrveWebhookService } from './syrve-webhook.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([SyrveIntegration, SyrveTableLink, TableEntity]), LogsModule, AuthModule],
-  controllers: [SyrveIntegrationController, SyrveTableRenamingController],
+  controllers: [SyrveIntegrationController, SyrveTableRenamingController, SyrveWebhookController],
   providers: [SyrveIntegrationService, SyrveClient, SyrveRequestLimiter, SyrveSettingsStore, SyrveTableRenamingService, SyrveWorkerService, SyrveReadinessService,
-    SyrveTableLoadingService, SyrveTableLoadingStore, SyrveActivationStore, SyrveActivationService, SyrveOperationsService, SyrveAsyncInterceptor],
+    SyrveTableLoadingService, SyrveTableLoadingStore, SyrveActivationStore, SyrveActivationService, SyrveOperationsService, SyrveAsyncInterceptor,
+    SyrveWebhookService, SyrveWebhookGuard],
   exports: [SyrveIntegrationService, SyrveTableRenamingService],
 })
 export class SyrveIntegrationModule {}

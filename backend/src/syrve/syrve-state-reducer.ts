@@ -3,6 +3,7 @@ import type { TableStatus } from '../tables/entities/table.entity';
 import type { SyrveTableState } from './entities/syrve-table-link.entity';
 import { buildSyrveOrderObservation, MAX_RESPONSE_ORDERS, mergeSyrveOrders, observationIds } from './syrve-order-observer';
 import type { SyrveObservedOrder, SyrveOrderProbe } from './syrve-order-observer';
+import { SyrveWebhookTopologyError, type SyrveWebhookTopology } from './syrve-webhook';
 
 // Pure policy only. No entity saves, API route, scheduler or activation wiring.
 export type SyrveStateScope = {
@@ -137,6 +138,78 @@ function validateOrder(order: SyrveObservedOrder) {
     || (order.state === 'closed' && !['Closed', 'Deleted'].includes(order.status))) throw new SyrveStateValidationError();
 }
 
+export type SyrveWebhookTransition = SyrveTransition & { status: TableStatus | null };
+
+// A callback is a delta about one UUID, never a complete table observation.
+// Preserve every other active bill. The shared watermark prevents an older
+// transfer from reopening another table that has never seen that bill before.
+export function reduceSyrveWebhookOrder(current: SyrveTableSyncState[], order: SyrveObservedOrder,
+  topology: SyrveWebhookTopology, nextRevisions: string[]): SyrveWebhookTransition[] {
+  validateOrder(order);
+  const states = current.map(copyState);
+  if (states.length !== nextRevisions.length || !states.length
+    || new Set(states.map(state => state.scope.syrveTableId)).size !== states.length) throw new SyrveStateValidationError();
+  const unchanged = (diagnostic?: SyrveTransitionDiagnostic) => states.map(state => ({ state, changed: false,
+    diagnostics: diagnostic ? [diagnostic] : [], status: null }));
+  if (states.some(state => state.scope.organizationId !== topology.organizationId
+    || state.scope.configurationRevision !== topology.configurationRevision)) throw new SyrveStateValidationError();
+  const previous = states.flatMap(state => state.orderVersions.filter(version => version.id === order.id));
+  const maximum = previous.length ? Math.max(...previous.map(version => version.timestamp)) : -1;
+  if (order.timestamp < maximum) return unchanged('stale_order');
+  const signature = fingerprint(order), equal = order.timestamp === maximum;
+  const conflict = equal && previous.some(version => version.timestamp === maximum && version.fingerprint !== signature);
+  const related = (state: SyrveTableSyncState) => order.tableIds.includes(state.scope.syrveTableId)
+    || state.orderVersions.some(version => version.id === order.id);
+  const affected = (state: SyrveTableSyncState) => order.tableIds.includes(state.scope.syrveTableId)
+    || state.activeSyrveOrderIds.includes(order.id);
+  const liveTable = (id: string, matchingGroup?: string | null) => {
+    const table = topology.tables.find(table => table.id === id);
+    return table && !table.isDeleted && topology.liveGroupIds.includes(table.terminalGroupId)
+      && (!matchingGroup || table.terminalGroupId === matchingGroup);
+  };
+  if (order.tableIds.some(id => !liveTable(id, order.terminalGroupId))
+    || states.some(state => affected(state) && (!topology.visibleTableIds.includes(state.scope.syrveTableId)
+      || !liveTable(state.scope.syrveTableId)))) throw new SyrveWebhookTopologyError();
+
+  return states.map((state, index): SyrveWebhookTransition => {
+    if (!related(state)) return { state, changed: false, diagnostics: [], status: null };
+    const versions = new Map(state.orderVersions.map(version => [version.id, version]));
+    const before = versions.get(order.id), active = new Set(state.activeSyrveOrderIds);
+    const associated = order.tableIds.includes(state.scope.syrveTableId);
+    const departure = order.state !== 'unknown' && order.tableIds.length > 0 && !associated;
+    const outcome = order.state === 'unknown' ? 'unknown' : associated ? order.state : 'closed';
+    const version: SyrveOrderVersion = { id: order.id, timestamp: order.timestamp, state: outcome,
+      fingerprint: conflict ? null : signature };
+    const legacyRepair = departure && isLegacyTransferRepair(before, version);
+    if (!conflict && before?.state === 'unknown' && before.timestamp === order.timestamp && !legacyRepair) {
+      return { state, changed: false, diagnostics: ['unknown_orders'], status: null };
+    }
+    const diagnostics: SyrveTransitionDiagnostic[] = [];
+    if (conflict) { version.state = 'unknown'; diagnostics.push('conflicting_order_versions'); }
+    versions.set(order.id, version);
+    const canClose = ![...versions.values()].some(value => value.state === 'unknown');
+    if (!conflict && outcome === 'open' && associated) active.add(order.id);
+    else if (!conflict && outcome === 'closed' && canClose) active.delete(order.id);
+    else if (outcome === 'closed' && active.has(order.id)) {
+      diagnostics.push('unknown_orders');
+      // Identical-version repair must remove membership atomically or remain
+      // unresolved, otherwise a later poll could replay a physical release.
+      if (legacyRepair) versions.set(order.id, before!);
+    }
+    const next: SyrveTableSyncState = { ...state, activeSyrveOrderIds: [...active].sort(),
+      manuallyFreedSyrveOrderIds: state.manuallyFreedSyrveOrderIds.filter(id => active.has(id)),
+      orderVersions: [...versions.values()].sort((a,b) => a.id.localeCompare(b.id)),
+      lastSyrveState: active.size ? 'open' : state.activeSyrveOrderIds.length && canClose ? 'closed' : state.lastSyrveState };
+    const changed = JSON.stringify(next) !== JSON.stringify(state);
+    if (changed) {
+      next.localRevision = uuid(nextRevisions[index]);
+      if (next.localRevision === state.localRevision) throw new SyrveStateValidationError();
+    }
+    const transition: SyrveTransition = { state: next, changed, diagnostics };
+    return { ...transition, status: legacyRepair ? null : syrveTableStatusEvent(state, transition) };
+  });
+}
+
 function collectOrderEvidence(state: SyrveTableSyncState,
   input: SyrveOrderProbe | SyrveOrderObservationBatch[]): SyrveObservedOrder[] | null {
   const plan = getSyrveOrderIdsToObserve(state);
@@ -175,6 +248,9 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   probe: SyrveOrderProbe | SyrveOrderObservationBatch[];
   // Server-established prerequisite, never a Director DTO flag. PR 6 cannot prove it.
   visibilityVerified: boolean;
+  // Read under the same settings transaction across every mapped association.
+  // This also fences a delayed poll on a destination that never saw the bill.
+  knownOrderVersions?: SyrveOrderVersion[];
 }): SyrveTransition {
   const state = copyState(current), rejected = fence(state, event);
   const retained = (diagnostic: SyrveTransitionDiagnostic): SyrveTransition => ({ state, changed: false, diagnostics: [diagnostic] });
@@ -186,6 +262,12 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   if (!orders) return retained('observation_unknown');
 
   const diagnostics = new Set<SyrveTransitionDiagnostic>();
+  const shared = new Map<string, SyrveOrderVersion[]>();
+  for (const version of event.knownOrderVersions || []) {
+    if (!Number.isSafeInteger(version.timestamp) || version.timestamp < 0) throw new SyrveStateValidationError();
+    const id = uuid(version.id);
+    shared.set(id, [...(shared.get(id) || []), version]);
+  }
   const active = new Set(state.activeSyrveOrderIds), freed = new Set(state.manuallyFreedSyrveOrderIds);
   const versions = new Map(state.orderVersions.map((version) => [version.id, version]));
   const associated = orders.filter((order) => order.tableIds.includes(state.scope.syrveTableId));
@@ -217,8 +299,11 @@ export function reduceSyrveOrderState(current: SyrveTableSyncState, event: Syrve
   // Phase one derives the entire prospective ledger without changing membership
   // or overrides. This fences existing, newly unknown and equal-conflict records.
   for (const { order, previous, signature, evidenceState } of candidates) {
-    if (previous && order.timestamp < previous.timestamp) { diagnostics.add('stale_order'); continue; }
-    if (previous && order.timestamp === previous.timestamp && previous.fingerprint !== signature) {
+    const known = shared.get(order.id) || [];
+    const maximum = Math.max(previous?.timestamp ?? -1, ...known.map(version => version.timestamp));
+    if (order.timestamp < maximum) { diagnostics.add('stale_order'); continue; }
+    if ((previous && order.timestamp === previous.timestamp && previous.fingerprint !== signature)
+      || known.some(version => order.timestamp === version.timestamp && version.fingerprint !== signature)) {
       // A conflict remains fenced at this version; only a strictly newer version can resolve it.
       versions.set(order.id, { id: order.id, timestamp: order.timestamp, state: 'unknown', fingerprint: null });
       diagnostics.add('conflicting_order_versions');

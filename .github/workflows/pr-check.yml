@@ -122,6 +122,8 @@ jobs:
         run: node backend/scripts/syrve-request-limit-validation.mjs
       - name: Validate independent batched Syrve status application on 60 tables
         run: node backend/scripts/syrve-batch-validation.mjs
+      - name: Validate authenticated Syrve callback application and atomic transfers
+        run: node backend/scripts/syrve-webhook-validation.mjs
       - name: Validate asynchronous Director operations and private ownership
         run: node backend/scripts/syrve-operations-validation.mjs
       - name: Capture fresh schema audit
