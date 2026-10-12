@@ -7,7 +7,7 @@ export class AddRestaurantAutoTheme2026101200010 implements MigrationInterface {
 
   async up(runner: QueryRunner): Promise<void> {
     await runner.query(
-      'ALTER TABLE "restaurant" ADD COLUMN "auto_theme_enabled" boolean NOT NULL DEFAULT false',
+      'ALTER TABLE "restaurant" ADD COLUMN IF NOT EXISTS "auto_theme_enabled" boolean NOT NULL DEFAULT false',
     );
   }
 
