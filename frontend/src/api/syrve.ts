@@ -93,6 +93,12 @@ export type SyrveWebhookDiagnostics = {
   webhookAddressSet: boolean; authorizationSet: boolean; settingsChanged: false; statusesApplied: false;
 };
 
+export type SyrveWebhookSetup = {
+  configurationRevision: string; organizationId: string; startedAt: string; checkedAt: string;
+  settingsReadAccess: 'confirmed'; settingsWriteAccess: 'confirmed' | 'not_checked';
+  notificationsConfigured: true; settingsChanged: boolean; statusesApplied: false; deliveryVerified: false;
+};
+
 type SyrveLoadingFlags = { syncEnabled: false; activationAvailable: false; statusesApplied: false; renamingApplied: false; complete: false };
 export type SyrveTableLoadingPreview = SyrveLoadingFlags & {
   configurationRevision: string; organizationId: string; checkedAt: string;
@@ -149,6 +155,8 @@ export const syrveApi = {
     syrveOperation<SyrveBillRegisters>('/syrve-integration/bill-registers', { configurationRevision }),
   webhookDiagnostics: (configurationRevision: string) =>
     syrveOperation<SyrveWebhookDiagnostics>('/syrve-integration/webhook-diagnostics', { configurationRevision }),
+  configureWebhook: (configurationRevision: string) =>
+    syrveOperation<SyrveWebhookSetup>('/syrve-integration/webhook-setup', { configurationRevision, confirmed: true }),
   posBillDiagnostics: (configurationRevision: string, orderId: string, terminalGroupId: string) =>
     syrveOperation<SyrveBillDiagnostics>('/syrve-integration/bill-loading-diagnostics', { configurationRevision, orderId, terminalGroupId, confirmed: true }),
   previewTableLoading: (configurationRevision: string) =>

@@ -1,6 +1,8 @@
 const CODE_MESSAGES: Readonly<Record<string, string>> = {
   SYRVE_AUTH_FAILED: 'Syrve відхилив дані доступу. Перевірте API-ключ і налаштування підключення.',
   SYRVE_ACCESS_DENIED: 'Syrve не надав права для цієї перевірки.',
+  SYRVE_WEBHOOK_WRITE_DENIED: 'API-ключ Syrve не має права змінювати налаштування сповіщень. Потрібен доступ до налаштувань організації.',
+  SYRVE_WEBHOOK_NOT_CONFIRMED: 'Налаштування сповіщень у Syrve не підтверджено. Повторіть перевірку підключення.',
   SYRVE_RATE_LIMITED: 'Syrve тимчасово обмежив кількість запитів. Спробуйте пізніше.',
   SYRVE_RATE_GUARD_UNAVAILABLE: 'Не вдалося перевірити загальний ліміт запитів Syrve. Запит не надіслано, збережений стан не змінено.',
   SYRVE_TIMEOUT: 'Syrve не відповів протягом 12 секунд.',
@@ -19,6 +21,9 @@ const CODE_MESSAGES: Readonly<Record<string, string>> = {
 // arbitrary exception text. Exact matches also reject a trusted prefix with
 // appended credentials, URLs, identifiers or database details.
 const PUBLIC_MESSAGES = new Set([
+  'Спочатку ввімкніть автостатуси Syrve.',
+  'На сервері потрібно налаштувати публічну HTTPS адресу прийому сповіщень Syrve.',
+  'Для цього API-ключа вже задано інший приймач сповіщень. Його не змінено. Потрібно перевірити налаштування Syrve.',
   'Поетапну перевірку Syrve ще не підготовлено на сервері.',
   'Перевірка Syrve вже триває. Дочекайтеся її завершення.',
   'Перевірку Syrve перервано. Повторіть дію з актуальними налаштуваннями.',

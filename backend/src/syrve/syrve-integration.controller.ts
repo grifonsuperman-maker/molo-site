@@ -4,6 +4,7 @@ import type { AuthUser } from '../auth/types/auth-user.type';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
   ConnectSyrveDto,
+  ConfigureSyrveWebhookDto,
   ConfirmSyrveTableLoadingDto,
   EnableSyrveAutoStatusDto,
   DisconnectSyrveDto,
@@ -125,6 +126,13 @@ export class SyrveIntegrationController {
   @Header('Cache-Control', 'no-store')
   webhookDiagnostics(@Body() dto: SyrveRevisionDto) {
     return this.service.webhookDiagnostics(dto);
+  }
+
+  @Post('webhook-setup')
+  @SyrveAsync('webhook-setup')
+  @Header('Cache-Control', 'no-store')
+  configureWebhook(@Body() dto: ConfigureSyrveWebhookDto) {
+    return this.service.configureWebhook(dto);
   }
 
   @Post('bill-loading-diagnostics')

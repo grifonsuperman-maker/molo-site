@@ -533,6 +533,7 @@ export default function SyrveIntegrationDock() {
               busy={busy || loadingTables || changingAutoStatus} />}
             {!editingConnection && !statusUnavailable && <SyrveWebhookDiagnosticsPanel configurationRevision={status.configurationRevision || ''}
               organizationId={status.organizationId || ''} connectionReady={connected && status.hasCredentials && status.settingsPrepared}
+              syncEnabled={status.syncEnabled}
               busy={busy || loadingTables || changingAutoStatus} />}
             {!editingConnection && !statusUnavailable && <SyrveAutoStatusPanel configurationRevision={status.configurationRevision} organizationId={status.organizationId}
               linkedTables={status.confirmedLinks} syncEnabled={status.syncEnabled} busy={busy || loadingTables}

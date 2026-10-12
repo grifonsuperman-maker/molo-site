@@ -71,6 +71,12 @@ export class SyrveRevisionDto {
   configurationRevision: string;
 }
 
+export class ConfigureSyrveWebhookDto extends SyrveRevisionDto {
+  @IsBoolean()
+  @Equals(true)
+  confirmed: boolean;
+}
+
 export class SyrveBillDiagnosticsDto extends SyrveRevisionDto {
   @IsUUID('all')
   orderId: string;
