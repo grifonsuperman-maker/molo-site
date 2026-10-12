@@ -10,7 +10,7 @@ any feature. Merging the PR **does not apply the migration** to a running DB.
 
 The migration adds `restaurant.auto_theme_enabled boolean NOT NULL DEFAULT false`.
 Existing `site_mode`, `holiday_key`, bookings, Syrve and table status are
-unaffected. It refuses rollback while any restaurant has automation enabled.
+unaffected. It acquires an ACCESS EXCLUSIVE lock and refuses to adopt a preexisting column. It refuses rollback while any restaurant has automation enabled, holding the same lock through the check and drop.
 
 Before applying anything to production, a human must:
 
