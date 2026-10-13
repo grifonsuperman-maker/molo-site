@@ -49,17 +49,22 @@ export async function runStaffCredentialValidation(env = process.env) {
     await assert.rejects(source.transaction(async (manager) => {
       const staff = manager.getRepository(Staff);
       const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+      const loginName = `ci_${suffix}`;
       const pin = '5246';
       const password = 'Synthetic-CI-password';
       const waiter = await staff.save(staff.create({ fullName: `CI waiter ${suffix}`, role: 'waiter', isOnShift: true, pinHash: await hash(pin, 4) }));
       const director = await staff.save(staff.create({ fullName: `CI Director ${suffix}`, role: 'owner',
-        pinHash: await hash(pin, 4), directorLoginName: `ci_${suffix}`, directorPasswordHash: await hash(password, 4),
+        pinHash: await hash(pin, 4), directorLoginName: loginName, directorPasswordHash: await hash(password, 4),
         directorCredentialsConfiguredAt: new Date(),
       }));
       const bootstrap = await staff.save(staff.create({ fullName: `CI bootstrap ${suffix}`, role: 'owner' }));
       const jwt = new JwtService({ secret: resolveJwtSecret() });
       const auth = new AuthService(staff, jwt);
       const service = new StaffService(staff, manager.getRepository(StaffShiftEvent), jwt);
+      const added = await service.create({ fullName: `CI added ${suffix}`, role: 'admin', pin });
+      assert.equal(added.hasPin, true);
+      assertPrivate(added);
+      assert.equal((await service.loginWithPin({ staffId: added.id, pin })).user.role, 'admin');
       const logs = new LogsService(manager.getRepository(Log));
       const broadcasts = new BroadcastsService(manager.getRepository(Broadcast), {}, logs, {});
       for (const employee of [waiter, director]) {
@@ -93,13 +98,13 @@ export async function runStaffCredentialValidation(env = process.env) {
       await assert.rejects(service.loginWithPin({ staffId: waiter.id, pin: '0000' }), /Невірний працівник або PIN/);
       const initial = await service.loginDirector({ staffId: bootstrap.id, temporaryPin: '1111' });
       assert.equal(initial.mustConfigureDirectorAccess, true);
-      await assert.rejects(service.loginDirector({ loginName: director.directorLoginName, password: 'wrong' }), /Невірне ім’я або пароль/);
+      await assert.rejects(service.loginDirector({ loginName, password: 'wrong' }), /Невірне ім’я або пароль/);
       const failedDirector = await staff.findOne({ select: STAFF_WITH_CREDENTIALS_SELECT, where: { id: director.id } });
       assert.equal(failedDirector.directorFailedLoginAttempts, 1);
-      const directorLogin = await service.loginDirector({ loginName: director.directorLoginName, password });
+      const directorLogin = await service.loginDirector({ loginName, password });
       assertPrivate(directorLogin);
       assert.equal((await auth.verifyToken(directorLogin.accessToken)).role, 'owner');
-      assert.equal((await service.getDirectorAccess(directorLogin.user)).loginName, director.directorLoginName);
+      assert.equal((await service.getDirectorAccess(directorLogin.user)).loginName, loginName);
 
       // Fake transport: no invitations or messages are sent to real people.
       const linking = new TelegramStaffLinkService(staff, jwt, { async getBotUsername() { return 'synthetic_ci_bot'; } });
@@ -107,6 +112,10 @@ export async function runStaffCredentialValidation(env = process.env) {
         const invitation = await linking.createInvite(employee.id);
         const token = new URL(invitation.inviteUrl).searchParams.get('startapp').slice('staff_'.length);
         assertPrivate(await linking.getInviteInfo(token));
+        if (employee.role === 'owner') {
+          await assert.rejects(linking.confirmInvite({ token, initData: initData(id), password: 'wrong' }),
+            /Невірні дані входу.*Залишилось спроб: 4/);
+        }
         const linked = await linking.confirmInvite({ token, initData: initData(id), ...credential });
         assertPrivate(linked);
         assert.equal((await auth.verifyToken(linked.accessToken)).role, employee.role);
@@ -114,11 +123,11 @@ export async function runStaffCredentialValidation(env = process.env) {
         assert.equal((await auth.verifyToken(telegramLogin.accessToken)).role, employee.role);
       }
       await service.updateDirectorAccess(directorLogin.user, {
-        fullName: director.fullName, loginName: director.directorLoginName, currentPassword: password,
+        fullName: director.fullName, loginName, currentPassword: password,
         newPassword: 'Synthetic-CI-next-password', confirmPassword: 'Synthetic-CI-next-password',
       });
       await assert.rejects(auth.verifyToken(directorLogin.accessToken), /Недійсний токен/);
-      const fresh = await service.loginDirector({ loginName: director.directorLoginName, password: 'Synthetic-CI-next-password' });
+      const fresh = await service.loginDirector({ loginName, password: 'Synthetic-CI-next-password' });
       assert.equal((await auth.verifyToken(fresh.accessToken)).role, 'owner');
       throw ROLLBACK;
     }), (error) => error === ROLLBACK);

@@ -178,7 +178,14 @@ export class TelegramStaffLinkService {
         staff.telegramId = telegramId;
         staff.telegramInviteTokenHash = null;
         staff.telegramInviteExpiresAt = null;
-        return manager.getRepository(Staff).save(staff);
+        // Keep the locked credential version in memory: save() strips hidden
+        // fields, which would produce an immediately invalid Director token.
+        await manager.getRepository(Staff).update(staff.id, {
+          telegramId,
+          telegramInviteTokenHash: null,
+          telegramInviteExpiresAt: null,
+        });
+        return staff;
       });
     } catch (error: any) {
       if (error instanceof ConflictException || error instanceof UnauthorizedException) {
@@ -356,7 +363,10 @@ export class TelegramStaffLinkService {
           director.directorLockedUntil = new Date(
             Date.now() + DIRECTOR_LOCK_MINUTES * 60_000,
           );
-          await repository.save(director);
+          await repository.update(director.id, {
+            directorFailedLoginAttempts: director.directorFailedLoginAttempts,
+            directorLockedUntil: director.directorLockedUntil,
+          });
           return {
             error: new UnauthorizedException(
               `Забагато невдалих спроб. Вхід заблоковано на ${DIRECTOR_LOCK_MINUTES} хв.`,
@@ -364,7 +374,10 @@ export class TelegramStaffLinkService {
           };
         }
 
-        await repository.save(director);
+        await repository.update(director.id, {
+          directorFailedLoginAttempts: director.directorFailedLoginAttempts,
+          directorLockedUntil: director.directorLockedUntil,
+        });
         const attemptsLeft =
           DIRECTOR_MAX_FAILED_ATTEMPTS - director.directorFailedLoginAttempts;
         return {
@@ -380,7 +393,10 @@ export class TelegramStaffLinkService {
       ) {
         director.directorFailedLoginAttempts = 0;
         director.directorLockedUntil = null;
-        await repository.save(director);
+        await repository.update(director.id, {
+          directorFailedLoginAttempts: 0,
+          directorLockedUntil: null,
+        });
       }
 
       return {

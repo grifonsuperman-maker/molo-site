@@ -324,7 +324,9 @@ export class StaffService implements OnModuleInit {
     });
 
     const saved = await this.staffRepo.save(staff);
-    return this.toPublicStaff(saved);
+    // TypeORM removes select:false fields from the saved instance. Read the
+    // credential presence explicitly before building the sanitized flags.
+    return this.toPublicStaff(await this.getStaffOrThrow(saved.id));
   }
 
   async update(id: string, dto: UpdateStaffDto) {
