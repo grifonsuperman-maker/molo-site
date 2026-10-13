@@ -61,10 +61,16 @@ function createSingleStaffRepository(staff, lockCalls, transactionState) {
     async save(value) {
       return value;
     },
+    async update(id, values) {
+      assert.equal(id, staff.id);
+      Object.assign(staff, values);
+      return { affected: 1 };
+    },
     createQueryBuilder() {
       let expectedStaffId = null;
       let expectedHash = null;
       return {
+        addSelect() { return this; },
         setLock(value) {
           lockCalls.push(value);
           return this;

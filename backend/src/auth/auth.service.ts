@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { isDevAuthAllowed, resolveJwtSecret } from '../config/runtime-secrets';
 import { Staff } from '../staff/entities/staff.entity';
+import { STAFF_WITH_CREDENTIALS_SELECT } from '../staff/staff-credential-selection';
 import { TelegramAuthDto } from './dto/telegram-auth.dto';
 import { directorSessionVersion } from './director-session-version';
 import { AuthRole, AuthUser } from './types/auth-user.type';
@@ -25,6 +26,7 @@ export class AuthService {
     const telegramUser = this.resolveTelegramUser(dto);
 
     const staff = await this.staffRepo.findOne({
+      select: STAFF_WITH_CREDENTIALS_SELECT,
       where: { telegramId: telegramUser.telegramId, active: true, isArchived: false },
     });
 
@@ -63,7 +65,7 @@ export class AuthService {
         return payload;
       }
 
-      const staff = await this.staffRepo.findOne({ where: { id: payload.staffId } });
+      const staff = await this.staffRepo.findOne({ select: STAFF_WITH_CREDENTIALS_SELECT, where: { id: payload.staffId } });
       if (!staff || !staff.active || staff.isArchived) {
         throw new UnauthorizedException('Працівник заблокований або архівований');
       }

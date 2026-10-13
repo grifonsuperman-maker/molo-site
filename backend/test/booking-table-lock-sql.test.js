@@ -84,6 +84,20 @@ for (const action of ['cancel', 'reject', 'noShow', 'complete']) {
   });
 }
 
+for (const action of ['create', 'createManual']) {
+  test(`${action} locks only the fresh physical row when its zone is nullable`, async () => {
+    const { bookings } = harness();
+    const service = new BookingsService(bookings, {}, {}, {}, {}, {}, {}, {}, {}, {});
+    service.validateRestaurant = async () => undefined;
+    service.assertNoActiveGuestBooking = async () => undefined;
+    service.resolveTableForBooking = async () => ({ id: TABLE_ID, status: 'free' });
+    await assert.rejects(service[action]({
+      tableId: TABLE_ID, bookingDate: '2026-10-10', bookingTime: '16:00',
+      fullName: 'Тест', guestsCount: 2, guestDeviceId: 'synthetic-device',
+    }), (error) => error === STOP_AFTER_SQL);
+  });
+}
+
 test('banquet creation locks physical rows without locking their nullable zones', async () => {
   const { bookings } = harness({ assignmentsReady: true });
   const service = new BookingsService(bookings, {}, {}, {}, {}, {}, {}, {}, {}, {});

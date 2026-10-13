@@ -20,6 +20,7 @@ import type { AuthUser } from '../auth/types/auth-user.type';
 import { TelegramService } from '../notifications/telegram.service';
 import type { ConfirmTelegramStaffLinkDto } from './dto/telegram-staff-link.dto';
 import { Staff } from './entities/staff.entity';
+import { STAFF_CREDENTIAL_FIELDS, STAFF_WITH_CREDENTIALS_SELECT } from './staff-credential-selection';
 
 const TELEGRAM_INVITE_TTL_MS = 30 * 60 * 1000;
 const TELEGRAM_INVITE_PREFIX = 'staff_';
@@ -44,6 +45,7 @@ export class TelegramStaffLinkService {
       const lockedStaff = await manager
         .getRepository(Staff)
         .createQueryBuilder('staff')
+        .addSelect(STAFF_CREDENTIAL_FIELDS.map((field) => `staff.${field}`))
         .setLock('pessimistic_write')
         .where('staff.id = :staffId', { staffId })
         .getOne();
@@ -147,6 +149,7 @@ export class TelegramStaffLinkService {
         const staff = await manager
           .getRepository(Staff)
           .createQueryBuilder('staff')
+          .addSelect(STAFF_CREDENTIAL_FIELDS.map((field) => `staff.${field}`))
           .setLock('pessimistic_write')
           .where('staff.telegram_invite_token_hash = :tokenHash', { tokenHash })
           .getOne();
@@ -175,7 +178,14 @@ export class TelegramStaffLinkService {
         staff.telegramId = telegramId;
         staff.telegramInviteTokenHash = null;
         staff.telegramInviteExpiresAt = null;
-        return manager.getRepository(Staff).save(staff);
+        // Keep the locked credential version in memory: save() strips hidden
+        // fields, which would produce an immediately invalid Director token.
+        await manager.getRepository(Staff).update(staff.id, {
+          telegramId,
+          telegramInviteTokenHash: null,
+          telegramInviteExpiresAt: null,
+        });
+        return staff;
       });
     } catch (error: any) {
       if (error instanceof ConflictException || error instanceof UnauthorizedException) {
@@ -201,6 +211,7 @@ export class TelegramStaffLinkService {
 
     const tokenHash = this.hashToken(token);
     const staff = await this.staffRepo.findOne({
+      select: STAFF_WITH_CREDENTIALS_SELECT,
       where: {
         telegramInviteTokenHash: tokenHash,
       },
@@ -295,6 +306,7 @@ export class TelegramStaffLinkService {
       const repository = manager.getRepository(Staff);
       const director = await repository
         .createQueryBuilder('staff')
+        .addSelect(STAFF_CREDENTIAL_FIELDS.map((field) => `staff.${field}`))
         .setLock('pessimistic_write')
         .where('staff.telegram_invite_token_hash = :tokenHash', { tokenHash })
         .getOne();
@@ -351,7 +363,10 @@ export class TelegramStaffLinkService {
           director.directorLockedUntil = new Date(
             Date.now() + DIRECTOR_LOCK_MINUTES * 60_000,
           );
-          await repository.save(director);
+          await repository.update(director.id, {
+            directorFailedLoginAttempts: director.directorFailedLoginAttempts,
+            directorLockedUntil: director.directorLockedUntil,
+          });
           return {
             error: new UnauthorizedException(
               `Забагато невдалих спроб. Вхід заблоковано на ${DIRECTOR_LOCK_MINUTES} хв.`,
@@ -359,7 +374,10 @@ export class TelegramStaffLinkService {
           };
         }
 
-        await repository.save(director);
+        await repository.update(director.id, {
+          directorFailedLoginAttempts: director.directorFailedLoginAttempts,
+          directorLockedUntil: director.directorLockedUntil,
+        });
         const attemptsLeft =
           DIRECTOR_MAX_FAILED_ATTEMPTS - director.directorFailedLoginAttempts;
         return {
@@ -375,7 +393,10 @@ export class TelegramStaffLinkService {
       ) {
         director.directorFailedLoginAttempts = 0;
         director.directorLockedUntil = null;
-        await repository.save(director);
+        await repository.update(director.id, {
+          directorFailedLoginAttempts: 0,
+          directorLockedUntil: null,
+        });
       }
 
       return {

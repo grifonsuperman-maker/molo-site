@@ -19,6 +19,7 @@ import { StaffShiftActionDto } from './dto/staff-shift-action.dto';
 import { UpdateDirectorAccessDto } from './dto/update-director-access.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { Staff } from './entities/staff.entity';
+import { STAFF_WITH_CREDENTIALS_SELECT } from './staff-credential-selection';
 import {
   StaffShiftEvent,
   StaffShiftEventType,
@@ -47,6 +48,7 @@ export class StaffService implements OnModuleInit {
 
   async findAll() {
     const staff = await this.staffRepo.find({
+      select: STAFF_WITH_CREDENTIALS_SELECT,
       order: {
         isArchived: 'ASC',
         role: 'ASC',
@@ -79,6 +81,7 @@ export class StaffService implements OnModuleInit {
 
   async getDirectorAccessStatus() {
     const directors = await this.staffRepo.find({
+      select: STAFF_WITH_CREDENTIALS_SELECT,
       where: {
         role: 'owner',
         active: true,
@@ -133,6 +136,7 @@ export class StaffService implements OnModuleInit {
       }
 
       const director = await staffRepo.findOne({
+        select: STAFF_WITH_CREDENTIALS_SELECT,
         where: {
           id: dto.staffId,
           role: 'owner',
@@ -164,6 +168,7 @@ export class StaffService implements OnModuleInit {
     }
 
     const director = await staffRepo.findOne({
+      select: STAFF_WITH_CREDENTIALS_SELECT,
       where: {
         directorLoginName: loginName,
         role: 'owner',
@@ -319,7 +324,9 @@ export class StaffService implements OnModuleInit {
     });
 
     const saved = await this.staffRepo.save(staff);
-    return this.toPublicStaff(saved);
+    // TypeORM removes select:false fields from the saved instance. Read the
+    // credential presence explicitly before building the sanitized flags.
+    return this.toPublicStaff(await this.getStaffOrThrow(saved.id));
   }
 
   async update(id: string, dto: UpdateStaffDto) {
@@ -378,6 +385,7 @@ export class StaffService implements OnModuleInit {
 
   async loginWithPin(dto: StaffPinLoginDto) {
     const staff = await this.staffRepo.findOne({
+      select: STAFF_WITH_CREDENTIALS_SELECT,
       where: {
         id: dto.staffId,
         active: true,
@@ -773,6 +781,7 @@ export class StaffService implements OnModuleInit {
 
     const id = user.staffId || user.sub;
     const director = await this.staffRepo.findOne({
+      select: STAFF_WITH_CREDENTIALS_SELECT,
       where: {
         id,
         role: 'owner',
@@ -864,6 +873,7 @@ export class StaffService implements OnModuleInit {
 
   private async getStaffOrThrow(id: string) {
     const staff = await this.staffRepo.findOne({
+      select: STAFF_WITH_CREDENTIALS_SELECT,
       where: {
         id,
       },

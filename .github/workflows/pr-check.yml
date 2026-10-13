@@ -118,6 +118,10 @@ jobs:
         run: node backend/scripts/booking-table-assignments-validation.mjs
       - name: Validate booking buttons, physical table locks and transactional rollback
         run: node backend/scripts/booking-status-validation.mjs
+      - name: Validate atomic booking creation, concurrent identity limits and fresh table statuses
+        run: node backend/scripts/booking-create-validation.mjs
+      - name: Validate private staff projections and credential authentication
+        run: node backend/scripts/staff-credential-validation.mjs
       - name: Validate global Syrve request quota, concurrent instances and restart
         run: node backend/scripts/syrve-request-limit-validation.mjs
       - name: Validate independent batched Syrve status application on 60 tables
