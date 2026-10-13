@@ -106,6 +106,61 @@ and ignored non-bill events. Whether Syrve retries failed deliveries must be
 verified in the live acceptance test; normal polling remains the recovery path.
 Large deliveries rejected by the existing body limit also recover via polling.
 
+## Processing diagnostics
+
+The guard and receiver emit bounded JSON records prefixed with
+`Діагностика сповіщень Syrve: `. One server-generated `observationId` connects
+the `received` record to its `accepted` or `rejected` outcome. It is held in a
+request-local WeakMap, never taken from a header/body and never added to the HTTP
+response. `receivedAt` and `recordedAt` are server UTC timestamps; `handlingMs`
+uses a monotonic clock. This measures handling from the authorization guard
+through COMMIT, not POS-to-cloud delivery or the next 15-second UI refresh.
+Requests rejected before the guard, including the existing JSON/body-size
+checks, cannot appear in these records. The records are not a complete HTTP
+access log or durable event queue.
+
+Final records include the actual handler HTTP status, the fixed reason and
+processing step, parsed/ignored event counts, unassociated order and unmapped
+table counts. Only validated current bindings supply informational integer
+`tableNumber` values. A transfer includes both prior associations and its
+destinations. Per-table diagnostics show committed ledger/status change counts,
+active-bill counts before/after, `occupied`/`free` actions, unchanged reducer
+outcomes and allowlisted diagnostics such as `stale_order`, `unknown_orders`
+or `conflicting_order_versions`. Table numbers are informational and may be
+shared across cash groups; they never establish identity. A stable 16-hex
+`tableRef`, derived by hashing the local physical UUID with a separate domain,
+keeps those table counters separate without disclosing the UUID. Unchanged outcomes
+are not automatically called duplicates; bill-only updates can change the
+ledger without changing a physical status.
+
+Rejection reasons distinguish `UNAUTHORIZED`, `AUTHORIZATION_UNAVAILABLE`,
+`INVALID_PAYLOAD`, `CONFIGURATION_CHANGED`, `AUTO_STATUS_DISABLED`,
+`LOCAL_STATE_CHANGED`, `TOPOLOGY_UNAVAILABLE`, `TOPOLOGY_UNCONFIRMED`,
+`TOPOLOGY_CHANGED`, `STATE_STORAGE_UNAVAILABLE`, `COMMIT_NOT_CONFIRMED` and `PROCESSING_FAILED`.
+`LOCAL_STATE_CHANGED` additionally identifies the physical, ledger or combined
+fence for the affected table. Original exceptions, HTTP bodies and authorization
+rules remain unchanged. Unknown internal errors use a fixed reason; their
+messages/stacks are never copied into these diagnostic records.
+
+An `accepted` record is written only after the settings transaction returns
+successfully. Rejected/rolled-back batches report `commitConfirmed: false`, zero
+confirmed ledger/status changes, no actions and no claimed post-commit active-bill
+count, even if SQL updates had been staged before failure. `COMMIT_NOT_CONFIRMED`
+means the transaction did not return successfully; a lost COMMIT acknowledgement
+or connection/release failure does not prove that the database rolled back.
+The existing durable deduplication still fences any subsequent delivery. Logger failures do
+not change acknowledgement or trigger a retry of committed work. The original
+successful `Сповіщення Syrve: ` counters remain available.
+
+The records contain no callback/organization/order/table UUIDs, provider
+versions, request URL/headers/body, customer/items, credentials or raw errors.
+They issue no additional SQL or Syrve API requests, alter no quota/cache TTL,
+and neither retry nor relax state/topology/activation fences. On a live test,
+compare the known POS action time with `receivedAt` and then `handlingMs`; inspect
+the rejection reason and per-table counters before attributing a delay to
+polling or to upstream delivery. A code change adding diagnostics does not
+itself reduce polling/delivery latency.
+
 No migration is required: the existing per-link versions, memberships and local
 revisions provide durable deduplication. Run the unit/HTTP checks with the normal
 backend suite. `backend/scripts/syrve-webhook-validation.mjs` additionally runs

@@ -8,6 +8,7 @@ import { createSyrveTableSyncState, getSyrveOrderIdsToObserve, reduceSyrveOrderS
 import { isVerifiedLoadedProbe } from './syrve-client';
 import type { SyrveObservedOrder } from './syrve-order-observer';
 import type { SyrveWebhookTopology } from './syrve-webhook';
+import type { SyrveWebhookObservation } from './syrve-webhook-observation';
 
 export type SyrveStateCapture = { linkId: string; state: SyrveTableSyncState; orderIds: string[][]; physicalVersion: string };
 export const syrveCaptureContext = (leaseId: string, captured: SyrveStateCapture) =>
@@ -168,7 +169,7 @@ export class SyrveStateStore {
   }
 
   async applyWebhookOrdersInTransaction(manager: EntityManager, current: SyrveSettingsSnapshot,
-    captured: SyrveStateCapture[], orders: SyrveObservedOrder[], topology: SyrveWebhookTopology) {
+    captured: SyrveStateCapture[], orders: SyrveObservedOrder[], topology: SyrveWebhookTopology, observation?: SyrveWebhookObservation) {
     const entity = this.requireConnection(current);
     if (captured.length !== current.links.length || new Set(captured.map(value => value.linkId)).size !== captured.length
       || captured.some(value => value.state.scope.integrationId !== entity.id
@@ -183,6 +184,7 @@ export class SyrveStateStore {
       // Includes direct booking/transfer writers and PostgreSQL microseconds.
       // Reject the entire transfer/batch without consuming any provider event.
       if (affected && (before.physicalVersion !== value.physicalVersion || before.state.localRevision !== value.state.localRevision)) {
+        observation?.fence(value.state, before.physicalVersion !== value.physicalVersion, before.state.localRevision !== value.state.localRevision);
         throw new ConflictException('Стан столу змінився. Запізніле сповіщення Syrve не застосовано.');
       }
     }
@@ -193,6 +195,7 @@ export class SyrveStateStore {
     for (const order of [...orders].sort((a,b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id))) {
       const transitions = reduceSyrveWebhookOrder(states, order, topology, states.map(() => randomUUID()));
       transitions.forEach((transition, index) => {
+        observation?.transition(states[index], order, transition);
         if (transition.status) { statuses.set(fresh[index].state.scope.moloTableId, transition.status); statusesApplied++; }
       });
       states = transitions.map(transition => transition.state);
