@@ -88,8 +88,8 @@ export class NotificationsService {
     return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
   }
 
-  private escapeHtml(value: string) {
-    return value
+  private escapeHtml(value: string | number) {
+    return String(value)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
@@ -226,16 +226,16 @@ export class NotificationsService {
     const text = [
       '🟠 <b>Нове бронювання</b>',
       '',
-      `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
+      `🪑 Стіл: <b>${this.escapeHtml(booking.table?.tableNumber || '-')}</b>`,
       `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
-      `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
-      `📅 Дата: <b>${booking.bookingDate}</b>`,
-      `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
-      `⏳ Відпочинок: <b>${this.durationLine(booking)}</b>`,
-      `🧽 Наступний гість з: <b>${this.availableFromLabel(booking)}</b>`,
+      `📞 Телефон: <b>${this.escapeHtml(booking.client?.phone || '-')}</b>`,
+      `📅 Дата: <b>${this.escapeHtml(booking.bookingDate)}</b>`,
+      `🕒 Час: <b>${this.escapeHtml(this.bookingTimeRange(booking))}</b>`,
+      `⏳ Відпочинок: <b>${this.escapeHtml(this.durationLine(booking))}</b>`,
+      `🧽 Наступний гість з: <b>${this.escapeHtml(this.availableFromLabel(booking))}</b>`,
       longBookingLine,
-      `👥 Гостей: <b>${booking.guestsCount}</b>`,
-      `📝 Побажання: ${booking.wishes || '-'}`,
+      `👥 Гостей: <b>${this.escapeHtml(booking.guestsCount)}</b>`,
+      `📝 Побажання: ${this.escapeHtml(booking.wishes || '-')}`,
     ].filter(Boolean).join('\n');
 
     const replyMarkup = {
@@ -260,16 +260,16 @@ export class NotificationsService {
       '🟠 <b>Нове бронювання</b>',
       '✍️ Створено Адміністратором',
       '',
-      `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
+      `🪑 Стіл: <b>${this.escapeHtml(booking.table?.tableNumber || '-')}</b>`,
       `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
-      `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
-      `📅 Дата: <b>${booking.bookingDate}</b>`,
-      `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
-      `⏳ Відпочинок: <b>${this.durationLine(booking)}</b>`,
-      `🧽 Наступний гість з: <b>${this.availableFromLabel(booking)}</b>`,
+      `📞 Телефон: <b>${this.escapeHtml(booking.client?.phone || '-')}</b>`,
+      `📅 Дата: <b>${this.escapeHtml(booking.bookingDate)}</b>`,
+      `🕒 Час: <b>${this.escapeHtml(this.bookingTimeRange(booking))}</b>`,
+      `⏳ Відпочинок: <b>${this.escapeHtml(this.durationLine(booking))}</b>`,
+      `🧽 Наступний гість з: <b>${this.escapeHtml(this.availableFromLabel(booking))}</b>`,
       longBookingLine,
-      `👥 Гостей: <b>${booking.guestsCount}</b>`,
-      `📝 Побажання: ${booking.wishes || '-'}`,
+      `👥 Гостей: <b>${this.escapeHtml(booking.guestsCount)}</b>`,
+      `📝 Побажання: ${this.escapeHtml(booking.wishes || '-')}`,
     ].filter(Boolean).join('\n');
 
     await this.sendToRoles(['waiter'], text);
@@ -279,10 +279,10 @@ export class NotificationsService {
     const text = [
       '✅ <b>Бронювання підтверджено</b>',
       '',
-      `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
+      `🪑 Стіл: <b>${this.escapeHtml(booking.table?.tableNumber || '-')}</b>`,
       `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
-      `📅 Дата: <b>${booking.bookingDate}</b>`,
-      `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
+      `📅 Дата: <b>${this.escapeHtml(booking.bookingDate)}</b>`,
+      `🕒 Час: <b>${this.escapeHtml(this.bookingTimeRange(booking))}</b>`,
     ].join('\n');
 
     await Promise.all([
@@ -298,10 +298,10 @@ export class NotificationsService {
     const text = [
       '❌ <b>Бронювання скасовано</b>',
       '',
-      `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
+      `🪑 Стіл: <b>${this.escapeHtml(booking.table?.tableNumber || '-')}</b>`,
       `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
-      `📅 Дата: <b>${booking.bookingDate}</b>`,
-      `🕒 Час: <b>${this.bookingTimeRange(booking)}</b>`,
+      `📅 Дата: <b>${this.escapeHtml(booking.bookingDate)}</b>`,
+      `🕒 Час: <b>${this.escapeHtml(this.bookingTimeRange(booking))}</b>`,
     ].join('\n');
     const pushTitle = booking.cancellationReason === 'admin_rejected'
       ? 'Бронювання не підтверджено'
@@ -335,12 +335,12 @@ export class NotificationsService {
     const text = [
       '⏰ <b>Запит на перенесення бронювання</b>',
       '',
-      `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
+      `🪑 Стіл: <b>${this.escapeHtml(booking.table?.tableNumber || '-')}</b>`,
       `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
-      `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
+      `📞 Телефон: <b>${this.escapeHtml(booking.client?.phone || '-')}</b>`,
       '',
-      `Було: <b>${booking.bookingDate} ${this.timeLabel(booking.bookingTime)}</b>`,
-      `Нове: <b>${request.requestedDate} ${this.timeLabel(request.requestedTime)}</b>`,
+      `Було: <b>${this.escapeHtml(booking.bookingDate)} ${this.escapeHtml(this.timeLabel(booking.bookingTime))}</b>`,
+      `Нове: <b>${this.escapeHtml(request.requestedDate)} ${this.escapeHtml(this.timeLabel(request.requestedTime))}</b>`,
     ].join('\n');
 
     const replyMarkup = {
@@ -377,11 +377,11 @@ export class NotificationsService {
         : '❌ <b>Зміну часу бронювання не підтверджено</b>',
       '',
       approved
-        ? `📅 Нова дата: <b>${notification.bookingDate}</b>`
-        : `📅 Бронювання: <b>${notification.bookingDate}</b>`,
+        ? `📅 Нова дата: <b>${this.escapeHtml(notification.bookingDate)}</b>`
+        : `📅 Бронювання: <b>${this.escapeHtml(notification.bookingDate)}</b>`,
       approved
-        ? `🕒 Новий час: <b>${this.timeLabel(notification.bookingTime)}</b>`
-        : `🕒 Час залишається: <b>${this.timeLabel(notification.bookingTime)}</b>`,
+        ? `🕒 Новий час: <b>${this.escapeHtml(this.timeLabel(notification.bookingTime))}</b>`
+        : `🕒 Час залишається: <b>${this.escapeHtml(this.timeLabel(notification.bookingTime))}</b>`,
       !approved && adminComment ? `💬 Причина: ${escapedAdminComment}` : null,
     ].filter(Boolean).join('\n');
 
@@ -396,10 +396,10 @@ export class NotificationsService {
     const text = [
       '⚠️ <b>Гість повідомив про запізнення</b>',
       '',
-      `🪑 Стіл: <b>${booking.tableNumber || '-'}</b>`,
-      `📅 Дата: <b>${booking.bookingDate}</b>`,
-      `🕒 Час бронювання: <b>${this.timeLabel(booking.bookingTime)}</b>`,
-      `⏳ Запізнення: <b>${this.latenessLabel(booking.latenessHours, booking.latenessMinutes)}</b>`,
+      `🪑 Стіл: <b>${this.escapeHtml(booking.tableNumber || '-')}</b>`,
+      `📅 Дата: <b>${this.escapeHtml(booking.bookingDate)}</b>`,
+      `🕒 Час бронювання: <b>${this.escapeHtml(this.timeLabel(booking.bookingTime))}</b>`,
+      `⏳ Запізнення: <b>${this.escapeHtml(this.latenessLabel(booking.latenessHours, booking.latenessMinutes))}</b>`,
     ].join('\n');
 
     await this.sendToRoles(['admin'], text);
@@ -409,10 +409,10 @@ export class NotificationsService {
     const text = [
       '⚠️ <b>Гість запізнюється</b>',
       '',
-      `🪑 Стіл: <b>${booking.table?.tableNumber || '-'}</b>`,
+      `🪑 Стіл: <b>${this.escapeHtml(booking.table?.tableNumber || '-')}</b>`,
       `👤 Імʼя: <b>${this.bookingGuestName(booking)}</b>`,
-      `📞 Телефон: <b>${booking.client?.phone || '-'}</b>`,
-      `🕒 Час бронювання: <b>${this.timeLabel(booking.bookingTime)}</b>`,
+      `📞 Телефон: <b>${this.escapeHtml(booking.client?.phone || '-')}</b>`,
+      `🕒 Час бронювання: <b>${this.escapeHtml(this.timeLabel(booking.bookingTime))}</b>`,
       '',
       'Минуло 15 хвилин після часу бронювання.',
     ].join('\n');
