@@ -12,6 +12,8 @@ export class AddRestaurantAutoTheme2026101200010 implements MigrationInterface {
     if (!runner.isTransactionActive) {
       throw new Error('Auto-theme migration requires an active transaction');
     }
+    // Bound the lock queue: never stall normal restaurant traffic indefinitely.
+    await runner.query("SET LOCAL lock_timeout = '2s'");
     await runner.query('LOCK TABLE "restaurant" IN ACCESS EXCLUSIVE MODE');
     const [existing] = await runner.query(
       "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'restaurant' AND column_name = 'auto_theme_enabled') AS present",
@@ -41,6 +43,8 @@ export class AddRestaurantAutoTheme2026101200010 implements MigrationInterface {
       throw new Error('Auto-theme rollback requires an active transaction');
     }
     // Fence concurrent writes until the flag has been checked and dropped.
+    // Bound the lock queue: never stall normal restaurant traffic indefinitely.
+    await runner.query("SET LOCAL lock_timeout = '2s'");
     await runner.query('LOCK TABLE "restaurant" IN ACCESS EXCLUSIVE MODE');
     const [state] = await runner.query(
       'SELECT EXISTS (SELECT 1 FROM "restaurant" WHERE "auto_theme_enabled" = true) AS enabled',
