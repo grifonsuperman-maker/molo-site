@@ -10,7 +10,7 @@ any feature. Merging the PR **does not apply the migration** to a running DB.
 
 The migration adds `restaurant.auto_theme_enabled boolean NOT NULL DEFAULT false`.
 Existing `site_mode`, `holiday_key`, bookings, Syrve and table status are
-unaffected. It acquires an ACCESS EXCLUSIVE lock and refuses to adopt a preexisting column. It refuses rollback while any restaurant has automation enabled, holding the same lock through the check and drop.
+unaffected. It uses `SET LOCAL lock_timeout = '2s'` inside the migration transaction before each `ACCESS EXCLUSIVE` lock, aborting rather than waiting indefinitely in the production traffic queue. It refuses to adopt a preexisting column and refuses rollback while any restaurant has automation enabled, holding the same lock through the check and drop.
 
 Before applying anything to production, a human must:
 
@@ -30,7 +30,7 @@ Before applying anything to production, a human must:
    staff workflows still work.
 
 **Stop** on any unexpected column, nonempty auto flag, failed backup, failed
-schema audit, unknown database target or migration-history discrepancy. Do not
+schema audit, lock timeout (retry at a quiet time), unknown database target or migration-history discrepancy. Do not
 deploy the auto-theme feature PR yet.
 
 ## Stage 2 — feature PR
