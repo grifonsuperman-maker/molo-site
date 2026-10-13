@@ -98,7 +98,7 @@ export async function runStaffCredentialValidation(env = process.env) {
       await assert.rejects(service.loginWithPin({ staffId: waiter.id, pin: '0000' }), /Невірний працівник або PIN/);
       const initial = await service.loginDirector({ staffId: bootstrap.id, temporaryPin: '1111' });
       assert.equal(initial.mustConfigureDirectorAccess, true);
-      await assert.rejects(service.loginDirector({ loginName, password: 'wrong' }), /Невірне ім’я або пароль/);
+      await assert.rejects(service.loginDirector({ loginName, password: 'wrong' }), /Невірні дані входу.*Залишилось спроб: 4/);
       const failedDirector = await staff.findOne({ select: STAFF_WITH_CREDENTIALS_SELECT, where: { id: director.id } });
       assert.equal(failedDirector.directorFailedLoginAttempts, 1);
       const directorLogin = await service.loginDirector({ loginName, password });
