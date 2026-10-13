@@ -6,6 +6,29 @@ const test = require('node:test');
 const { ROLES_KEY } = require('../dist/common/decorators/roles.decorator.js');
 const { BookingsController } = require('../dist/bookings/bookings.controller.js');
 const { BookingsService } = require('../dist/bookings/bookings.service.js');
+const { Booking } = require('../dist/bookings/entities/booking.entity.js');
+const { Client } = require('../dist/clients/entities/client.entity.js');
+const { TableEntity } = require('../dist/tables/entities/table.entity.js');
+
+function attachCreationTransaction(bookings, clients, tables) {
+  tables.createQueryBuilder = () => ({
+    leftJoinAndSelect() { return this; },
+    where() { return this; },
+    setLock() { return this; },
+    getOne: () => tables.findOne(),
+  });
+  const manager = {
+    async query() {},
+    getRepository(entity) {
+      if (entity === Booking) return bookings;
+      if (entity === Client) return clients;
+      if (entity === TableEntity) return tables;
+      return {};
+    },
+    async transaction(work) { return work(manager); },
+  };
+  bookings.manager = manager;
+}
 
 test('admin manual endpoint keeps lock + availability guard and forwards actor', async () => {
   const calls = [];
@@ -112,6 +135,7 @@ test('manual booking is saved approved without guest browser credentials', async
       return table;
     },
   };
+  attachCreationTransaction(bookings, clients, tables);
   const service = new BookingsService(
     bookings,
     {},
@@ -233,6 +257,7 @@ test('manual booking blocks a blacklisted client even when phone formatting diff
       return table;
     },
   };
+  attachCreationTransaction(bookings, clients, tables);
   const service = new BookingsService(
     bookings,
     {},
@@ -311,6 +336,7 @@ test('phone-less manual booking does not create a fake Client and keeps the gues
       return table;
     },
   };
+  attachCreationTransaction(bookings, clients, tables);
   const service = new BookingsService(
     bookings,
     {},

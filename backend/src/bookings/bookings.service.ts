@@ -1,7 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { BookingHistory } from './entities/booking-history.entity';
 import { BookingTableAssignment } from './entities/booking-table-assignment.entity';
@@ -23,6 +23,7 @@ import type { AuthUser } from '../auth/types/auth-user.type';
 import { TableStatusProjectionService } from '../tables/table-status-projection.service';
 import { bookingTableAssignmentsReady, syncSingleTableTransferAssignment } from './booking-table-assignment-transfer';
 import { remainingBookingStatusForTable, synchronizeBookingTableStatusForDate } from './booking-table-status';
+import { normalizeLegacyUkrainePhone } from './guest-contact-validation';
 
 const DEFAULT_DURATION_MINUTES = 120;
 const DEFAULT_CLEANUP_MINUTES = 15;
@@ -44,15 +45,15 @@ export class BookingsService {
     private readonly statuses: TableStatusProjectionService,
   ) {}
 
-  async restaurant() {
-    const restaurants = await this.restaurants.find({ order: { createdAt: 'ASC' }, take: 1 });
+  async restaurant(repository: Repository<Restaurant> = this.restaurants) {
+    const restaurants = await repository.find({ order: { createdAt: 'ASC' }, take: 1 });
     const restaurant = restaurants[0];
     if (!restaurant) throw new NotFoundException('Ресторан не знайдено');
     return restaurant;
   }
 
-  async validateRestaurant() {
-    const restaurant = await this.restaurant();
+  async validateRestaurant(repository: Repository<Restaurant> = this.restaurants) {
+    const restaurant = await this.restaurant(repository);
     if (restaurant.status === 'closed') throw new BadRequestException(restaurant.closeMessage);
     if (restaurant.status === 'booking_closed') throw new BadRequestException(restaurant.bookingClosedMessage);
   }
@@ -65,8 +66,9 @@ export class BookingsService {
     return createHash('sha256').update(String(guestDeviceId).trim()).digest('hex');
   }
 
-  private async assertNoActiveGuestBooking(bookingDate: string, phone: string, guestDeviceIdHash: string) {
-    const activeBookings = await this.bookings
+  private async assertNoActiveGuestBooking(bookingDate: string, phone: string, guestDeviceIdHash: string,
+    bookings: Repository<Booking> = this.bookings) {
+    const activeBookings = await bookings
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.client', 'client')
       .addSelect('booking.guestDeviceIdHash')
@@ -288,21 +290,21 @@ export class BookingsService {
     }
   }
 
-  private async resolveTableForBooking(dto: CreateBookingDto) {
+  private async resolveTableForBooking(dto: CreateBookingDto, tables: Repository<TableEntity> = this.tables) {
     let table: TableEntity | null = null;
     const tableId = String(dto.tableId || '');
 
     if (dto.tableId && !tableId.startsWith('visual-')) {
-      table = await this.tables.findOne({ where: { id: dto.tableId }, relations: ['zone'] });
+      table = await tables.findOne({ where: { id: dto.tableId }, relations: ['zone'] });
     }
 
     if (!table && dto.tableNumber) {
-      table = await this.tables.findOne({ where: { tableNumber: String(dto.tableNumber) }, relations: ['zone'] });
+      table = await tables.findOne({ where: { tableNumber: String(dto.tableNumber) }, relations: ['zone'] });
     }
 
     if (!table && dto.tableNumber) {
-      table = await this.tables.save(
-        this.tables.create({
+      table = await tables.save(
+        tables.create({
           tableNumber: String(dto.tableNumber),
           seats: dto.seats || dto.guestsCount || 4,
           shape: 'rectangle',
@@ -317,11 +319,32 @@ export class BookingsService {
         }),
       ).catch(rethrowTableNumberConflict);
 
-      table = await this.tables.findOne({ where: { id: table.id }, relations: ['zone'] });
+      table = await tables.findOne({ where: { id: table.id }, relations: ['zone'] });
     }
 
     if (!table) throw new NotFoundException('Стіл не знайдено');
     return table;
+  }
+
+  private async lockCreationTable(tables: Repository<TableEntity>, id: string) {
+    // Lock only the physical row: a nullable zone cannot be FOR UPDATE'd.
+    // Re-read after any staff/Syrve writer that committed while we were waiting.
+    const table = await tables.createQueryBuilder('creation_table')
+      .leftJoinAndSelect('creation_table.zone', 'zone')
+      .where('creation_table.id = :id', { id })
+      .setLock('pessimistic_write', undefined, ['creation_table'])
+      .getOne();
+    if (!table) throw new NotFoundException('Стіл не знайдено');
+    await this.assertTableCanBeBooked(table);
+    return table;
+  }
+
+  private async lockCreationClient(manager: EntityManager, phone?: string) {
+    if (!phone) return;
+    // A separate key from the controller's table/date session lock avoids
+    // self-deadlock and serializes first-time client creation across dates.
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))',
+      ['molo-booking-client', normalizeLegacyUkrainePhone(phone) || this.normalizePhone(phone)]);
   }
 
   private async assertNoTimeConflict(
@@ -330,9 +353,10 @@ export class BookingsService {
     bookingTime: string,
     durationMinutes?: number,
     excludeBookingId?: string,
+    bookings: Repository<Booking> = this.bookings,
   ) {
     const timeInfo = this.buildTimeInfo(bookingTime, durationMinutes);
-    const activeBookings = await this.getActiveBookingsForTable(tableId, bookingDate, excludeBookingId);
+    const activeBookings = await this.getActiveBookingsForTable(tableId, bookingDate, excludeBookingId, bookings);
     const conflict = this.findConflict(activeBookings, timeInfo.startMinutes, timeInfo.availableFromMinutes);
 
     if (conflict) {
@@ -345,10 +369,11 @@ export class BookingsService {
     return timeInfo;
   }
 
-  private async setTableStatus(table: TableEntity | null, status: TableEntity['status']) {
+  private async setTableStatus(table: TableEntity | null, status: TableEntity['status'],
+    tables: Repository<TableEntity> = this.tables) {
     if (!table) return;
     table.status = status;
-    await this.tables.save({ id: table.id, status: table.status });
+    await tables.save({ id: table.id, status: table.status });
   }
 
   private restaurantDateToday() {
@@ -375,6 +400,7 @@ export class BookingsService {
     status: TableEntity['status'],
     bookingDate: string,
     force = false,
+    tables: Repository<TableEntity> = this.tables,
   ) {
     if (!table) return;
 
@@ -386,7 +412,7 @@ export class BookingsService {
     if (table.status === 'closed') return;
     if (!force && (table.status === 'occupied' || table.status === 'cleaning')) return;
 
-    await this.setTableStatus(table, status);
+    await this.setTableStatus(table, status, tables);
   }
 
   private async getBookingTables(bookingId: string) {
@@ -457,9 +483,10 @@ export class BookingsService {
     newData?: Record<string, unknown> | null,
     reason?: string | null,
     actor?: AuthUser | null,
+    histories: Repository<BookingHistory> = this.histories,
   ) {
-    await this.histories.save(
-      this.histories.create({
+    await histories.save(
+      histories.create({
         booking,
         action,
         actorRole,
@@ -676,52 +703,62 @@ export class BookingsService {
 
   async create(dto: CreateBookingDto) {
     try {
-      await this.validateRestaurant();
+      const created = await this.bookings.manager.transaction(async (manager) => {
+        await this.validateRestaurant(manager.getRepository(Restaurant));
+        const bookings = manager.getRepository(Booking);
+        const tables = manager.getRepository(TableEntity);
+        const clients = manager.getRepository(Client);
+        const histories = manager.getRepository(BookingHistory);
+        await this.lockCreationClient(manager, dto.phone);
 
-      const guestDeviceIdHash = this.hashGuestDeviceId(dto.guestDeviceId);
-      const guestPhoneNormalized = this.normalizePhone(dto.phone) || null;
-      await this.assertNoActiveGuestBooking(dto.bookingDate, dto.phone, guestDeviceIdHash);
+        const guestDeviceIdHash = this.hashGuestDeviceId(dto.guestDeviceId);
+        const guestPhoneNormalized = this.normalizePhone(dto.phone) || null;
+        await this.assertNoActiveGuestBooking(dto.bookingDate, dto.phone, guestDeviceIdHash, bookings);
 
-      const table = await this.resolveTableForBooking(dto);
-      await this.assertTableCanBeBooked(table);
+        const resolved = await this.resolveTableForBooking(dto, tables);
+        const table = await this.lockCreationTable(tables, resolved.id);
 
-      let client = await this.clients.findOne({ where: { phone: dto.phone } });
-      if (!client) client = await this.clients.save(this.clients.create({ fullName: dto.fullName, phone: dto.phone }));
-      if (client.isBlacklisted) throw new BadRequestException('Бронювання з цього номера недоступне');
+        let client = await clients.findOne({ where: { phone: dto.phone } });
+        if (!client) client = await clients.save(clients.create({ fullName: dto.fullName, phone: dto.phone }));
+        if (client.isBlacklisted) throw new BadRequestException('Бронювання з цього номера недоступне');
 
-      const timeInfo = await this.assertNoTimeConflict(table.id, dto.bookingDate, dto.bookingTime, dto.durationMinutes);
+        const timeInfo = await this.assertNoTimeConflict(table.id, dto.bookingDate, dto.bookingTime, dto.durationMinutes, undefined, bookings);
 
-      const originalWishes = dto.wishes || '';
-      const wishesWithSystemTime = [
-        `Час відпочинку: ${timeInfo.durationMinutes} хв (${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel})`,
-        `Підготовка столу після гостей: ${timeInfo.cleanupMinutes} хв, наступний гість з ${timeInfo.availableFromLabel}`,
-        originalWishes,
-      ].filter(Boolean).join('\n');
+        const originalWishes = dto.wishes || '';
+        const wishesWithSystemTime = [
+          `Час відпочинку: ${timeInfo.durationMinutes} хв (${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel})`,
+          `Підготовка столу після гостей: ${timeInfo.cleanupMinutes} хв, наступний гість з ${timeInfo.availableFromLabel}`,
+          originalWishes,
+        ].filter(Boolean).join('\n');
 
-      const guestAccessToken = randomBytes(32).toString('hex');
-      const guestAccessTokenHash = createHash('sha256').update(guestAccessToken).digest('hex');
+        const guestAccessToken = randomBytes(32).toString('hex');
+        const guestAccessTokenHash = createHash('sha256').update(guestAccessToken).digest('hex');
 
-      const booking = await this.bookings.save(
-        this.bookings.create({
-          table,
-          client,
-          guestAccessTokenHash,
-          guestDeviceIdHash,
-          guestPhoneNormalized,
-          guestName: null,
-          bookingDate: dto.bookingDate,
-          bookingTime: timeInfo.bookingTime,
-          durationMinutes: timeInfo.durationMinutes,
-          guestsCount: dto.guestsCount,
-          wishes: wishesWithSystemTime,
-          status: 'pending',
-          source: 'mini_app',
-        }),
-      );
+        const booking = await bookings.save(
+          bookings.create({
+            table,
+            client,
+            guestAccessTokenHash,
+            guestDeviceIdHash,
+            guestPhoneNormalized,
+            guestName: null,
+            bookingDate: dto.bookingDate,
+            bookingTime: timeInfo.bookingTime,
+            durationMinutes: timeInfo.durationMinutes,
+            guestsCount: dto.guestsCount,
+            wishes: wishesWithSystemTime,
+            status: 'pending',
+            source: 'mini_app',
+          }),
+        );
 
-      await this.saveHistory(booking, 'booking_created', 'guest', null, this.bookingSnapshot(booking));
+        await this.saveHistory(booking, 'booking_created', 'guest', null, this.bookingSnapshot(booking), null, null, histories);
 
-      await this.setTableStatusOnlyForToday(table, 'pending', dto.bookingDate);
+        await this.setTableStatusOnlyForToday(table, 'pending', dto.bookingDate, false, tables);
+        return { booking, table, client, timeInfo, guestAccessToken };
+      });
+      const { booking, table, client, timeInfo, guestAccessToken } = created;
+
       await this.safeLog('Створено заявку на бронювання', {
         bookingId: booking.id,
         tableNumber: table.tableNumber,
@@ -758,91 +795,98 @@ export class BookingsService {
         throw new BadRequestException('На цю дату вже є активне бронювання з цього пристрою або номера телефону');
       }
       console.error('Booking create failed:', error);
-      throw new BadRequestException(`Booking error: ${error?.message || 'unknown error'}`);
+      throw new InternalServerErrorException('Не вдалося створити бронювання. Спробуйте ще раз.');
     }
   }
 
   async createManual(dto: CreateAdminManualBookingDto, actor?: AuthUser) {
     try {
-      const bookingDate = this.normalizeBookingDate(dto.bookingDate);
-      const fullName = String(dto.fullName || '').trim();
-      const phone = String(dto.phone || '').trim();
-      const guestPhoneNormalized = phone
-        ? await this.assertNoActivePhoneBooking(bookingDate, phone)
-        : null;
+      const created = await this.bookings.manager.transaction(async (manager) => {
+        const bookings = manager.getRepository(Booking);
+        const tables = manager.getRepository(TableEntity);
+        const clients = manager.getRepository(Client);
+        const histories = manager.getRepository(BookingHistory);
+        await this.lockCreationClient(manager, dto.phone?.trim());
+        const bookingDate = this.normalizeBookingDate(dto.bookingDate);
+        const fullName = String(dto.fullName || '').trim();
+        const phone = String(dto.phone || '').trim();
+        const guestPhoneNormalized = phone
+          ? await this.assertNoActivePhoneBooking(bookingDate, phone, bookings)
+          : null;
 
-      const table = await this.tables.findOne({
-        where: { id: dto.tableId },
-        relations: ['zone'],
-      });
-      if (!table) throw new NotFoundException('Стіл не знайдено');
-      await this.assertTableCanBeBooked(table);
+        const table = await this.lockCreationTable(tables, dto.tableId);
 
-      let client: Client | null = null;
-      if (phone && guestPhoneNormalized) {
-        const matchingClients = await this.clients
-          .createQueryBuilder('client')
-          .where(
-            `regexp_replace("client"."phone", '[^0-9]', '', 'g') = :normalizedPhone`,
-            { normalizedPhone: guestPhoneNormalized },
-          )
-          .getMany();
+        let client: Client | null = null;
+        if (phone && guestPhoneNormalized) {
+          const matchingClients = await clients
+            .createQueryBuilder('client')
+            .where(
+              `regexp_replace("client"."phone", '[^0-9]', '', 'g') = :normalizedPhone`,
+              { normalizedPhone: guestPhoneNormalized },
+            )
+            .getMany();
 
-        if (matchingClients.some((candidate) => candidate.isBlacklisted)) {
-          throw new BadRequestException('Бронювання з цього номера недоступне');
+          if (matchingClients.some((candidate) => candidate.isBlacklisted)) {
+            throw new BadRequestException('Бронювання з цього номера недоступне');
+          }
+
+          client = matchingClients[0] || null;
+          if (!client) {
+            client = await clients.save(
+              clients.create({ fullName, phone }),
+            );
+          }
         }
 
-        client = matchingClients[0] || null;
-        if (!client) {
-          client = await this.clients.save(
-            this.clients.create({ fullName, phone }),
-          );
-        }
-      }
-
-      const timeInfo = await this.assertNoTimeConflict(
-        table.id,
-        bookingDate,
-        dto.bookingTime,
-        dto.durationMinutes,
-      );
-      const wishes = [
-        `Час відпочинку: ${timeInfo.durationMinutes} хв (${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel})`,
-        `Підготовка столу після гостей: ${timeInfo.cleanupMinutes} хв, наступний гість з ${timeInfo.availableFromLabel}`,
-        dto.wishes || '',
-      ].filter(Boolean).join('\n');
-
-      // Ручне бронювання Адміністратора не залежить від перемикача онлайн-бронювання.
-      // Якщо телефону немає, Client не створюємо: ім'я зберігається у самій броні.
-      const booking = await this.bookings.save(
-        this.bookings.create({
-          table,
-          client,
-          guestAccessTokenHash: null,
-          guestDeviceIdHash: null,
-          guestPhoneNormalized,
-          guestName: fullName,
+        const timeInfo = await this.assertNoTimeConflict(
+          table.id,
           bookingDate,
-          bookingTime: timeInfo.bookingTime,
-          durationMinutes: timeInfo.durationMinutes,
-          guestsCount: dto.guestsCount,
-          wishes,
-          status: 'approved',
-          source: 'admin_manual',
-          approvedAt: new Date(),
-        }),
-      );
+          dto.bookingTime,
+          dto.durationMinutes,
+          undefined, bookings,
+        );
+        const wishes = [
+          `Час відпочинку: ${timeInfo.durationMinutes} хв (${timeInfo.bookingTimeLabel} — ${timeInfo.departureTimeLabel})`,
+          `Підготовка столу після гостей: ${timeInfo.cleanupMinutes} хв, наступний гість з ${timeInfo.availableFromLabel}`,
+          dto.wishes || '',
+        ].filter(Boolean).join('\n');
 
-      await this.saveHistory(
-        booking,
-        'booking_created',
-        actor?.role || 'admin',
-        null,
-        this.bookingSnapshot(booking),
-        null,
-        actor || null,
-      );
-      await this.setTableStatusOnlyForToday(table, 'reserved', bookingDate);
+        // Ручне бронювання Адміністратора не залежить від перемикача онлайн-бронювання.
+        // Якщо телефону немає, Client не створюємо: ім'я зберігається у самій броні.
+        const booking = await bookings.save(
+          bookings.create({
+            table,
+            client,
+            guestAccessTokenHash: null,
+            guestDeviceIdHash: null,
+            guestPhoneNormalized,
+            guestName: fullName,
+            bookingDate,
+            bookingTime: timeInfo.bookingTime,
+            durationMinutes: timeInfo.durationMinutes,
+            guestsCount: dto.guestsCount,
+            wishes,
+            status: 'approved',
+            source: 'admin_manual',
+            approvedAt: new Date(),
+          }),
+        );
+
+        await this.saveHistory(
+          booking,
+          'booking_created',
+          actor?.role || 'admin',
+          null,
+          this.bookingSnapshot(booking),
+          null,
+          actor || null,
+          histories,
+        );
+        await this.setTableStatusOnlyForToday(table, 'reserved', bookingDate, false, tables);
+        return { booking, table, fullName, phone, bookingDate, timeInfo };
+      });
+      const { booking, table, fullName, phone, bookingDate, timeInfo } = created;
+
       await this.safeLog('Створено ручне бронювання', {
         bookingId: booking.id,
         tableNumber: table.tableNumber,
@@ -890,9 +934,7 @@ export class BookingsService {
         throw new BadRequestException('На цю дату вже є активне бронювання з цього номера телефону');
       }
       console.error('Manual booking create failed:', error);
-      throw new BadRequestException(
-        `Не вдалося створити бронювання: ${error?.message || 'невідома помилка'}`,
-      );
+      throw new InternalServerErrorException('Не вдалося створити бронювання. Спробуйте ще раз.');
     }
   }
 

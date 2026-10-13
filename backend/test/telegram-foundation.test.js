@@ -65,6 +65,7 @@ function createSingleStaffRepository(staff, lockCalls, transactionState) {
       let expectedStaffId = null;
       let expectedHash = null;
       return {
+        addSelect() { return this; },
         setLock(value) {
           lockCalls.push(value);
           return this;

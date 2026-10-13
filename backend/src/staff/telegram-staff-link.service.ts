@@ -20,6 +20,7 @@ import type { AuthUser } from '../auth/types/auth-user.type';
 import { TelegramService } from '../notifications/telegram.service';
 import type { ConfirmTelegramStaffLinkDto } from './dto/telegram-staff-link.dto';
 import { Staff } from './entities/staff.entity';
+import { STAFF_CREDENTIAL_FIELDS, STAFF_WITH_CREDENTIALS_SELECT } from './staff-credential-selection';
 
 const TELEGRAM_INVITE_TTL_MS = 30 * 60 * 1000;
 const TELEGRAM_INVITE_PREFIX = 'staff_';
@@ -44,6 +45,7 @@ export class TelegramStaffLinkService {
       const lockedStaff = await manager
         .getRepository(Staff)
         .createQueryBuilder('staff')
+        .addSelect(STAFF_CREDENTIAL_FIELDS.map((field) => `staff.${field}`))
         .setLock('pessimistic_write')
         .where('staff.id = :staffId', { staffId })
         .getOne();
@@ -147,6 +149,7 @@ export class TelegramStaffLinkService {
         const staff = await manager
           .getRepository(Staff)
           .createQueryBuilder('staff')
+          .addSelect(STAFF_CREDENTIAL_FIELDS.map((field) => `staff.${field}`))
           .setLock('pessimistic_write')
           .where('staff.telegram_invite_token_hash = :tokenHash', { tokenHash })
           .getOne();
@@ -201,6 +204,7 @@ export class TelegramStaffLinkService {
 
     const tokenHash = this.hashToken(token);
     const staff = await this.staffRepo.findOne({
+      select: STAFF_WITH_CREDENTIALS_SELECT,
       where: {
         telegramInviteTokenHash: tokenHash,
       },
@@ -295,6 +299,7 @@ export class TelegramStaffLinkService {
       const repository = manager.getRepository(Staff);
       const director = await repository
         .createQueryBuilder('staff')
+        .addSelect(STAFF_CREDENTIAL_FIELDS.map((field) => `staff.${field}`))
         .setLock('pessimistic_write')
         .where('staff.telegram_invite_token_hash = :tokenHash', { tokenHash })
         .getOne();

@@ -49,7 +49,7 @@ export class Staff {
   })
   role: StaffRole;
 
-  @Column({ name: 'pin_hash', type: 'text', nullable: true })
+  @Column({ name: 'pin_hash', type: 'text', nullable: true, select: false })
   pinHash: string | null;
 
   @Column({
@@ -58,16 +58,18 @@ export class Staff {
     length: 64,
     nullable: true,
     unique: true,
+    select: false,
   })
   directorLoginName: string | null;
 
-  @Column({ name: 'director_password_hash', type: 'text', nullable: true })
+  @Column({ name: 'director_password_hash', type: 'text', nullable: true, select: false })
   directorPasswordHash: string | null;
 
   @Column({
     name: 'director_credentials_configured_at',
     type: 'timestamp',
     nullable: true,
+    select: false,
   })
   directorCredentialsConfiguredAt: Date | null;
 
@@ -75,10 +77,11 @@ export class Staff {
     name: 'director_failed_login_attempts',
     type: 'integer',
     default: 0,
+    select: false,
   })
   directorFailedLoginAttempts: number;
 
-  @Column({ name: 'director_locked_until', type: 'timestamp', nullable: true })
+  @Column({ name: 'director_locked_until', type: 'timestamp', nullable: true, select: false })
   directorLockedUntil: Date | null;
 
   @Column({ type: 'text', nullable: true })
