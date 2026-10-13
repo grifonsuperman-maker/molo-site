@@ -31,10 +31,11 @@ test('migration locks restaurant, adds disabled flag and verifies schema', async
     return [];
   });
   await new Migration().up(runner);
-  assert.match(statements[0], /LOCK TABLE "restaurant" IN ACCESS EXCLUSIVE MODE/);
-  assert.match(statements[1], /information_schema.columns/);
-  assert.match(statements[2], /ADD COLUMN "auto_theme_enabled" boolean NOT NULL DEFAULT false/);
-  assert.match(statements[3], /information_schema.columns/);
+  assert.match(statements[0], /SET LOCAL lock_timeout = '2s'/);
+  assert.match(statements[1], /LOCK TABLE "restaurant" IN ACCESS EXCLUSIVE MODE/);
+  assert.match(statements[2], /information_schema.columns/);
+  assert.match(statements[3], /ADD COLUMN "auto_theme_enabled" boolean NOT NULL DEFAULT false/);
+  assert.match(statements[4], /information_schema.columns/);
 });
 
 test('up rejects a preexisting column even with matching schema', async () => {
@@ -44,7 +45,7 @@ test('up rejects a preexisting column even with matching schema', async () => {
     return [{ present: true }];
   });
   await assert.rejects(new Migration().up(runner), /already exists/);
-  assert.equal(statements.length, 2);
+  assert.equal(statements.length, 3);
 });
 
 test('up rejects an unexpected resulting schema', async () => {
@@ -64,8 +65,9 @@ test('down locks restaurant before checking active auto flags', async () => {
     return [{ enabled: true }];
   });
   await assert.rejects(new Migration().down(runner), /Disable automatic theme/);
-  assert.match(statements[0], /ACCESS EXCLUSIVE MODE/);
-  assert.equal(statements.length, 2);
+  assert.match(statements[0], /SET LOCAL lock_timeout = '2s'/);
+  assert.match(statements[1], /ACCESS EXCLUSIVE MODE/);
+  assert.equal(statements.length, 3);
 });
 
 test('down drops column only after exclusive lock and inactive check', async () => {
@@ -75,12 +77,25 @@ test('down drops column only after exclusive lock and inactive check', async () 
     return [{ enabled: false }];
   });
   await new Migration().down(runner);
-  assert.match(statements[0], /ACCESS EXCLUSIVE MODE/);
-  assert.match(statements[2], /DROP COLUMN "auto_theme_enabled"/);
+  assert.match(statements[0], /SET LOCAL lock_timeout = '2s'/);
+  assert.match(statements[1], /ACCESS EXCLUSIVE MODE/);
+  assert.match(statements[3], /DROP COLUMN "auto_theme_enabled"/);
 });
 
 test('migration refuses operations outside an active transaction', async () => {
   const runner = { isTransactionActive: false, query: () => assert.fail('no writes') };
   await assert.rejects(new Migration().up(runner), /active transaction/);
   await assert.rejects(new Migration().down(runner), /active transaction/);
+});
+
+test('migration stops before waiting for an exclusive lock if lock_timeout is rejected', async () => {
+  for (const direction of ['up', 'down']) {
+    const statements = [];
+    const runner = transaction(async (sql) => {
+      statements.push(sql);
+      throw new Error('cannot set lock timeout');
+    });
+    await assert.rejects(new Migration()[direction](runner), /cannot set lock timeout/);
+    assert.deepEqual(statements, ["SET LOCAL lock_timeout = '2s'"]);
+  }
 });
