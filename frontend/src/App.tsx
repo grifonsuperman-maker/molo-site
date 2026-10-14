@@ -6,12 +6,13 @@ import "./waiter/waiter-legacy-theme.css";
 import "./waiter/waiter-call-alert.css";
 import "./admin/admin-neon-theme.css";
 import SitePhotoController from "./theme/SitePhotoController";
+import GuestMaintenance from "./guest/components/GuestMaintenance";
 import MoloSplash from "./theme/components/MoloSplash";
 import { useTelegramAuth } from "./auth/useTelegramAuth";
 import TelegramStaffLinkGate, {
   readTelegramStaffInviteToken,
 } from "./telegram/TelegramStaffLinkGate";
-import { telegramRoleToMode } from "./telegram/telegramRuntime";
+import { isTelegramMiniApp, telegramRoleToMode } from "./telegram/telegramRuntime";
 import { isDeveloperRoleSwitcherPath } from "./developer/developerRoleSwitcher";
 
 const GuestApp = lazy(() => import("./guest/GuestApp"));
@@ -109,6 +110,14 @@ export default function App() {
   const showDeveloperRoleSwitcher =
     isDeveloperRoleSwitcherPath(window.location.pathname) &&
     !telegramAuth.isTelegram;
+  const showGuestMaintenance =
+    mode === "guest" && !telegramInviteToken && !showDeveloperRoleSwitcher;
+  const awaitingTelegramStaffRole =
+    showGuestMaintenance &&
+    isTelegramMiniApp() &&
+    (telegramAuth.loading ||
+      (telegramAuth.user !== null &&
+        telegramRoleToMode(telegramAuth.user.role) !== "guest"));
 
   useEffect(() => {
     if (
@@ -174,8 +183,8 @@ export default function App() {
 
   return (
     <main className="min-h-screen bg-[#10100f] text-white">
-      <MoloSplash />
-      <SitePhotoController />
+      {(!showGuestMaintenance || awaitingTelegramStaffRole) && <MoloSplash />}
+      {!showGuestMaintenance && <SitePhotoController />}
 
       {telegramInviteToken && (
         <TelegramStaffLinkGate
@@ -251,13 +260,16 @@ export default function App() {
 
       <RoleLoadBoundary resetKey={mode}>
         <Suspense fallback={null}>
-          {mode === "guest" && (
-            <>
-              <GuestApp />
-              <GuestBookingDecisionController />
-              <GuestReviewDismissController />
-            </>
-          )}
+          {mode === "guest" &&
+            (showGuestMaintenance ? (
+              awaitingTelegramStaffRole ? null : <GuestMaintenance />
+            ) : (
+              <>
+                <GuestApp />
+                <GuestBookingDecisionController />
+                <GuestReviewDismissController />
+              </>
+            ))}
           {mode === "waiter" && (
             <div className="molo-waiter-legacy-theme">
               <WaiterCallAlertController />
