@@ -231,7 +231,7 @@ test('actual entrypoint keeps guest/staff components and the role-switch path se
   }).outputText, { exports: boundaryExports, require });
   const Boundary = boundaryExports.default;
   const App = () => null, Install = () => null, Push = () => null, Developer = () => null;
-  for (const [pathname, developerRoute] of [['/developer', true], ['/developer/', true], ['/', false], ['/__dev/roles', false]]) {
+  for (const [pathname, developerRoute] of [['/developer', true], ['/developer/', true], ['/developer/index.html', true], ['/', false], ['/__dev/roles', false]]) {
     let rendered;
     const entryExports = {};
     vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../src/entryRoute.ts'), 'utf8'), {

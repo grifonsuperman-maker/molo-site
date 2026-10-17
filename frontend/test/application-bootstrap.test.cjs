@@ -46,21 +46,41 @@ function boot(pathname, failApplication = false) {
   };
 }
 
-test('SPA document loads only the local route-aware entry and has no unconditional external script', () => {
-  const html = fs.readFileSync(path.resolve(__dirname, '../index.html'), 'utf8');
-  const scripts = [...html.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/g)].map(match => match[0]);
-  assert.equal(scripts.length, 1);
-  assert.match(scripts[0], /type="module"/);
-  assert.match(scripts[0], /src="\/src\/bootstrap\.ts"/);
-  assert.doesNotMatch(html, /<script[^>]*src=["'](?:https?:)?\/\//);
-  assert.doesNotMatch(html, /telegram-web-app\.js/);
+test('both HTML documents load only the local route-aware entry without unconditional external scripts', () => {
+  for (const name of ['index.html', 'developer/index.html']) {
+    const html = fs.readFileSync(path.resolve(__dirname, '..', name), 'utf8');
+    const scripts = [...html.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/g)].map(match => match[0]);
+    assert.equal(scripts.length, 1);
+    assert.match(scripts[0], /type="module"/);
+    assert.match(scripts[0], /src="\/src\/bootstrap\.ts"/);
+    assert.doesNotMatch(html, /<script[^>]*src=["'](?:https?:)?\/\//);
+    assert.doesNotMatch(html, /telegram-web-app\.js/);
+  }
 });
 
-test('both developer entry URLs start without inserting or waiting for Telegram SDK', async () => {
-  for (const pathname of ['/developer', '/developer/']) {
+test('developer directory and explicit file URLs start without inserting or waiting for Telegram SDK', async () => {
+  for (const pathname of ['/developer', '/developer/', '/developer/index.html']) {
     const h = boot(pathname); await flush();
     assert.equal(h.scripts.length, 0);
     assert.deepEqual(h.starts, [{ developer: true, initData: undefined }]);
+  }
+});
+
+test('production build emits a real developer document with resolvable assets outside the directory', () => {
+  const dist = path.resolve(__dirname, '../dist');
+  for (const name of ['index.html', 'developer/index.html']) {
+    const file = path.join(dist, name);
+    assert.ok(fs.existsSync(file), `${name} must be emitted; build before running the suite`);
+    const html = fs.readFileSync(file, 'utf8');
+    const scripts = [...html.matchAll(/<script\b[^>]*src="([^"]+)"[^>]*>/g)];
+    assert.equal(scripts.length, 1);
+    assert.match(scripts[0][0], /type="module"/);
+    assert.match(scripts[0][1], /^\/assets\/[A-Za-z0-9_-]+\.js$/);
+    assert.doesNotMatch(html, /telegram-web-app\.js/);
+    const assets = [...html.matchAll(/(?:src|href)="(\/[^"?#]+)"/g)].map(match => match[1]);
+    for (const asset of assets) {
+      assert.ok(fs.statSync(path.join(dist, asset)).isFile(), `${name}: ${asset} must resolve from the site root`);
+    }
   }
 });
 
