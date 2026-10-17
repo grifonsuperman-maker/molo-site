@@ -340,8 +340,8 @@ export const bookingsApi = {
 
   getToday: () => api.get<Booking[]>('/bookings/today'),
 
-  getByDate: (date: string) =>
-    api.get<Booking[]>(`/bookings/by-date?date=${encode(date)}`),
+  getByDate: (date: string, options?: RequestInit) =>
+    api.get<Booking[]>(`/bookings/by-date?date=${encode(date)}`, options),
 
   getArchive: (params?: {
     date?: string;
