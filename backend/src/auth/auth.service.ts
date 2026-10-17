@@ -12,6 +12,7 @@ import {
   DEFAULT_TELEGRAM_INIT_DATA_MAX_AGE_SECONDS,
   verifyTelegramInitData,
 } from './telegram-init-data';
+import { verifyDeveloperToken } from '../developer/developer-access';
 
 @Injectable()
 export class AuthService {
@@ -53,9 +54,19 @@ export class AuthService {
 
   async verifyToken(token: string): Promise<AuthUser> {
     try {
-      const payload = await this.jwtService.verifyAsync<AuthUser>(token, {
-        secret: resolveJwtSecret(),
-      });
+      let payload: AuthUser;
+      try {
+        payload = await this.jwtService.verifyAsync<AuthUser>(token, {
+          secret: resolveJwtSecret(),
+        });
+      } catch {
+        // Developer tokens have a separate signing key and cannot become staff
+        // sessions. Ordinary staff authentication retains its existing path.
+        return await verifyDeveloperToken(this.jwtService, token);
+      }
+      if (payload.role === 'developer') {
+        throw new UnauthorizedException('Недійсний вхід розробника');
+      }
       if (!payload.staffId) {
         // A Director JWT must always carry the staff identity used for the
         // persisted session-version check, including legacy tokens.
