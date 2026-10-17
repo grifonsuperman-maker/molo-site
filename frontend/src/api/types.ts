@@ -39,6 +39,7 @@ export type Restaurant = {
   menuUrl: string | null;
   status: RestaurantStatus;
   siteMode?: SiteMode;
+  autoThemeEnabled?: boolean;
   holidayKey?: HolidayKey | null;
   closeMessage: string;
   bookingClosedMessage: string;

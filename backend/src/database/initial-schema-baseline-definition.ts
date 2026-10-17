@@ -224,6 +224,7 @@ export const INITIAL_SCHEMA_BASELINE_CREATE_STATEMENTS = [
   "close_time" time without time zone DEFAULT '23:00:00'::time without time zone NOT NULL,
   "status" "restaurant_status_enum" DEFAULT 'open'::restaurant_status_enum NOT NULL,
   "site_mode" "restaurant_site_mode_enum" DEFAULT 'night'::restaurant_site_mode_enum NOT NULL,
+  "auto_theme_enabled" boolean DEFAULT false NOT NULL,
   "holiday_key" character varying(32),
   "close_message" text DEFAULT 'Ресторан зараз зачинений. Ми працюємо з 10:00 до 23:00.'::text NOT NULL,
   "booking_closed_message" text DEFAULT 'Онлайн-бронювання завершено. Для бронювання зателефонуйте адміністратору.'::text NOT NULL,
