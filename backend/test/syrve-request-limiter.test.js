@@ -3,13 +3,14 @@ const test = require('node:test');
 const { performance } = require('node:perf_hooks');
 const { SyrveRequestLimiter, SyrveRequestLimitError, syrveRequestKey, syrveRetryAfterMs,
   SYRVE_REQUEST_GAP_MS, SYRVE_DIRECTORY_REQUEST_GAP_MS, syrveDirectoryRequestKey,
-  syrveRequestGroup, isFreshSyrvePermit } = require('../dist/syrve/syrve-request-limiter.js');
+  syrveRequestGroup, syrveGroupedRequestKey, isFreshSyrvePermit } = require('../dist/syrve/syrve-request-limiter.js');
 const { SyrveClient } = require('../dist/syrve/syrve-client.js');
 const { CreateSyrveRequestLimits2026100600080: Migration } = require('../dist/migrations/2026100600080-CreateSyrveRequestLimits.js');
 
 const BASE = 'https://api-eu.syrve.live', ORG = '11111111-2222-3333-4444-555555555555';
 const GROUP = '22222222-2222-3333-4444-555555555555', TABLE = '33333333-2222-3333-4444-555555555555';
 const LOGIN = 'synthetic-quota-login', KEY = syrveRequestKey(LOGIN);
+const ORDER_GROUPS = ['Orders: loading data', 'Orders: receiving', 'POS: availability'];
 
 function database() {
   const rows = new Map(), statements = [];
@@ -127,11 +128,78 @@ test('previous deployment permits and cooldowns block the new directory quota', 
   }
 });
 
-test('order reads, POS availability, loading and unknown paths retain one conservative group', () => {
-  for (const path of ['/api/1/order/by_table', '/api/1/order/by_id', '/api/1/order/init_by_table',
-    '/api/1/order/init_by_posOrder', '/api/1/terminal_groups/is_alive', '/api/1/commands/status',
-    '/api/1/access_token', '/api/v2/access_token', '/api/1/unrecognized']) {
+test('transport uses the documented groups and keeps both order readers in one allowance', () => {
+  for (const path of ['/api/1/order/by_table', '/api/1/order/by_id']) assert.equal(syrveRequestGroup(path), 'Orders: receiving');
+  for (const path of ['/api/1/order/init_by_table', '/api/1/order/init_by_posOrder']) assert.equal(syrveRequestGroup(path), 'Orders: loading data');
+  assert.equal(syrveRequestGroup('/api/1/terminal_groups/is_alive'), 'POS: availability');
+  for (const path of ['/api/1/commands/status', '/api/1/access_token', '/api/v2/access_token', '/api/1/unrecognized']) {
     assert.equal(syrveRequestGroup(path), 'conservative');
+  }
+});
+
+test('separating a known group never resets directory identity or reveals credentials', () => {
+  assert.equal(syrveGroupedRequestKey(KEY, 'directories'), syrveDirectoryRequestKey(KEY));
+  assert.equal(syrveGroupedRequestKey(KEY, 'conservative'), KEY);
+  const keys = ORDER_GROUPS.map(group => syrveGroupedRequestKey(KEY, group));
+  assert.equal(new Set([KEY, syrveDirectoryRequestKey(KEY), ...keys]).size, 5);
+  assert.ok(keys.every(key => /^[0-9a-f]{64}$/.test(key) && !key.includes(LOGIN)));
+});
+
+for (const group of ORDER_GROUPS) {
+  test(group + ' retains two sends per rolling minute across workers and restarts', async t => {
+    const db = database(); t.mock.method(performance, 'now', () => db.state.now);
+    const sent = [];
+    for (let n = 0; n < 8; n++) {
+      db.state.now = n * SYRVE_REQUEST_GAP_MS;
+      const permit = await db.limiter().acquire(KEY, { group, deadline: Date.now() + 2_000 });
+      db.state.now += n % 2 === 0 ? 999 : 0;
+      assert.equal(isFreshSyrvePermit(permit), true); sent.push(db.state.now);
+      await assert.rejects(db.limiter().acquire(KEY, { group, deadline: Date.now() + 5 }), limited);
+    }
+    for (const start of sent) assert.ok(sent.filter(time => time >= start && time < start + 60_000).length <= 2);
+    assert.equal(db.rows.get(syrveGroupedRequestKey(KEY, group)), 8 * SYRVE_REQUEST_GAP_MS);
+  });
+}
+
+test('waiting for an exhausted order reader does not reserve another group or the global barrier', async () => {
+  const db = database();
+  await db.limiter().acquire(KEY, { group: syrveRequestGroup('/api/1/order/by_table') });
+  db.state.now = SYRVE_DIRECTORY_REQUEST_GAP_MS;
+  await assert.rejects(db.limiter().acquire(KEY, { group: syrveRequestGroup('/api/1/order/by_id'), deadline: Date.now() + 5 }), limited);
+  assert.equal(db.rows.get(KEY), SYRVE_DIRECTORY_REQUEST_GAP_MS);
+  await db.limiter().acquire(KEY, { group: 'Orders: loading data' });
+  db.state.now += SYRVE_DIRECTORY_REQUEST_GAP_MS;
+  await db.limiter().acquire(KEY, { group: 'POS: availability' });
+  assert.equal(db.rows.get(syrveGroupedRequestKey(KEY, 'Orders: receiving')), SYRVE_REQUEST_GAP_MS);
+  assert.equal(db.rows.get(syrveGroupedRequestKey(KEY, 'Orders: loading data')), 37_100);
+  assert.equal(db.rows.get(syrveGroupedRequestKey(KEY, 'POS: availability')), 43_200);
+});
+
+test('mixed documented groups share the ten-minute total budget and preserve group limits', async t => {
+  const db = database(); t.mock.method(performance, 'now', () => db.state.now);
+  const groups = [...ORDER_GROUPS, 'directories'], sent = [];
+  for (let n = 0; n < 124; n++) {
+    db.state.now = n * SYRVE_DIRECTORY_REQUEST_GAP_MS;
+    const group = groups[n % groups.length];
+    try {
+      const permit = await db.limiter().acquire(KEY, { group, deadline: Date.now() + 2_000 });
+      db.state.now += n % 10 === 0 ? 999 : 0;
+      assert.equal(isFreshSyrvePermit(permit), true); sent.push({ time: db.state.now, group });
+    } catch (error) { assert.ok(limited(error)); }
+  }
+  assert.ok(groups.every(group => sent.some(value => value.group === group)));
+  for (const { time, group } of sent) {
+    assert.ok(sent.filter(value => value.time >= time && value.time < time + 60_000).length <= 10);
+    assert.ok(sent.filter(value => value.time >= time && value.time < time + 600_000).length <= 100);
+    assert.ok(sent.filter(value => value.group === group && value.time >= time && value.time < time + 60_000).length <= (group === 'directories' ? 10 : 2));
+  }
+});
+
+test('legacy permits and cooldowns also fence every newly separated group', async () => {
+  for (const group of ORDER_GROUPS) {
+    const db = database(); db.rows.set(KEY, 180_000);
+    await assert.rejects(db.limiter().acquire(KEY, { group, deadline: Date.now() + 100 }), limited);
+    assert.equal(db.rows.has(syrveGroupedRequestKey(KEY, group)), false);
   }
 });
 
@@ -161,6 +229,7 @@ test('upstream 429 persists Retry-After for every caller and never shortens a lo
   await db.limiter().cooldown(KEY, 60_000); assert.equal(db.rows.get(KEY), 180_000);
   await assert.rejects(db.limiter().acquire(KEY, { deadline: Date.now() + 100 }), limited);
   await assert.rejects(db.limiter().acquire(KEY, { group: 'directories', deadline: Date.now() + 100 }), limited);
+  for (const group of ORDER_GROUPS) await assert.rejects(db.limiter().acquire(KEY, { group, deadline: Date.now() + 100 }), limited);
   assert.equal(calls.length, 1);
 });
 
@@ -291,7 +360,7 @@ test('revocation during quota waiting is rechecked before claiming another slot'
   assert.equal(db.rows.get(KEY), SYRVE_REQUEST_GAP_MS);
 });
 
-test('a 60-table long operation and concurrent Director check complete under the same real rolling quota', async t => {
+test('a 60-table operation and concurrent Director check obey group and total quotas', async t => {
   const { withSyrveOperation } = require('../dist/syrve/syrve-operation-context.js');
   const { isVerifiedLoadedProbe } = require('../dist/syrve/syrve-client.js');
   const { batchTransport } = require('./helpers/syrve-batch-transport.js');
@@ -334,6 +403,68 @@ test('a 60-table long operation and concurrent Director check complete under the
   for (const [index, value] of warmed.entries()) {
     assert.equal(isVerifiedLoadedProbe(value[0], 'warm-' + tables[index], ORG, tables[index]), true);
     assert.equal(isVerifiedLoadedProbe(value[0], tables[index], ORG, tables[index]), false);
+  }
+});
+
+test('the real limiter completes a warm 60-table read in about 12 seconds and preserves explicit closure', async t => {
+  const { isVerifiedLoadedProbe } = require('../dist/syrve/syrve-client.js');
+  const { withSyrveOperation } = require('../dist/syrve/syrve-operation-context.js');
+  const { batchTransport } = require('./helpers/syrve-batch-transport.js');
+  const { id, row } = require('./helpers/syrve-state-fixtures.js');
+  const db = database(), tables = Array.from({ length: 60 }, (_, n) => id(200 + n)), orderId = id(909);
+  const scope = { organizationId: ORG, syrveTableId: tables[0] };
+  const tx = batchTransport(ORG, tables, { rows: [row(scope, orderId)] });
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
+  Object.defineProperty(db.state, 'now', { get: () => Date.now() - 1_000 });
+  t.mock.method(performance, 'now', () => Date.now() - 1_000);
+  const dispatches = [];
+  t.mock.method(globalThis, 'fetch', (url, options) => {
+    dispatches.push({ time: Date.now(), path: new URL(url).pathname }); return tx.fetch(url, options);
+  });
+  for (const key of ['SYRVE_APP_ID', 'SYRVE_APP_CLIENT_SECRET']) {
+    const previous = process.env[key]; delete process.env[key];
+    t.after(() => previous === undefined ? delete process.env[key] : process.env[key] = previous);
+  }
+  const finish = async pending => {
+    let done = false; pending.then(() => done = true, () => done = true);
+    for (let n = 0; n < 30_000 && !done; n++) {
+      await new Promise(setImmediate); if (!done) t.mock.timers.tick(10);
+    }
+    assert.equal(done, true, 'synthetic operation exceeded five minutes'); return pending;
+  };
+  const client = new SyrveClient(db.limiter());
+  const controls = { deadline: 1_800_000, signal: new AbortController().signal, loadingPlan: tx.plan, beforeCommand: async () => {} };
+  const read = context => finish(withSyrveOperation(controls, () => client.probeLoadedOrderBatch(BASE, LOGIN, ORG,
+    tables.map((tableId, index) => ({ tableId, orderIdBatches: [index === 0 ? [orderId] : []],
+      visibilityContext: context + tableId })), controls)));
+  const cold = await read('cold-');
+  assert.equal(cold.length, 60); assert.equal(dispatches.length, 7);
+  assert.ok(dispatches.at(-1).time - dispatches[0].time < 65_000);
+  assert.equal(cold[0][0].byTable[0].state, 'open');
+  let first = dispatches.length;
+  const warm = await read('warm-');
+  const warmDispatches = dispatches.slice(first);
+  assert.deepEqual(warmDispatches.map(value => value.path),
+    ['/api/1/order/init_by_table', '/api/1/terminal_groups/is_alive', '/api/1/order/by_table']);
+  assert.ok(warmDispatches.at(-1).time - warmDispatches[0].time >= 12_200);
+  assert.ok(warmDispatches.at(-1).time - warmDispatches[0].time < 15_000);
+  assert.equal(warm[0][0].byId[0].state, 'open');
+  for (const [index, probes] of warm.entries()) {
+    assert.equal(isVerifiedLoadedProbe(probes[0], 'warm-' + tables[index], ORG, tables[index]), true);
+  }
+  tx.setRows([row(scope, orderId, 'Closed', 200)]); first = dispatches.length;
+  const closed = await read('closed-'), closingDispatches = dispatches.slice(first);
+  assert.deepEqual(closingDispatches.map(value => value.path),
+    ['/api/1/order/init_by_table', '/api/1/terminal_groups/is_alive', '/api/1/order/by_table', '/api/1/order/by_id']);
+  assert.ok(closingDispatches.at(-1).time - closingDispatches[0].time >= 43_200);
+  assert.ok(closingDispatches.at(-1).time - closingDispatches[0].time < 46_000);
+  assert.equal(closed[0][0].byId[0].state, 'closed');
+  assert.equal(isVerifiedLoadedProbe(closed[0][0], 'closed-' + tables[0], ORG, tables[0]), true);
+  for (const { time, path } of dispatches) {
+    const group = syrveRequestGroup(path);
+    assert.ok(dispatches.filter(value => value.time >= time && value.time < time + 60_000).length <= 10);
+    assert.ok(dispatches.filter(value => syrveRequestGroup(value.path) === group
+      && value.time >= time && value.time < time + 60_000).length <= (group === 'directories' ? 10 : 2));
   }
 });
 
