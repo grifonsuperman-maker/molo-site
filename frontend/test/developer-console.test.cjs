@@ -225,6 +225,11 @@ test('actual entrypoint keeps guest/staff components and the role-switch path se
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(routeFile, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, { exports: routeExports });
+  const boundaryExports = {};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../src/developer/DeveloperConsoleBoundary.tsx'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText, { exports: boundaryExports, require });
+  const Boundary = boundaryExports.default;
   const App = () => null, Install = () => null, Push = () => null, Developer = () => null;
   for (const [pathname, developerRoute] of [['/developer', true], ['/developer/', true], ['/', false], ['/__dev/roles', false]]) {
     let rendered;
@@ -243,6 +248,7 @@ test('actual entrypoint keeps guest/staff components and the role-switch path se
       './App': { default: App }, './guest/components/GuestInstallPrompt': { default: Install },
       './guest/components/GuestPushOptIn': { default: Push },
       './entryRoute': entryExports,
+      './developer/DeveloperConsoleBoundary': { __esModule: true, default: Boundary },
     };
     // Default-import stubs need the same ES module shape as production TS.
     for (const id of ['./App', './guest/components/GuestInstallPrompt', './guest/components/GuestPushOptIn']) stubs[id].__esModule = true;
@@ -251,6 +257,12 @@ test('actual entrypoint keeps guest/staff components and the role-switch path se
       require(id) { return id.endsWith('.css') ? {} : stubs[id] || require(id); },
     });
     assert.equal(nodes(rendered, node => node.type === Developer).length, developerRoute ? 1 : 0);
+    const boundaries = nodes(rendered, node => node.type === Boundary);
+    assert.equal(boundaries.length, developerRoute ? 1 : 0);
+    if (developerRoute) {
+      assert.equal(nodes(boundaries[0], node => node.type === require('react').Suspense).length, 1);
+      assert.equal(nodes(boundaries[0], node => node.type === Developer).length, 1);
+    }
     for (const component of [App, Install, Push]) assert.equal(nodes(rendered, node => node.type === component).length, developerRoute ? 0 : 1);
   }
 });
