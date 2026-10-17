@@ -3,7 +3,8 @@ export type AuthRole =
   | 'waiter'
   | 'hookah'
   | 'admin'
-  | 'owner';
+  | 'owner'
+  | 'developer';
 
 export type AuthUser = {
   sub: string;
@@ -12,4 +13,5 @@ export type AuthUser = {
   staffId?: string | null;
   name?: string | null;
   directorSessionVersion?: number;
+  developerSessionExpiresAt?: string;
 };

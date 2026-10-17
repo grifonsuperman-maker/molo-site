@@ -6,6 +6,7 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const main = fs.readFileSync(path.join(root, 'src/main.tsx'), 'utf8');
 const notice = fs.readFileSync(
   path.join(root, 'src/guest/components/GuestMaintenance.tsx'), 'utf8',
 );
@@ -21,9 +22,11 @@ test('maintenance is limited to guests and excludes staff invite and developer a
   assert.match(app, /showGuestMaintenance \? \(\s*awaitingTelegramStaffRole \? null : <GuestMaintenance \/>/);
 });
 
-test('staff consoles, role links, and Telegram linking remain mounted through the original entrypoint', () => {
+test('staff consoles, role links, and Telegram linking remain mounted through the route-aware entrypoint', () => {
   assert.match(html, /<div id="root"><\/div>/);
-  assert.match(html, /<script type="module" src="\/src\/main\.tsx"><\/script>/);
+  assert.match(html, /<script type="module" src="\/src\/bootstrap\.ts"><\/script>/);
+  assert.match(main, /isDeveloperConsoleEntry \? \(/);
+  assert.match(main, /: <><App \/><GuestInstallPrompt \/><GuestPushOptIn \/><\/>/);
   assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/);
   assert.match(html, /rel="apple-touch-icon" href="\/pwa-icon-192\.png"/);
   assert.match(app, /<TelegramStaffLinkGate/);
