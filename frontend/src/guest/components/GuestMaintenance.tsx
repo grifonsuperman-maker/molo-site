@@ -17,8 +17,8 @@ export default function GuestMaintenance() {
         </p>
         <div className="mt-7 rounded-2xl border border-[#53482f] bg-[#d2af6412] px-4 py-5">
           <p className="text-base">Сайт відновить роботу</p>
-          <time dateTime="2026-10-18" className="mt-1 block text-3xl font-bold text-[#e7d19a]">
-            18.10.2026
+          <time dateTime="2026-11-05" className="mt-1 block text-3xl font-bold text-[#e7d19a]">
+            05.11.2026
           </time>
         </div>
         <p className="mt-7 text-sm text-[#c2b9a5]">Дякуємо за розуміння!</p>
