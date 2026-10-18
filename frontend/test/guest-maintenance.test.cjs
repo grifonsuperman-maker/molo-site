@@ -42,8 +42,8 @@ test('staff consoles, role links, and Telegram linking remain mounted through th
 
 test('maintenance notice needs no API, booking data, or staff credentials', () => {
   assert.match(notice, /Технічне обслуговування та оновлення версії/);
-  assert.match(notice, /dateTime="2026-10-18"/);
-  assert.match(notice, /18\.10\.2026/);
+  assert.match(notice, /dateTime="2026-11-05"/);
+  assert.match(notice, /05\.11\.2026/);
   assert.match(notice, /Сайт відновить роботу/);
   assert.doesNotMatch(notice, /\b(fetch|axios|restaurantApi|bookingsApi|staffApi|useEffect)\b/);
 });
