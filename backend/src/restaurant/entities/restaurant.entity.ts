@@ -97,6 +97,9 @@ export class Restaurant {
   })
   siteMode: SiteMode;
 
+  @Column({ name: 'auto_theme_enabled', type: 'boolean', default: false })
+  autoThemeEnabled: boolean;
+
   @Column({
     name: 'holiday_key',
     type: 'varchar',

@@ -11,6 +11,7 @@ import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { UpdateThemeDto } from './dto/update-theme.dto';
 import { CloseRestaurantDto } from './dto/close-restaurant.dto';
 import { LogsService } from '../logs/logs.service';
+import { resolveSiteMode } from './solar-theme';
 
 type AdminPermissionKey =
   | 'adminCanManageOnlineBooking'
@@ -54,6 +55,7 @@ export class RestaurantService {
       closeTime: '23:00',
       status: 'open',
       siteMode: 'night',
+      autoThemeEnabled: false,
       holidayKey: null,
       closeMessage: 'Ресторан зараз зачинений.\nМи працюємо з 10:00 до 23:00.',
       bookingClosedMessage:
@@ -71,13 +73,17 @@ export class RestaurantService {
     return this.findOrCreateRestaurant();
   }
 
-  getSettings() {
-    return this.getRestaurant();
+  async getSettings() {
+    const restaurant = await this.getRestaurant();
+    return {
+      ...restaurant,
+      siteMode: resolveSiteMode(restaurant.siteMode, restaurant.autoThemeEnabled),
+      holidayKey: restaurant.autoThemeEnabled ? null : restaurant.holidayKey,
+    };
   }
 
   async getTheme() {
-    const restaurant = await this.getRestaurant();
-
+    const restaurant = await this.getSettings();
     return {
       siteMode: restaurant.siteMode,
       holidayKey: restaurant.holidayKey,
@@ -90,6 +96,7 @@ export class RestaurantService {
     logMessage: string,
   ) {
     restaurant.siteMode = dto.siteMode;
+    restaurant.autoThemeEnabled = false;
 
     if (dto.holidayKey !== undefined) {
       restaurant.holidayKey = dto.holidayKey;
@@ -146,6 +153,10 @@ export class RestaurantService {
     const restaurant = await this.getRestaurant();
 
     Object.assign(restaurant, dto);
+    // Any manual mode selection explicitly takes priority over automatic time.
+    if (dto.siteMode !== undefined && dto.autoThemeEnabled !== true) {
+      restaurant.autoThemeEnabled = false;
+    }
 
     await this.repo.save(restaurant);
 
@@ -307,6 +318,7 @@ export class RestaurantService {
     );
 
     restaurant.siteMode = siteMode;
+    restaurant.autoThemeEnabled = false;
 
     if (holidayKey !== undefined) {
       restaurant.holidayKey = holidayKey;

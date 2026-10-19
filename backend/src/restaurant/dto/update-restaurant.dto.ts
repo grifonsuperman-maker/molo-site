@@ -21,6 +21,7 @@ export class UpdateRestaurantDto {
   @IsOptional() @IsString() closeTime?: string;
   @IsOptional() @IsString() closeMessage?: string;
   @IsOptional() @IsString() bookingClosedMessage?: string;
+  @IsOptional() @IsBoolean() autoThemeEnabled?: boolean;
   @IsOptional()
   @IsIn(['day', 'night', 'holiday'])
   siteMode?: 'day' | 'night' | 'holiday';
