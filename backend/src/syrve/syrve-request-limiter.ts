@@ -6,16 +6,19 @@ import { DataSource } from 'typeorm';
 // A little slower than 30 seconds: the permit may take up to one second to
 // reach fetch. Three actual dispatches still cannot fit in any 60-second window.
 export const SYRVE_REQUEST_GAP_MS = 31_000;
-// Support confirmed 100 directory requests per ten minutes. Spacing permits
-// by 6.1s also caps sends at ten per rolling minute despite their 1s lifetime.
-// Unconfirmed methods keep their existing shared, conservative allowance.
-export const SYRVE_DIRECTORY_REQUEST_GAP_MS = 6_100;
+// Keep every login below 100 sends/ten minutes and ten/rolling minute,
+// including the one-second permit lifetime. Order/POS groups keep 31s each.
+export const SYRVE_GLOBAL_REQUEST_GAP_MS = 6_100;
+export const SYRVE_DIRECTORY_REQUEST_GAP_MS = SYRVE_GLOBAL_REQUEST_GAP_MS;
 export const SYRVE_PERMIT_LIFETIME_MS = 1_000;
 const MAX_WAIT_MS = 120_000;
 const MAX_COOLDOWN_MS = 24 * 60 * 60_000;
 
 export type SyrveRequestPermit = { expiresAt: number };
-export type SyrveRequestGroup = 'directories' | 'conservative';
+export type SyrveRequestGroup = 'directories' | 'Orders: loading data'
+  | 'Orders: receiving' | 'POS: availability' | 'conservative';
+const REQUEST_GROUPS: SyrveRequestGroup[] = ['directories', 'Orders: loading data',
+  'Orders: receiving', 'POS: availability', 'conservative'];
 export class SyrveRequestLimitError extends Error {
   constructor(readonly reason: 'limited' | 'unavailable' | 'cancelled', readonly retryAfterMs = 60_000) {
     super('Syrve request admission failed');
@@ -37,14 +40,25 @@ export function syrveRequestGroup(path: string): SyrveRequestGroup {
     case '/api/1/organizations':
     case '/api/1/terminal_groups':
     case '/api/1/reserve/available_restaurant_sections': return 'directories';
-    // In particular, by_table/by_id return order details, not directories.
-    // Do not create separate quotas for each order endpoint or cash group.
+    // Exact restriction groups from the Syrve OpenAPI. Related endpoints,
+    // organizations, cash groups and client instances share the same bucket.
+    case '/api/1/order/init_by_table':
+    case '/api/1/order/init_by_posOrder': return 'Orders: loading data';
+    case '/api/1/order/by_table':
+    case '/api/1/order/by_id': return 'Orders: receiving';
+    case '/api/1/terminal_groups/is_alive': return 'POS: availability';
     default: return 'conservative';
   }
 }
 
 export function syrveDirectoryRequestKey(key: string): string {
   return createHash('sha256').update('molo-syrve-directory-quota\0').update(key).digest('hex');
+}
+
+export function syrveGroupedRequestKey(key: string, group: SyrveRequestGroup): string {
+  if (group === 'conservative') return key;
+  if (group === 'directories') return syrveDirectoryRequestKey(key);
+  return createHash('sha256').update('molo-syrve-group-quota\0').update(group).update('\0').update(key).digest('hex');
 }
 
 export function isFreshSyrvePermit(permit: SyrveRequestPermit): boolean {
@@ -72,21 +86,22 @@ export class SyrveRequestLimiter {
   }
 
   private async claim(key: string, group: SyrveRequestGroup): Promise<number> {
-    if (!/^[0-9a-f]{64}$/.test(key) || !['directories', 'conservative'].includes(group)) throw new SyrveRequestLimitError('unavailable');
+    if (!/^[0-9a-f]{64}$/.test(key) || !REQUEST_GROUPS.includes(group)) throw new SyrveRequestLimitError('unavailable');
     try {
       return await this.dataSource.transaction(async manager => {
         await manager.query("SET LOCAL lock_timeout = '750ms'");
         await manager.query("SET LOCAL statement_timeout = '2s'");
         const table = this.table();
         const directory = group === 'directories';
-        const quotaKey = directory ? syrveDirectoryRequestKey(key) : key;
+        const grouped = group !== 'conservative';
+        const quotaKey = syrveGroupedRequestKey(key, group);
         const gap = directory ? SYRVE_DIRECTORY_REQUEST_GAP_MS : SYRVE_REQUEST_GAP_MS;
-        if (directory) {
+        if (grouped) {
           // Retain the original login row as a barrier. Existing permits and
           // cooldowns, including those written by the previous deployment,
-          // must expire before a directory request can dispatch. Lock that row
+          // must expire before a grouped request can dispatch. Lock that row
           // before checking so concurrent cooldowns cannot race this admission.
-          // A successful listing extends this shared barrier by only 6.1s,
+          // A successful grouped request extends this barrier by only 6.1s,
           // keeping mixed old/new deployments below ten total sends/minute.
           await manager.query('INSERT INTO ' + table + ' (key_hash,next_request_at) VALUES ($1,clock_timestamp())'
             + ' ON CONFLICT (key_hash) DO NOTHING', [key]);
@@ -101,8 +116,8 @@ export class SyrveRequestLimiter {
           + " ON CONFLICT (key_hash) DO UPDATE SET next_request_at=clock_timestamp()+$2*interval '1 millisecond'"
           + ' WHERE quota.next_request_at<=clock_timestamp() RETURNING key_hash', [quotaKey, gap]);
         if (granted.length === 1) {
-          if (directory) await manager.query('UPDATE ' + table
-            + " SET next_request_at=clock_timestamp()+$2*interval '1 millisecond' WHERE key_hash=$1", [key, gap]);
+          if (grouped) await manager.query('UPDATE ' + table
+            + " SET next_request_at=clock_timestamp()+$2*interval '1 millisecond' WHERE key_hash=$1", [key, SYRVE_GLOBAL_REQUEST_GAP_MS]);
           return 0;
         }
         const [row] = await manager.query('SELECT GREATEST(1,ceil(EXTRACT(EPOCH FROM'
