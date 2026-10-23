@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 
@@ -275,6 +275,9 @@ export class AvailabilityBlocksService {
       if (!nextTable || !nextTable.isVisible || nextTable.status === 'closed') {
         throw new BadRequestException('Новий стіл закритий або недоступний');
       }
+      if (booking.bookingDate === this.today() && ['occupied', 'cleaning'].includes(nextTable.status)) {
+        throw new BadRequestException('Новий стіл зараз зайнятий або готується');
+      }
       if (nextTable.zone?.isClosed || nextTable.zone?.isVisible === false) {
         throw new BadRequestException('Локація нового столу недоступна');
       }
@@ -356,6 +359,13 @@ export class AvailabilityBlocksService {
         createdAt: new Date().toISOString(),
       };
       await manager.getRepository(Booking).save(booking);
+      const persistedBooking = await manager.getRepository(Booking).findOne({
+        where: { id: booking.id },
+        relations: ['table'],
+      });
+      if (persistedBooking?.table?.id !== nextTable.id) {
+        throw new ConflictException('Зміну столу не підтверджено у бронюванні. Оновіть дані перед повторною спробою');
+      }
       await manager.getRepository(BookingHistory).save(
         manager.getRepository(BookingHistory).create({
           booking,
